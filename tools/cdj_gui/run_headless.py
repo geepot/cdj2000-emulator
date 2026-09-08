@@ -43,6 +43,7 @@ def run(args: argparse.Namespace) -> int:
             # device never sees the property and falls back to RGB565 — which
             # renders every palette-blitted background as green/pink streaks.
             "BFIN_GUI_COLOR": "rgb555le",
+            "BFIN_PARALLEL_WRITEBACK": "1",
             "BFIN_GPIO5_READY_TOGGLE": "1",
             "BFIN_SPORT_RX_INPUT": str(args.packet.resolve()),
             "BFIN_SPORT_RX_RECORDS": "1",

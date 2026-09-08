@@ -1013,6 +1013,7 @@ class UiViewer:
                 "BFIN_GUI_OUTPUT": str(output),
                 "BFIN_GUI_HEIGHT": str(self.args.height),
                 "BFIN_GUI_COLOR": "rgb555le",
+                "BFIN_PARALLEL_WRITEBACK": "1",
                 "BFIN_FAST_LZSS": str(
                     (FIRMWARE / "gui-flash-image.bin").resolve()
                 ),

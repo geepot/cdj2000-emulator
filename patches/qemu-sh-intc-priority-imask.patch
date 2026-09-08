@@ -55,18 +55,16 @@ index 0da82f9..5ddfe2d 100644
      }
      desc->irqs = qemu_allocate_irqs(sh_intc_set_irq, desc, nr_sources);
      memory_region_init_io(&desc->iomem, NULL, &sh_intc_ops, desc, "intc",
-diff --git a/hw/intc/trace-events b/hw/intc/trace-events
-index e7d6c30..deaff50 100644
 --- a/hw/intc/trace-events
 +++ b/hw/intc/trace-events
-@@ -337,6 +337,7 @@ sh_intc_register(const char *s, int id, unsigned short v, int c, int m) "%s %u -
+@@ -337,6 +337,7 @@
  sh_intc_read(unsigned size, uint64_t offset, unsigned long val) "size %u 0x%" PRIx64 " -> 0x%lx"
  sh_intc_write(unsigned size, uint64_t offset, unsigned long val) "size %u 0x%" PRIx64 " <- 0x%lx"
  sh_intc_set(int id, int enable) "setting interrupt group %d to %d"
 +sh_intc_prio(int id, unsigned int level) "interrupt source %d priority level %u"
- 
- # loongson_ipi.c
- loongson_ipi_read(unsigned size, uint64_t addr, uint64_t val) "size: %u addr: 0x%"PRIx64 "val: 0x%"PRIx64
+ # hex-l2vic.c
+ hex_l2vic_reg_write(unsigned int addr, uint32_t value) "addr: 0x%03x value: 0x%08"PRIx32
+ hex_l2vic_reg_read(unsigned int addr, uint32_t value) "addr: 0x%03x value: 0x%08"PRIx32
 diff --git a/include/hw/sh4/sh_intc.h b/include/hw/sh4/sh_intc.h
 index 94f1831..6ec46e0 100644
 --- a/include/hw/sh4/sh_intc.h

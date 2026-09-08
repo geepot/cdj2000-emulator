@@ -23,7 +23,7 @@ set -e
 # Windows directory when all three are unset, and every single compile fails
 # with "Cannot create temporary file in C:\WINDOWS\: Permission denied" — a
 # message that reads like a broken toolchain and is nothing of the sort.
-if [ -z "$TMP" ]; then
+if [ -z "$TMP" ] && command -v cygpath >/dev/null 2>&1; then
     TMP=$(cygpath -w "${TMPDIR:-/tmp}" 2>/dev/null) || TMP='C:\Windows\Temp'
     TEMP=$TMP
     export TMP TEMP
@@ -54,8 +54,11 @@ if [ -f "$patch" ]; then
     if patch -d "$QEMU_SRC" -p1 --forward --silent --dry-run < "$patch" >/dev/null 2>&1; then
         echo "applying $(basename "$patch")"
         patch -d "$QEMU_SRC" -p1 --forward < "$patch"
-    else
+    elif patch -d "$QEMU_SRC" -p1 --reverse --force --silent --dry-run < "$patch" >/dev/null 2>&1; then
         echo "$(basename "$patch") already applied"
+    else
+        echo "patch does not apply cleanly: $patch" >&2
+        exit 1
     fi
 fi
 

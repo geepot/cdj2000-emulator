@@ -198,3 +198,46 @@ bytes. The native NXS GUI-only run now publishes frames and displays
 `E-8709: COMMUNICATION ERROR`, with `link_rx=0`, because MAIN is not connected.
 Some image regions are visibly corrupt; framebuffer publication is verified,
 but image fidelity is not. This run does not demonstrate full-system boot.
+
+### Experimental full NXS board pair
+
+QEMU source tested on macOS: `55347990687e7bc5b6b0d624f290025726e8fbfa`
+(version 11.1.50). The interrupt trace-event patch context was refreshed for
+that revision. Build with:
+
+```sh
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+```
+
+`cdj2000nxs-main` has 128 MiB SDRAM, matching the NXS boot stack at
+`0xac000000`. The original `cdj2000-main` retains 64 MiB. With 64 MiB, stock
+NXS reset code entered the error loop at `0xa00004e6`; with 128 MiB it reaches
+the application and sends GUI status records. Peripheral fidelity and DSP
+execution remain incomplete; this profile is explicitly experimental.
+
+The GUI launchers now enable `BFIN_PARALLEL_WRITEBACK=1` by default. Without
+it, a parallel arithmetic/store packet writes the newly calculated register
+value instead of the old value, corrupting resource relocation. The
+instruction-level regression in `tests/bfin/parallel-store.s` fails with
+stored value 11 instead of 7 when the fix is disabled, and passes when enabled.
+The NXS GUI-only screen becomes readable with this fix.
+
+Prepare `firmware/nxs/main-firmware.bin` using the validated NXS loader, then:
+
+```sh
+python -m tools.cdj_main.nxs_vm runs/nxs-check --seconds 60
+```
+
+This diagnostic runner connects QEMU's request and status channels on ports
+5980 and 5982, with panel control on 5984. It uses stock firmware traffic,
+without a link proxy or replay file. Each new run directory contains commands,
+explicit environment overrides, logs, traffic and the framebuffer. A zero
+exit means the bounded run completed and produced a frame; it does not certify
+full boot, input fidelity or actual C674x DSP execution.
+
+Direct-link verification (45 seconds, `runs/nxs-linked-two-channels`):
+stock NXS MAIN and GUI exchanged bidirectional traffic and the GUI rendered
+`Not Loaded.` with `E-7010: DSP DEVICE ERROR`. The communication error cleared.
+This identifies the next blocker as DSP support; it does not validate audio
+or the original model's behavioral DSP against NXS. Host suite including the
+new Blackfin instruction regression: 157 passed, 42 skipped.

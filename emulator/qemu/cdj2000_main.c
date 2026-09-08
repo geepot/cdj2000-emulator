@@ -4489,7 +4489,7 @@ static void cdj2000_main_init(MachineState *machine)
 
     cpu = SUPERH_CPU(cpu_create(machine->cpu_type));
 
-    memory_region_init_ram(sdram, NULL, "cdj2000.sdram", SDRAM_SIZE,
+    memory_region_init_ram(sdram, NULL, "cdj2000.sdram", machine->ram_size,
                            &error_fatal);
     memory_region_add_subregion(system, SDRAM_BASE, sdram);
 
@@ -4564,6 +4564,7 @@ static void cdj2000_main_machine_init(MachineClass *mc)
     mc->desc = "Pioneer CDJ-2000 MAIN board (SH-4)";
     mc->init = cdj2000_main_init;
     mc->default_cpu_type = TYPE_SH7785_CPU;
+    mc->default_ram_size = SDRAM_SIZE;
     /* SDRAM is allocated by the board, as on r2d — no default_ram_id here. */
     mc->no_floppy = 1;
     mc->no_cdrom = 1;
@@ -4571,3 +4572,16 @@ static void cdj2000_main_machine_init(MachineClass *mc)
 }
 
 DEFINE_MACHINE("cdj2000-main", cdj2000_main_machine_init)
+
+/* Experimental NXS profile. The boot stack is at physical 0x0c000000;
+ * retaining the original player's 64 MiB RAM makes its RAM test fail.
+ * Peripheral and C674x emulation are still being validated for this profile.
+ */
+static void cdj2000_nxs_main_machine_init(MachineClass *mc)
+{
+    cdj2000_main_machine_init(mc);
+    mc->desc = "Pioneer CDJ-2000NXS MAIN board (experimental)";
+    mc->default_ram_size = 128 * MiB;
+}
+
+DEFINE_MACHINE("cdj2000nxs-main", cdj2000_nxs_main_machine_init)
