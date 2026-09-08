@@ -11,8 +11,8 @@ typedef struct {
     unsigned size;
 } CdjC674xStore;
 typedef struct {
-    uint64_t due;
-    uint32_t address, value;
+    uint64_t due, value;
+    uint32_t address;
     unsigned bank, dst, size;
     bool sign_extend;
 } CdjC674xLoad;

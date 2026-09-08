@@ -272,7 +272,7 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 
 `cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
-control-register MVC, register/relative branches, ADDKPC, ADD/OR (.L), CMPEQ, scalar loads/stores, LDNW/STNW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
+control-register MVC, register/relative branches, ADDKPC, ADD/OR (.L), CMPEQ, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
 packets use the header layout and halfword p bits; compact .L ADD/SUB
 support the low/high register set and cross path. Compact register moves
 implement both directions between a full register index and the selected
@@ -285,7 +285,10 @@ transactions. Full-width STB/STH/STW also use the E3 write queue and
 preserve neighboring bytes for narrow stores. LDNW/STNW permit unaligned
 word addresses, including transfers crossing a bus-word boundary, with
 scaled offsets. The core rejects parallel memory accesses in a packet with
-an active nonaligned access, as required by the ISA. Full-width LDW, LDB/LDBU and LDH/LDHU support linear immediate/register offsets and
+an active nonaligned access, as required by the ISA. Doubleword transfers
+use even/odd register pairs in little-endian order. LDNDW/STNDW support
+scaled and unscaled offsets; aligned forms require eight-byte alignment.
+Both load-result registers participate in E5 write-hazard checks. Full-width LDW, LDB/LDBU and LDH/LDHU support linear immediate/register offsets and
 pre/post pointer updates: address generation in E1, RAM sampling in E3 and
 register writeback in E5. Narrow loads select little-endian byte/halfword
 lanes, apply signed or unsigned extension, and scale offsets by element size. PROT inserts four NOP cycles. Pending memory
@@ -302,11 +305,12 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-unaligned` uploads
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-double` uploads
 13,781 words and executes 33 packets / 40 cycles. It enters the
 function at `0x118047c0`, passes the LDNW
-packet and stops on the unimplemented LDNDW opcode `0x239037a5` at
-`0x118047f4`. `B15=0x11805ae0`,
+packet and now decodes the following LDNDW, but the packet cannot commit
+because opcode `0x2003e1a3` at `0x118047f8` is still unimplemented.
+The completed packet count therefore remains 33. `B15=0x11805ae0`,
 `B14=0x11806900` and `B3=0x118042c8`. This agrees with standalone replay
 of the uploaded L2 image. The older prototype's compact listing omits the
 register-extension bits, sometimes the cross path on moves, and the extended
@@ -321,7 +325,8 @@ It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
 ADDKPC return addresses, mixed-width packet boundaries, compact register
 banks and arithmetic, full-index compact moves, relative and compact BNOP branches, ADD overflow, CMPEQ, stack-store timing and captured source values,
 doubleword order, byte/halfword lanes and sign extension, scalar-store byte preservation, unaligned transfers across word boundaries,
-second-word bounds failures and nonaligned packet restrictions,
+second-word bounds failures, doubleword register pairs and offset scaling,
+upper-register hazards, and nonaligned packet restrictions,
 shift counts through and beyond 32 bits, load E1/E3/E5 timing, PROT, memory/register hazards,
 alignment/bounds failures, and atomic unsupported-packet
 stops. The same harness

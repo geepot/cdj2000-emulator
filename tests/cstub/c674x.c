@@ -387,5 +387,46 @@ int main(void)
     memory[1] = (3u << 23) | (10u << 18) | 0x264;
     assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(!c.load_count && c.r[1][10] == 0x10c1 && !c.cycles);
+    /* LDNDW spans three bus words; bit 23 scales the offset, not the
+     * destination pair. Both halves appear together in E5. */
+    for (unsigned scaled = 0; scaled < 2; ++scaled) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[1][10] = 0x10c1;
+        memory[48] = 0x44332211; memory[49] = 0x88776655; memory[50] = 0xccbbaa99;
+        memory[0] = (6u << 23) | (scaled << 23) | (10u << 18) |
+                    (1u << 13) | (11u << 9) | 0x1a4;
+        memory[7] = 0xe0100000;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.r[0][6] == 0x55443322 && c.r[0][7] == 0x99887766);
+        assert(c.r[1][10] == 0x10c1 + (scaled ? 8 : 1) && c.cycles == 5);
+    }
+    /* STNDW samples the pair and preserves bytes on either side. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][6] = 0x44332211; c.r[0][7] = 0x88776655; c.r[1][10] = 0x10c3;
+    memory[48] = memory[49] = memory[50] = 0xaaaaaaaa;
+    memory[0] = (6u << 23) | (10u << 18) | (1u << 13) | (11u << 9) | 0x1f4;
+    for (unsigned j = 0; j < 3; ++j) assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][10] == 0x10c4 && memory[48] == 0x11aaaaaa);
+    assert(memory[49] == 0x55443322 && memory[50] == 0xaa887766);
+
+    /* Aligned LDDW scales by eight and rejects odd register-pair indices. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][10] = 0x10b8; memory[48] = 0x12345678; memory[49] = 0x90abcdef;
+    memory[0] = (6u << 23) | (10u << 18) | (1u << 13) | (9u << 9) | 0x1e4;
+    memory[7] = 0xe0100000;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][10] == 0x10c0 && c.r[0][6] == 0x12345678 && c.r[0][7] == 0x90abcdef);
+    cdj_c674x_reset(&c, 0x1000); memory[0] |= 1u << 23;
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!c.load_count && !c.cycles);
+
+    /* The high half participates in write-hazard checks. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][10] = 0x10c0;
+    memory[0] = (6u << 23) | (10u << 18) | 0x3e4;
+    memory[4] = mvk(0, 7, 9);
+    for (unsigned j = 0; j < 4; ++j) assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 4 && c.load_count == 1 && c.r[0][7] == 0);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }
