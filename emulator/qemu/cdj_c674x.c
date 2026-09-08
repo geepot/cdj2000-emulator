@@ -240,16 +240,26 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             value = sx((w >> 7) & 0xffff, 16);
         } else if ((w & 0x7c) == 0x68) {
             value = (cpu->r[side][dst] & 0xffff) | (((w >> 7) & 0xffff) << 16);
+        } else if ((w & 0x7c1ffc) == 0x40) {
+            value = sx(a, 5); /* MVK .D */
         } else if ((w & 0x3effc) == 0xa358) {
             value = sx(b, 5); /* MVK .L */
         } else if ((w & 0xffc) == 0x7a0 || (w & 0xffc) == 0xf58 || (w & 0xffc) == 0x9f0) {
             value = (uint32_t)sx(a, 5) & cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x7e0 || (w & 0xffc) == 0xf78 || (w & 0xffc) == 0x9b0) {
             value = cpu->r[side][a] & cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0x58) {
+        } else if ((w & 0xffc) == 0x58 || (w & 0xffc) == 0x1a0) {
             value = (uint32_t)sx(a, 5) + cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0x78) {
+        } else if ((w & 0xffc) == 0x78 || (w & 0xffc) == 0x1e0) {
             value = cpu->r[side][a] + cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0xd8 || (w & 0xffc) == 0x5a0) {
+            value = (uint32_t)sx(a, 5) - cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0xf8 || (w & 0xffc) == 0x5e0) {
+            value = cpu->r[side][a] - cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0x8d8) {
+            value = sx(a, 5) > (int32_t)cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0x8f8) {
+            value = (int32_t)cpu->r[side][a] > (int32_t)cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xfd8) {
             value = (uint32_t)sx(a, 5) | cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xff8) {

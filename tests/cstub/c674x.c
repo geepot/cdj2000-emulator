@@ -428,5 +428,35 @@ int main(void)
     for (unsigned j = 0; j < 4; ++j) assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.cycles == 4 && c.load_count == 1 && c.r[0][7] == 0);
+    /* Firmware decrement alias: ADD.S -1, B0, B0. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][0] = 1; memory[0] = 0x2003e1a3; memory[1] = 0;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][0] == 0);
+    memory[2] = (2u << 23) | (31u << 13) | 0x42; /* MVK.D2 -1,B2 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][2] == 0xffffffff);
+
+    /* SUB uses src1-src2, including immediate-first and cross-path forms. */
+    const unsigned subops[] = {0xd8, 0x5a0, 0xf8, 0x5e0};
+    for (unsigned j = 0; j < 4; ++j) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[0][1] = 0x80000000; c.r[1][2] = 1;
+        memory[0] = (3u << 23) | (2u << 18) | ((j < 2 ? 31u : 1u) << 13) | 0x1000 | subops[j];
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[0][3] == (j < 2 ? 0xfffffffe : 0x7fffffff));
+    }
+    /* Signed comparison at both extremes, and a negative immediate. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][1] = 0x7fffffff; c.r[1][2] = 0x80000000;
+    memory[0] = (3u << 23) | (2u << 18) | (1u << 13) | 0x18f8;
+    memory[1] = (4u << 23) | (2u << 18) | (31u << 13) | 0x18d8;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == 1 && c.r[0][4] == 1);
+    c.r[1][2] = 0;
+    memory[2] = memory[1];
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][4] == 0);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

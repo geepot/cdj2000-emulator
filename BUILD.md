@@ -272,7 +272,7 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 
 `cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
-control-register MVC, register/relative branches, ADDKPC, ADD/OR (.L), CMPEQ, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
+control-register MVC, register/relative branches, ADDKPC, ADD/SUB (.L/.S), OR (.L), MVK (.D), CMPEQ/CMPGT, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
 packets use the header layout and halfword p bits; compact .L ADD/SUB
 support the low/high register set and cross path. Compact register moves
 implement both directions between a full register index and the selected
@@ -305,25 +305,22 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-double` uploads
-13,781 words and executes 33 packets / 40 cycles. It enters the
-function at `0x118047c0`, passes the LDNW
-packet and now decodes the following LDNDW, but the packet cannot commit
-because opcode `0x2003e1a3` at `0x118047f8` is still unimplemented.
-The completed packet count therefore remains 33. `B15=0x11805ae0`,
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-sub` uploads
+13,781 words and executes 35 packets / 42 cycles. It passes the initial
+LDNDW/decrement packet and the signed comparison, then stops on compact
+control-register opcode `0xd86f` at `0x1180481a`. `B15=0x11805ae0`,
 `B14=0x11806900` and `B3=0x118042c8`. This agrees with standalone replay
-of the uploaded L2 image. The older prototype's compact listing omits the
-register-extension bits, sometimes the cross path on moves, and the extended
-load/store selector; it must not
-be treated as an execution oracle.
-Remaining compact instructions, extended memory operations, integer and
-floating-point instructions, interrupts and peripheral execution are still
-required for DSP boot and audio. No DSP-ready result is fabricated.
+of the uploaded L2 image. The older prototype's listing omits register-extension
+bits, sometimes the cross path on moves, and the extended load/store selector;
+it must not be treated as an execution oracle.
+Remaining compact instructions, loop/control-register behavior, extended memory
+operations, integer and floating-point instructions, interrupts and peripherals
+are still required for DSP boot and audio. No DSP-ready result is fabricated.
 
 `tests/test_c674x.py` compiles an independent, synthetic instruction harness.
 It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
 ADDKPC return addresses, mixed-width packet boundaries, compact register
-banks and arithmetic, full-index compact moves, relative and compact BNOP branches, ADD overflow, CMPEQ, stack-store timing and captured source values,
+banks and arithmetic, full-index compact moves, relative and compact BNOP branches, ADD/SUB wraparound and operand order, signed comparison boundaries, CMPEQ, stack-store timing and captured source values,
 doubleword order, byte/halfword lanes and sign extension, scalar-store byte preservation, unaligned transfers across word boundaries,
 second-word bounds failures, doubleword register pairs and offset scaling,
 upper-register hazards, and nonaligned packet restrictions,
