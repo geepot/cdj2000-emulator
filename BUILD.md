@@ -272,10 +272,11 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 
 `cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
-control-register MVC, register branch, ADDKPC and NOP. Every execute packet
+control-register MVC, register branch, ADDKPC, CMPEQ and NOP. Mixed fetch
+packets use the header layout and halfword p bits; compact .L ADD/SUB
+support the low/high register set and cross path. Every execute packet
 reads the pre-packet state; writes commit together. Branches take effect after
-five delay slots, including inserted NOP cycles. Unsupported instructions and
-compact fetch packets stop with PC and opcode, without committing part of the
+five delay slots, including inserted NOP cycles. Unsupported instructions stop with PC and opcode, without committing part of the
 failed packet. This is not a complete ISA, pipeline, privilege or interrupt model.
 
 On DSPINT the host-port device reads the uploaded entry pointer at global L2
@@ -285,13 +286,16 @@ zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
 The captured stage-1 image executes 14 packets / 16 cycles before reaching
-compact code at `0x11804280`. Stack `B15=0x11805af8`, data pointer
+compact code at `0x11804280`. A standalone replay of the uploaded L2 image
+now decodes its first CMPEQ and stops on the unimplemented compact stack
+store `0x3577` at `0x11804284`; that entire packet remains uncommitted. Stack `B15=0x11805af8`, data pointer
 `B14=0x11806900`, and return address `B3=0x11801dd8` agree with the decoded
-startup instructions. Compact instruction execution, loads/stores, remaining
+startup instructions. Remaining compact instructions, loads/stores, remaining
 integer and floating-point instructions, interrupts and peripheral execution
 are still required for DSP boot and audio. No DSP-ready result is fabricated.
 
 `tests/test_c674x.py` compiles an independent, synthetic instruction harness.
 It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
-ADDKPC return addresses and atomic unsupported-packet stops. The same harness
+ADDKPC return addresses, mixed-width packet boundaries, compact register
+banks and arithmetic, CMPEQ, and atomic unsupported-packet stops. The same harness
 also passes Clang address and undefined-behavior sanitizers.

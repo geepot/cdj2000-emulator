@@ -67,5 +67,51 @@ int main(void)
     memory[0] = mvk(0, 0, 99) | 1; memory[1] = 0xffffffff;
     assert(!cdj_c674x_step(&c, read_word, NULL));
     assert(c.r[0][0] == 0 && c.pc == 0x1000 && c.packets == 0);
+    /* Header p bits, not opcode bit zero, join compact instructions. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][1] = 7; c.r[1][2] = 5;
+    uint32_t add = (1u << 13) | (1u << 12) | (2u << 7) | (3u << 4);
+    uint32_t sub = (3u << 13) | (1u << 12) | (2u << 7) | (4u << 4) | 0x800;
+    memory[0] = add | (sub << 16);
+    memory[7] = 0xe0200001; /* word 0 compact; first half parallel */
+    assert(cdj_c674x_step(&c, read_word, NULL));
+    assert(c.r[0][3] == 12 && c.r[0][4] == (uint32_t)-5);
+    assert(c.pc == 0x1004 && c.cycles == 1);
+
+    /* RS applies to both operands and result; sequential halfword PCs. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][17] = 9; c.r[1][18] = 4;
+    memory[7] = 0xe0280000;
+    assert(cdj_c674x_step(&c, read_word, NULL));
+    assert(c.r[0][19] == 13 && c.pc == 0x1002);
+    assert(cdj_c674x_step(&c, read_word, NULL));
+    assert(c.r[0][20] == 9 && c.pc == 0x1004);
+
+    /* Full instructions retain their p bit; packets skip the header. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1018);
+    memory[6] = mvk(0, 1, 42) | 1;
+    memory[7] = 0xe0000000;
+    memory[8] = mvk(0, 2, 73);
+    assert(cdj_c674x_step(&c, read_word, NULL));
+    assert(c.pc == 0x1024 && c.r[0][1] == 42 && c.r[0][2] == 73);
+
+    /* Signed immediate equality, cross path and predicate. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[1][4] = 0xffffffff;
+    memory[0] = (4u << 18) | (31u << 13) | (1u << 12) | 0xa58;
+    assert(cdj_c674x_step(&c, read_word, NULL)); assert(c.r[0][0] == 1);
+    memory[1] = (6u << 29) | (1u << 23) | (4u << 18) | (1u << 12) | 0xa78;
+    assert(cdj_c674x_step(&c, read_word, NULL)); assert(c.r[0][1] == 0);
+
+    /* A later unknown compact instruction rolls back the whole packet. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = mvk(0, 0, 99) | 1;
+    memory[1] = 0x3577; memory[7] = 0xe0400000;
+    assert(!cdj_c674x_step(&c, read_word, NULL));
+    assert(c.fault_pc == 0x1004 && c.fault_word == 0x3577);
+    assert(c.r[0][0] == 0 && c.pc == 0x1000 && c.cycles == 0);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

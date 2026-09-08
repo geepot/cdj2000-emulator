@@ -26,24 +26,60 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, void *opaque)
 {
     uint32_t words[8], pcs[8], next = cpu->pc;
     unsigned count = 0, elapsed = 1;
+    bool compact[8], parallel = true;
+    uint32_t headers[8];
     CdjC674x out = *cpu;
     bool written[2][32] = {{false}}, controls[32] = {false};
     if (cpu->fault) return false;
     /* Validate the entire packet before committing any architectural state. */
     do {
         uint32_t header, word;
-        if (next & 3) return stop(cpu, next, 0, "unaligned instruction fetch");
-        if (!read(opaque, (next & ~31u) + 28, &header) || !read(opaque, next, &word))
+        if (next & 1) return stop(cpu, next, 0, "unaligned instruction fetch");
+        if (!read(opaque, (next & ~31u) + 28, &header))
             return stop(cpu, next, 0, "unmapped instruction fetch");
-        if ((header >> 28) == 14) return stop(cpu, next, header, "compact fetch packet not implemented");
+        bool mixed = (header >> 28) == 14;
+        /* The header occupies no execution slot. */
+        if (mixed && (next & 31) == 28) {
+            next += 4;
+            continue;
+        }
+        if (mixed && (next & 31) == 30)
+            return stop(cpu, next, header, "instruction points into compact header");
+        unsigned slot = (next & 31) / 4;
+        bool short_word = mixed && ((header >> (21 + slot)) & 1);
+        if (!short_word && (next & 3))
+            return stop(cpu, next, 0, "unaligned full instruction fetch");
+        if (!read(opaque, next & ~3u, &word))
+            return stop(cpu, next, 0, "unmapped instruction fetch");
         if (count == 8) return stop(cpu, next, word, "execute packet exceeds eight instructions");
-        pcs[count] = next; words[count++] = word; next += 4;
-    } while (words[count - 1] & 1);
+        if (short_word) word = (word >> ((next & 2) * 8)) & 0xffff;
+        parallel = short_word ? ((header >> ((next & 31) / 2)) & 1) : (word & 1);
+        pcs[count] = next; words[count] = word;
+        compact[count] = short_word; headers[count++] = mixed ? header : 0;
+        next += short_word ? 2 : 4;
+        if (mixed && (next & 31) == 28) next += 4;
+    } while (parallel);
     for (unsigned i = 0; i < count; ++i) {
         uint32_t w = words[i], pc = pcs[i], value = 0;
         unsigned side = (w >> 1) & 1, dst = (w >> 23) & 31;
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
+        if (compact[i]) {
+            /* SPRUFE8B Figure D-4: compact .L ADD/SUB. */
+            if ((w & 0x040e) != 0 || (headers[i] & (1u << 14)))
+                return stop(cpu, pc, w, "compact instruction not implemented");
+            unsigned rs = (headers[i] & (1u << 19)) ? 16 : 0;
+            side = w & 1;
+            dst = ((w >> 4) & 7) + rs;
+            a = ((w >> 13) & 7) + rs;
+            b = ((w >> 7) & 7) + rs;
+            cross = side ^ ((w >> 12) & 1);
+            value = (w & 0x0800) ? cpu->r[side][a] - cpu->r[cross][b]
+                                  : cpu->r[side][a] + cpu->r[cross][b];
+            if (written[side][dst]) return stop(cpu, pc, w, "parallel register write conflict");
+            out.r[side][dst] = value; written[side][dst] = true;
+            continue;
+        }
         unsigned creg = w >> 29, z = (w >> 28) & 1;
         bool enabled = true, reg_write = true, control_write = false;
         if (creg == 7 || (!creg && z)) return stop(cpu, pc, w, "reserved predicate");
@@ -68,6 +104,10 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, void *opaque)
             value = (uint32_t)sx(a, 5) & cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x7e0 || (w & 0xffc) == 0xf78 || (w & 0xffc) == 0x9b0) {
             value = cpu->r[side][a] & cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0xa58) {
+            value = (uint32_t)sx(a, 5) == cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0xa78) {
+            value = cpu->r[side][a] == cpu->r[cross][b];
         } else if ((w & 0xffe) == 0x3a2 && a == 0) {
             /* FADCR/FAUCR/FMCR storage only; FP operations are not decoded yet. */
             if (dst < 18 || dst > 20) return stop(cpu, pc, w, "control register write not implemented");
