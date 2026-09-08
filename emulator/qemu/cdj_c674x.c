@@ -65,6 +65,26 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
         if (compact[i]) {
+            /* Figures F-17/18/20/21: compact BNOP uses halfword offsets.
+             * Predicate controls the branch, never the inserted NOPs. */
+            if ((headers[i] & 0x8000) &&
+                ((w & 0x3e) == 0x0a || (w & 0x2e) == 0x2a)) {
+                bool unsigned_offset = (w & 0xc000) == 0xc000;
+                unsigned n = unsigned_offset ? 5 : w >> 13;
+                int32_t displacement = unsigned_offset ? (int32_t)((w >> 6) & 255)
+                                                       : sx((w >> 6) & 127, 7);
+                bool enabled = !(w & 0x20) ||
+                    ((cpu->r[w & 1][0] != 0) ^ ((w >> 4) & 1));
+                if (n > 0 && elapsed > 1)
+                    return stop(cpu, pc, w, "multiple multicycle instructions");
+                if (n + 1 > elapsed) elapsed = n + 1;
+                if (enabled) {
+                    if (out.branch_due) return stop(cpu, pc, w, "overlapping branches not implemented");
+                    out.branch_target = (pc & ~31u) + (uint32_t)(displacement * 2);
+                    out.branch_due = cpu->cycles + 6;
+                }
+                continue;
+            }
             /* SPRUFE8B Figure C-21: compact stack pushes. Sources and
              * address are sampled in E1; B15 updates now, RAM in E3. */
             if ((w & 0x487f) == 0x0077) {
@@ -174,6 +194,10 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             value = (uint32_t)sx(a, 5) & cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x7e0 || (w & 0xffc) == 0xf78 || (w & 0xffc) == 0x9b0) {
             value = cpu->r[side][a] & cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0x58) {
+            value = (uint32_t)sx(a, 5) + cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0x78) {
+            value = cpu->r[side][a] + cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xa58) {
             value = (uint32_t)sx(a, 5) == cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xa78) {

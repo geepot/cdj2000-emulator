@@ -246,5 +246,38 @@ int main(void)
     memory[1] = 0x3577; memory[7] = 0xe0400000;
     assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(!c.load_count && !c.store_count && !c.cycles && c.r[1][15] == 0x10c0);
+    /* Compact BNOP uses halfword displacement and waits on false predicates. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = (5u << 13) | (17u << 6) | 0x2a; /* [A0], +34 bytes */
+    memory[7] = 0xe0208000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1002 && c.cycles == 6 && !c.branch_due);
+    cdj_c674x_reset(&c, 0x1000); c.r[0][0] = 1;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1022 && c.cycles == 6 && !c.branch_due);
+
+    /* Negative signed offset, B0 inverted predicate and five NOPs. */
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = (5u << 13) | (127u << 6) | 0x3b;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0xffe && c.cycles == 6);
+
+    /* Unsigned 8-bit offset must not sign extend values above 127. */
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0xc00a | (200u << 6);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1190 && c.cycles == 6);
+
+    /* Full-width ADD wraps at 32 bits and samples parallel operands. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[1][4] = 0xffffffff; c.r[0][1] = 2;
+    memory[0] = (2u << 23) | (4u << 18) | (1u << 13) | 0x1059;
+    memory[1] = (3u << 23) | (4u << 18) | (1u << 13) | 0x1078;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][2] == 0 && c.r[0][3] == 1);
+    memory[2] = (4u << 23) | (31u << 13) | 0x58;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][4] == 0xffffffff);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }
