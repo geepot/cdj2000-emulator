@@ -14,11 +14,14 @@ static bool write_memory(void *unused, uint32_t address, uint64_t value,
                          unsigned size, bool commit)
 {
     (void)unused;
-    if ((size != 4 && size != 8) || address < 0x1000 ||
+    if ((size != 1 && size != 2 && size != 4 && size != 8) || address < 0x1000 ||
         address > 0x1100 - size || (address & (size - 1))) return false;
     if (commit) {
-        memory[(address - 0x1000) / 4] = value;
-        if (size == 8) memory[(address - 0x1000) / 4 + 1] = value >> 32;
+        for (unsigned i = 0; i < size; ++i) {
+            unsigned offset = address - 0x1000 + i, shift = (offset & 3) * 8;
+            memory[offset / 4] = (memory[offset / 4] & ~(255u << shift)) |
+                                 ((uint32_t)((value >> (8 * i)) & 255) << shift);
+        }
     }
     return true;
 }
@@ -320,5 +323,34 @@ int main(void)
     memory[1] = (2u << 23) | (31u << 13) | 0xfd8;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][2] == 0xffffffff);
+    /* Register shifts mask to six bits; counts >=32 must not invoke C UB. */
+    const unsigned counts[] = {0, 1, 31, 32, 40, 63, 64};
+    const uint32_t right[] = {0x80000001, 0x40000000, 1, 0, 0, 0, 0x80000001};
+    const uint32_t arithmetic[] = {0x80000001, 0xc0000000, 0xffffffff, 0xffffffff,
+                                  0xffffffff, 0xffffffff, 0x80000001};
+    const uint32_t left[] = {0x80000001, 2, 0x80000000, 0, 0, 0, 0x80000001};
+    for (unsigned j = 0; j < 7; ++j) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[0][1] = counts[j]; c.r[1][2] = 0x80000001;
+        memory[0] = (3u << 23) | (2u << 18) | (1u << 13) | 0x19e0;
+        memory[1] = (4u << 23) | (2u << 18) | (1u << 13) | 0x1de0;
+        memory[2] = (5u << 23) | (2u << 18) | (1u << 13) | 0x1ce0;
+        for (unsigned k = 0; k < 3; ++k) assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[0][3] == right[j] && c.r[0][4] == arithmetic[j] && c.r[0][5] == left[j]);
+    }
+    /* STB/STH/STW preserve neighboring bytes and scale pointer increments. */
+    for (unsigned size = 1; size <= 4; size *= 2) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[0][3] = 0x12345678; c.r[1][10] = 0x10c0 + size;
+        memory[48] = memory[49] = 0xaabbccdd;
+        unsigned op = size == 1 ? 0x34 : size == 2 ? 0x54 : 0x74;
+        memory[0] = (3u << 23) | (10u << 18) | (1u << 13) | (11u << 9) | 0x80 | op;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.r[1][10] == 0x10c0 + 2 * size && memory[48] == 0xaabbccdd);
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(memory[48] == (size == 1 ? 0xaabb78dd : size == 2 ? 0x5678ccdd : 0xaabbccdd));
+        assert(memory[49] == (size == 4 ? 0x12345678 : 0xaabbccdd));
+    }
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

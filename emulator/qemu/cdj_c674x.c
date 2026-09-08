@@ -150,41 +150,51 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             if (n > 1 && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
             if (n > elapsed) elapsed = n;
             reg_write = false;
-        } else if ((w & 0x17c) == 0x64 || (w & 0x17c) == 0x24 ||
-                   (w & 0x17c) == 0x14 || (w & 0x17c) == 0x44 || (w & 0x17c) == 0x04) {
-            /* Scalar loads: address E1, RAM access E3, destination E5. */
+        } else if ((w & 0x10c) == 0x04) {
+            /* Scalar memory: address E1, RAM access E3, load destination E5. */
             unsigned op = (w >> 4) & 7;
-            unsigned size = op == 6 ? 4 : (op == 0 || op == 4) ? 2 : 1;
+            unsigned size = op >= 6 ? 4 : (op == 0 || op == 4 || op == 5) ? 2 : 1;
+            bool is_store = op == 3 || op == 5 || op == 7;
             unsigned bank = (w >> 7) & 1, mode = (w >> 9) & 15;
             reg_write = false;
             if (!(mode & 8) && (mode & 2))
-                return stop(cpu, pc, w, "reserved load addressing mode");
+                return stop(cpu, pc, w, "reserved memory addressing mode");
             if (enabled) {
                 if (b >= 4 && b <= 7 && cpu->control[0])
-                    return stop(cpu, pc, w, "circular load addressing not implemented");
+                    return stop(cpu, pc, w, "circular memory addressing not implemented");
                 uint32_t offset = ((mode & 4) ? cpu->r[bank][a] : a) * size;
                 uint32_t base = cpu->r[bank][b];
                 uint32_t updated = (mode & 1) ? base + offset : base - offset;
                 uint32_t address = ((mode & 10) == 10) ? base : updated;
                 uint32_t dummy;
-                if ((address & (size - 1)) || !read(opaque, address & ~3u, &dummy))
-                    return stop(cpu, pc, w, "unaligned or unmapped scalar load");
-                if (out.load_count == 40) return stop(cpu, pc, w, "load queue full");
-                for (unsigned j = 0; j < out.load_count; ++j)
-                    if (out.loads[j].due == cpu->cycles + 5 &&
-                        out.loads[j].bank == side && out.loads[j].dst == dst)
-                        return stop(cpu, pc, w, "parallel load write conflict");
-                out.loads[out.load_count++] = (CdjC674xLoad){
-                    .due = cpu->cycles + 5, .address = address, .bank = side, .dst = dst,
-                    .size = size, .sign_extend = op == 2 || op == 4
-                };
+                if ((address & (size - 1)) ||
+                    (is_store ? (!write || !write(opaque, address, cpu->r[side][dst], size, false))
+                              : !read(opaque, address & ~3u, &dummy)))
+                    return stop(cpu, pc, w, "unaligned or unmapped scalar memory access");
+                if (is_store) {
+                    if (out.store_count == 24) return stop(cpu, pc, w, "store queue full");
+                    out.stores[out.store_count++] = (CdjC674xStore){
+                        .due = cpu->cycles + 3, .address = address,
+                        .value = cpu->r[side][dst], .size = size
+                    };
+                } else {
+                    if (out.load_count == 40) return stop(cpu, pc, w, "load queue full");
+                    for (unsigned j = 0; j < out.load_count; ++j)
+                        if (out.loads[j].due == cpu->cycles + 5 &&
+                            out.loads[j].bank == side && out.loads[j].dst == dst)
+                            return stop(cpu, pc, w, "parallel load write conflict");
+                    out.loads[out.load_count++] = (CdjC674xLoad){
+                        .due = cpu->cycles + 5, .address = address, .bank = side, .dst = dst,
+                        .size = size, .sign_extend = op == 2 || op == 4
+                    };
+                }
                 if (mode & 8) {
                     if (written[bank][b]) return stop(cpu, pc, w, "parallel register write conflict");
                     out.r[bank][b] = updated; written[bank][b] = true;
                 }
             }
             /* PROT inserts four NOPs, including for a false predicate. */
-            if (headers[i] & (1u << 20)) {
+            if (!is_store && (headers[i] & (1u << 20))) {
                 if (elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
                 elapsed = 5;
             }
@@ -206,6 +216,19 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             value = (uint32_t)sx(a, 5) | cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xff8) {
             value = cpu->r[side][a] | cpu->r[cross][b];
+        } else if ((w & 0xfbc) == 0x9a0 || (w & 0xfbc) == 0xda0 ||
+                   (w & 0xfbc) == 0xca0) {
+            /* Scalar .S shifts; register counts use only six low bits. */
+            unsigned n = (w & 0x40) ? (cpu->r[side][a] & 63) : a;
+            uint32_t source = cpu->r[cross][b];
+            unsigned op = w & 0xfbc;
+            if (op == 0xca0) value = n >= 32 ? 0 : source << n;
+            else if (op == 0x9a0) value = n >= 32 ? 0 : source >> n;
+            else if (n >= 32) value = (source & 0x80000000u) ? UINT32_MAX : 0;
+            else {
+                value = source >> n;
+                if (n && (source & 0x80000000u)) value |= UINT32_MAX << (32 - n);
+            }
         } else if ((w & 0xffc) == 0xa58) {
             value = (uint32_t)sx(a, 5) == cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xa78) {
