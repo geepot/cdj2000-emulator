@@ -272,9 +272,11 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 
 `cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
-control-register MVC, register branch, ADDKPC, CMPEQ and NOP. Mixed fetch
+control-register MVC, register/relative branches, ADDKPC, CMPEQ and NOP. Mixed fetch
 packets use the header layout and halfword p bits; compact .L ADD/SUB
-support the low/high register set and cross path. Compact Dpp STW/STDW
+support the low/high register set and cross path. Compact register moves
+implement both directions between a full register index and the selected
+subset, including cross-bank operands. Compact Dpp STW/STDW
 stack pushes update B15 in E1 and queue little-endian RAM writes for E3.
 The memory callback currently supports checked L2 RAM writes, not device
 transactions. Pending writes freeze with the core on an unsupported packet. Every execute packet
@@ -288,21 +290,24 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-stack` uploads
-13,781 words and executes 15 packets / 17 cycles. The first compact CMPEQ
-and STW packet completes, updating `B15` to `0x11805af0`. Execution stops on
-the unsupported relative branch `0xc0001111` at `0x11804288`; its parallel
-STDW remains uncommitted. The preceding STW is still pending in the store
-pipeline at this stop. `B14=0x11806900` and `B3=0x11801dd8` retain their
-startup values. This agrees with standalone replay of the uploaded L2 image.
-Remaining compact instructions, loads, general stores, relative branches,
-integer and floating-point instructions, interrupts and peripheral execution
-are still required for DSP boot and audio. No DSP-ready result is fabricated.
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-moves` uploads
+13,781 words and executes 17 packets / 19 cycles. Compact stack pushes and
+register moves now complete, leaving `B15=0x11805ae0`. Execution stops on
+the unsupported word load `0xd0283664` at `0x11804294`. The relative branch
+in the preceding packet has a false predicate on this startup path; synthetic
+tests separately check taken branches, negative displacement, fetch-base
+addressing and five delay cycles. `B14=0x11806900` and `B3=0x11801dd8`
+retain their startup values. This agrees with standalone replay of the uploaded
+L2 image. The older prototype's compact listing omits the register-extension
+bits on moves; it must not be treated as an execution oracle.
+Remaining compact instructions, loads, general stores, integer and
+floating-point instructions, interrupts and peripheral execution are still
+required for DSP boot and audio. No DSP-ready result is fabricated.
 
 `tests/test_c674x.py` compiles an independent, synthetic instruction harness.
 It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
 ADDKPC return addresses, mixed-width packet boundaries, compact register
-banks and arithmetic, CMPEQ, stack-store timing and captured source values,
+banks and arithmetic, full-index compact moves, relative branches, CMPEQ, stack-store timing and captured source values,
 doubleword order, alignment/bounds failures, and atomic unsupported-packet
 stops. The same harness
 also passes Clang address and undefined-behavior sanitizers.

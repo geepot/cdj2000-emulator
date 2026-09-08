@@ -158,5 +158,37 @@ int main(void)
     memory[0] = 0x8677;
     assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(c.r[1][15] == 0x10f4 && !c.store_count);
+    /* Relative branches use fetch-packet base, signed offsets and five
+     * delay cycles. A backward target must not use the opcode address. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1028);
+    memory[10] = (0x1ffffcu << 7) | 0x10; /* fetch 1020 - 16 = 1010 */
+    memory[11] = 8u << 13; /* NOP 9 ends early at the branch */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x102c && c.branch_target == 0x1010);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1010 && c.cycles == 6 && !c.branch_due);
+    cdj_c674x_reset(&c, 0x1028);
+    memory[10] |= 6u << 29; /* false A0 predicate */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.branch_due && c.pc == 0x102c);
+
+    /* Compact moves in both directions between full and subset registers.
+     * Parallel source reads see the old value, including across register files. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][27] = 0xabcdef01; c.r[0][17] = 0x1234;
+    uint32_t to = (1u << 13) | (1u << 12) | (3u << 10) | (3u << 7) | 6;
+    uint32_t from = (6u << 13) | (3u << 10) | (1u << 7) | 0x46;
+    memory[0] = to | from << 16; memory[7] = 0xe0280001;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][17] == 0xabcdef01 && c.r[0][30] == 0x1234);
+
+    /* Firmware's low-bank L and cross-bank D move forms. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[0][0] = 7; c.r[1][3] = 0x11223344;
+    memory[0] = 0xb5d62046; memory[7] = 0xe0200001;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][1] == 7 && c.r[0][13] == 0x11223344);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

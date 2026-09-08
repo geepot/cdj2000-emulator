@@ -86,6 +86,21 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 written[1][15] = true;
                 continue;
             }
+            /* Figures G-1/G-2: one operand is a full 5-bit register,
+             * the other uses the header-selected register subset. */
+            if ((w & 0x0026) == 0x0006 && ((w >> 3) & 3) != 3) {
+                unsigned rs = (headers[i] & (1u << 19)) ? 16 : 0;
+                unsigned ms = ((w >> 10) & 3) << 3;
+                side = w & 1;
+                cross = side ^ ((w >> 12) & 1);
+                dst = (w >> 13) & 7;
+                b = (w >> 7) & 7;
+                if (w & 0x40) { dst += ms; b += rs; }
+                else { dst += rs; b += ms; }
+                if (written[side][dst]) return stop(cpu, pc, w, "parallel register write conflict");
+                out.r[side][dst] = cpu->r[cross][b]; written[side][dst] = true;
+                continue;
+            }
             /* SPRUFE8B Figure D-4: compact .L ADD/SUB. */
             if ((w & 0x040e) != 0 || (headers[i] & (1u << 14)))
                 return stop(cpu, pc, w, "compact instruction not implemented");
@@ -133,6 +148,13 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             /* FADCR/FAUCR/FMCR storage only; FP operations are not decoded yet. */
             if (dst < 18 || dst > 20) return stop(cpu, pc, w, "control register write not implemented");
             control_write = true; reg_write = false; value = cpu->r[cross][b];
+        } else if ((w & 0x7c) == 0x10) {
+            reg_write = false;
+            if (enabled) {
+                if (out.branch_due) return stop(cpu, pc, w, "overlapping branches not implemented");
+                out.branch_target = (pc & ~31u) + (uint32_t)(sx((w >> 7) & 0x1fffff, 21) * 4);
+                out.branch_due = cpu->cycles + 6;
+            }
         } else if ((w & 0x0f83effe) == 0x362) {
             reg_write = false;
             if (enabled) {
