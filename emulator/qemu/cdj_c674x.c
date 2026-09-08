@@ -22,7 +22,7 @@ static bool stop(CdjC674x *cpu, uint32_t pc, uint32_t word, const char *why)
     return false;
 }
 
-bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, void *opaque)
+bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     uint32_t words[8], pcs[8], next = cpu->pc;
     unsigned count = 0, elapsed = 1;
@@ -65,6 +65,27 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, void *opaque)
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
         if (compact[i]) {
+            /* SPRUFE8B Figure C-21: compact stack pushes. Sources and
+             * address are sampled in E1; B15 updates now, RAM in E3. */
+            if ((w & 0x487f) == 0x0077) {
+                unsigned bank = (w >> 12) & 1, src = (w >> 7) & 15;
+                unsigned size = (w & 0x8000) ? 8 : 4;
+                uint32_t address = cpu->r[1][15];
+                uint64_t data = cpu->r[bank][src];
+                if ((address & (size - 1)) || (size == 8 && (src & 1)))
+                    return stop(cpu, pc, w, "unaligned stack store or invalid register pair");
+                if (size == 8) data |= (uint64_t)cpu->r[bank][src + 1] << 32;
+                if (!write || !write(opaque, address, data, size, false))
+                    return stop(cpu, pc, w, "unmapped stack store");
+                if (written[1][15]) return stop(cpu, pc, w, "parallel register write conflict");
+                if (out.store_count == 24) return stop(cpu, pc, w, "store queue full");
+                out.stores[out.store_count++] = (CdjC674xStore){
+                    .due = cpu->cycles + 3, .value = data, .address = address, .size = size
+                };
+                out.r[1][15] = address - size * (((w >> 13) & 1) + 1);
+                written[1][15] = true;
+                continue;
+            }
             /* SPRUFE8B Figure D-4: compact .L ADD/SUB. */
             if ((w & 0x040e) != 0 || (headers[i] & (1u << 14)))
                 return stop(cpu, pc, w, "compact instruction not implemented");
@@ -140,6 +161,13 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, void *opaque)
     out.pc = next;
     for (unsigned i = 0; i < elapsed; ++i) {
         ++out.cycles;
+        for (unsigned j = 0; j < out.store_count;) {
+            CdjC674xStore *store = &out.stores[j];
+            if (store->due > out.cycles) { ++j; continue; }
+            if (!write || !write(opaque, store->address, store->value, store->size, true))
+                return stop(cpu, cpu->pc, 0, "RAM store callback broke commit guarantee");
+            memmove(store, store + 1, (--out.store_count - j) * sizeof(*store));
+        }
         if (out.branch_due && out.cycles == out.branch_due) {
             out.pc = out.branch_target; out.branch_due = 0; break;
         }

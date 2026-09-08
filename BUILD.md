@@ -274,7 +274,10 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
 control-register MVC, register branch, ADDKPC, CMPEQ and NOP. Mixed fetch
 packets use the header layout and halfword p bits; compact .L ADD/SUB
-support the low/high register set and cross path. Every execute packet
+support the low/high register set and cross path. Compact Dpp STW/STDW
+stack pushes update B15 in E1 and queue little-endian RAM writes for E3.
+The memory callback currently supports checked L2 RAM writes, not device
+transactions. Pending writes freeze with the core on an unsupported packet. Every execute packet
 reads the pre-packet state; writes commit together. Branches take effect after
 five delay slots, including inserted NOP cycles. Unsupported instructions stop with PC and opcode, without committing part of the
 failed packet. This is not a complete ISA, pipeline, privilege or interrupt model.
@@ -285,17 +288,21 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The captured stage-1 image executes 14 packets / 16 cycles before reaching
-compact code at `0x11804280`. A standalone replay of the uploaded L2 image
-now decodes its first CMPEQ and stops on the unimplemented compact stack
-store `0x3577` at `0x11804284`; that entire packet remains uncommitted. Stack `B15=0x11805af8`, data pointer
-`B14=0x11806900`, and return address `B3=0x11801dd8` agree with the decoded
-startup instructions. Remaining compact instructions, loads/stores, remaining
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-stack` uploads
+13,781 words and executes 15 packets / 17 cycles. The first compact CMPEQ
+and STW packet completes, updating `B15` to `0x11805af0`. Execution stops on
+the unsupported relative branch `0xc0001111` at `0x11804288`; its parallel
+STDW remains uncommitted. The preceding STW is still pending in the store
+pipeline at this stop. `B14=0x11806900` and `B3=0x11801dd8` retain their
+startup values. This agrees with standalone replay of the uploaded L2 image.
+Remaining compact instructions, loads, general stores, relative branches,
 integer and floating-point instructions, interrupts and peripheral execution
 are still required for DSP boot and audio. No DSP-ready result is fabricated.
 
 `tests/test_c674x.py` compiles an independent, synthetic instruction harness.
 It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
 ADDKPC return addresses, mixed-width packet boundaries, compact register
-banks and arithmetic, CMPEQ, and atomic unsupported-packet stops. The same harness
+banks and arithmetic, CMPEQ, stack-store timing and captured source values,
+doubleword order, alignment/bounds failures, and atomic unsupported-packet
+stops. The same harness
 also passes Clang address and undefined-behavior sanitizers.

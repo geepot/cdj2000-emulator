@@ -47,13 +47,27 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     return true;
 }
 
+static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
+                      unsigned size, bool commit)
+{
+    NxsHpi *s = opaque;
+    if (address >= 0x00800000 && address < 0x00840000) address += 0x11000000;
+    if ((size != 4 && size != 8) || (address & (size - 1)) ||
+        address < L2_BASE || address > L2_BASE + L2_SIZE - size) return false;
+    if (commit) {
+        if (size == 8) stq_le_p(s->l2 + address - L2_BASE, value);
+        else stl_le_p(s->l2 + address - L2_BASE, value);
+    }
+    return true;
+}
+
 static void start_dsp(NxsHpi *s)
 {
     /* Boot-ROM handoff abstraction: the host supplies the entry in L2[0].
      * No claim to execute the unavailable ROM. The uploaded code is decoded. */
     cdj_c674x_reset(&s->cpu, ldl_le_p(s->l2));
     unsigned budget = 10000;
-    while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, s)) {}
+    while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {}
     info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
                 s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
