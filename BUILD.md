@@ -272,7 +272,7 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 
 `cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
-control-register MVC, register/relative branches, ADDKPC, ADD/SUB (.L/.S), OR (.L), MVK (.D), CMPEQ/CMPGT, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
+control-register MVC (including ILC/RILC setup), register/relative branches, ADDKPC, ADD/SUB (.L/.S), OR (.L), MVK (.D), CMPEQ/CMPGT, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
 packets use the header layout and halfword p bits; compact .L ADD/SUB
 support the low/high register set and cross path. Compact register moves
 implement both directions between a full register index and the selected
@@ -288,7 +288,10 @@ scaled offsets. The core rejects parallel memory accesses in a packet with
 an active nonaligned access, as required by the ISA. Doubleword transfers
 use even/odd register pairs in little-endian order. LDNDW/STNDW support
 scaled and unscaled offsets; aligned forms require eight-byte alignment.
-Both load-result registers participate in E5 write-hazard checks. Full-width LDW, LDB/LDBU and LDH/LDHU support linear immediate/register offsets and
+Both load-result registers participate in E5 write-hazard checks. Compact
+MVC writes ILC from the selected B register subset; full-width MVC can write
+ILC/RILC. Their four-cycle availability timestamps are recorded for the future
+loop engine. Loop execution and control-register reads are still incomplete. Full-width LDW, LDB/LDBU and LDH/LDHU support linear immediate/register offsets and
 pre/post pointer updates: address generation in E1, RAM sampling in E3 and
 register writeback in E5. Narrow loads select little-endian byte/halfword
 lanes, apply signed or unsigned extension, and scale offsets by element size. PROT inserts four NOP cycles. Pending memory
@@ -305,14 +308,14 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-sub` uploads
-13,781 words and executes 35 packets / 42 cycles. It passes the initial
-LDNDW/decrement packet and the signed comparison, then stops on compact
-control-register opcode `0xd86f` at `0x1180481a`. `B15=0x11805ae0`,
-`B14=0x11806900` and `B3=0x118042c8`. This agrees with standalone replay
-of the uploaded L2 image. The older prototype's listing omits register-extension
-bits, sometimes the cross path on moves, and the extended load/store selector;
-it must not be treated as an execution oracle.
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-ilc` uploads
+13,781 words and executes 39 packets / 46 cycles. It completes the ILC setup
+and reaches `SPLOOP 2` (`0x00838001`) at `0x11804838`, where execution
+stops because the software-pipelined loop buffer is not implemented.
+`B15=0x11805ae0`, `B14=0x11806900` and `B3=0x118042c8`. This agrees
+with standalone replay of the uploaded L2 image. The older prototype's listing
+omits register-extension bits, sometimes the cross path on moves, and the
+extended load/store selector; it must not be treated as an execution oracle.
 Remaining compact instructions, loop/control-register behavior, extended memory
 operations, integer and floating-point instructions, interrupts and peripherals
 are still required for DSP boot and audio. No DSP-ready result is fabricated.
@@ -323,7 +326,8 @@ ADDKPC return addresses, mixed-width packet boundaries, compact register
 banks and arithmetic, full-index compact moves, relative and compact BNOP branches, ADD/SUB wraparound and operand order, signed comparison boundaries, CMPEQ, stack-store timing and captured source values,
 doubleword order, byte/halfword lanes and sign extension, scalar-store byte preservation, unaligned transfers across word boundaries,
 second-word bounds failures, doubleword register pairs and offset scaling,
-upper-register hazards, and nonaligned packet restrictions,
+upper-register hazards, nonaligned packet restrictions, ILC/RILC setup,
+register-subset selection and parallel control-write conflicts,
 shift counts through and beyond 32 bits, load E1/E3/E5 timing, PROT, memory/register hazards,
 alignment/bounds failures, and atomic unsupported-packet
 stops. The same harness

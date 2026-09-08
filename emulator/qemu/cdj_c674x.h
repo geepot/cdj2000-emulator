@@ -19,6 +19,7 @@ typedef struct {
 typedef struct {
     uint32_t r[2][32], control[32], pc;
     uint64_t cycles, packets, branch_due;
+    uint64_t control_ready[32];
     uint32_t branch_target, fault_pc, fault_word;
     const char *fault;
     CdjC674xStore stores[24];

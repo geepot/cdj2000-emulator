@@ -85,6 +85,16 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
         if (compact[i]) {
+            /* Figure F-31: compact MVC to ILC. SPLOOP observes a four-cycle
+             * availability latency (section 7.4.3), tracked separately. */
+            if ((w & 0xfc7f) == 0xd86f) {
+                unsigned src = ((w >> 7) & 7) + ((headers[i] & 0x80000) ? 16 : 0);
+                if (controls[13]) return stop(cpu, pc, w, "parallel control write conflict");
+                out.control[13] = cpu->r[1][src];
+                out.control_ready[13] = cpu->cycles + 4;
+                controls[13] = true;
+                continue;
+            }
             /* Figures F-17/18/20/21: compact BNOP uses halfword offsets.
              * Predicate controls the branch, never the inserted NOPs. */
             if ((headers[i] & 0x8000) &&
@@ -283,7 +293,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             value = cpu->r[side][a] == cpu->r[cross][b];
         } else if ((w & 0xffe) == 0x3a2 && a == 0) {
             /* FADCR/FAUCR/FMCR storage only; FP operations are not decoded yet. */
-            if (dst < 18 || dst > 20) return stop(cpu, pc, w, "control register write not implemented");
+            if (dst != 13 && dst != 14 && (dst < 18 || dst > 20)) return stop(cpu, pc, w, "control register write not implemented");
             control_write = true; reg_write = false; value = cpu->r[cross][b];
         } else if ((w & 0x7c) == 0x10) {
             reg_write = false;
@@ -315,6 +325,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         if (enabled && control_write) {
             if (controls[dst]) return stop(cpu, pc, w, "parallel control write conflict");
             out.control[dst] = value; controls[dst] = true;
+            if (dst == 13 || dst == 14) out.control_ready[dst] = cpu->cycles + 4;
         }
     }
     if (nonaligned_memory && memory_count > 1)

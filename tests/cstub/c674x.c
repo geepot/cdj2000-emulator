@@ -458,5 +458,33 @@ int main(void)
     memory[2] = memory[1];
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][4] == 0);
+    /* Compact MVC reads B0 (or B16 with RS), with four-cycle availability
+     * for the loop engine. Parallel writes still see pre-packet registers. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][0] = 7; memory[0] = mvk(1, 0, 99) | 1;
+    memory[1] = 0xd86f; memory[7] = 0xe0400000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[13] == 7 && c.control_ready[13] == 4 && c.r[1][0] == 99);
+    cdj_c674x_reset(&c, 0x1004); c.r[1][16] = 123;
+    memory[7] |= 1u << 19;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[13] == 123 && c.control_ready[13] == 4);
+
+    /* Full-width MVC to ILC/RILC preserves predicates and source cross path. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][2] = 17;
+    memory[0] = (13u << 23) | (2u << 18) | 0x13a2;
+    memory[1] = (14u << 23) | (2u << 18) | 0x13a2;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[13] == 17 && c.control[14] == 17);
+    assert(c.control_ready[13] == 4 && c.control_ready[14] == 5);
+
+    /* Two writes to ILC in one packet cannot silently choose a winner. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = (13u << 23) | 0x3a3;
+    memory[1] = 0xd86f; memory[7] = 0xe0400000;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && !c.control_ready[13]);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }
