@@ -1,0 +1,94 @@
+--- a/sim/bfin/gui.c
++++ b/sim/bfin/gui.c
+@@ -390,9 +390,9 @@
+   return format ? bytes_per_pixel * 8 : 0;
+ }
+ 
+-#elif defined (_WIN32)
+-
+-/* A dependency-free fallback for native Windows builds.  GNU sim normally
++#else
++
++/* A dependency-free framebuffer backend for builds without SDL.  GNU sim normally
+    uses SDL for the PPI display, but the MinGW build used by the CDJ GUI lab
+    has no SDL development package.  The old inline stubs returned zero from
+    bfin_gui_update, which made the DMA engine retry the first scanline
+@@ -402,7 +402,22 @@
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <string.h>
++#ifdef _WIN32
+ #include <windows.h>
++#endif
++
++static void
++bfin_gui_replace_file (const char *temporary, const char *destination)
++{
++#ifdef _WIN32
++  MoveFileExA (temporary, destination,
++               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
++#else
++  if (rename (temporary, destination) != 0)
++    perror ("publishing Blackfin framebuffer");
++#endif
++}
+ 
+ struct gui_state
+ {
+@@ -677,8 +692,7 @@
+       fprintf (stream, "P6\n%d %d\n255\n", gui->width, gui->height);
+       fwrite (gui->rgb, 3, (size_t) gui->width * gui->height, stream);
+       if (!fclose (stream))
+-	MoveFileExA (temporary, output_path,
+-		     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
++	bfin_gui_replace_file (temporary, output_path);
+     }
+   free (temporary);
+ }
+@@ -743,8 +757,7 @@
+ 	  for (y = y0; y < y1; ++y)
+ 	    fwrite (gui->rgb + ((size_t) y * gui->width + x0) * 3, 3, w, stream);
+ 	  if (!fclose (stream))
+-	    MoveFileExA (temporary, out_path,
+-			 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
++	    bfin_gui_replace_file (temporary, out_path);
+ 	}
+       free (temporary);
+     }
+--- a/sim/bfin/gui.h
++++ b/sim/bfin/gui.h
+@@ -21,14 +21,9 @@
+ #ifndef BFIN_GUI_H
+ #define BFIN_GUI_H
+ 
+-/* These macros are ugly.  */
+-#if defined (HAVE_SDL) || defined (_WIN32)
+-# define _BFIN_GUI_INLINE
+-# define _BFIN_GUI_STUB(...) ;
+-#else
+-# define _BFIN_GUI_INLINE ATTRIBUTE_UNUSED static inline
+-# define _BFIN_GUI_STUB(val) { return val; }
+-#endif
++/* Every host has either SDL or the file-backed framebuffer backend. */
++#define _BFIN_GUI_INLINE
++#define _BFIN_GUI_STUB(...) ;
+ 
+ enum gui_color {
+   GUI_COLOR_RGB_555_LE,
+--- a/sim/bfin/interp.c
++++ b/sim/bfin/interp.c
+@@ -894,11 +894,11 @@
+       double dt = now - bfin_stats.last_wall;
+ 
+       fprintf (stderr,
+-	       "STATS wall=%.1f insns=%" PRIu64 " mips=%.2f ticks=%" PRId64
++	       "STATS wall=%.1f pc=%#x insns=%" PRIu64 " mips=%.2f ticks=%" PRId64
+ 	       " tick_rate=%.3fM/s events=%lu dma=%lu frames=%lu"
+ 	       " published=%lu link_rx=%lu mem_fill=%lu"
+ 	       " guest_s=%.2f parked_s=%.2f dropped_ms=%.1f waits=%lu spins=%lu\n",
+-	       now - bfin_stats.t0, bfin_stats.insns,
++	       now - bfin_stats.t0, (unsigned) PCREG, bfin_stats.insns,
+ 	       (double) (bfin_stats.insns - bfin_stats.last_insns) / dt / 1e6,
+ 	       ticks, (double) (ticks - bfin_stats.last_ticks) / dt / 1e6,
+ 	       bfin_stats.events, bfin_stat_dma_events, bfin_stat_frames,

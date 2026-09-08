@@ -221,13 +221,20 @@ if [ -n "$missing" ]; then
     exit 1
 fi
 
+# The viewer consumes PPM frames. Autodetected SDL selects another backend,
+# so remove an old SDL-built object when upgrading an existing build tree.
+if [ "$(cat "$OBJ/cdj-display-backend" 2>/dev/null)" != file ]; then
+    rm -f "$OBJ/sim/bfin/gui.o"
+fi
 echo "building"
 # The makefile that knows about bfin/run is sim/Makefile, not sim/bfin/.
 # -lws2_32 is the socket library the MAIN link needs on Windows.
 case $EXE in
-    .exe) "$MAKE" -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" LIBS=-lws2_32 ;;
-    *)    "$MAKE" -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" ;;
+    .exe) "$MAKE" -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" SDL_CFLAGS= LIBS=-lws2_32 ;;
+    *)    "$MAKE" -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" SDL_CFLAGS= ;;
 esac
+
+echo file > "$OBJ/cdj-display-backend"
 
 # ---------------------------------------------------------------- install ---
 # libtool leaves a ~50 KB wrapper stub at sim/bfin/run and the real ~17 MB

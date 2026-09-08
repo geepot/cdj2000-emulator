@@ -1012,6 +1012,7 @@ class UiViewer:
             {
                 "BFIN_GUI_OUTPUT": str(output),
                 "BFIN_GUI_HEIGHT": str(self.args.height),
+                "BFIN_GUI_COLOR": "rgb555le",
                 "BFIN_FAST_LZSS": str(
                     (FIRMWARE / "gui-flash-image.bin").resolve()
                 ),
@@ -1026,7 +1027,10 @@ class UiViewer:
         # replayed record stream with a live link to the MAIN board.
         for setting in self.args.env:
             name, _, value = setting.partition("=")
-            env[name] = value
+            if value == "":
+                env.pop(name, None)
+            else:
+                env[name] = value
         command = [
             simulator_path(self.args.simulator),
             "--model",

@@ -177,3 +177,24 @@ the configured wall-clock limit without a reported CPU exception. It reports
 unconnected GPIO ports 2 and 4; this is not a full boot or display validation.
 Host suite: 156 passed, 42 skipped. Skipped tests need additional firmware or
 runtime fixtures. QEMU has not yet been built on this Mac for this fork.
+
+### Diagnosing GUI startup on macOS
+
+Patch 04 enables the file-backed framebuffer on POSIX hosts. The build
+explicitly clears `SDL_CFLAGS`: SDL autodetection otherwise selects a backend
+that does not publish the PPM file consumed by the Python viewer. Existing
+SDL-built `gui.o` is rebuilt when switching to the file backend.
+
+Useful viewer overrides:
+
+```sh
+--env BFIN_FAST_LZSS= --env BFIN_STATS=5 --env BFIN_EXCEPTION_TRACE=1 \
+--env BFIN_GUI_TRACE=1 --env BFIN_GUI_FRAME_TRACE=1
+```
+
+Empty values remove an environment variable. Statistics include guest PC,
+instruction count, display DMA, completed/published frames and received link
+bytes. The native NXS GUI-only run now publishes frames and displays
+`E-8709: COMMUNICATION ERROR`, with `link_rx=0`, because MAIN is not connected.
+Some image regions are visibly corrupt; framebuffer publication is verified,
+but image fidelity is not. This run does not demonstrate full-system boot.
