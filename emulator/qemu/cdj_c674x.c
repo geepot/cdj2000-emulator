@@ -41,15 +41,13 @@ static bool stop(CdjC674x *cpu, uint32_t pc, uint32_t word, const char *why)
     return false;
 }
 
-bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
+bool cdj_c674x_fetch(CdjC674x *cpu, CdjC674xRead read, void *opaque,
+                     CdjC674xPacket *packet)
 {
-    uint32_t words[8], pcs[8], next = cpu->pc;
-    unsigned count = 0, elapsed = 1, memory_count = 0;
-    bool nonaligned_memory = false;
-    bool compact[8], parallel = true;
-    uint32_t headers[8];
-    CdjC674x out = *cpu;
-    bool written[2][32] = {{false}}, controls[32] = {false};
+    CdjC674xPacket result = {0};
+    uint32_t next = cpu->pc;
+    unsigned count = 0;
+    bool parallel = true;
     if (cpu->fault) return false;
     /* Validate the entire packet before committing any architectural state. */
     do {
@@ -74,21 +72,38 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         if (count == 8) return stop(cpu, next, word, "execute packet exceeds eight instructions");
         if (short_word) word = (word >> ((next & 2) * 8)) & 0xffff;
         parallel = short_word ? ((header >> ((next & 31) / 2)) & 1) : (word & 1);
-        pcs[count] = next; words[count] = word;
-        compact[count] = short_word; headers[count++] = mixed ? header : 0;
+        result.instructions[count++] = (CdjC674xInstruction){
+            .pc = next, .word = word, .compact = short_word, .header = mixed ? header : 0
+        };
         next += short_word ? 2 : 4;
         if (mixed && (next & 31) == 28) next += 4;
     } while (parallel);
-    for (unsigned i = 0; i < count; ++i) {
-        uint32_t w = words[i], pc = pcs[i], value = 0;
+    result.count = count;
+    result.next_pc = next;
+    *packet = result;
+    return true;
+}
+
+bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
+                       CdjC674xRead read, CdjC674xWrite write, void *opaque)
+{
+    unsigned elapsed = 1, memory_count = 0;
+    bool nonaligned_memory = false;
+    CdjC674x out = *cpu;
+    bool written[2][32] = {{false}}, controls[32] = {false};
+    if (cpu->fault) return false;
+    if (packet->count > 8) return stop(cpu, cpu->pc, 0, "execute packet exceeds eight instructions");
+    for (unsigned i = 0; i < packet->count; ++i) {
+        const CdjC674xInstruction *insn = &packet->instructions[i];
+        uint32_t w = insn->word, pc = insn->pc, value = 0;
         unsigned side = (w >> 1) & 1, dst = (w >> 23) & 31;
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
-        if (compact[i]) {
+        if (insn->compact) {
             /* Figure F-31: compact MVC to ILC. SPLOOP observes a four-cycle
              * availability latency (section 7.4.3), tracked separately. */
             if ((w & 0xfc7f) == 0xd86f) {
-                unsigned src = ((w >> 7) & 7) + ((headers[i] & 0x80000) ? 16 : 0);
+                unsigned src = ((w >> 7) & 7) + ((insn->header & 0x80000) ? 16 : 0);
                 if (controls[13]) return stop(cpu, pc, w, "parallel control write conflict");
                 out.control[13] = cpu->r[1][src];
                 out.control_ready[13] = cpu->cycles + 4;
@@ -97,7 +112,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             }
             /* Figures F-17/18/20/21: compact BNOP uses halfword offsets.
              * Predicate controls the branch, never the inserted NOPs. */
-            if ((headers[i] & 0x8000) &&
+            if ((insn->header & 0x8000) &&
                 ((w & 0x3e) == 0x0a || (w & 0x2e) == 0x2a)) {
                 bool unsigned_offset = (w & 0xc000) == 0xc000;
                 unsigned n = unsigned_offset ? 5 : w >> 13;
@@ -140,7 +155,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             /* Figures G-1/G-2: one operand is a full 5-bit register,
              * the other uses the header-selected register subset. */
             if ((w & 0x0026) == 0x0006 && ((w >> 3) & 3) != 3) {
-                unsigned rs = (headers[i] & (1u << 19)) ? 16 : 0;
+                unsigned rs = (insn->header & (1u << 19)) ? 16 : 0;
                 unsigned ms = ((w >> 10) & 3) << 3;
                 side = w & 1;
                 cross = side ^ ((w >> 12) & 1);
@@ -153,9 +168,9 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 continue;
             }
             /* SPRUFE8B Figure D-4: compact .L ADD/SUB. */
-            if ((w & 0x040e) != 0 || (headers[i] & (1u << 14)))
+            if ((w & 0x040e) != 0 || (insn->header & (1u << 14)))
                 return stop(cpu, pc, w, "compact instruction not implemented");
-            unsigned rs = (headers[i] & (1u << 19)) ? 16 : 0;
+            unsigned rs = (insn->header & (1u << 19)) ? 16 : 0;
             side = w & 1;
             dst = ((w >> 4) & 7) + rs;
             a = ((w >> 13) & 7) + rs;
@@ -242,7 +257,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 }
             }
             /* PROT inserts four NOPs, including for a false predicate. */
-            if (!is_store && (headers[i] & (1u << 20))) {
+            if (!is_store && (insn->header & (1u << 20))) {
                 if (elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
                 elapsed = 5;
             }
@@ -344,7 +359,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             (written[out.loads[j].bank][out.loads[j].dst] ||
              (out.loads[j].size == 8 && written[out.loads[j].bank][out.loads[j].dst + 1])))
             return stop(cpu, cpu->pc, 0, "load result write conflict");
-    out.pc = next;
+    out.pc = packet->next_pc;
     for (unsigned i = 0; i < elapsed; ++i) {
         ++out.cycles;
         for (unsigned j = 0; j < out.store_count;) {
@@ -375,4 +390,11 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
     ++out.packets;
     *cpu = out;
     return true;
+}
+
+bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
+{
+    CdjC674xPacket packet;
+    return cdj_c674x_fetch(cpu, read, opaque, &packet) &&
+           cdj_c674x_execute(cpu, &packet, read, write, opaque);
 }

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "cdj_c674x.h"
+#include "cdj_c674x_loop.h"
 static uint32_t memory[64];
 static bool read_word(void *unused, uint32_t address, uint32_t *value)
 {
@@ -486,5 +487,39 @@ int main(void)
     memory[1] = 0xd86f; memory[7] = 0xe0400000;
     assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(!c.cycles && !c.control_ready[13]);
+    /* Execute TI's copy-loop schedule with the real instruction core. The
+     * replayed load, move and store share the same pre-cycle register state. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][1] = 0x1080; c.r[1][0] = 0x10c0;
+    for (unsigned j = 0; j < 8; ++j) memory[32 + j] = 0x12340000 + j;
+    CdjC674xInstruction loop_insns[] = {
+        {.word = (2u << 23) | (1u << 18) | (1u << 13) | (11u << 9) | 0x64, .pc = 0x1000},
+        {.word = (2u << 23) | (2u << 18) | 0x1fda, .pc = 0x1010},
+        {.word = (2u << 23) | (1u << 13) | (11u << 9) | 0xf6, .pc = 0x1014}
+    };
+    CdjC674xLoop loop;
+    assert(cdj_c674x_loop_init(&loop, 1, 8));
+    for (unsigned t = 0; t < 17; ++t) {
+        uint32_t tag = t == 0 ? 0 : t == 5 ? 1 : 2;
+        if (t <= 6)
+            assert(cdj_c674x_loop_load(&loop, &tag, (t == 0 || t >= 5) ? 1 : 0, t == 6, 6));
+        uint32_t tags[8]; unsigned count; bool post, drained;
+        assert(cdj_c674x_loop_issue(&loop, tags, &count, &post, &drained));
+        CdjC674xPacket packet = {.count = count, .next_pc = 0x1020};
+        for (unsigned j = 0; j < count; ++j) packet.instructions[j] = loop_insns[tags[j]];
+        assert(cdj_c674x_execute(&c, &packet, read_word, write_memory, NULL));
+    }
+    assert(c.r[0][1] == 0x10a0 && c.r[1][0] == 0x10e0);
+    for (unsigned j = 0; j < 8; ++j) assert(memory[48 + j] == memory[32 + j]);
+    assert(!c.load_count && !c.store_count);
+
+    /* An overlaid fault names its original program PC, not the replay PC,
+     * and rolls back earlier instructions in the composite packet. */
+    cdj_c674x_reset(&c, 0x1040);
+    CdjC674xPacket composite = {.count = 2, .next_pc = 0x1044};
+    composite.instructions[0] = (CdjC674xInstruction){.word = mvk(0, 0, 99), .pc = 0x1000};
+    composite.instructions[1] = (CdjC674xInstruction){.word = 0xffffffff, .pc = 0x1010};
+    assert(!cdj_c674x_execute(&c, &composite, read_word, write_memory, NULL));
+    assert(c.fault_pc == 0x1010 && c.pc == 0x1040 && c.r[0][0] == 0 && !c.cycles);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

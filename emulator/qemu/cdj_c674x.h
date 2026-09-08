@@ -33,6 +33,20 @@ typedef bool (*CdjC674xRead)(void *, uint32_t, uint32_t *);
  * guarantee a later commit succeeds; callbacks must write the whole transfer.
  * Device/MMIO stores require a future bus transaction interface. */
 typedef bool (*CdjC674xWrite)(void *, uint32_t, uint64_t, unsigned, bool commit);
+typedef struct {
+    uint32_t word, pc, header;
+    bool compact;
+} CdjC674xInstruction;
+typedef struct {
+    CdjC674xInstruction instructions[8];
+    unsigned count;
+    uint32_t next_pc;
+} CdjC674xPacket;
+/* Fetch and execution are separate so loop-buffer instructions retain their
+ * original PC/header and share one architectural commit with overlaid code. */
+bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
+bool cdj_c674x_execute(CdjC674x *, const CdjC674xPacket *, CdjC674xRead,
+                      CdjC674xWrite, void *);
 void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry);
 bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque);
 #endif

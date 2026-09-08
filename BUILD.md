@@ -347,7 +347,13 @@ The independent harness in `tests/cstub/c674x-loop.c` matches the complete
 checks II=2 overlap and draining, zero iterations, and rejects more than eight
 simultaneous operations without advancing state. Address/undefined-behavior
 sanitizers pass. This is evidence for scheduling, not full loop execution.
-CPU integration must preserve pre-packet reads across overlaid instructions,
-merge post-loop execution, enforce functional-unit and buffer capacity limits,
-and maintain the ILC lifecycle. SPMASK, reload/nested loops, SPLOOPD/W,
+The core now separates packet fetch from execution. A composite packet can
+contain instructions with different original PCs and compact headers while
+preserving pre-packet reads and one architectural commit. A second test drives
+this execution API from the scheduler: all eight words are copied correctly
+using actual LDW/MV/STW execution and delayed memory effects. A composite
+fault retains the originating instruction PC and rolls back the whole packet.
+Automatic SPLOOP/SPKERNEL decoding must still drive this API, merge post-loop
+execution, enforce functional-unit and buffer capacity limits, and maintain the
+ILC lifecycle. SPMASK, reload/nested loops, SPLOOPD/W,
 interrupt draining and restart are still missing.
