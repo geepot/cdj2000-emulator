@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Run the experimental NXS MAIN and GUI profiles over a direct serial link.
 
-No proxy or generated status packets. DSP is still a behavioral model.
+No proxy or generated status packets. DSP has UHPI transport but no CPU.
 """
 from __future__ import annotations
 import argparse
@@ -44,9 +44,11 @@ def main():
     gui_env.update(overrides)
     main_env = {k:v for k,v in os.environ.items() if not k.startswith('CDJ_')}
     main_env['CDJ_INPUT_PORT'] = str(args.port + 4)
+    main_env['CDJ_NXS_HPI_DUMP'] = str(run / 'dsp-l2.bin')
+    main_env['CDJ_REQ_STATUS_FRESH'] = '0'
     (run / 'run.json').write_text(json.dumps(dict(main=main_command, gui=gui_command,
-        gui_environment=overrides, main_environment={'CDJ_INPUT_PORT': main_env['CDJ_INPUT_PORT']},
-        dsp='behavioral; no C674x execution', profile='experimental NXS'), indent=2) + '\n')
+        gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
+        dsp='NXS UHPI transport; no C674x execution', profile='experimental NXS'), indent=2) + '\n')
     processes = []
     result = {}
     with (run / 'main-stderr.log').open('w') as mainlog, (run / 'gui.log').open('w') as guilog:

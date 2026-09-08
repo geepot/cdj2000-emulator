@@ -52,6 +52,9 @@
 
 #include "cdj2000_ata.h"
 #include "cdj2000_dsp.h"
+#include "cdj2000_nxs_hpi.h"
+
+static bool cdj_nxs_profile;
 #include "cdj2000_input.h"
 #include "cdj2000_usb.h"
 #include "cdj2000_usbh.h"
@@ -877,6 +880,25 @@ static void cdj_dmac_run(CdjDmacState *dmac, unsigned index)
     uint8_t buffer[DMA_CHUNK];
     uint64_t remaining;
 
+    if (cdj_nxs_hpi_port(source) || cdj_nxs_hpi_port(destination)) {
+        /* UHPI data access is one 32-bit bus cycle; the DSP address advances
+         * inside HPID. The host-side fixed register address must not move. */
+        unsigned sm = (channel->chcr >> 12) & 3;
+        unsigned dm = (channel->chcr >> 14) & 3;
+        unsigned ts = ((channel->chcr >> 3) & 3) | ((channel->chcr >> 18) & 4);
+        if (ts != 2 || sm > 1 || dm > 1 || !channel->tcr) {
+            error_report("nxs-hpi: unsupported DMA CHCR=%#x TCR=%#x", channel->chcr, channel->tcr);
+            return;
+        }
+        for (uint32_t word = 0; word < channel->tcr; ++word) {
+            address_space_read(&address_space_memory, source, MEMTXATTRS_UNSPECIFIED, buffer, 4);
+            address_space_write(&address_space_memory, destination, MEMTXATTRS_UNSPECIFIED, buffer, 4);
+            source += sm ? 4 : 0;
+            destination += dm ? 4 : 0;
+        }
+        cdj_dmac_complete(channel, source, destination);
+        return;
+    }
     channel->role = cdj_dmac_role(channel);
     if (getenv("CDJ_DMAC_TRACE")) {
         fprintf(stderr, "cdj2000-dmac %.3f: ch%u SAR %#010x DAR %#010x TCR %#x "
@@ -1550,6 +1572,12 @@ static void cdj_dsp_event_pending(void *opaque, bool raised)
     if (sink->flag) {
         sink->flag->dsp_event = raised;
     }
+}
+
+static void cdj_nxs_hint_level(void *opaque, bool high)
+{
+    CdjLinkFlagState *flag = opaque;
+    flag->dsp_event = high;
 }
 
 static uint64_t cdj_link_flag_read(void *opaque, hwaddr offset, unsigned size)
@@ -4383,9 +4411,13 @@ static void cdj_intc_timer_init(MemoryRegion *system, SuperHCPU *cpu)
      */
     const char *dsp_chardev = getenv("CDJ_DSP_CHARDEV");
 
+    if (cdj_nxs_profile) {
+        cdj_nxs_hpi_init(system, cdj_nxs_hint_level, cdj_dsp_event_sink.flag);
+    } else {
     cdj_dsp_init(system, dsp_chardev ? qemu_chr_find(dsp_chardev) : NULL,
                  intc->irqs[CDJ_INTC_DSP_EVENT], cdj_dsp_event_pending,
                  &cdj_dsp_event_sink);
+    }
     /*
      * The USB controller sits on the external bus at physical 0x01000000, well
      * clear of CS0's 4 MiB of flash.  Without it USBFD_TSK's enable-and-poll at
@@ -4487,6 +4519,7 @@ static void cdj2000_main_init(MachineState *machine)
 #endif
     ssize_t loaded;
 
+    cdj_nxs_profile = !strcmp(object_get_typename(OBJECT(machine)), MACHINE_TYPE_NAME("cdj2000nxs-main"));
     cpu = SUPERH_CPU(cpu_create(machine->cpu_type));
 
     memory_region_init_ram(sdram, NULL, "cdj2000.sdram", machine->ram_size,

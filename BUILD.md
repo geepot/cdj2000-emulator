@@ -241,3 +241,28 @@ stock NXS MAIN and GUI exchanged bidirectional traffic and the GUI rendered
 This identifies the next blocker as DSP support; it does not validate audio
 or the original model's behavioral DSP against NXS. Host suite including the
 new Blackfin instruction regression: 157 passed, 42 skipped.
+
+### NXS DSP host port
+
+The NXS profile now uses `cdj2000_nxs_hpi.c` instead of the original player's
+behavioral DSP/window. It models the verified 32-bit host accesses: HPIC at
+`0x0c000000`, HPIA at `0x0c040000`, incrementing HPID at `0x0c080000`, and
+fixed HPID at `0x0c0c0000`. The supported target is global L2 RAM
+`0x11800000..0x1183ffff`, with HWOB set and byte addressing. The DMAC preserves
+the host data-register address while the target address increments inside UHPI.
+
+The stock boot writes 13,781 words: the 55,120-byte stage-1 program plus its
+entry pointer. The captured program at `0x11801da0` matches independent MAIN
+extraction byte-for-byte, SHA-256
+`b6d4e3237a0409d13a523b1e445cc40113dda31467ac5e18dbc1ff6b2a83f736`.
+This was repeated with `CDJ_REQ_STATUS_FRESH=0`; the NXS runner now explicitly
+disables that upstream request-rewriting option and records its environment.
+
+DSPINT records the handoff and writes `dsp-l2.bin` in the run directory.
+**C674x execution and the boot ROM are not implemented.** No fake DSP-ready
+reply is generated. Additional memory regions, DSP-side registers, reset-line
+behavior and interrupt-driven host transfers remain work. The current host
+port supports the observed initial upload, not arbitrary DSP firmware yet.
+
+`tests/test_nxs_hpi.py` drives the actual QEMU device and its DMAC via qtest,
+using synthetic memory and a stopped CPU; no Pioneer firmware is required.
