@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Run the experimental NXS MAIN and GUI profiles over a direct serial link.
 
-No proxy or generated status packets. DSP has UHPI transport but no CPU.
+No proxy or generated status packets. DSP uses UHPI transport and a partial C674x interpreter.
 """
 from __future__ import annotations
 import argparse
@@ -48,7 +48,7 @@ def main():
     main_env['CDJ_REQ_STATUS_FRESH'] = '0'
     (run / 'run.json').write_text(json.dumps(dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
-        dsp='NXS UHPI transport; no C674x execution', profile='experimental NXS'), indent=2) + '\n')
+        dsp='NXS UHPI plus partial C674x interpreter; incomplete ISA, ROM handoff abstraction', profile='experimental NXS'), indent=2) + '\n')
     processes = []
     result = {}
     with (run / 'main-stderr.log').open('w') as mainlog, (run / 'gui.log').open('w') as guilog:

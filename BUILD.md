@@ -259,10 +259,39 @@ This was repeated with `CDJ_REQ_STATUS_FRESH=0`; the NXS runner now explicitly
 disables that upstream request-rewriting option and records its environment.
 
 DSPINT records the handoff and writes `dsp-l2.bin` in the run directory.
-**C674x execution and the boot ROM are not implemented.** No fake DSP-ready
+**Full C674x execution and the boot ROM remain incomplete** (see the partial
+core milestone below). No fake DSP-ready
 reply is generated. Additional memory regions, DSP-side registers, reset-line
 behavior and interrupt-driven host transfers remain work. The current host
 port supports the observed initial upload, not arbitrary DSP firmware yet.
 
 `tests/test_nxs_hpi.py` drives the actual QEMU device and its DMAC via qtest,
 using synthetic memory and a stopped CPU; no Pioneer firmware is required.
+
+### Partial C674x execution core
+
+`cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
+supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
+control-register MVC, register branch, ADDKPC and NOP. Every execute packet
+reads the pre-packet state; writes commit together. Branches take effect after
+five delay slots, including inserted NOP cycles. Unsupported instructions and
+compact fetch packets stop with PC and opcode, without committing part of the
+failed packet. This is not a complete ISA, pipeline, privilege or interrupt model.
+
+On DSPINT the host-port device reads the uploaded entry pointer at global L2
+base and starts this core. **That is an explicit boot-ROM handoff abstraction;
+the unavailable boot ROM is not executed.** Initial core state is deterministic
+zero initialization, not a measured ROM register snapshot. The implemented
+startup path initializes the registers it uses.
+
+The captured stage-1 image executes 14 packets / 16 cycles before reaching
+compact code at `0x11804280`. Stack `B15=0x11805af8`, data pointer
+`B14=0x11806900`, and return address `B3=0x11801dd8` agree with the decoded
+startup instructions. Compact instruction execution, loads/stores, remaining
+integer and floating-point instructions, interrupts and peripheral execution
+are still required for DSP boot and audio. No DSP-ready result is fabricated.
+
+`tests/test_c674x.py` compiles an independent, synthetic instruction harness.
+It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
+ADDKPC return addresses and atomic unsupported-packet stops. The same harness
+also passes Clang address and undefined-behavior sanitizers.

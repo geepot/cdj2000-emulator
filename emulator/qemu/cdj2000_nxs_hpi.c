@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
- * NXS MAIN-facing TI UHPI transport. This is not a C674x CPU.
+ * NXS MAIN-facing TI UHPI transport with a partial C674x execution core.
  * Matches the independently verified NXS upload path: byte-addressed global
  * L2, HWOB=1, HPID auto-increment and fixed-address accesses.
  */
@@ -8,6 +8,7 @@
 #include "qemu/error-report.h"
 #include "qemu/bswap.h"
 #include "cdj2000_nxs_hpi.h"
+#include "cdj_c674x.h"
 
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
@@ -20,6 +21,7 @@ typedef struct {
     bool hwob;
     bool dspint;
     uint64_t words;
+    CdjC674x cpu;
     void (*hint)(void *, bool);
     void *opaque;
 } NxsHpi;
@@ -34,6 +36,29 @@ static bool valid_data(NxsHpi *s)
 {
     return s->hwob && !(s->address & 3) && s->address >= L2_BASE &&
            s->address <= L2_BASE + L2_SIZE - 4;
+}
+
+static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
+{
+    NxsHpi *s = opaque;
+    if (address >= 0x00800000 && address < 0x00840000) address += 0x11000000;
+    if ((address & 3) || address < L2_BASE || address > L2_BASE + L2_SIZE - 4) return false;
+    *value = ldl_le_p(s->l2 + address - L2_BASE);
+    return true;
+}
+
+static void start_dsp(NxsHpi *s)
+{
+    /* Boot-ROM handoff abstraction: the host supplies the entry in L2[0].
+     * No claim to execute the unavailable ROM. The uploaded code is decoded. */
+    cdj_c674x_reset(&s->cpu, ldl_le_p(s->l2));
+    unsigned budget = 10000;
+    while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, s)) {}
+    info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
+                " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
+                s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
+                s->cpu.fault_word, s->cpu.fault ? s->cpu.fault : "startup budget",
+                s->cpu.r[1][15], s->cpu.r[1][14], s->cpu.r[1][3]);
 }
 
 static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)
@@ -60,7 +85,7 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
         if ((value & 0x00040004) && s->hint) s->hint(s->opaque, true);
         if ((value & 0x00020002) && !s->dspint) {
             s->dspint = true;
-            info_report("nxs-hpi: DSPINT after %" PRIu64 " written words; C674x CPU not attached", s->words);
+            info_report("nxs-hpi: DSPINT after %" PRIu64 " written words; starting partial C674x interpreter", s->words);
             const char *path = getenv("CDJ_NXS_HPI_DUMP");
             if (path && *path) {
                 FILE *file = fopen(path, "wb");
@@ -71,6 +96,7 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
                     if (count != sizeof(s->l2) || status) error_report("nxs-hpi: incomplete L2 dump");
                 }
             }
+            start_dsp(s);
         }
         return;
     }
