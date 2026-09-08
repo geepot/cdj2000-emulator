@@ -521,5 +521,38 @@ int main(void)
     composite.instructions[1] = (CdjC674xInstruction){.word = 0xffffffff, .pc = 0x1010};
     assert(!cdj_c674x_execute(&c, &composite, read_word, write_memory, NULL));
     assert(c.fault_pc == 0x1010 && c.pc == 0x1040 && c.r[0][0] == 0 && !c.cycles);
+    /* Decode SPLOOP/SPKERNEL from RAM and execute the complete copy loop,
+     * without manually feeding the scheduler. Also exercise zero iterations. */
+    for (unsigned iterations = 0; iterations <= 8; iterations += 8) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[13] = iterations; c.r[0][1] = 0x1080; c.r[1][0] = 0x10c0;
+        for (unsigned j = 0; j < 8; ++j) memory[32 + j] = 0x56780000 + j;
+        memory[0] = 0x38000; /* SPLOOP 1 */
+        memory[1] = loop_insns[0].word;
+        memory[2] = 3u << 13; /* NOP 4 */
+        memory[3] = loop_insns[1].word;
+        memory[4] = (24u << 22) | 0x34001; /* SPKERNEL 6,0: reversed stage bits */
+        memory[5] = loop_insns[2].word;
+        memory[6] = mvk(0, 10, 42);
+        unsigned steps = 0;
+        do {
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(++steps < 30);
+        } while (c.loop_active || c.r[0][10] != 42 || c.store_count);
+        assert(c.control[13] == 0 && c.r[0][1] == 0x1080 + iterations * 4);
+        assert(c.r[1][0] == 0x10c0 + iterations * 4);
+        for (unsigned j = 0; j < 8; ++j)
+            assert(memory[48 + j] == (iterations ? memory[32 + j] : 0));
+    }
+    /* ILC availability is enforced before starting a loop. */
+    cdj_c674x_reset(&c, 0x1000); c.control_ready[13] = 4;
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!c.loop_active && !c.cycles);
+
+    /* BNOP must insert its NOP cycles even if its predicate is false. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = (6u << 29) | 0x008ca362;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 6 && c.pc == 0x1004 && !c.branch_due);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

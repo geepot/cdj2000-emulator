@@ -28,6 +28,7 @@ bool cdj_c674x_loop_load(CdjC674xLoop *loop, const uint32_t *tags,
         if (loop->post_cycle < loading_end) loop->post_cycle = loading_end;
         loop->end_cycle = loop->iterations ?
             (uint64_t)(loop->iterations - 1) * loop->ii + loop->length : loading_end;
+        if (loop->post_cycle > loop->end_cycle) loop->post_cycle = loop->end_cycle;
     }
     return true;
 }

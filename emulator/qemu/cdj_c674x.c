@@ -317,6 +317,16 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 out.branch_target = (pc & ~31u) + (uint32_t)(sx((w >> 7) & 0x1fffff, 21) * 4);
                 out.branch_due = cpu->cycles + 6;
             }
+        } else if ((w & 0x0f830ffe) == 0x00800362) {
+            unsigned n = (w >> 13) & 7;
+            reg_write = false;
+            if (n && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+            if (n + 1 > elapsed) elapsed = n + 1;
+            if (enabled) {
+                if (out.branch_due) return stop(cpu, pc, w, "overlapping branches not implemented");
+                out.branch_target = cpu->r[cross][b];
+                out.branch_due = cpu->cycles + 6;
+            }
         } else if ((w & 0x0f83effe) == 0x362) {
             reg_write = false;
             if (enabled) {
@@ -359,6 +369,10 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             (written[out.loads[j].bank][out.loads[j].dst] ||
              (out.loads[j].size == 8 && written[out.loads[j].bank][out.loads[j].dst + 1])))
             return stop(cpu, cpu->pc, 0, "load result write conflict");
+    if (packet->single_cycle && elapsed > 1) {
+        out.idle_cycles = elapsed - 1;
+        elapsed = 1;
+    }
     out.pc = packet->next_pc;
     for (unsigned i = 0; i < elapsed; ++i) {
         ++out.cycles;
@@ -384,7 +398,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
         }
         if (out.branch_due && out.cycles == out.branch_due) {
-            out.pc = out.branch_target; out.branch_due = 0; break;
+            out.pc = out.branch_target; out.branch_due = 0; out.idle_cycles = 0; break;
         }
     }
     ++out.packets;
@@ -392,9 +406,117 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     return true;
 }
 
+static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
+{
+    CdjC674x out = *cpu;
+    CdjC674xPacket combined = {.next_pc = cpu->pc, .single_cycle = true};
+    bool loading = !out.loop.sealed;
+    bool post = out.loop.sealed && out.loop.cycle >= out.loop.post_cycle;
+    if (loading && !out.loop_wait) {
+        CdjC674xPacket source;
+        if (!cdj_c674x_fetch(&out, read, opaque, &source))
+            return stop(cpu, out.fault_pc, out.fault_word, out.fault);
+        if (++out.loop_packets > 14) return stop(cpu, cpu->pc, 0, "loop buffer packet capacity exceeded");
+        bool finish = false;
+        unsigned delay = 0, count = 0;
+        uint32_t tags[8];
+        for (unsigned i = 0; i < source.count; ++i) {
+            CdjC674xInstruction insn = source.instructions[i];
+            uint32_t w = insn.word;
+            if (!insn.compact && (w & 0xf03ffffc) == 0x34000) {
+                if (i != 0) return stop(cpu, insn.pc, w, "SPKERNEL must start packet");
+                unsigned cbits = 0, stage = 0, field = (w >> 22) & 63;
+                while ((1u << cbits) < out.loop.ii) ++cbits;
+                for (unsigned j = 5; j >= cbits && j < 6; --j)
+                    stage |= ((field >> j) & 1) << (5 - j);
+                unsigned cycle = field & ((1u << cbits) - 1);
+                if (cycle >= out.loop.ii) return stop(cpu, insn.pc, w, "invalid SPKERNEL cycle");
+                delay = stage * out.loop.ii + cycle;
+                finish = true;
+                continue;
+            }
+            if (!insn.compact && (w & 0xfffe1ffeu) == 0) {
+                unsigned n = ((w >> 13) & 15) + 1;
+                if (n > 9 || (n > 1 && (finish || out.loop_wait)))
+                    return stop(cpu, insn.pc, w, "invalid loop NOP packet");
+                if (n > 1) out.loop_wait = n - 1;
+                continue;
+            }
+            /* This initial integration accepts single-cycle body operations.
+             * More loop control forms must not be mistaken for ordinary code. */
+            if ((!insn.compact && ((w & 0x1ffe) == 0x162 ||
+                  (w & 0x0f830ffe) == 0x00800362 || (w & 0x7c) == 0x10 ||
+                  (w & 0x0f83effe) == 0x362)) ||
+                (insn.header & (1u << 20)) ||
+                (insn.compact && (insn.header & 0x8000)))
+                return stop(cpu, insn.pc, w, "loop body control or protected instruction not implemented");
+            if (out.loop_tags == 112) return stop(cpu, insn.pc, w, "loop instruction capacity exceeded");
+            tags[count++] = out.loop_tags;
+            out.loop_instructions[out.loop_tags++] = insn;
+        }
+        if (!cdj_c674x_loop_load(&out.loop, tags, count, finish, delay))
+            return stop(cpu, cpu->pc, 0, "invalid loop buffer load");
+        combined.next_pc = source.next_pc;
+    } else if (loading) {
+        --out.loop_wait;
+        if (!cdj_c674x_loop_load(&out.loop, NULL, 0, false, 0))
+            return stop(cpu, cpu->pc, 0, "loop dynamic length exceeded");
+    }
+    uint32_t tags[8]; unsigned count; bool scheduler_post, drained;
+    if (!cdj_c674x_loop_issue(&out.loop, tags, &count, &scheduler_post, &drained))
+        return stop(cpu, cpu->pc, 0, "loop issue capacity exceeded");
+    for (unsigned i = 0; i < count; ++i)
+        combined.instructions[combined.count++] = out.loop_instructions[tags[i]];
+    if (post && !out.idle_cycles) {
+        CdjC674xPacket source;
+        if (!cdj_c674x_fetch(&out, read, opaque, &source))
+            return stop(cpu, out.fault_pc, out.fault_word, out.fault);
+        if (combined.count + source.count > 8) return stop(cpu, cpu->pc, 0, "loop/post packet capacity exceeded");
+        for (unsigned i = 0; i < source.count; ++i)
+            combined.instructions[combined.count++] = source.instructions[i];
+        combined.next_pc = source.next_pc;
+    } else if (out.idle_cycles) {
+        --out.idle_cycles;
+    }
+    if (!cdj_c674x_execute(&out, &combined, read, write, opaque))
+        return stop(cpu, out.fault_pc, out.fault_word, out.fault);
+    uint64_t launched = 1 + out.loop.cycle / out.loop.ii;
+    out.control[13] = launched < out.loop.iterations ? out.loop.iterations - launched : 0;
+    if (drained && scheduler_post) out.loop_active = false;
+    *cpu = out;
+    return true;
+}
+
 bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
+    if (cpu->fault) return false;
+    if (cpu->loop_active) return loop_step(cpu, read, write, opaque);
+    if (cpu->idle_cycles) {
+        CdjC674x out = *cpu;
+        CdjC674xPacket idle = {.next_pc = cpu->pc, .single_cycle = true};
+        --out.idle_cycles;
+        if (!cdj_c674x_execute(&out, &idle, read, write, opaque))
+            return stop(cpu, out.fault_pc, out.fault_word, out.fault);
+        *cpu = out;
+        return true;
+    }
     CdjC674xPacket packet;
-    return cdj_c674x_fetch(cpu, read, opaque, &packet) &&
-           cdj_c674x_execute(cpu, &packet, read, write, opaque);
+    if (!cdj_c674x_fetch(cpu, read, opaque, &packet)) return false;
+    if (!packet.instructions[0].compact && (packet.instructions[0].word & 0x007ffffc) == 0x38000) {
+        uint32_t w = packet.instructions[0].word;
+        if (w >> 28) return stop(cpu, cpu->pc, w, "nested SPLOOP not implemented");
+        if (cpu->cycles < cpu->control_ready[13]) return stop(cpu, cpu->pc, w, "ILC not yet available");
+        if (cpu->branch_due) return stop(cpu, cpu->pc, w, "SPLOOP in branch delay not implemented");
+        CdjC674x out = *cpu;
+        if (!cdj_c674x_loop_init(&out.loop, ((w >> 23) & 31) + 1, cpu->control[13]))
+            return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
+        memmove(packet.instructions, packet.instructions + 1, (--packet.count) * sizeof(packet.instructions[0]));
+        if (!cdj_c674x_execute(&out, &packet, read, write, opaque))
+            return stop(cpu, out.fault_pc, out.fault_word, out.fault);
+        out.loop_active = true; out.loop_wait = out.loop_tags = out.loop_packets = 0;
+        if (out.control[13]) --out.control[13];
+        *cpu = out;
+        return true;
+    }
+    return cdj_c674x_execute(cpu, &packet, read, write, opaque);
 }

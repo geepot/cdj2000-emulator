@@ -3,6 +3,7 @@
 #define CDJ_C674X_H
 #include <stdbool.h>
 #include <stdint.h>
+#include "cdj_c674x_loop.h"
 /* Partial interpreter. Encodings/semantics: TI SPRUFE8B, instruction entries
  * MVK, MVKH, MVC, AND, B, ADDKPC and NOP; no third-party decoder code. */
 typedef struct {
@@ -17,6 +18,16 @@ typedef struct {
     bool sign_extend;
 } CdjC674xLoad;
 typedef struct {
+    uint32_t word, pc, header;
+    bool compact;
+} CdjC674xInstruction;
+typedef struct {
+    CdjC674xInstruction instructions[8];
+    unsigned count;
+    uint32_t next_pc;
+    bool single_cycle;
+} CdjC674xPacket;
+typedef struct {
     uint32_t r[2][32], control[32], pc;
     uint64_t cycles, packets, branch_due;
     uint64_t control_ready[32];
@@ -26,6 +37,10 @@ typedef struct {
     unsigned store_count;
     CdjC674xLoad loads[40];
     unsigned load_count;
+    bool loop_active;
+    unsigned idle_cycles, loop_wait, loop_tags, loop_packets;
+    CdjC674xLoop loop;
+    CdjC674xInstruction loop_instructions[112];
 } CdjC674x;
 /* Read callbacks currently describe stable, side-effect-free RAM only. */
 typedef bool (*CdjC674xRead)(void *, uint32_t, uint32_t *);
@@ -33,15 +48,6 @@ typedef bool (*CdjC674xRead)(void *, uint32_t, uint32_t *);
  * guarantee a later commit succeeds; callbacks must write the whole transfer.
  * Device/MMIO stores require a future bus transaction interface. */
 typedef bool (*CdjC674xWrite)(void *, uint32_t, uint64_t, unsigned, bool commit);
-typedef struct {
-    uint32_t word, pc, header;
-    bool compact;
-} CdjC674xInstruction;
-typedef struct {
-    CdjC674xInstruction instructions[8];
-    unsigned count;
-    uint32_t next_pc;
-} CdjC674xPacket;
 /* Fetch and execution are separate so loop-buffer instructions retain their
  * original PC/header and share one architectural commit with overlaid code. */
 bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);

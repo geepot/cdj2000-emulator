@@ -291,7 +291,8 @@ scaled and unscaled offsets; aligned forms require eight-byte alignment.
 Both load-result registers participate in E5 write-hazard checks. Compact
 MVC writes ILC from the selected B register subset; full-width MVC can write
 ILC/RILC. Their four-cycle availability timestamps are recorded for the future
-loop engine. Loop execution and control-register reads are still incomplete. Full-width LDW, LDB/LDBU and LDH/LDHU support linear immediate/register offsets and
+loop engine. Unconditional SPLOOP execution is supported below; other loop
+forms and control-register reads remain incomplete. Full-width LDW, LDB/LDBU and LDH/LDHU support linear immediate/register offsets and
 pre/post pointer updates: address generation in E1, RAM sampling in E3 and
 register writeback in E5. Narrow loads select little-endian byte/halfword
 lanes, apply signed or unsigned extension, and scale offsets by element size. PROT inserts four NOP cycles. Pending memory
@@ -308,10 +309,11 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-ilc` uploads
-13,781 words and executes 39 packets / 46 cycles. It completes the ILC setup
-and reaches `SPLOOP 2` (`0x00838001`) at `0x11804838`, where execution
-stops because the software-pipelined loop buffer is not implemented.
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-loop` uploads
+13,781 words and executes 62 packets / 73 cycles. It completes the
+`SPLOOP 2` at `0x11804838` and returns from the copy routine to its caller.
+Execution then stops on overlapping delayed branches at `0x118042e8`
+(`0xc0009c10`), which the single-pending-branch model cannot yet execute.
 `B15=0x11805ae0`, `B14=0x11806900` and `B3=0x118042c8`. This agrees
 with standalone replay of the uploaded L2 image. The older prototype's listing
 omits register-extension bits, sometimes the cross path on moves, and the
@@ -333,27 +335,29 @@ alignment/bounds failures, and atomic unsupported-packet
 stops. The same harness
 also passes Clang address and undefined-behavior sanitizers.
 
-### SPLOOP scheduler under integration
+### Unconditional SPLOOP execution
 
-`emulator/qemu/cdj_c674x_loop.c` schedules instruction tags for unconditional
-SPLOOP operations. The caller loads the original instruction packets as they
-are encountered; the scheduler overlays iterations separated by the iteration
-interval and drains them after the final iteration. It also reports when
-post-loop fetching may overlap the epilog, using a decoded SPKERNEL delay.
-It does not yet drive the CPU interpreter: real firmware still stops at SPLOOP.
+`emulator/qemu/cdj_c674x_loop.c` schedules overlapping iterations as original
+packets are fetched. The core decodes full-width unconditional SPLOOP and
+SPKERNEL, tracks ILC, expands body NOPs into cycles, replays buffered
+instructions and merges post-loop instructions during the epilog. Register
+BNOP supports a return during draining: its NOP cycles still allow buffered
+instructions and delayed memory effects to finish. SPKERNEL stage bits are
+reversed per TI Table 3-29; excessive fetch delay is capped at the epilog end.
 
-The independent harness in `tests/cstub/c674x-loop.c` matches the complete
-14-cycle operation schedule in TI SPRUFE8B Table 7-1 (eight copies, II=1),
-checks II=2 overlap and draining, zero iterations, and rejects more than eight
-simultaneous operations without advancing state. Address/undefined-behavior
-sanitizers pass. This is evidence for scheduling, not full loop execution.
-The core now separates packet fetch from execution. A composite packet can
-contain instructions with different original PCs and compact headers while
-preserving pre-packet reads and one architectural commit. A second test drives
-this execution API from the scheduler: all eight words are copied correctly
-using actual LDW/MV/STW execution and delayed memory effects. A composite
-fault retains the originating instruction PC and rolls back the whole packet.
-Automatic SPLOOP/SPKERNEL decoding must still drive this API, merge post-loop
-execution, enforce functional-unit and buffer capacity limits, and maintain the
-ILC lifecycle. SPMASK, reload/nested loops, SPLOOPD/W,
-interrupt draining and restart are still missing.
+Composite packets preserve each instruction's original PC/header, read one
+pre-cycle register snapshot and commit together. Faults retain their originating
+PC and leave the composite packet uncommitted. Loading is limited to 14
+original packets, 48 cycles and eight simultaneous instructions. Complete
+functional-unit conflict checks are still missing; register and memory hazards
+covered by the interpreter are checked. SPMASK, reload/nested loops,
+SPLOOPD/W, protected/control instructions in the body, interrupt draining and
+restart remain unsupported and must not be counted as complete loop emulation.
+
+The independent schedule test matches all 14 cycles of TI SPRUFE8B Table 7-1.
+CPU tests additionally decode the complete copy program through normal
+`cdj_c674x_step`, verify eight copied words and pointer updates, and verify
+zero iterations perform no memory operations. Tests cover ILC readiness,
+composite faults, and false-predicate BNOP timing. The connected NXS run
+above verifies the firmware's loop and return path. Sanitizers and the
+160-test host suite pass (42 platform/dependency tests skipped).
