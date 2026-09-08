@@ -13,7 +13,8 @@ typedef struct {
 typedef struct {
     uint64_t due;
     uint32_t address, value;
-    unsigned bank, dst;
+    unsigned bank, dst, size;
+    bool sign_extend;
 } CdjC674xLoad;
 typedef struct {
     uint32_t r[2][32], control[32], pc;

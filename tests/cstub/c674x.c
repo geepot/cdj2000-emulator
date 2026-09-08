@@ -279,5 +279,46 @@ int main(void)
     memory[2] = (4u << 23) | (31u << 13) | 0x58;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][4] == 0xffffffff);
+    /* Little-endian byte lanes and signed/unsigned extension. PROT waits
+     * for E5, while postincrement scales by the loaded element size. */
+    for (unsigned lane = 0; lane < 4; ++lane) {
+        for (unsigned sign = 0; sign < 2; ++sign) {
+            memset(memory, 0, sizeof(memory));
+            cdj_c674x_reset(&c, 0x1000); c.r[1][10] = 0x10c0 + lane;
+            memory[48] = 0xff807f01;
+            memory[0] = (2u << 23) | (10u << 18) | (1u << 13) |
+                        (11u << 9) | (sign ? 0xa4 : 0x94);
+            memory[7] = 0xe0100000;
+            assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+            const uint32_t unsigned_values[] = {1, 127, 128, 255};
+            const uint32_t signed_values[] = {1, 127, 0xffffff80, 0xffffffff};
+            assert(c.r[0][2] == (sign ? signed_values[lane] : unsigned_values[lane]));
+            assert(c.r[1][10] == 0x10c1 + lane && c.cycles == 5);
+        }
+    }
+    for (unsigned sign = 0; sign < 2; ++sign) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000); c.r[0][10] = 0x10c0;
+        memory[48] = 0x8001ffff;
+        memory[0] = (3u << 23) | (10u << 18) | (1u << 13) |
+                    (9u << 9) | (sign ? 0x46 : 0x06);
+        memory[7] = 0xe0100000;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[1][3] == (sign ? 0xffff8001u : 0x8001u));
+        assert(c.r[0][10] == 0x10c2);
+    }
+    cdj_c674x_reset(&c, 0x1000); c.r[0][10] = 0x10c1;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.load_count && c.r[0][10] == 0x10c1);
+
+    /* OR's immediate-zero form is the firmware's full-width move alias. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[1][4] = 0x87654321;
+    memory[0] = 0x04901fd8;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][9] == 0x87654321);
+    memory[1] = (2u << 23) | (31u << 13) | 0xfd8;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][2] == 0xffffffff);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }
