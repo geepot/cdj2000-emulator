@@ -1,0 +1,45 @@
+--- a/sim/bfin/bfin-sim.c
++++ b/sim/bfin/bfin-sim.c
+@@ -693,7 +693,7 @@
+ }
+ 
+ #define SIGNEXTEND(v, n) \
+-  (((bs32)(v) << (HOST_LONG_WORD_SIZE - (n))) >> (HOST_LONG_WORD_SIZE - (n)))
++  ((bs32)((bu32)(v) << (32 - (n))) >> (32 - (n)))
+ 
+ static ATTRIBUTE_NORETURN void
+ illegal_instruction (SIM_CPU *cpu)
+--- a/sim/Makefile.in
++++ b/sim/Makefile.in
+@@ -4933,7 +4933,7 @@
+ 	$(AM_V_GEN)set -e; \
+ 	LANG=C ; export LANG; \
+ 	LC_ALL=C ; export LC_ALL; \
+-	sed -n -e '/^sim_install_/{s/^\(sim_install_[a-z_0-9A-Z]*\).*/\1/;p}' $(GEN_MODULES_C_SRCS) | sort >$@.l-tmp; \
++	sed -n -e '/^sim_install_/{s/^\(sim_install_[a-z_0-9A-Z]*\).*/\1/;p;}' $(GEN_MODULES_C_SRCS) | sort >$@.l-tmp; \
+ 	( \
+ 	echo '/* Do not modify this file.  */'; \
+ 	echo '/* It is created automatically by the Makefile.  */'; \
+--- a/sim/common/local.mk
++++ b/sim/common/local.mk
+@@ -142,7 +142,7 @@
+ 	$(AM_V_GEN)set -e; \
+ 	LANG=C ; export LANG; \
+ 	LC_ALL=C ; export LC_ALL; \
+-	sed -n -e '/^sim_install_/{s/^\(sim_install_[a-z_0-9A-Z]*\).*/\1/;p}' $(GEN_MODULES_C_SRCS) | sort >$@.l-tmp; \
++	sed -n -e '/^sim_install_/{s/^\(sim_install_[a-z_0-9A-Z]*\).*/\1/;p;}' $(GEN_MODULES_C_SRCS) | sort >$@.l-tmp; \
+ 	( \
+ 	echo '/* Do not modify this file.  */'; \
+ 	echo '/* It is created automatically by the Makefile.  */'; \
+--- a/sim/bfin/dv-bfin_ppi.c
++++ b/sim/bfin/dv-bfin_ppi.c
+@@ -31,6 +31,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifndef _WIN32
++#include <fcntl.h>
++#endif
+ 
+ /* XXX: TX is merely a stub.  */
+ 

@@ -11,13 +11,17 @@ licence; the patches inherit the licence of what they patch.
 | what | `sim/`, the GNU simulator, built for `bfin-elf` |
 | where from | `https://ftp.gnu.org/gnu/gdb/gdb-17.2.tar.xz`, fetched by `scripts/build-bfin-sim.sh` |
 | licence | GPL-3.0-or-later (see `COPYING3` in the tarball) |
-| our changes | `patches/01-gdb-17.2-bfin-parallel-dsp32alu.patch` and `patches/02-gdb-17.2-bfin-cdj2000-board.patch` |
+| our changes | `patches/01-gdb-17.2-bfin-parallel-dsp32alu.patch` , `patches/02-gdb-17.2-bfin-cdj2000-board.patch`, and `patches/03-gdb-17.2-macos-lp64.patch` |
 
-The patches touch sixteen files -- twelve under `sim/bfin/` and four under
+Patches 01 and 02 touch sixteen files -- twelve under `sim/bfin/` and four under
 `sim/common/` -- and add no new ones. Because they are derivative of GPLv3 FSF
-code, **those two patch files are GPL-3.0-or-later**, whatever the rest of this
+code, **all three patch files are GPL-3.0-or-later**, whatever the rest of this
 repository is licensed under. Every file they modify keeps its FSF copyright
 header intact.
+
+Patch 03 corrects LP64 sign extension and BSD sed syntax in the simulator
+source and its generated build rules, and adds the POSIX header required by
+SPORT socket handling.
 
 Patch 01 is an ordinary correctness fix and is upstream-suitable on its own.
 Patch 02 is the CDJ-specific board work and is not: it is a large body of

@@ -135,3 +135,45 @@ With one exception. The board files in `emulator/` name their flash image as
 the working directory the launchers set -- the repository root. So
 `CDJ_FIRMWARE_DIR` moves everything the Python side reads but not that one file.
 Copy the board file and pass `--board` if you need it elsewhere.
+
+## macOS migration
+
+The `codex/macos-nxs` branch is bringing this project to macOS. Install Xcode
+Command Line Tools and Homebrew `make`, `gmp`, and `mpfr` before running
+`scripts/build-bfin-sim.sh`. On macOS the script uses `gmake`, BSD-compatible
+tar arguments, system zlib and Homebrew's arithmetic libraries. `CDJ_MAKE`
+can select another GNU make executable. Patch 03 fixes BSD sed module
+registration, Blackfin sign extension on LP64 hosts, and a missing POSIX
+header in SPORT socket handling. Applied-patch checksums are stored in the
+GDB source tree; changing a patch requires a fresh source tree.
+
+Extract a locally supplied combined NXS updater:
+
+```sh
+python3 -m tools.cdj_gui.nxs_container /path/to/C2KNXS.UPD firmware/nxs/updates
+python3 -m tools.cdj_gui.extract firmware/nxs/updates/C2KGUI.UPD firmware/nxs
+```
+
+The splitter validates the four manifest lengths, NXS component identities,
+and all CRCs before writing byte-identical component files. `container.json`
+records the source and component SHA-256 hashes. All generated files remain
+under ignored `firmware/`.
+
+This does **not** establish NXS MAIN compatibility. The QEMU board and proxy
+still contain original-CDJ-2000 firmware assumptions. The NXS MAIN register
+map, native MAIN–GUI link, flash geometry and real C674x DSP execution remain
+migration work. GUI ELF loading bypasses the resident flash bootloader.
+
+Initial input verification on this Mac: all four extracted component files
+match the earlier independent NXS parser byte-for-byte. The five GUI ELF
+regions also match its materialized LDR data. The earlier harness additionally
+staged four INIT bytes at `0xff800060`; this fork omits them. That boot-stage
+assumption needs reconciliation before claiming equivalent startup behavior.
+
+Verified on Apple Silicon macOS (2026-09-08): `bin/cdj-run` builds as a
+Mach-O arm64 executable, and rerunning the build succeeds. A five-second
+stock NXS GUI run reaches core-timer and SPORT initialization and exits at
+the configured wall-clock limit without a reported CPU exception. It reports
+unconnected GPIO ports 2 and 4; this is not a full boot or display validation.
+Host suite: 156 passed, 42 skipped. Skipped tests need additional firmware or
+runtime fixtures. QEMU has not yet been built on this Mac for this fork.

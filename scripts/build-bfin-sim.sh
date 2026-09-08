@@ -74,7 +74,17 @@ fi
 SIM_CFLAGS=${CDJ_SIM_CFLAGS:-"$OPT -march=$MARCH -g"}
 [ -n "$PROFILE" ] && SIM_CFLAGS="$SIM_CFLAGS -pg"
 
-case $(uname -s 2>/dev/null) in
+HOST_OS=$(uname -s 2>/dev/null)
+MAKE=${MAKE:-make}
+case $HOST_OS in
+    Darwin) MAKE=${CDJ_MAKE:-gmake} ;;
+esac
+command -v "$MAKE" >/dev/null 2>&1 || {
+    echo "missing $MAKE; on macOS install Homebrew make, gmp and mpfr" >&2
+    exit 1
+}
+
+case $HOST_OS in
     MINGW*|MSYS*|CYGWIN*) EXE=.exe ;;
     *)                    EXE= ;;
 esac
@@ -82,7 +92,7 @@ esac
 # MSYS2's shell drops TMP from the environment it hands to native processes, and
 # GCC then tries to write to the Windows directory.  Every compile fails with a
 # permission error that reads like a broken toolchain and is nothing of the sort.
-if [ -z "$TMP" ]; then
+if [ "$EXE" = .exe ] && [ -z "$TMP" ]; then
     TMP=$(cygpath -w "${TMPDIR:-/tmp}" 2>/dev/null) || TMP='C:\Windows\Temp'
     TEMP=$TMP
     export TMP TEMP
@@ -118,7 +128,10 @@ else
         echo "unpacking $tarball"
         # --force-local: a Windows path starting "C:" otherwise reads as a
         # remote host and tar tries to open an rsh connection.
-        tar --force-local -xJf "$tarball" -C "$WORK"
+        case $EXE in
+            .exe) tar --force-local -xJf "$tarball" -C "$WORK" ;;
+            *) tar -xJf "$tarball" -C "$WORK" ;;
+        esac
     fi
 fi
 
@@ -129,12 +142,26 @@ fi
 for patch in "$REPO"/patches/0*-gdb-*.patch; do
     [ -e "$patch" ] || continue
     name=$(basename "$patch")
+    stamp=$SRC/.cdj-$name.applied
+    checksum=$(cksum < "$patch")
+    if [ -f "$stamp" ]; then
+        if [ "$(cat "$stamp")" != "$checksum" ]; then
+            echo "$name changed; use a fresh GDB source tree" >&2
+            exit 1
+        fi
+        echo "$name already applied"
+        continue
+    fi
     if patch -d "$SRC" -p1 --forward --silent --dry-run < "$patch" >/dev/null 2>&1; then
         echo "applying $name"
         patch -d "$SRC" -p1 --forward --no-backup-if-mismatch < "$patch"
-    else
+    elif patch -d "$SRC" -p1 --reverse --force --silent --dry-run < "$patch" >/dev/null 2>&1; then
         echo "$name already applied"
+    else
+        echo "patch does not apply cleanly: $name" >&2
+        exit 1
     fi
+    echo "$checksum" > "$stamp"
 done
 
 # ------------------------------------------------------------------ build ---
@@ -148,11 +175,18 @@ if [ ! -f "$OBJ/config.status" ]; then
     # The simulator only.  Building gdb itself takes an order of magnitude
     # longer and nothing here uses it.  CFLAGS in the environment reaches
     # bfd, opcodes and libiberty as well, which is harmless.
+    set -- --with-system-zlib
+    if [ "$HOST_OS" = Darwin ]; then
+        for dependency in gmp mpfr; do
+            prefix=$(brew --prefix "$dependency")
+            set -- "$@" "--with-$dependency=$prefix"
+        done
+    fi
     (cd "$OBJ" && CFLAGS="$SIM_CFLAGS" "$SRC/configure" \
         --target=bfin-elf \
         --disable-gdb --disable-binutils --disable-gas --disable-ld \
         --disable-gprof --disable-gprofng --disable-nls --disable-werror \
-        --enable-sim --enable-sim-inline --disable-sim-assert)
+        --enable-sim --enable-sim-inline --disable-sim-assert "$@")
     echo "$SIM_CFLAGS" > "$OBJ/cdj-cflags"
 fi
 
@@ -164,7 +198,7 @@ fi
 # often not installed, and without this bfd stops on doc/bfd.info with an error
 # that says nothing about the simulator.
 echo "configuring sim"
-make -C "$OBJ" MAKEINFO=true configure-sim
+"$MAKE" -C "$OBJ" MAKEINFO=true configure-sim
 
 # bfin/run links against libbfd, libopcodes and libiberty.  Only the top-level
 # makefile knows how to build them, and it is not reached by building in sim/.
@@ -175,7 +209,7 @@ make -C "$OBJ" MAKEINFO=true configure-sim
 # libraries are checked for directly instead -- a real failure still stops the
 # script, one line later and with a clearer message.
 echo "building the libraries the simulator links against"
-make -C "$OBJ" MAKEINFO=true all-bfd all-libiberty all-opcodes || true
+"$MAKE" -C "$OBJ" MAKEINFO=true all-bfd all-libiberty all-opcodes || true
 
 missing=
 for lib in bfd/libbfd.la libiberty/libiberty.a opcodes/libopcodes.la; do
@@ -191,8 +225,8 @@ echo "building"
 # The makefile that knows about bfin/run is sim/Makefile, not sim/bfin/.
 # -lws2_32 is the socket library the MAIN link needs on Windows.
 case $EXE in
-    .exe) make -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" LIBS=-lws2_32 ;;
-    *)    make -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" ;;
+    .exe) "$MAKE" -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" LIBS=-lws2_32 ;;
+    *)    "$MAKE" -C "$OBJ/sim" MAKEINFO=true "bfin/run$EXE" ;;
 esac
 
 # ---------------------------------------------------------------- install ---
@@ -217,4 +251,4 @@ fi
 
 # A rebuilt tree with the old binary still installed is the most expensive
 # silent error in the project (BUILD.md), so say when the copy is fresh.
-echo "installed $(date -r "$REPO/bin/$INSTALL_NAME$EXE" +%H:%M:%S 2>/dev/null)"
+echo "installed $(date +%Y-%m-%dT%H:%M:%S%z)"
