@@ -15,7 +15,7 @@ static bool write_memory(void *unused, uint32_t address, uint64_t value,
 {
     (void)unused;
     if ((size != 1 && size != 2 && size != 4 && size != 8) || address < 0x1000 ||
-        address > 0x1100 - size || (address & (size - 1))) return false;
+        address > 0x1100 - size) return false;
     if (commit) {
         for (unsigned i = 0; i < size; ++i) {
             unsigned offset = address - 0x1000 + i, shift = (offset & 3) * 8;
@@ -352,5 +352,40 @@ int main(void)
         assert(memory[48] == (size == 1 ? 0xaabb78dd : size == 2 ? 0x5678ccdd : 0xaabbccdd));
         assert(memory[49] == (size == 4 ? 0x12345678 : 0xaabbccdd));
     }
+    /* LDNW joins adjacent little-endian words at every possible alignment. */
+    const uint32_t joined[] = {0x44332211, 0x55443322, 0x66554433, 0x77665544};
+    for (unsigned lane = 0; lane < 4; ++lane) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[1][10] = 0x10c0 + lane;
+        memory[48] = 0x44332211; memory[49] = 0x88776655;
+        memory[0] = (2u << 23) | (10u << 18) | (1u << 13) | (11u << 9) | 0x1b4;
+        memory[7] = 0xe0100000;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.r[0][2] == joined[lane] && c.r[1][10] == 0x10c4 + lane && c.cycles == 5);
+    }
+    /* STNW crosses a word boundary without changing surrounding bytes. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 0x12345678; c.r[1][10] = 0x10c3;
+    memory[48] = 0xaabbccdd; memory[49] = 0xeeff0011;
+    memory[0] = (3u << 23) | (10u << 18) | (1u << 13) | (11u << 9) | 0x1d4;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][10] == 0x10c7 && memory[48] == 0xaabbccdd);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(memory[48] == 0x78bbccdd && memory[49] == 0xee123456);
+
+    /* A missing second word is detected before modifying the pointer. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][10] = 0x10fd;
+    memory[0] = (2u << 23) | (10u << 18) | (1u << 13) | (11u << 9) | 0x1b4;
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!c.load_count && !c.cycles && c.r[1][10] == 0x10fd);
+
+    /* Nonaligned access excludes all other memory operations in its packet. */
+    cdj_c674x_reset(&c, 0x1000); c.r[1][10] = 0x10c1; c.r[0][10] = 0x10d0;
+    memory[0] |= 1;
+    memory[1] = (3u << 23) | (10u << 18) | 0x264;
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!c.load_count && c.r[1][10] == 0x10c1 && !c.cycles);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

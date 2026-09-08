@@ -52,7 +52,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
 {
     NxsHpi *s = opaque;
     if (address >= 0x00800000 && address < 0x00840000) address += 0x11000000;
-    if ((size != 1 && size != 2 && size != 4 && size != 8) || (address & (size - 1)) ||
+    if ((size != 1 && size != 2 && size != 4 && size != 8) ||
         address < L2_BASE || address > L2_BASE + L2_SIZE - size) return false;
     if (commit) {
         if (size == 8) stq_le_p(s->l2 + address - L2_BASE, value);

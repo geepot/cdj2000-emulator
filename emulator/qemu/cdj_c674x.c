@@ -8,6 +8,23 @@ static int32_t sx(uint32_t value, unsigned bits)
     return (int32_t)((value ^ sign) - sign);
 }
 
+/* Side-effect-free RAM reads; nonaligned words may span two bus words. */
+static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
+                        unsigned size, uint32_t *value)
+{
+    uint32_t low, high;
+    if ((uint64_t)address + size > UINT64_C(0x100000000) ||
+        !read(opaque, address & ~3u, &low)) return false;
+    unsigned shift = (address & 3) * 8;
+    *value = low >> shift;
+    if ((address & 3) + size > 4) {
+        if (!read(opaque, (address & ~3u) + 4, &high)) return false;
+        *value |= high << (32 - shift);
+    }
+    if (size < 4) *value &= (1u << (size * 8)) - 1;
+    return true;
+}
+
 void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry)
 {
     memset(cpu, 0, sizeof(*cpu));
@@ -25,7 +42,8 @@ static bool stop(CdjC674x *cpu, uint32_t pc, uint32_t word, const char *why)
 bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     uint32_t words[8], pcs[8], next = cpu->pc;
-    unsigned count = 0, elapsed = 1;
+    unsigned count = 0, elapsed = 1, memory_count = 0;
+    bool nonaligned_memory = false;
     bool compact[8], parallel = true;
     uint32_t headers[8];
     CdjC674x out = *cpu;
@@ -88,6 +106,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             /* SPRUFE8B Figure C-21: compact stack pushes. Sources and
              * address are sampled in E1; B15 updates now, RAM in E3. */
             if ((w & 0x487f) == 0x0077) {
+                ++memory_count;
                 unsigned bank = (w >> 12) & 1, src = (w >> 7) & 15;
                 unsigned size = (w & 0x8000) ? 8 : 4;
                 uint32_t address = cpu->r[1][15];
@@ -150,16 +169,19 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             if (n > 1 && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
             if (n > elapsed) elapsed = n;
             reg_write = false;
-        } else if ((w & 0x10c) == 0x04) {
+        } else if ((w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154) {
             /* Scalar memory: address E1, RAM access E3, load destination E5. */
             unsigned op = (w >> 4) & 7;
-            unsigned size = op >= 6 ? 4 : (op == 0 || op == 4 || op == 5) ? 2 : 1;
-            bool is_store = op == 3 || op == 5 || op == 7;
+            bool nonaligned = (w & 0x100) != 0;
+            unsigned size = nonaligned ? 4 : op >= 6 ? 4 : (op == 0 || op == 4 || op == 5) ? 2 : 1;
+            bool is_store = nonaligned ? op == 5 : op == 3 || op == 5 || op == 7;
             unsigned bank = (w >> 7) & 1, mode = (w >> 9) & 15;
             reg_write = false;
             if (!(mode & 8) && (mode & 2))
                 return stop(cpu, pc, w, "reserved memory addressing mode");
             if (enabled) {
+                ++memory_count;
+                nonaligned_memory |= nonaligned;
                 if (b >= 4 && b <= 7 && cpu->control[0])
                     return stop(cpu, pc, w, "circular memory addressing not implemented");
                 uint32_t offset = ((mode & 4) ? cpu->r[bank][a] : a) * size;
@@ -167,9 +189,9 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 uint32_t updated = (mode & 1) ? base + offset : base - offset;
                 uint32_t address = ((mode & 10) == 10) ? base : updated;
                 uint32_t dummy;
-                if ((address & (size - 1)) ||
+                if ((!nonaligned && (address & (size - 1))) ||
                     (is_store ? (!write || !write(opaque, address, cpu->r[side][dst], size, false))
-                              : !read(opaque, address & ~3u, &dummy)))
+                              : !read_scalar(read, opaque, address, size, &dummy)))
                     return stop(cpu, pc, w, "unaligned or unmapped scalar memory access");
                 if (is_store) {
                     if (out.store_count == 24) return stop(cpu, pc, w, "store queue full");
@@ -185,7 +207,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                             return stop(cpu, pc, w, "parallel load write conflict");
                     out.loads[out.load_count++] = (CdjC674xLoad){
                         .due = cpu->cycles + 5, .address = address, .bank = side, .dst = dst,
-                        .size = size, .sign_extend = op == 2 || op == 4
+                        .size = size, .sign_extend = !nonaligned && (op == 2 || op == 4)
                     };
                 }
                 if (mode & 8) {
@@ -269,6 +291,8 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             out.control[dst] = value; controls[dst] = true;
         }
     }
+    if (nonaligned_memory && memory_count > 1)
+        return stop(cpu, cpu->pc, 0, "parallel access with nonaligned memory instruction");
     /* Same-cycle overlapping RAM reads/writes need bus arbitration that
      * this core does not yet model. Do not choose an invented ordering. */
     for (unsigned j = 0; j < out.load_count; ++j)
@@ -296,14 +320,9 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             CdjC674xLoad *load = &out.loads[j];
             if (load->due == out.cycles + 2) {
                 uint32_t data;
-                if (!read(opaque, load->address & ~3u, &data))
+                if (!read_scalar(read, opaque, load->address, load->size, &data))
                     return stop(cpu, cpu->pc, 0, "RAM load mapping changed during execution");
-                data >>= (load->address & 3) * 8;
-                if (load->size < 4) {
-                    unsigned bits = load->size * 8;
-                    data &= (1u << bits) - 1;
-                    if (load->sign_extend) data = sx(data, bits);
-                }
+                if (load->sign_extend) data = sx(data, load->size * 8);
                 load->value = data;
             }
             if (load->due > out.cycles) { ++j; continue; }
