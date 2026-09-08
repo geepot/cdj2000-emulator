@@ -190,5 +190,61 @@ int main(void)
     memory[0] = 0xb5d62046; memory[7] = 0xe0200001;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][1] == 7 && c.r[0][13] == 0x11223344);
+    /* LDW postincrement updates its pointer in E1, samples RAM in E3,
+     * and makes its destination visible only after E5. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[0][10] = 0x10c0; c.r[1][2] = 99;
+    memory[0] = (2u << 23) | (10u << 18) | (1u << 13) | (11u << 9) | 0x66;
+    memory[48] = 123;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][10] == 0x10c4 && c.r[1][2] == 99 && c.load_count == 1);
+    memory[48] = 456;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    memory[48] = 789; /* E3 already captured 456 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][2] == 99);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][2] == 456 && !c.load_count && c.cycles == 5);
+
+    /* PROT applies to full-width loads in a header-bearing fetch packet. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[1][10] = 0x10c8; c.r[1][4] = 2;
+    memory[0] = (3u << 23) | (10u << 18) | (4u << 13) | (12u << 9) | 0xe4;
+    memory[7] = 0xe0100000; memory[48] = 0x12345678;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][10] == 0x10c0 && c.r[0][3] == 0x12345678 && c.cycles == 5);
+
+    /* False loads cannot touch an unmapped address or modify a pointer. */
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] |= 6u << 29; memory[7] = 0;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.load_count && c.r[1][10] == 0);
+
+    /* A parallel decode failure must roll back pointer and load queue. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[0][10] = 0x10c0;
+    memory[0] = (10u << 18) | (1u << 13) | (11u << 9) | 0x65;
+    memory[1] = 0xffffffff;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][10] == 0x10c0 && !c.load_count && !c.cycles);
+    /* An E1 write must not silently overwrite a simultaneous E5 result. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[0][10] = 0x10c0;
+    memory[0] = (2u << 23) | (10u << 18) | 0x264;
+    memory[4] = mvk(0, 2, 99);
+    for (unsigned j = 0; j < 4; ++j)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 4 && c.load_count == 1 && c.r[0][2] == 0);
+
+    /* A load and store accessing the same address in E3 are unsupported,
+     * rather than silently assuming a RAM arbitration order. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000); c.r[1][15] = c.r[0][10] = 0x10c0;
+    memory[0] = (2u << 23) | (10u << 18) | 0x265;
+    memory[1] = 0x3577; memory[7] = 0xe0400000;
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!c.load_count && !c.store_count && !c.cycles && c.r[1][15] == 0x10c0);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

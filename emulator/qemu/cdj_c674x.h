@@ -11,13 +11,21 @@ typedef struct {
     unsigned size;
 } CdjC674xStore;
 typedef struct {
+    uint64_t due;
+    uint32_t address, value;
+    unsigned bank, dst;
+} CdjC674xLoad;
+typedef struct {
     uint32_t r[2][32], control[32], pc;
     uint64_t cycles, packets, branch_due;
     uint32_t branch_target, fault_pc, fault_word;
     const char *fault;
     CdjC674xStore stores[24];
     unsigned store_count;
+    CdjC674xLoad loads[40];
+    unsigned load_count;
 } CdjC674x;
+/* Read callbacks currently describe stable, side-effect-free RAM only. */
 typedef bool (*CdjC674xRead)(void *, uint32_t, uint32_t *);
 /* commit=false checks a RAM write without effects. A successful check must
  * guarantee a later commit succeeds; callbacks must write the whole transfer.

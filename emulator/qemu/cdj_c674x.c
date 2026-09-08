@@ -130,6 +130,40 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             if (n > 1 && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
             if (n > elapsed) elapsed = n;
             reg_write = false;
+        } else if ((w & 0x17c) == 0x64) {
+            /* LDW: address in E1, RAM access E3, destination in E5. */
+            unsigned bank = (w >> 7) & 1, mode = (w >> 9) & 15;
+            reg_write = false;
+            if (!(mode & 8) && (mode & 2))
+                return stop(cpu, pc, w, "reserved load addressing mode");
+            if (enabled) {
+                if (b >= 4 && b <= 7 && cpu->control[0])
+                    return stop(cpu, pc, w, "circular load addressing not implemented");
+                uint32_t offset = ((mode & 4) ? cpu->r[bank][a] : a) << 2;
+                uint32_t base = cpu->r[bank][b];
+                uint32_t updated = (mode & 1) ? base + offset : base - offset;
+                uint32_t address = ((mode & 10) == 10) ? base : updated;
+                uint32_t dummy;
+                if ((address & 3) || !read(opaque, address, &dummy))
+                    return stop(cpu, pc, w, "unaligned or unmapped word load");
+                if (out.load_count == 40) return stop(cpu, pc, w, "load queue full");
+                for (unsigned j = 0; j < out.load_count; ++j)
+                    if (out.loads[j].due == cpu->cycles + 5 &&
+                        out.loads[j].bank == side && out.loads[j].dst == dst)
+                        return stop(cpu, pc, w, "parallel load write conflict");
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = cpu->cycles + 5, .address = address, .bank = side, .dst = dst
+                };
+                if (mode & 8) {
+                    if (written[bank][b]) return stop(cpu, pc, w, "parallel register write conflict");
+                    out.r[bank][b] = updated; written[bank][b] = true;
+                }
+            }
+            /* PROT inserts four NOPs, including for a false predicate. */
+            if (headers[i] & (1u << 20)) {
+                if (elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+                elapsed = 5;
+            }
         } else if ((w & 0x7c) == 0x28) {
             value = sx((w >> 7) & 0xffff, 16);
         } else if ((w & 0x7c) == 0x68) {
@@ -180,6 +214,19 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             out.control[dst] = value; controls[dst] = true;
         }
     }
+    /* Same-cycle overlapping RAM reads/writes need bus arbitration that
+     * this core does not yet model. Do not choose an invented ordering. */
+    for (unsigned j = 0; j < out.load_count; ++j)
+        for (unsigned k = 0; k < out.store_count; ++k)
+            if (out.loads[j].due - 2 == out.stores[k].due &&
+                (uint64_t)out.loads[j].address < (uint64_t)out.stores[k].address + out.stores[k].size &&
+                (uint64_t)out.stores[k].address < (uint64_t)out.loads[j].address + 4)
+                return stop(cpu, cpu->pc, 0, "simultaneous overlapping RAM accesses not implemented");
+    /* Reject E5/E1 register collisions before any RAM transaction commits. */
+    for (unsigned j = 0; j < out.load_count; ++j)
+        if (out.loads[j].due == cpu->cycles + 1 &&
+            written[out.loads[j].bank][out.loads[j].dst])
+            return stop(cpu, cpu->pc, 0, "load result write conflict");
     out.pc = next;
     for (unsigned i = 0; i < elapsed; ++i) {
         ++out.cycles;
@@ -189,6 +236,14 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             if (!write || !write(opaque, store->address, store->value, store->size, true))
                 return stop(cpu, cpu->pc, 0, "RAM store callback broke commit guarantee");
             memmove(store, store + 1, (--out.store_count - j) * sizeof(*store));
+        }
+        for (unsigned j = 0; j < out.load_count;) {
+            CdjC674xLoad *load = &out.loads[j];
+            if (load->due == out.cycles + 2 && !read(opaque, load->address, &load->value))
+                return stop(cpu, cpu->pc, 0, "RAM load mapping changed during execution");
+            if (load->due > out.cycles) { ++j; continue; }
+            out.r[load->bank][load->dst] = load->value;
+            memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
         }
         if (out.branch_due && out.cycles == out.branch_due) {
             out.pc = out.branch_target; out.branch_due = 0; break;
