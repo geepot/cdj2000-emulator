@@ -332,3 +332,22 @@ shift counts through and beyond 32 bits, load E1/E3/E5 timing, PROT, memory/regi
 alignment/bounds failures, and atomic unsupported-packet
 stops. The same harness
 also passes Clang address and undefined-behavior sanitizers.
+
+### SPLOOP scheduler under integration
+
+`emulator/qemu/cdj_c674x_loop.c` schedules instruction tags for unconditional
+SPLOOP operations. The caller loads the original instruction packets as they
+are encountered; the scheduler overlays iterations separated by the iteration
+interval and drains them after the final iteration. It also reports when
+post-loop fetching may overlap the epilog, using a decoded SPKERNEL delay.
+It does not yet drive the CPU interpreter: real firmware still stops at SPLOOP.
+
+The independent harness in `tests/cstub/c674x-loop.c` matches the complete
+14-cycle operation schedule in TI SPRUFE8B Table 7-1 (eight copies, II=1),
+checks II=2 overlap and draining, zero iterations, and rejects more than eight
+simultaneous operations without advancing state. Address/undefined-behavior
+sanitizers pass. This is evidence for scheduling, not full loop execution.
+CPU integration must preserve pre-packet reads across overlaid instructions,
+merge post-loop execution, enforce functional-unit and buffer capacity limits,
+and maintain the ILC lifecycle. SPMASK, reload/nested loops, SPLOOPD/W,
+interrupt draining and restart are still missing.
