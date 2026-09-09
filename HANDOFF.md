@@ -8,33 +8,38 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
-The genuine MAIN/HPI upload now crosses every observed 32 KiB DSP chunk and
-enters MAIN boot phase 3. A shared portable HPI model connects host HPIC
-control to DSP-side HPIC, including ROM-ready state, HINT acknowledgement and
-DSPINT state. MAIN PTDAT_H boot-phase outputs drive the observed DSP GPIO4
-inputs. EMIFB configuration/readback and a zero-initialized 32 MiB external
-SDRAM window are present; SDRAM command timing, arbitration and retention are
-still approximations. The CPU adds compact Dpp/Dstk stack memory forms,
-word-scaled compact CALLP displacement and the PACK2/PACKH2/PACKHL2/PACKLH2/
-PACKL4/PACKH4 family with focused tests.
+The versioned DSP checkpoint/replay workflow is operational. Schema 1 records
+the complete C674x state (including branch queues, pending E3/E5 memory
+transactions and software-loop buffers), every modeled C6747 peripheral, MAIN
+boot phase/HPI counters, 256 KiB L2 and lossless sparse pages for the zero-based
+32 MiB SDRAM. Process-local pointers are removed and rebound on restore. The
+format records native byte order and all component sizes and rejects corrupt,
+truncated or ABI-incompatible files. It is deliberately ABI-bound; run
+manifests add firmware/source SHA-256 provenance and document approximations.
 
-`runs/dsp-phase2-callp-fixed --boot-phase 2 --verify-repeat` reaches the
-genuine HINT host-event boundary at 1,315 packets / 1,749 cycles with an exact
-repeat trace. Rebuilt connected `runs/nxs-pack4-connected` completes the
-repeated phase 0/2 chunk handshakes, observes phase 3, and then fails closed at
-2,599,580 packets / 6,132,079 cycles, PC `0x11804468`, word `0xc09868c0`.
-That word is the next unsupported reachable instruction; it is not skipped.
-The bounded GUI run exits 0 and produced a frame, which is not evidence of full
-boot or audio. Suite: 173 passed / 43 skipped.
+Connected runs now checkpoint DSP start, boot-phase transitions, cooperative
+budget stops, HINT yields and faults. `runs/nxs-checkpoint-connected-2`
+produced 65 checkpoints (28 MiB total) and a SHA-256-bound ordered transcript
+of 110,210 state-changing HPI events. Transport replay reproduces 104,093
+uploaded words in 14 contiguous chunks, 14 HINT acknowledgements, 13 DSP HINT
+edges and one DSPINT edge, and proves that the initial upload exactly matches
+the DSP-start checkpoint. `runs/dsp-event-replay-1 --verify-repeat` is exact.
 
-Immediate priority is a lossless, versioned connected-DSP checkpoint plus
-ordered MAIN-to-DSP event transcript. It must retain CPU pipeline/loop state,
-all modeled peripherals, boot phase, L2 and SDRAM; reject incompatible or
-incomplete input; and prove deterministic state/memory/fault equivalence.
-Only after that gate is operational should `0xc09868c0` and its coherent TI
-instruction family be implemented. Until transcript replay exists, standalone
-phase selection is a deterministic discovery aid, not a faithful replacement
-for connected MAIN execution.
+Standalone checkpoint restore/repeat proves byte-identical final CPU and
+peripheral state plus L2 and logical SDRAM hashes. It reduced the phase-3
+blocker loop to about 0.6 seconds. From the connected `0xc09868c0` checkpoint,
+the TI-documented scalar ADD/SUB .D and CMPLTU forms advance nine packets to
+PC `0x118044c0`, compact word `0x0c66`; rebuilt connected execution agrees at
+2,599,589 packets / 6,132,090 cycles. The compact word's classification still
+needs primary-reference reconciliation: the parent decoder calls it
+`[A0] MVK.L 0,A0`, while the visible SPRUFE8B G-3 fixed-field layout appears
+inconsistent. Keep it fail-closed until corroborated. Suite: 176 passed / 43
+skipped. The bounded GUI exit/frame is not full boot or working audio.
+
+Next finish checkpoint-driven external-event injection beyond a HINT yield,
+then reconcile `0x0c66` against TI/GNU encoding sources and implement its whole
+valid compact family. Do not relax compatibility checks or infer correctness
+from packet count alone.
 
 ### Previous SYSCFG checkpoint
 

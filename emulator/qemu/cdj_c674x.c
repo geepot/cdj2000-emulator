@@ -586,6 +586,24 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             uint32_t offset = (op >= 0x3c ? op & 1 : op & 2) ? a : cpu->r[side][a];
             offset <<= (op - 0x30) / 4;
             value = (op < 0x3c && (op & 1)) ? cpu->r[side][b] - offset : cpu->r[side][b] + offset;
+        } else if ((w & 0x7c) == 0x40 && ((w >> 7) & 63) >= 0x10 &&
+                   ((w >> 7) & 63) <= 0x13) {
+            /* ADD/SUB .D without a cross path, SPRUFE8B pp110,529.
+             * The assembler operand order is src2,src1 because the D-unit
+             * hardware subtracts the src1 field from the src2 field. */
+            unsigned op = (w >> 7) & 63;
+            uint32_t left = cpu->r[side][b];
+            uint32_t right = (op & 2) ? a : cpu->r[side][a];
+            value = (op & 1) ? left - right : left + right;
+        } else if ((w & 0xffc) == 0xab0 || (w & 0xffc) == 0xaf0 ||
+                   (w & 0xffc) == 0xb30) {
+            /* Cross-path ADD/SUB .D, including ADD's signed constant form.
+             * Cross SUB uses conventional src1-src2 ordering (SPRUFE8B
+             * pp110-111,529-530), unlike non-cross D-unit SUB above. */
+            uint32_t left = (w & 0xffc) == 0xaf0 ? (uint32_t)sx(a, 5)
+                                                 : cpu->r[side][a];
+            uint32_t right = cpu->r[cross][b];
+            value = (w & 0xffc) == 0xb30 ? left - right : left + right;
         } else if ((w & 0x7c1ffc) == 0x40) {
             value = sx(a, 5); /* MVK .D */
         } else if ((w & 0x3effc) == 0xa358) {
@@ -632,6 +650,10 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = sx(a, 5) > (int32_t)cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x8f8) {
             value = (int32_t)cpu->r[side][a] > (int32_t)cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0xbd8) {
+            value = a < cpu->r[cross][b]; /* CMPLTU .L ucst4,xuint */
+        } else if ((w & 0xffc) == 0xbf8) {
+            value = cpu->r[side][a] < cpu->r[cross][b]; /* CMPLTU .L uint,xuint */
         } else if ((w & 0xffc) == 0xfd8 || (w & 0xffc) == 0x6a0 || (w & 0xffc) == 0x8f0) {
             value = (uint32_t)sx(a, 5) | cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xff8 || (w & 0xffc) == 0x6e0 || (w & 0xffc) == 0x8b0) {

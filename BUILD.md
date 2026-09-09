@@ -942,3 +942,38 @@ frontend execution. Full boot and audio remain incomplete. SDRAM command
 timing/arbitration, physical HPI pins/HRDY/FIFO behavior and DSP interrupt
 delivery remain unmodeled; the portable register state must not be described as
 those physical effects.
+
+### Versioned DSP checkpoints and HPI event replay
+
+Schema-1 `.cdjdsp` files contain ABI-checked native CPU/peripheral state, full
+L2 and lossless sparse 4 KiB SDRAM pages. The loader rejects wrong magic,
+schema, byte order, component sizes, checksum, page counts, trailing data and
+truncation. Run manifests bind every checkpoint, the ordered HPI transcript,
+the genuine firmware inputs and relevant source files with SHA-256. Source
+changes are recorded but remain loadable when the explicit ABI contract still
+matches; this is what permits implementing the next opcode and retrying its
+atomic fault packet.
+
+```sh
+.venv/bin/pytest -q
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-checkpoint-connected-2 --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+.venv/bin/python -m tools.cdj_dsp.event_replay runs/nxs-checkpoint-connected-2 runs/dsp-event-replay-1 --verify-repeat
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-checkpoint-connected-2/dsp-checkpoints/00000000000000000065.cdjdsp runs/dsp-checkpoint-next --steps 100000 --verify-repeat
+```
+
+Suite: 176 passed / 43 skipped. The connected run creates 65 checkpoints in
+28 MiB. Event replay gates 110,210 ordered state-changing events, 104,093 HPI
+words in 14 chunks, 14 host HINT acknowledgements, 13 DSP HINT edges, one
+DSPINT edge and exact initial-L2 equivalence. Checkpoint replay gates identical
+traces, faults, packet/cycle counts, final serialized state, L2 SHA-256 and
+logical 32 MiB SDRAM SHA-256.
+
+The first checkpoint-driven ISA batch implements scalar ADD/SUB .D register,
+constant and cross-path forms plus scalar CMPLTU. Replay and rebuilt connected
+execution agree on the next fail-closed stop at 2,599,589 packets / 6,132,090
+cycles, `0x118044c0` / compact `0x0c66`. Full boot/audio remain incomplete.
+Schema 1 is not cross-ABI portable, DSP interrupt delivery remains absent, and
+the event replayer currently validates/reconstructs captured external HPI
+transport while CPU continuation begins from an exact connected checkpoint; it
+does not yet inject future events into a yielded standalone CPU.

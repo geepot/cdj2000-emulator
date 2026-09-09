@@ -276,6 +276,60 @@ int main(void)
             assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
             assert(c.r[side][6] == ((op < 0x3c && (op & 1)) ? 2 - offset : 2 + offset));
         }
+    /* Complete scalar ADD/SUB .D family: same-bank register/unsigned
+     * constant forms and cross-path register/signed-constant forms. */
+    for (unsigned op = 0x10; op <= 0x13; ++op)
+        for (unsigned side = 0; side < 2; ++side) {
+            cdj_c674x_reset(&c, 0x1000);
+            c.r[side][3] = 5; c.r[side][6] = 2;
+            memory[0] = 1u << 23 | 6u << 18 | 3u << 13 |
+                        op << 7 | 0x40 | side << 1;
+            assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+            uint32_t right = op & 2 ? 3 : 5;
+            assert(c.r[side][1] == ((op & 1) ? 2 - right : 2 + right));
+        }
+    const unsigned d_cross_ops[] = {0xab0, 0xaf0, 0xb30};
+    for (unsigned n = 0; n < 3; ++n)
+        for (unsigned side = 0; side < 2; ++side) {
+            cdj_c674x_reset(&c, 0x1000);
+            c.r[side][3] = 0xfffffffdu;
+            c.r[side ^ 1][6] = 5;
+            memory[0] = 1u << 23 | 6u << 18 | 3u << 13 | 1u << 12 |
+                        d_cross_ops[n] | side << 1;
+            assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+            uint32_t left = n == 1 ? 3 : 0xfffffffdu;
+            assert(c.r[side][1] == (n == 2 ? left - 5 : left + 5));
+        }
+    /* The captured [A0] SUB .D1 A3,A6,A1 is atomic when false and wraps
+     * exactly like 32-bit C674x integer arithmetic when true. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][1] = 99; c.r[0][3] = 5; c.r[0][6] = 2;
+    memory[0] = 0xc09868c0;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][1] == 99);
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][0] = 1; c.r[0][3] = 5; c.r[0][6] = 2;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][1] == UINT32_MAX - 2);
+    /* CMPLTU scalar forms compare unsigned values, including the captured
+     * CMPLTU .L1 15,A1,A0 at 0x118044a4. */
+    for (unsigned side = 0; side < 2; ++side)
+        for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+            for (unsigned immediate = 0; immediate < 2; ++immediate) {
+                cdj_c674x_reset(&c, 0x1000);
+                c.r[side][3] = 15;
+                c.r[side ^ cross_path][6] = 16;
+                memory[0] = 1u << 23 | 6u << 18 | 3u << 13 |
+                            cross_path << 12 | (immediate ? 0xbd8 : 0xbf8) |
+                            side << 1;
+                assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+                assert(c.r[side][1] == 1);
+                cdj_c674x_reset(&c, 0x1000);
+                c.r[side][1] = 99;
+                memory[0] |= 6u << 29; /* false A0 predicate */
+                assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+                assert(c.r[side][1] == 99);
+            }
     /* More than 14 source packets fit when they occupy no functional slots. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.control[13] = 1;
