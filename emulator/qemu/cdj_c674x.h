@@ -30,6 +30,12 @@ typedef struct {
 typedef struct {
     uint32_t r[2][32], control[32], pc;
     uint64_t cycles, packets, branch_due;
+    /* Optional board clock edge, after advancing the cycle and before E3
+     * bus effects. Runs for inserted NOPs too, never for a decode rejection.
+     * Must not fail or modify CPU state. Rebind after reset/checkpoint restore.
+     * Like bus commits, external effects cannot roll back a broken callback. */
+    void (*cycle_tick)(void *);
+    void *cycle_opaque;
     uint64_t control_ready[32];
     uint32_t branch_target, fault_pc, fault_word;
     struct { uint64_t due; uint32_t target; } branch_queue[5];

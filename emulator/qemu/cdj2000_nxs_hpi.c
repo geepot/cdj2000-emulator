@@ -107,15 +107,22 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
     return true;
 }
 
+static void dsp_cycle_tick(void *opaque)
+{
+    NxsHpi *s = opaque;
+    cdj_c6747_pll_tick(&s->pll);
+}
+
 static void start_dsp(NxsHpi *s)
 {
     /* Boot-ROM handoff abstraction: the host supplies the entry in L2[0].
      * No claim to execute the unavailable ROM. The uploaded code is decoded. */
     cdj_c674x_reset(&s->cpu, ldl_le_p(s->l2));
+    s->cpu.cycle_tick = dsp_cycle_tick;
+    s->cpu.cycle_opaque = s;
     unsigned budget = 10000;
     while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
         cdj_c6747_psc_tick(&s->psc);
-        cdj_c6747_pll_tick(&s->pll);
     }
     info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",

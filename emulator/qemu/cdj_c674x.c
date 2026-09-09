@@ -668,6 +668,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     out.pc = packet->next_pc;
     for (unsigned i = 0; i < elapsed; ++i) {
         ++out.cycles;
+        if (out.cycle_tick) out.cycle_tick(out.cycle_opaque);
         for (unsigned j = 0; j < out.store_count;) {
             CdjC674xStore *store = &out.stores[j];
             if (store->due > out.cycles) { ++j; continue; }

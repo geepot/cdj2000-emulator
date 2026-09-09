@@ -64,7 +64,7 @@ def main():
                         pll_assumptions=['POR configuration at ROM handoff',
                                          'oscillator counter complete at handoff, not PLL lock',
                                          'legacy PLLCTL bit 4 writable latch; C6747 effect unverified',
-                                         'divider GO completes after eight successful DSP steps; not clock timing'],
+                                         'divider GO completes after eight subsequent DSP cycles; not physical clock timing'],
                         sources={str(p.relative_to(ROOT)): hashlib.sha256(content).hexdigest()
                                  for p, content in source_data.items()})
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

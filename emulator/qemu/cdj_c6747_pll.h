@@ -11,7 +11,8 @@ typedef struct {
     uint32_t active_dividers[7], target_dividers[7], command;
     unsigned go_remaining;
 } CdjC6747Pll;
-/* Synthetic eight-successful-step GO latency, not OSCIN/PLL timing. */
+/* One DSP-cycle edge before bus commits. GO lasts eight subsequent cycles;
+ * still synthetic latency, not physical OSCIN/PLL alignment timing. */
 void cdj_c6747_pll_tick(CdjC6747Pll *s);
 void cdj_c6747_pll_reset(CdjC6747Pll *s);
 bool cdj_c6747_pll_read(const CdjC6747Pll *s, uint32_t address, uint32_t *value);

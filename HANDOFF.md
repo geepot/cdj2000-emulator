@@ -8,6 +8,38 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+The CPU now has an optional per-cycle board-clock callback, invoked before E3
+bus effects on every cycle (including inserted NOPs, loop cycles and truncated
+branch delays). Both DSP hosts bind it to PLL ticking. GO now takes eight
+subsequent DSP cycles rather than eight successful step calls; it remains a
+synthetic phase-alignment delay. PSC deliberately retains its separately
+documented step-based approximation. Callbacks cannot fail/mutate CPU state;
+like bus commits, their external effects cannot roll back a broken bus callback.
+CPU reset clears the binding; future serialized checkpoints must rebind it.
+
+`runs/dsp-cycle-clock-1` passes repeat and exact prior-trace equivalence against
+`runs/dsp-protected-loop-1`, retaining the 1,162/1,420 PLLRST-release stop below.
+Suite: 171 passed / 43 skipped; CPU and combined PLL/CPU sanitizer harnesses
+pass. The new integration harness tests E3 GO start, eight NOP 1 calls versus
+one NOP 8, and a PROT load whose E3 observes GO completion within the same call.
+Rebuilt `runs/nxs-cycle-clock-connected` agrees at the same stop/counts; its
+15-second GUI run exits 0 with a frame, not a completed boot.
+
+Clock research for the next batch: parent `docs/dsp/dsp-hardware.md` traces
+X501/IC506/IC16 to OSCIN = 16.9344 MHz (RRV4356 pp12,13,96), with firmware x23
+giving 389.4912 MHz. Visually checked SPRS377F Table 6-4 p73: reset assertion
+minimum 1000 ns; maximum lock wait **2000*N/sqrt(M)** OSCIN cycles (text
+extraction loses the radical). At N=1,M=23 this rounds up to 418 OSCIN cycles;
+1000 ns rounds up to 17 input-clock periods. These are datasheet bounds, not
+measured lock timing on the custom DSP. Next implement oscillator-domain
+elapsed time and reset/lock transition validation, including divider ratios,
+bypass/source selection and physical clock consumers. PLLRST release/PLLEN
+still fail closed; do not equate a configuration latch or elapsed bound with a
+firmware-visible lock indication. The missing-ROM initial clock state remains
+an explicit assumption.
+
+### Previous protected-load checkpoint
+
 Protected loop loads now expand into four empty program-stream cycles while
 buffered operations continue issuing (SPRUFE8B 3.10, 7.7.3.3). PROT is removed
 from the buffered/direct lowered instruction, so replay does not reinsert fetch

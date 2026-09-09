@@ -19,6 +19,11 @@ static CdjC6747Mcasp mcasp;
 static CdjC6747Gpio gpio;
 static CdjC6747I2c i2c;
 static CdjC6747Pll pll;
+static void cycle_tick(void *unused)
+{
+    (void)unused;
+    cdj_c6747_pll_tick(&pll);
+}
 static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }
 static bool read_bus(void *unused, uint32_t a, uint32_t *v)
@@ -81,6 +86,7 @@ int main(int argc, char **argv)
     uint32_t entry;
     read_bus(NULL, 0x11800000, &entry);
     cdj_c674x_reset(&c, entry);
+    c.cycle_tick = cycle_tick;
     const char *reason = "step_limit";
     for (unsigned long long step = 0; step < limit; ++step) {
         if (breakpoint && c.pc == breakpoint) { reason = "breakpoint"; break; }
@@ -89,7 +95,6 @@ int main(int argc, char **argv)
                c.pc, c.cycles, c.loop_active ? "true" : "false", c.branch_due);
         if (!cdj_c674x_step(&c, read_bus, write_bus, NULL)) { reason = "fault"; break; }
         cdj_c6747_psc_tick(&psc);
-        cdj_c6747_pll_tick(&pll);
     }
     /* Fault strings originate in the interpreter and contain no JSON escapes. */
     printf("{\"event\":\"stop\",\"reason\":\"%s\",\"fault\":\"%s\",\"pc\":%" PRIu32

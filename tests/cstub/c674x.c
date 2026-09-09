@@ -28,9 +28,37 @@ static bool write_memory(void *unused, uint32_t address, uint64_t value,
 }
 static uint32_t mvk(unsigned side, unsigned dst, int value)
 { return dst << 23 | ((uint32_t)value & 0xffff) << 7 | 0x28 | side << 1; }
+static void test_cycle_tick(void *opaque)
+{
+    unsigned *ticks = opaque;
+    memory[48] = ++*ticks;
+}
 int main(void)
 {
     CdjC674x c;
+    /* Board clocks advance on every cycle, including PROT/NOP delays;
+     * E3 captures the value on that edge, not the step's final value. */
+    unsigned ticks = 0;
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.cycle_tick = test_cycle_tick; c.cycle_opaque = &ticks;
+    c.r[0][5] = 0x10c0;
+    memory[0] = 0x01940264; memory[7] = 0xe0100000;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(ticks == 5 && c.cycles == 5 && c.r[0][3] == 3);
+    memory[1] = 7u << 13; /* NOP 8 */
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(ticks == 13 && c.cycles == 13);
+    memory[2] = 0xffffffff;
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(ticks == 13 && c.cycles == 13);
+    cdj_c674x_reset(&c, 0x1000);
+    assert(!c.cycle_tick && !c.cycle_opaque);
+    /* A taken BNOP truncates both inserted NOPs and board ticks. */
+    memset(memory, 0, sizeof(memory)); ticks = 0;
+    c.cycle_tick = test_cycle_tick; c.cycle_opaque = &ticks;
+    memory[0] = (7u << 13) | 0x120;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(ticks == 6 && c.cycles == 6);
     /* PROT in a software loop is equivalent cycle by cycle to LD; NOP 4.
      * Cover overlapping replay (II < 5), masked one-shot loads, and false
      * predicates with invalid addresses. Mutate RAM between E1/E3/E5 to
@@ -44,6 +72,7 @@ int main(void)
         CdjC674x reference[24];
         for (unsigned prot = 0; prot < 2; ++prot) {
             memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+            ticks = 0; c.cycle_tick = test_cycle_tick; c.cycle_opaque = &ticks;
             c.r[1][1] = 1; c.r[1][0] = enabled;
             c.r[0][5] = enabled ? 0x10c0 : 0xffffffff;
             memory[0] = 0x4003e000 | (ii - 1) << 23; /* [B1] SPLOOPW */
@@ -58,9 +87,9 @@ int main(void)
             memory[7] = 0xe0000000 | prot << 20 | rs << 19 |
                         (compact ? 1u << (21 + load_slot) : 0);
             for (unsigned cycle = 0; cycle < 24; ++cycle) {
-                memory[48] = 1000 + cycle;
                 assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
                 assert(c.cycles == cycle + 1 && !c.idle_cycles);
+                assert(ticks == c.cycles);
                 if (!prot) reference[cycle] = c;
                 else {
                     const CdjC674x *r = &reference[cycle];
@@ -74,8 +103,8 @@ int main(void)
             }
             assert(c.loop_tags == (masked ? 0u : 1u));
             if (!enabled) assert(c.r[0][3 + rs * 16] == 0);
-            else if (masked) assert(c.r[0][3 + rs * 16] == 1003);
-            else assert(c.r[0][3 + rs * 16] > 1003);
+            else if (masked) assert(c.r[0][3 + rs * 16] == 4);
+            else assert(c.r[0][3 + rs * 16] > 4);
         }
     }
     /* SPKERNEL cannot share a protected-load packet (SPRUFE8B p481).

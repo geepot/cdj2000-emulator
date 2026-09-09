@@ -795,3 +795,40 @@ execution agrees at 1,162 packets / 1,420 cycles, PC `0x11802ecc`, compact
 Trace SHA-256 `65dba25926a35dc30506d2cb4bbf955a47dafb5e23c53bdfbecab93c2df5a1c0`.
 Connected GUI exit 0/frame is not boot completion. No working audio or physical
 PLL lock/clock propagation has been established.
+
+### Cycle-edge PLL clock integration
+
+Both replay and connected DSP execution now advance PLL state through the
+CPU's per-cycle callback, before E3 bus effects. Multi-cycle NOP/protected-load
+calls no longer count as just one PLL tick. A GO store starts its eight-cycle
+synthetic delay at E3; all eight subsequent cycles must elapse. PSC remains
+step-based for now. This is clock-delivery infrastructure, not physical PLL
+phase alignment, lock detection, or clock propagation to devices.
+
+The combined `tests/cstub/c6747-pll-clock.c` harness checks E3 start, split and
+multi-cycle waits, and load sampling when GO completes during PROT insertion.
+The core harness checks per-cycle delivery through loops, branch truncation,
+no ticking on decode rejection and callback clearing at reset. Rebind callbacks
+after restoring any future serialized CPU checkpoint.
+
+```sh
+.venv/bin/pytest -q
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-protected-loop-connected/dsp-l2.bin runs/dsp-cycle-clock-1 --verify-repeat --expect-trace runs/dsp-protected-loop-1/trace.jsonl
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-cycle-clock-connected --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+```
+
+Suite: 171 passed / 43 skipped; core and PLL/CPU address/undefined sanitizer
+harnesses pass. Replay passes both equivalence gates, hash unchanged at
+`65dba25926a35dc30506d2cb4bbf955a47dafb5e23c53bdfbecab93c2df5a1c0`.
+PLLRST release remains unsupported at 1,162 packets / 1,420 cycles.
+Rebuilt `runs/nxs-cycle-clock-connected` matches these counts and the stop;
+GUI exits 0 with a frame at the 15-second bound, not full boot.
+
+For subsequent physical timing work, visually checked SPRS377F Table 6-4 p73
+specifies 1000 ns minimum PLLRST assertion and 2000*N/sqrt(M) OSCIN cycles
+maximum lock wait. The radical is missing from plain-text extraction.
+RRV4356-derived parent hardware research gives OSCIN=16.9344 MHz, N=1,M=23:
+rounding upward gives 17 assertion periods and 418 lock-wait periods. Do not
+use DSP step counts as oscillator periods after clock division/multiplication,
+or expose a made-up lock status bit. Full boot/audio remain unverified.

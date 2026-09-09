@@ -5,6 +5,17 @@ import subprocess
 import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
+def test_c6747_pll_cycle_clock(tmp_path):
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'pll-clock-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-pll-clock.c'),
+        *[str(ROOT / 'emulator/qemu' / name) for name in
+          ('cdj_c6747_pll.c', 'cdj_c674x.c', 'cdj_c674x_loop.c')],
+        '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=5)
+
 def test_c6747_pll_configuration(tmp_path):
     cc = shutil.which('cc')
     if not cc: pytest.skip('requires C compiler')
