@@ -159,7 +159,8 @@ static bool queued_memory_load(const CdjC674xLoad *load)
 static unsigned queued_result_registers(const CdjC674xLoad *load)
 {
     if (load->size == CDJ_C674X_DELAYED_IFR_SET ||
-        load->size == CDJ_C674X_DELAYED_IFR_CLEAR) return 0;
+        load->size == CDJ_C674X_DELAYED_IFR_CLEAR ||
+        load->size == CDJ_C674X_DELAYED_SAT) return 0;
     return load->size == 8 || load->size == 16 ? 2 : 1;
 }
 
@@ -170,6 +171,8 @@ static uint32_t control_read(const CdjC674x *cpu, unsigned id)
         return cpu->control[id] & 0xffff03ffu;
     case 2:                         /* IFR */
         return cpu->control[id] & 0xfff2u;
+    case 21:                        /* SSR, SPRUFE8B 2.9.13 */
+        return cpu->control[id] & 0x3fu;
     case 4:                         /* IER */
         return (cpu->control[id] & 0xfff2u) | 1u;
     case 5: {                       /* ISTP */
@@ -201,13 +204,32 @@ static bool control_read_supported(unsigned id)
 {
     return id == 1 || id == 2 || id == 4 || id == 5 || id == 6 || id == 7 ||
            id == 13 || id == 14 || id == 26 || id == 27 ||
-           (id >= 18 && id <= 20);
+           (id >= 18 && id <= 21);
 }
 
 static bool control_write_supported(unsigned id)
 {
     return (id >= 1 && id <= 7) || id == 13 || id == 14 ||
-           id == 26 || id == 27 || (id >= 18 && id <= 20);
+           id == 26 || id == 27 || (id >= 18 && id <= 21);
+}
+
+static uint32_t saturate32(int64_t value, bool *saturated)
+{
+    *saturated = value > INT32_MAX || value < INT32_MIN;
+    return value > INT32_MAX ? INT32_MAX : value < INT32_MIN ?
+           (uint32_t)INT32_MIN : (uint32_t)value;
+}
+
+static uint32_t saturating_shift32(uint32_t source, unsigned count,
+                                   bool *saturated)
+{
+    /* SSHL's six-bit register count includes 32..63. Avoid signed shifts
+     * and overflow: multiplication fits int64_t for all counts below 32. */
+    if (count < 32)
+        return saturate32((int64_t)(int32_t)source * (INT64_C(1) << count),
+                          saturated);
+    *saturated = source != 0;
+    return !source ? 0 : source & 0x80000000u ? 0x80000000u : 0x7fffffffu;
 }
 
 static uint64_t arithmetic_shift_right64(uint64_t value, unsigned count)
@@ -1032,6 +1054,34 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 op << 4 | 4 | ((w >> 12) & 1) << 1;
             compact = false;
         }
+        if (compact) {
+            /* SPRUFE8B D-4/F-22/F-25/F-26: expand saturating compact
+             * scalar forms into the same semantic path as full encodings.
+             * .S SUB ignores SAT, whereas .L SUB becomes SSUB. */
+            unsigned rs = (insn->header & 0x80000) ? 16 : 0;
+            unsigned s = w & 1, d = ((w >> 4) & 7) + rs;
+            unsigned left = ((w >> 13) & 7) + rs;
+            unsigned right = ((w >> 7) & 7) + rs;
+            bool sat = (insn->header & 0x4000) != 0;
+            unsigned opcode = 0;
+            if (sat && (w & 0x040e) == 0)
+                opcode = (w & 0x0800) ? 0x1f8 : 0x278;
+            else if (sat && !(insn->header & 0x8000) &&
+                     (w & 0x0c0e) == 0x000a)
+                opcode = 0x820;
+            if (opcode) {
+                w = d << 23 | right << 18 | left << 13 |
+                    (w & 0x1000) | opcode | s << 1;
+                compact = false;
+            } else if (sat && (w & 0x047e) == 0x0442) {
+                unsigned count = ((w >> 13) & 7) | (((w >> 11) & 3) << 3);
+                w = right << 23 | right << 18 | count << 13 | 0x8a0 | s << 1;
+                compact = false;
+            } else if ((w & 0x1c7e) == 0x1c62) {
+                w = right << 23 | right << 18 | left << 13 | 0x8e0 | s << 1;
+                compact = false;
+            }
+        }
         unsigned side = (w >> 1) & 1, dst = (w >> 23) & 31;
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
@@ -1075,13 +1125,9 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 value = (w >> 13) & 1;
             } else if (!(insn->header & (1u << 15)) &&
                        (w & 0x040e) == 0x000a) {
-                /* Figure F-22: compact .S ADD/SUB.  Header SAT changes ADD
-                 * into SADD, whose delayed CSR.SAT behavior remains
-                 * deliberately unsupported; SAT does not alter SUB. */
+                /* Figure F-22: nonsaturating compact .S ADD/SUB.
+                 * SAT-selected SADD was expanded above; SUB ignores SAT. */
                 bool subtract = (w & 0x0800) != 0;
-                if (!subtract && (insn->header & (1u << 14)))
-                    return stop(cpu, pc, insn->word,
-                                "compact SADD saturation not implemented");
                 dst = ((w >> 4) & 7) + rs;
                 uint32_t left = cpu->r[side][((w >> 13) & 7) + rs];
                 uint32_t right = cpu->r[cross][((w >> 7) & 7) + rs];
@@ -1135,9 +1181,6 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if (op == 3)
                     return stop(cpu, pc, insn->word,
                                 "reserved compact Ssh5 instruction");
-                if (op == 2 && (insn->header & (1u << 14)))
-                    return stop(cpu, pc, insn->word,
-                                "compact SSHL saturation not implemented");
                 unsigned count = ((w >> 13) & 7) | (((w >> 11) & 3) << 3);
                 dst = ((w >> 7) & 7) + rs;
                 value = shift_32(cpu->r[side][dst], count, op);
@@ -1146,9 +1189,6 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                  * As for full-width scalar shifts, only the low six count
                  * bits participate. */
                 unsigned op = (w >> 11) & 3;
-                if (op == 3)
-                    return stop(cpu, pc, insn->word,
-                                "compact SSHL saturation not implemented");
                 dst = ((w >> 7) & 7) + rs;
                 unsigned count = cpu->r[side][((w >> 13) & 7) + rs] & 63;
                 value = shift_32(cpu->r[side][dst], count, op);
@@ -1419,7 +1459,72 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             enabled = (cpu->r[bank[creg]][index[creg]] != 0) ^ z;
         }
         bool long_offset = (w & 0x0c) == 12;
-        if (long_offset || (w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154 ||
+        unsigned scalar_sat_op = w & 0xffc;
+        if (scalar_sat_op == 0x618 || scalar_sat_op == 0x638 ||
+            scalar_sat_op == 0x598) {
+            /* SADD signed32/scst5 + signed40, SSUB scst5 - signed40.
+             * Long operands are local even/odd pairs; their high 24 bits
+             * are not part of the signed 40-bit arithmetic value. */
+            reg_write = false;
+            if ((dst & 1) || (b & 1))
+                return stop(cpu, pc, insn->word, "invalid long register pair");
+            if (scalar_sat_op != 0x638 && (w & 0x1000))
+                return stop(cpu, pc, insn->word, "cross-path long operand not supported");
+            if (enabled) {
+                int64_t left = scalar_sat_op == 0x638 ?
+                    (int32_t)cpu->r[cross][a] : sx(a, 5);
+                uint64_t raw = register_long40(cpu, side, b);
+                int64_t right = (int64_t)raw - ((raw & (UINT64_C(1) << 39)) ?
+                                              (INT64_C(1) << 40) : 0);
+                int64_t result = scalar_sat_op == 0x598 ? left - right : left + right;
+                int64_t limit = INT64_C(1) << 39;
+                bool saturated = result >= limit || result < -limit;
+                if (result >= limit) result = limit - 1;
+                if (result < -limit) result = -limit;
+                if (written[side][dst] || written[side][dst + 1])
+                    return stop(cpu, pc, insn->word, "parallel register write conflict");
+                out.r[side][dst] = (uint32_t)result;
+                out.r[side][dst + 1] = ((uint64_t)result >> 32) & 0xffu;
+                written[side][dst] = written[side][dst + 1] = true;
+                if (saturated) {
+                    if (out.load_count == 40)
+                        return stop(cpu, pc, insn->word, "delayed-status queue full");
+                    out.loads[out.load_count++] = (CdjC674xLoad){
+                        .due = cpu->cycles + 2, .address = 1u << side,
+                        .size = CDJ_C674X_DELAYED_SAT
+                    };
+                }
+            }
+        } else if (scalar_sat_op == 0x278 || scalar_sat_op == 0x258 ||
+            scalar_sat_op == 0x1f8 || scalar_sat_op == 0x3f8 ||
+            scalar_sat_op == 0x1d8 || scalar_sat_op == 0x820 ||
+            scalar_sat_op == 0x8e0 || scalar_sat_op == 0x8a0) {
+            /* SADD/SSUB/SSHL scalar forms, SPRUFE8B pp422,493,499.
+             * Result E1; CSR.SAT and per-unit SSR flag in E2. */
+            if (enabled) {
+                bool saturated;
+                unsigned unit_bit = (scalar_sat_op & 0x1c) == 0x18 ? side : 2 + side;
+                if (scalar_sat_op == 0x8e0 || scalar_sat_op == 0x8a0) {
+                    unsigned count = scalar_sat_op == 0x8a0 ? a : cpu->r[side][a] & 63;
+                    value = saturating_shift32(cpu->r[cross][b], count, &saturated);
+                } else {
+                    int64_t left = scalar_sat_op == 0x258 || scalar_sat_op == 0x1d8 ?
+                        sx(a, 5) : (int32_t)cpu->r[scalar_sat_op == 0x3f8 ? cross : side][a];
+                    int64_t right = (int32_t)cpu->r[scalar_sat_op == 0x3f8 ? side : cross][b];
+                    bool subtract = scalar_sat_op == 0x1f8 || scalar_sat_op == 0x3f8 ||
+                                    scalar_sat_op == 0x1d8;
+                    value = saturate32(subtract ? left - right : left + right, &saturated);
+                }
+                if (saturated) {
+                    if (out.load_count == 40)
+                        return stop(cpu, pc, insn->word, "delayed-status queue full");
+                    out.loads[out.load_count++] = (CdjC674xLoad){
+                        .due = cpu->cycles + 2, .address = 1u << unit_bit,
+                        .size = CDJ_C674X_DELAYED_SAT
+                    };
+                }
+            }
+        } else if (long_offset || (w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154 ||
                    (w & 0x17c) == 0x124 || (w & 0x17c) == 0x174 ||
                    (w & 0x17c) == 0x164 || (w & 0x17c) == 0x144) {
             /* Scalar memory: address E1, RAM access E3, load destination E5. */
@@ -2170,6 +2275,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 /* CSR.PGIE and ITSR.GIE are also one physical bit. */
                 out.control[27] = (out.control[27] & ~1u) |
                                   ((value >> 1) & 1u);
+            } else if (dst == 21) {
+                out.control[21] = value & 0x3fu;
             } else if (dst == 4) {
                 /* Reset remains enabled. NMIE can be set by MVC but not
                  * manually cleared; maskable enables are ordinary RW bits. */
@@ -2244,6 +2351,14 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 load->value = data;
             }
             if (load->due > out.cycles) { ++j; continue; }
+            if (load->size == CDJ_C674X_DELAYED_SAT) {
+                /* Functional-unit set wins a simultaneous MVC write/clear
+                 * (SPRUFE8B 2.8.3 and 2.9.13). Parallel units accumulate. */
+                out.control[1] |= 0x200u;
+                out.control[21] |= load->address & 0x3fu;
+                memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
+                continue;
+            }
             if (load->size == CDJ_C674X_DELAYED_IFR_SET ||
                 load->size == CDJ_C674X_DELAYED_IFR_CLEAR) {
                 uint32_t sets = 0, clears = 0;

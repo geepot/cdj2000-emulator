@@ -27,6 +27,8 @@ typedef struct {
 } CdjC674xLoad;
 #define CDJ_C674X_DELAYED_IFR_SET 32u
 #define CDJ_C674X_DELAYED_IFR_CLEAR 33u
+/* No GPR write: address is the SSR unit mask, with CSR.SAT set in parallel. */
+#define CDJ_C674X_DELAYED_SAT 34u
 typedef struct {
     uint32_t word, pc, header;
     bool compact;

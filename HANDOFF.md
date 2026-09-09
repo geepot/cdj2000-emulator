@@ -8,6 +8,51 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Saturating arithmetic batch: full-width SADD (.L/.S), SSUB (.L), SSHL (.S),
+including every scalar and signed-40-bit SADD/SSUB operand form, now shares
+semantics with compact L3/S3/Ssh5/S2sh variants. SSHL uses the low six register
+count bits, including nonzero saturation for counts 32..63. Results appear in
+E1; CSR.SAT and per-unit SSR flags appear in E2. SSR MVC reads/writes mask to
+six bits; functional-unit sets win simultaneous MVC clears. References:
+SPRUFE8B SADD pp422-424, SSHL pp493-494, SSUB pp499-500, SSR 2.9.13,
+compact figures D-4/F-22/F-25/F-26. The delayed-status queue uses size sentinel
+34 without changing checkpoint layout; round-trip tests preserve it. Do not
+resume new in-flight status effects with an older interpreter.
+
+Independent table tests exercise sides, cross paths, compact RS/SAT selectors,
+false predicates, 32/40-bit boundaries, poisoned high pair bits, masked shift
+counts, delayed/sticky flags, MVC precedence and transactional failure.
+Full suite: 239 passed, 44 skipped with local socket permission. Core and new
+family harnesses pass ASan/UBSan. These tests establish the new semantics;
+the connected traces do not establish that saturation paths are exercised.
+Packed saturation, saturating multiply and the separate SAT instruction are
+not covered by this batch.
+
+Current-source replay `runs/dsp-saturation-transcript-replay-1` matches all 71
+stops from `nxs-return-bnop-connected-1`, plus exact repeat state/memory,
+coverage and TX capture. It ends at 58,099,500 packets / 120,392,283 cycles;
+trace SHA-256 `d523861d05899844d20c80a2ec9aab6fb752fe4e207a0822e87af32851f5e969`.
+Coverage: 4,469 source packets, 5,396 instruction addresses, 4,585 encodings,
+33 probable addresses, zero execution faults. Source predicate audit across
+this whole transcript: 2,976 true-observed, 231 false-only, 2,189 unavailable.
+These are source observations, not buffered issue or architectural parity.
+Strict `runs/dsp-saturation-strict-replay-1` still reproduces the documented
+SPLOOPD conflict, with one verified stop and exact repeat;
+trace SHA-256 `35734efde2f1b3aa09ad2e5ab6735d5b19fd7dd6c592305347f9dd069e391c33`.
+
+Fresh connected `runs/nxs-saturation-connected-2` and deterministic
+`runs/dsp-saturation-connected-replay-1` match all 69 stops and repeat exactly
+through phase-budget exhaustion at 56,099,500 packets / 116,888,772 cycles.
+Transcript: 105,288 events, SHA-256
+`e5c8aa47c4920464f48fbcba99c8ce93b4f27453cb56d1a8eeb8d7c400c9a5cc`.
+Replay trace: `3bb133579bc576f82174c8f9bc3fe9402e1ed35b6a4377a819bfdfb1b6b629c2`;
+coverage: `4ad02a41a78849e6f3f3efffb1b8ff725ed1ceb1bbde0bc618b5315da97cff27`.
+Counts equal the preceding 71-stop inventory, except 4,839 dynamic edges.
+All 59,988 captured XBUF words are zero; TX SHA-256
+`f84639275492f868d73c8bff2009bcbaaaa7a76b911ff133dd36b230489a17b4`.
+Both connected/replay gates use explicitly exploratory timing/audio and remain
+ineligible for architectural validation. No full boot or working audio claim.
+
 Predicate audit tooling now records the six predicate-register boolean states
 before successful source fetch steps. Coverage reports distinguish true-observed,
 false-only, unavailable and empty observations; legacy traces remain unavailable.
@@ -45,7 +90,7 @@ Remaining milestone evidence gaps, in priority order:
   and re-piping the loop and requires software to save ILC/RILC/ITSR; it does
   not by itself justify inventing a second persistent hardware loop context
   across an ISR. Any replacement design needs that distinction resolved.
-- Compact saturation, circular addressing, reload forms and unimplemented
+- Remaining packed/multiply saturation, circular addressing, reload forms and unimplemented
   control registers remain fail-closed. Current traces have not established
   them as terminal missing-opcode frontiers; probable code is not confirmation.
 

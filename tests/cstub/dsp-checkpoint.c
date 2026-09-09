@@ -34,7 +34,10 @@ int main(int argc, char **argv)
     before.cpu.stores[0].address = 0xc0001000;
     before.cpu.stores[0].value = UINT64_C(0x123456789abcdef0);
     before.cpu.stores[0].size = 8;
-    before.cpu.load_count = 3;
+    before.cpu.load_count = 4;
+    before.cpu.loads[3].due = 6132080;
+    before.cpu.loads[3].address = 0x9;
+    before.cpu.loads[3].size = CDJ_C674X_DELAYED_SAT;
     before.cpu.loads[0].due = 6132081;
     before.cpu.loads[0].address = 0x11802000;
     before.cpu.loads[0].bank = 1;
@@ -139,7 +142,9 @@ int main(int argc, char **argv)
     assert(memcmp(l2, restored_l2, sizeof(l2)) == 0);
     assert(memcmp(shared_ram, restored_shared_ram, sizeof(shared_ram)) == 0);
     assert(memcmp(sdram, restored_sdram, sizeof(sdram)) == 0);
-    assert(after.cpu.store_count == 1 && after.cpu.load_count == 3);
+    assert(after.cpu.store_count == 1 && after.cpu.load_count == 4);
+    assert(after.cpu.loads[3].size == CDJ_C674X_DELAYED_SAT &&
+           after.cpu.loads[3].address == 0x9 && after.cpu.loads[3].due == 6132080);
     assert(after.cpu.loads[1].size == 0 &&
            after.cpu.loads[1].value == 0x4f800000 &&
            after.cpu.loads[1].address == (1u << 23) &&

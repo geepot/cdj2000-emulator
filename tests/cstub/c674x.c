@@ -2014,7 +2014,7 @@ int main(void)
     assert(c.r[1][5] == 0);
     /* Compact register ADD/SUB on .S and in-place .D complete the
      * non-saturating arithmetic batch across both sides, RS subsets and
-     * cross paths.  SADD still fails closed because CSR.SAT is delayed. */
+     * cross paths. Saturating variants share the full-width semantic path. */
     for (unsigned unit = 0; unit < 2; ++unit)
     for (unsigned subtract = 0; subtract < 2; ++subtract)
     for (unsigned side = 0; side < 2; ++side)
@@ -2037,9 +2037,10 @@ int main(void)
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.r[0][7] = 0x7fffffff;
     memory[0] = 7u << 13 | 7u << 7 | 5u << 4 | 0x0a;
-    memory[7] = 0xe0204000; /* SAT makes the ADD an unsupported SADD. */
-    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(!c.cycles && c.r[0][5] == 0);
+    memory[7] = 0xe0204000; /* SAT makes the ADD a SADD. */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 1 && c.r[0][5] == 0x7fffffff);
+    assert(!(c.control[1] & 0x200) && c.load_count == 1);
     /* SUB ignores the header SAT selector and retains modular arithmetic. */
     cdj_c674x_reset(&c, 0x1000); c.r[0][7] = 0x7fffffff;
     memory[0] |= 1u << 11;
@@ -2096,8 +2097,8 @@ int main(void)
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.r[0][4] = 1; memory[0] = 4u << 7 | 2u << 5 | 0x402;
     memory[7] = 0xe0204000;
-    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(!c.cycles && c.r[0][4] == 1);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 1 && c.r[0][4] == 1 && !c.load_count);
     /* Signed comparison at both extremes, and a negative immediate. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.r[0][1] = 0x7fffffff; c.r[1][2] = 0x80000000;

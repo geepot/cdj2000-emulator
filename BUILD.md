@@ -1,5 +1,31 @@
 # Building
 
+Saturating arithmetic batch validation:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_saturation.py
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-saturation.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c \
+  -o /tmp/cdj-saturation-family-san
+/tmp/cdj-saturation-family-san
+sh scripts/build-qemu-sh4.sh build/qemu
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/NEW_SAT_CONNECTED \
+  --seconds 15 --qemu build/qemu/build/qemu-system-sh4 \
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_SAT_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_SAT_REPLAY --steps 100000000 \
+  --events runs/NEW_SAT_CONNECTED/dsp-events.jsonl \
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx --verify-repeat
+```
+
+Local socket permission is required for connected runs and full pytest. The
+initial sandboxed `nxs-saturation-connected-1` failed before firmware execution
+because it could not bind serial sockets; `nxs-saturation-connected-2` is the
+successful authorized run. In-flight saturation status uses sentinel size 34
+in the existing checkpoint writeback queue. Use current sources to resume it.
+
 Source-predicate audit regression (tool-only; no QEMU rebuild needed):
 
 ```sh
