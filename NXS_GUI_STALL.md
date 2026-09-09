@@ -105,3 +105,47 @@ Frontend follow-up `20524e1` makes keyboard and Inspector/lab button holds
 physical down/up contacts as well. Native Tk tests verify actual bindings,
 repeat suppression, outside release and focus loss. The 122-test focused
 suite passed; these host-input tests do not establish a firmware response.
+
+## Confirmed premature receive cancellation: SIC mask ordering
+
+Stock NXS GUI code at `0x00d106d6` checks the status announcement type and
+halfword count; a valid announcement arms `0x01f00040` via `0x00d0c59a`.
+`0x00d0f65c` drains the receive channel using a separate 200-byte buffer.
+The shared interrupt handler checks TX DMA_DONE at `0x00d0cae8`, then RX
+DMA_DONE at `0x00d0cb0e`. If neither is set, it requests communication recovery
+by setting `0x00600301` at `0x00d0cb70`. This is distinct from the normal
+5,000-tick timeout checked at `0x00cfc82c`.
+
+Patch 06's timestamped trace made the failure concrete. In
+`/tmp/cdj-panel-fresh-mmr-1/gui.log`, with fresh-only delivery:
+
+| GUI simulator time | Event |
+| --- | --- |
+| 10.603334 | RX completion acknowledged at PC `0x00d0c650` |
+| 10.603371–10.603373 | Shared ISR runs again; both TX and RX IRQ_STATUS are zero |
+| 10.604098 | Payload receive armed: address `0x01f00040`, 120 halfwords |
+| 10.604298 | Receive disabled, all 120 halfwords still outstanding |
+| 10.604302 | Replaced by a 32-halfword status receive |
+
+The cancellation occurs after **200 microseconds**, not the five-second
+watchdog. MAIN subsequently sends the payload but no matching receive remains.
+The earlier length census (`cdj-panel-fresh-lengths-1`) independently showed
+three unsuccessful 240-byte read attempts, followed by repeated 64-byte reads;
+the payload was not simply absent from MAIN or never armed by GUI.
+
+GNU sim's SIC mask-write handlers forwarded pending sources **before** storing
+the new mask. NXS uses the BF531 model's **bf537** register-layout handler.
+Firmware masks RX in its ISR before acknowledging DMA_DONE; forwarding the old
+mask re-latches that source in the CEC, producing the empty second ISR above.
+Patch 07 stores the new mask first in all four register layouts. The actual
+IMASK case-body tests cover masking, unmasking a pending source, retaining a
+different shared source, and unmasking with no pending source. They do not
+claim to test the complete SIC/CEC hardware protocol.
+
+With patch 07, `/tmp/cdj-panel-mask-order-fresh-1` arms the payload at
+11.390831 and receives it at 11.648998: the receive now survives the roughly
+258 ms MAIN delay. The 60-second run consumes genuine payloads, MENU opens
+UTILITY, both fixed pools remain completely free and both mailboxes are empty.
+It still displays **E-7206 AUTH CHIP ERROR**. This establishes a specific
+interrupt-order fix, not complete boot, media loading, or playback. Untraced
+and normal cached-delivery controls must still pass before changing defaults.

@@ -1,0 +1,34 @@
+--- a/sim/bfin/dv-bfin_sic.c
++++ b/sim/bfin/dv-bfin_sic.c
+@@ -177,6 +177,6 @@
+     case mmr_offset(bf52x.imask0):
+     case mmr_offset(bf52x.imask1):
+-      bfin_sic_52x_forward_interrupts (me, sic);
+       *value32p = value;
++      bfin_sic_52x_forward_interrupts (me, sic);
+       break;
+     case mmr_offset(bf52x.iar0) ... mmr_offset(bf52x.iar3):
+@@ -288,6 +288,6 @@
+       break;
+     case mmr_offset(bf537.imask):
+-      bfin_sic_537_forward_interrupts (me, sic);
+       *value32p = value;
++      bfin_sic_537_forward_interrupts (me, sic);
+       break;
+     case mmr_offset(bf537.iar0):
+@@ -400,6 +400,6 @@
+       break;
+     case mmr_offset(bf54x.imask0) ... mmr_offset(bf54x.imask2):
+-      bfin_sic_54x_forward_interrupts (me, sic);
+       *value32p = value;
++      bfin_sic_54x_forward_interrupts (me, sic);
+       break;
+     case mmr_offset(bf54x.iar0) ... mmr_offset(bf54x.iar11):
+@@ -506,6 +506,6 @@
+     case mmr_offset(bf561.imask0):
+     case mmr_offset(bf561.imask1):
+-      bfin_sic_561_forward_interrupts (me, sic);
+       *value32p = value;
++      bfin_sic_561_forward_interrupts (me, sic);
+       break;
+     case mmr_offset(bf561.iar0):

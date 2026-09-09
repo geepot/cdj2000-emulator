@@ -388,3 +388,16 @@ request phase. Do not enable this flag in normal launches on that evidence.
 simulator time, and pre-write channel state. It does not change DMA behavior.
 This distinguishes payload cancellation from a five-second communication
 timeout; logging can perturb scheduling, so compare untraced controls too.
+
+## 07: publish the SIC mask before forwarding interrupts
+
+All four SIC register layouts previously forwarded pending interrupts using
+the old mask, then stored the new mask. Masking a serviced DMA interrupt could
+therefore latch it again before firmware acknowledged DMA_DONE; unmasking a
+pending source could fail to deliver it until some later event.
+
+Store the mask first. The BF531 NXS GUI uses the **bf537** register-layout path.
+`tests/test_bfin_sic_mask.py` executes each actual IMASK case body with a
+forwarding stub, covering masking, unmasking, pending shared sources and no
+pending source. It requires the locally patched simulator source and a compiler.
+This is a mask-ordering fix, not a complete SIC/CEC pulse/acknowledgment model.
