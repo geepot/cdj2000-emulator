@@ -655,6 +655,189 @@ int main(void)
         assert(c.r[side][dst] == compare_expected[relation]);
     }
 
+    /* INTSP/INTSPU form one four-cycle .L conversion family.  Results and
+     * sticky FADCR INEX appear in E4; all rounding is integer-derived so the
+     * tests do not depend on the host floating-point environment. */
+    struct IntSpCase {
+        uint32_t source, expected;
+        unsigned rmode;
+        bool unsigned_source, inexact;
+    } int_sp_cases[] = {
+        {0,          0x00000000, 0, false, false},
+        {1,          0x3f800000, 0, false, false},
+        {0xffffffff, 0xbf800000, 0, false, false},
+        {0x80000000, 0xcf000000, 0, false, false},
+        {0x7fffffff, 0x4f000000, 0, false, true},
+        {0x7fffffff, 0x4effffff, 1, false, true},
+        {0x7fffffff, 0x4f000000, 2, false, true},
+        {0x7fffffff, 0x4effffff, 3, false, true},
+        {0xffffffff, 0x4f800000, 0, true,  true},
+        {0xffffffff, 0x4f7fffff, 1, true,  true},
+        {0xffffffff, 0x4f800000, 2, true,  true},
+        {0xffffffff, 0x4f7fffff, 3, true,  true},
+        {0x01000001, 0x4b800000, 0, false, true},
+        {0x01000003, 0x4b800002, 0, false, true},
+    };
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+    for (unsigned j = 0; j < sizeof(int_sp_cases) / sizeof(int_sp_cases[0]); ++j) {
+        struct IntSpCase tc = int_sp_cases[j];
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        unsigned dst = 4, src = 3, shift = side ? 25 : 9;
+        c.r[side][dst] = 0xdeadbeef;
+        c.r[side ^ cross_path][src] = tc.source;
+        c.control[18] = tc.rmode << shift;
+        memory[0] = dst << 23 | src << 18 | cross_path << 12 |
+                    (tc.unsigned_source ? 0x938 : 0x958) | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.cycles == 1 && c.load_count == 1 &&
+               c.loads[0].due == 4 && c.loads[0].size == 0 &&
+               c.r[side][dst] == 0xdeadbeef &&
+               c.control[18] == tc.rmode << shift);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == 0xdeadbeef);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == tc.expected && !c.load_count);
+        assert(c.control[18] == ((tc.rmode << shift) |
+               (tc.inexact ? 1u << (side ? 23 : 7) : 0)));
+    }
+
+    /* MPYSP uses FMCR, flushes denormalized operands and underflow outputs as
+     * specified by TI, and implements all four directed rounding modes. */
+    struct MpySpCase {
+        uint32_t left, right, expected, status;
+        unsigned rmode;
+    } mpy_sp_cases[] = {
+        {0x3fc00000, 0x40000000, 0x40400000, 0x000, 0}, /* 1.5 * 2 */
+        {0xc0200000, 0x4109999a, 0xc1ac0000, 0x080, 0}, /* TI -2.5 * 8.6 */
+        {0x7fc00001, 0x40000000, 0x7fffffff, 0x001, 0}, /* QNaN */
+        {0x7f800001, 0x40000000, 0x7fffffff, 0x011, 0}, /* SNaN */
+        {0x7f800000, 0x40000000, 0x7f800000, 0x020, 0}, /* infinity */
+        {0x7f800000, 0x00000000, 0x7fffffff, 0x010, 0}, /* infinity * zero */
+        {0x80000001, 0x40000000, 0x80000000, 0x084, 0}, /* denormal * normal */
+        {0x00000001, 0x00000000, 0x00000000, 0x004, 0}, /* denormal * zero */
+        {0x7f800000, 0x00000001, 0x7fffffff, 0x018, 0}, /* infinity * denormal */
+        {0x7f7fffff, 0x40000000, 0x7f800000, 0x0e0, 0}, /* overflow nearest */
+        {0x7f7fffff, 0x40000000, 0x7f7fffff, 0x0c0, 1}, /* overflow truncate */
+        {0xff7fffff, 0x40000000, 0xff7fffff, 0x0c0, 2}, /* negative toward +inf */
+        {0xff7fffff, 0x40000000, 0xff800000, 0x0e0, 3}, /* negative toward -inf */
+        {0x00800000, 0x3f000000, 0x00000000, 0x180, 0}, /* underflow nearest */
+        {0x00800000, 0x3f000000, 0x00800000, 0x180, 2}, /* underflow upward */
+        {0x80800000, 0x3f000000, 0x80800000, 0x180, 3}, /* underflow downward */
+        {0x3f800001, 0x3f800001, 0x3f800002, 0x080, 0}, /* rounded nearest */
+        {0x3f800001, 0x3f800001, 0x3f800003, 0x080, 2}, /* rounded upward */
+    };
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+    for (unsigned j = 0; j < sizeof(mpy_sp_cases) / sizeof(mpy_sp_cases[0]); ++j) {
+        struct MpySpCase tc = mpy_sp_cases[j];
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        unsigned dst = 5, left = 3, right = 4, shift = side ? 16 : 0;
+        c.r[side][left] = tc.left;
+        c.r[side ^ cross_path][right] = tc.right;
+        c.r[side][dst] = 0xdeadbeef;
+        c.control[20] = tc.rmode << (shift + 9);
+        memory[0] = dst << 23 | right << 18 | left << 13 |
+                    cross_path << 12 | 0xe00 | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.load_count == 1 && c.loads[0].due == 4 &&
+               !c.loads[0].size && c.loads[0].sign_extend &&
+               c.r[side][dst] == 0xdeadbeef);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == tc.expected && !c.load_count);
+        assert(c.control[20] == ((tc.rmode << (shift + 9)) |
+                                (tc.status << shift)));
+        assert(!c.control[18]);
+    }
+
+    /* SPINT follows FADCR rounding and SPTRUNC ignores it.  NaNs, infinity,
+     * denormals, overflow, ties and signed directed rounding set the exact
+     * documented sticky status bits with the E4 result. */
+    struct SpIntCase {
+        uint32_t source, expected, status;
+        unsigned rmode;
+    } sp_int_cases[] = {
+        {0x4109999a, 9,          0x080, 0}, /* 8.6 nearest */
+        {0x4109999a, 8,          0x080, 1},
+        {0x4109999a, 9,          0x080, 2},
+        {0x4109999a, 8,          0x080, 3},
+        {0xc109999a, 0xfffffff7, 0x080, 0}, /* -8.6 nearest */
+        {0xc109999a, 0xfffffff8, 0x080, 1},
+        {0xc109999a, 0xfffffff8, 0x080, 2},
+        {0xc109999a, 0xfffffff7, 0x080, 3},
+        {0x3f000000, 0,          0x080, 0}, /* 0.5 ties to even */
+        {0x3fc00000, 2,          0x080, 0}, /* 1.5 ties to even */
+        {0x40200000, 2,          0x080, 0}, /* 2.5 ties to even */
+        {0x4effffff, 0x7fffff80, 0x000, 0}, /* largest exact in-range SP */
+        {0xcf000000, 0x80000000, 0x000, 0}, /* -2^31 is valid */
+        {0x4f000000, 0x7fffffff, 0x0c0, 0}, /* positive overflow */
+        {0xcf000001, 0x80000000, 0x0c0, 0}, /* negative overflow */
+        {0x7f800000, 0x7fffffff, 0x0c0, 0}, /* infinity */
+        {0xff800000, 0x80000000, 0x0c0, 0},
+        {0x7fc00001, 0x7fffffff, 0x012, 0}, /* NaN */
+        {0xffc00001, 0x80000000, 0x012, 0},
+        {0x00000001, 0,          0x088, 0}, /* denormal */
+        {0x80000000, 0,          0x000, 0}, /* negative zero */
+    };
+    for (unsigned truncate = 0; truncate < 2; ++truncate)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+    for (unsigned j = 0; j < sizeof(sp_int_cases) / sizeof(sp_int_cases[0]); ++j) {
+        struct SpIntCase tc = sp_int_cases[j];
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        unsigned dst = 5, src = 4, shift = side ? 16 : 0;
+        /* For SPTRUNC, derive the expected finite rounded value by selecting
+         * the matching toward-zero row when this table has mode variants. */
+        uint32_t expected = tc.expected;
+        if (truncate && j < 4) expected = 8;
+        if (truncate && j >= 4 && j < 8) expected = 0xfffffff8;
+        if (truncate && (j == 9 || j == 10)) expected = j == 9 ? 1 : 2;
+        c.r[side ^ cross_path][src] = tc.source;
+        c.r[side][dst] = 0xdeadbeef;
+        c.control[18] = tc.rmode << (shift + 9);
+        memory[0] = dst << 23 | src << 18 | cross_path << 12 |
+                    (truncate ? 0x178 : 0x158) | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.load_count == 1 && c.loads[0].due == 4 &&
+               !c.loads[0].size && !c.loads[0].sign_extend);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == expected && !c.load_count);
+        assert(c.control[18] == ((tc.rmode << (shift + 9)) |
+                                (tc.status << shift)));
+    }
+
+    /* False predicates create no delayed result or warning; an unsupported
+     * parallel instruction rolls the whole issue packet back. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][4] = 99; c.r[0][3] = 0x7fffffff;
+    memory[0] = 2u << 29 | 4u << 23 | 3u << 18 | 0x958;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][4] == 99 && !c.load_count && !c.control[18]);
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][4] = 99; c.r[0][3] = 7;
+    memory[0] = 4u << 23 | 3u << 18 | 0x959;
+    memory[1] = 0xffffffff;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.r[0][4] == 99 && !c.load_count && !c.control[18]);
+
+    /* A same-cycle E1 write to an E4 destination is rejected before either
+     * operation commits; the pending conversion remains checkpointable. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][4] = 99; c.r[0][3] = 7;
+    memory[0] = 4u << 23 | 3u << 18 | 0x958;
+    memory[3] = mvk(0, 4, 1);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 3 && c.r[0][4] == 99 && c.load_count == 1 &&
+           c.loads[0].size == 0 && c.loads[0].value == 0x40e00000);
+
     /* A later unknown compact instruction rolls back the whole packet. */
     memset(memory, 0, sizeof(memory));
     cdj_c674x_reset(&c, 0x1000);

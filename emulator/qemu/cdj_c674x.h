@@ -13,6 +13,11 @@ typedef struct {
 } CdjC674xStore;
 typedef struct {
     uint64_t due, value;
+    /* size 1/2/4/8 is a memory load; size 0 is an already-computed delayed
+     * scalar result.  For size 0, address is a floating-point status-bit OR
+     * mask and sign_extend selects FADCR (false) or FMCR (true).  This reuses
+     * the ABI-stable writeback queue so schema-1 checkpoints retain every
+     * in-flight four-cycle result. */
     uint32_t address;
     unsigned bank, dst, size;
     bool sign_extend;

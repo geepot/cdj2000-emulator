@@ -8,6 +8,159 @@ static int32_t sx(uint32_t value, unsigned bits)
     return (int32_t)((value ^ sign) - sign);
 }
 
+/* Convert a 32-bit integer to IEEE-754 binary32 without depending on the
+ * host floating-point environment.  FADCR modes are nearest-even, toward
+ * zero, toward +infinity and toward -infinity (SPRUFE8B Table 2-25). */
+static uint32_t integer_to_sp(uint32_t source, bool signed_source,
+                              unsigned rmode, bool *inexact)
+{
+    bool negative = signed_source && (source & 0x80000000u);
+    uint32_t magnitude = negative ? 0u - source : source;
+    *inexact = false;
+    if (!magnitude) return 0;
+    unsigned msb = 31;
+    while (!(magnitude & (1u << msb))) --msb;
+    uint32_t mantissa;
+    unsigned exponent = msb + 127;
+    if (msb <= 23) {
+        mantissa = magnitude << (23 - msb);
+    } else {
+        unsigned shift = msb - 23;
+        uint32_t remainder_mask = (1u << shift) - 1;
+        uint32_t remainder = magnitude & remainder_mask;
+        mantissa = magnitude >> shift;
+        *inexact = remainder != 0;
+        bool increment = false;
+        if (rmode == 0 && remainder) {
+            uint32_t halfway = 1u << (shift - 1);
+            increment = remainder > halfway ||
+                        (remainder == halfway && (mantissa & 1));
+        } else if (rmode == 2) increment = !negative && remainder;
+        else if (rmode == 3) increment = negative && remainder;
+        if (increment && ++mantissa == (1u << 24)) {
+            mantissa >>= 1;
+            ++exponent;
+        }
+    }
+    return (negative ? 0x80000000u : 0) | exponent << 23 |
+           (mantissa & 0x7fffffu);
+}
+
+typedef struct { uint32_t value, status; } SpResult;
+
+/* C674x MPYSP treats denormal sources as signed zero and flushes an
+ * underflow result to signed zero or the smallest normal according to FMCR.
+ * Normal finite multiplication is evaluated exactly as a 48-bit integer and
+ * rounded once, avoiding host FP and excess-precision differences. */
+static SpResult multiply_sp(uint32_t left, uint32_t right, unsigned rmode)
+{
+    unsigned sign = (left ^ right) & 0x80000000u;
+    unsigned le = (left >> 23) & 255, re = (right >> 23) & 255;
+    uint32_t lf = left & 0x7fffff, rf = right & 0x7fffff;
+    bool lnan = le == 255 && lf, rnan = re == 255 && rf;
+    bool linf = le == 255 && !lf, rinf = re == 255 && !rf;
+    bool lden = !le && lf, rden = !re && rf;
+    bool lzero = !le && !lf, rzero = !re && !rf;
+    uint32_t status = (lnan ? 1u : 0) | (rnan ? 2u : 0) |
+                      (lden ? 4u : 0) | (rden ? 8u : 0);
+    if (lnan || rnan) {
+        if ((lnan && !(lf & 0x400000)) || (rnan && !(rf & 0x400000)))
+            status |= 1u << 4;
+        return (SpResult){sign | 0x7fffffffu, status};
+    }
+    if ((linf && (rzero || rden)) || (rinf && (lzero || lden)))
+        return (SpResult){sign | 0x7fffffffu, status | (1u << 4)};
+    if (linf || rinf)
+        return (SpResult){sign | 0x7f800000u, status | (1u << 5)};
+    if (lzero || rzero || lden || rden) {
+        if ((lden && !rzero && !rden) || (rden && !lzero && !lden))
+            status |= 1u << 7;
+        return (SpResult){sign, status};
+    }
+    uint64_t product = (uint64_t)(0x800000u | lf) * (0x800000u | rf);
+    unsigned msb = (product & (UINT64_C(1) << 47)) ? 47 : 46;
+    int exponent = (int)le + (int)re - 127 + (int)msb - 46;
+    unsigned shift = msb - 23;
+    uint32_t mantissa = product >> shift;
+    uint64_t remainder = product & ((UINT64_C(1) << shift) - 1);
+    bool inexact = remainder != 0, increment = false;
+    if (rmode == 0 && remainder) {
+        uint64_t halfway = UINT64_C(1) << (shift - 1);
+        increment = remainder > halfway ||
+                    (remainder == halfway && (mantissa & 1));
+    } else if (rmode == 2) increment = !sign && remainder;
+    else if (rmode == 3) increment = sign && remainder;
+    if (increment && ++mantissa == (1u << 24)) {
+        mantissa >>= 1;
+        ++exponent;
+    }
+    if (exponent >= 255) {
+        bool infinity = rmode == 0 || (rmode == 2 && !sign) ||
+                        (rmode == 3 && sign);
+        uint32_t result = sign | (infinity ? 0x7f800000u : 0x7f7fffffu);
+        status |= (1u << 7) | (1u << 6) | (infinity ? 1u << 5 : 0);
+        return (SpResult){result, status};
+    }
+    if (exponent <= 0) {
+        bool smallest = (rmode == 2 && !sign) || (rmode == 3 && sign);
+        status |= (1u << 8) | (1u << 7);
+        return (SpResult){sign | (smallest ? 0x00800000u : 0), status};
+    }
+    if (inexact) status |= 1u << 7;
+    return (SpResult){sign | (uint32_t)exponent << 23 |
+                      (mantissa & 0x7fffff), status};
+}
+
+/* SPINT/SPTRUNC convert the binary32 bit pattern directly.  Invalid and
+ * overflow inputs saturate by sign; denormals become zero.  SPINT uses FADCR
+ * rounding while SPTRUNC supplies mode 1 regardless of FADCR. */
+static SpResult sp_to_integer(uint32_t source, unsigned rmode)
+{
+    bool negative = (source & 0x80000000u) != 0;
+    unsigned exponent = (source >> 23) & 255;
+    uint32_t fraction = source & 0x7fffff;
+    uint32_t saturated = negative ? 0x80000000u : 0x7fffffffu;
+    if (exponent == 255) {
+        if (fraction)
+            return (SpResult){saturated, (1u << 4) | (1u << 1)};
+        return (SpResult){saturated, (1u << 7) | (1u << 6)};
+    }
+    if (!exponent) {
+        if (fraction) return (SpResult){0, (1u << 7) | (1u << 3)};
+        return (SpResult){0, 0};
+    }
+    int power = (int)exponent - 127;
+    uint64_t significand = 0x800000u | fraction;
+    uint64_t magnitude, remainder = 0, halfway = 0;
+    if (power >= 23) {
+        if (power > 31) return (SpResult){saturated, (1u << 7) | (1u << 6)};
+        magnitude = significand << (power - 23);
+    } else if (power >= 0) {
+        unsigned shift = 23 - power;
+        magnitude = significand >> shift;
+        remainder = significand & ((UINT64_C(1) << shift) - 1);
+        halfway = UINT64_C(1) << (shift - 1);
+    } else {
+        magnitude = 0;
+        remainder = significand;
+        if (power == -1) halfway = UINT64_C(1) << 23;
+        else halfway = UINT64_MAX; /* magnitude is strictly below one half */
+    }
+    if (remainder) {
+        bool increment = (rmode == 0 &&
+                          (remainder > halfway ||
+                           (remainder == halfway && (magnitude & 1)))) ||
+                         (rmode == 2 && !negative) ||
+                         (rmode == 3 && negative);
+        if (increment) ++magnitude;
+    }
+    if ((!negative && magnitude > 0x7fffffffu) ||
+        (negative && magnitude > 0x80000000u))
+        return (SpResult){saturated, (1u << 7) | (1u << 6)};
+    uint32_t result = negative ? 0u - (uint32_t)magnitude : magnitude;
+    return (SpResult){result, remainder ? 1u << 7 : 0};
+}
+
 /* Return the number of cycles inserted by a NOP encoding, or zero when the
  * instruction is not a NOP. The compact H-9 N3 field encodes count - 1;
  * SPRUFE8B labels the operand N3, but TI dis6x and GNU binutils agree on the
@@ -631,6 +784,86 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = sx(a, 5); /* MVK .D */
         } else if ((w & 0x3effc) == 0xa358) {
             value = sx(b, 5); /* MVK .L */
+        } else if ((w & 0x3cffc) == 0x958 ||
+                   (w & 0x3cffc) == 0x938) {
+            /* INTSP/INTSPU read the integer in E1 and write binary32 in E4.
+             * The FADCR rounding mode is sampled at issue; INEX becomes
+             * sticky with the delayed result only when precision is lost. */
+            reg_write = false;
+            if (enabled) {
+                bool inexact;
+                bool signed_source = (w & 0x3cffc) == 0x958;
+                unsigned rmode = (cpu->control[18] >> (side ? 25 : 9)) & 3;
+                uint32_t result = integer_to_sp(cpu->r[cross][b],
+                                                signed_source, rmode, &inexact);
+                uint64_t due = cpu->cycles + 4;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned count = out.loads[j].size == 8 ? 2 : 1;
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due, .value = result,
+                    .address = inexact ? 1u << (side ? 23 : 7) : 0,
+                    .bank = side, .dst = dst, .size = 0
+                };
+            }
+        } else if ((w & 0x3cffc) == 0x158 ||
+                   (w & 0x3cffc) == 0x178) {
+            /* SPINT obeys FADCR; SPTRUNC always rounds toward zero.  Both
+             * read in E1 and publish the integer and status in E4. */
+            reg_write = false;
+            if (enabled) {
+                unsigned shift = side ? 16 : 0;
+                unsigned rmode = (w & 0x20) ? 1 :
+                    (cpu->control[18] >> (shift + 9)) & 3;
+                SpResult result = sp_to_integer(cpu->r[cross][b], rmode);
+                uint64_t due = cpu->cycles + 4;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned count = out.loads[j].size == 8 ? 2 : 1;
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due, .value = result.value,
+                    .address = result.status << shift,
+                    .bank = side, .dst = dst, .size = 0
+                };
+            }
+        } else if ((w & 0xffc) == 0xe00) {
+            /* MPYSP uses FMCR and the same E1-read/E4-write timing as the
+             * other four-cycle scalar operations. */
+            reg_write = false;
+            if (enabled) {
+                unsigned shift = side ? 16 : 0;
+                unsigned rmode = (cpu->control[20] >> (shift + 9)) & 3;
+                SpResult result = multiply_sp(cpu->r[side][a],
+                                              cpu->r[cross][b], rmode);
+                uint64_t due = cpu->cycles + 4;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned count = out.loads[j].size == 8 ? 2 : 1;
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due, .value = result.value,
+                    .address = result.status << shift,
+                    .bank = side, .dst = dst, .size = 0,
+                    .sign_extend = true
+                };
+            }
         } else if ((w & 0xffc) == 0x018 || (w & 0xffc) == 0xff0 ||
                    (w & 0xffc) == 0x3d8 || (w & 0xffc) == 0x260 ||
                    (w & 0xffc) == 0x398 || (w & 0xffc) == 0x220 ||
@@ -800,11 +1033,17 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 (uint64_t)out.stores[k].address < (uint64_t)out.loads[j].address + out.loads[j].size)
                 return stop(cpu, cpu->pc, 0, "simultaneous overlapping RAM accesses not implemented");
     /* Reject E5/E1 register collisions before any RAM transaction commits. */
-    for (unsigned j = 0; j < out.load_count; ++j)
+    for (unsigned j = 0; j < out.load_count; ++j) {
+        unsigned count = out.loads[j].size == 8 ? 2 : 1;
         if (out.loads[j].due == cpu->cycles + 1 &&
             (written[out.loads[j].bank][out.loads[j].dst] ||
-             (out.loads[j].size == 8 && written[out.loads[j].bank][out.loads[j].dst + 1])))
-            return stop(cpu, cpu->pc, 0, "load result write conflict");
+             (count == 2 && written[out.loads[j].bank][out.loads[j].dst + 1])))
+            return stop(cpu, cpu->pc, 0, "delayed-result write conflict");
+        if (!out.loads[j].size && out.loads[j].address &&
+            out.loads[j].due == cpu->cycles + 1 &&
+            controls[out.loads[j].sign_extend ? 20 : 18])
+            return stop(cpu, cpu->pc, 0, "delayed FP-status write conflict");
+    }
     if (packet->single_cycle && elapsed > 1) {
         out.idle_cycles = elapsed - 1;
         elapsed = 1;
@@ -822,7 +1061,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
         for (unsigned j = 0; j < out.load_count;) {
             CdjC674xLoad *load = &out.loads[j];
-            if (load->due == out.cycles + 2) {
+            if (load->size && load->due == out.cycles + 2) {
                 uint64_t data;
                 if (!read_scalar(read, opaque, load->address, load->size, &data))
                     return stop(cpu, cpu->pc, 0, "RAM load mapping changed during execution");
@@ -832,6 +1071,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             if (load->due > out.cycles) { ++j; continue; }
             out.r[load->bank][load->dst] = load->value;
             if (load->size == 8) out.r[load->bank][load->dst + 1] = load->value >> 32;
+            if (!load->size)
+                out.control[load->sign_extend ? 20 : 18] |= load->address;
             memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
         }
         if (out.branch_due && out.cycles == out.branch_due) {

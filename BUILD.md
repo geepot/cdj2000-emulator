@@ -1034,3 +1034,58 @@ passes. Full boot and audio remain incomplete. Next implement the reachable
 external-stage floating-point/conversion cluster beginning with INTSP as a
 documented family, using checkpoint replay for iteration and another connected
 run only after a meaningful batch.
+
+### Scalar floating-point conversion and multiplication batch
+
+`INTSP`, `INTSPU`, `SPINT`, `SPTRUNC` and `MPYSP` now share a four-cycle
+E1-read/E4-write path. Their bit-exact helpers do not use host floating point.
+FADCR controls conversions, FMCR controls multiply, and sticky status is
+committed with the delayed result. TI rounding, denormal, underflow, overflow,
+NaN, infinity, signed-zero and saturation behavior is covered by table-driven
+tests. `ADDSP`, `SUBSP` and other scalar/vector floating-point instructions
+remain fail-closed.
+
+Computed E4 results use `size == 0` entries in the existing delayed-load queue;
+the entry's value, due cycle, destination and pending FADCR/FMCR OR mask are
+therefore already included in schema-1 checkpoints. The C structure layout and
+checkpoint component sizes did not change. Tests round-trip a checkpoint with
+an in-flight computed result and verify E4/E1 and delayed-status conflicts are
+rejected atomically.
+
+Reproduce focused and complete validation:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_c674x.py tests/test_dsp_replay.py tests/test_dsp_inventory.py
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-fp-batch-san
+/tmp/cdj-fp-batch-san
+.venv/bin/python -m pytest -q
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+```
+
+Focused tests report 18 passed; the full suite reports 180 passed / 43 skipped;
+the sanitizer harness passes. The rebuilt QEMU binary was checked newer than
+the C674x source. Use fresh run directories for replay and connected execution:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-compact-loop-connected-events-1/final.cdjdsp \
+  runs/NEW_FP_REPLAY --steps 1000000 --verify-repeat
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/NEW_FP_CONNECTED \
+  --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_FP_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_FP_EVENT_REPLAY --steps 10000000 \
+  --events runs/NEW_FP_CONNECTED/dsp-events.jsonl --verify-repeat
+```
+
+Current artifacts are `runs/nxs-fp-convert-connected` and
+`runs/dsp-fp-connected-events-1`. They agree at PC `0xc0012644`, word
+`0x020c9572`, after 2,600,629 packets / 6,133,250 cycles, with one in-flight E4
+result retained. The replay verifies all 39 connected stops. Trace SHA-256 is
+`9f75a60dbe1d4e094ae0fef9ec078219a5662b751e75c8cba0550c0a59497613` and
+final checkpoint SHA-256 is
+`6787287c81eafa09bf86eb32b283d16a19f0261cd0a0719fd4db61fdd6a27e10`.
+The current blocker is an `.L2X` `ADDU` extended-result form, not another
+floating-point instruction. Implement its associated extended integer family
+as the next batch. Exact replay does not prove full boot, working audio or all
+floating-point semantics; those remain incomplete.

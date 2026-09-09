@@ -35,7 +35,7 @@ state-divergent events fail closed. Starting from checkpoint 1,
 DSP stops through every HPI chunk in about 2.3 seconds. Its trace and final
 checkpoint repeat byte-for-byte; final L2 and logical SDRAM hashes also agree.
 
-The latest batch resolves compact `0x0c66` as SPLOOP (SPRUFE8B Figure H-5 and
+The preceding instruction batch resolves compact `0x0c66` as SPLOOP (SPRUFE8B Figure H-5 and
 GNU `nfu_uspl`), decodes all II values 1..14, and reuses the existing software
 loop scheduler. Compact SPLOOPD encodings are recognized but still stop
 explicitly because delayed testing is not implemented. Compact SPKERNEL
@@ -62,7 +62,7 @@ reconstructed sparse SDRAM; its results remain discovery-only.
 
 `runs/dsp-compact-loop-connected-events-1 --verify-repeat` starts at the new
 connected run's DSP-start checkpoint, gates all 39 connected stops and ends at
-the same fail-closed boundary: `INTSP .L1 A3,A3`, PC `0xc000ea94`, word
+the then-current fail-closed boundary: `INTSP .L1 A3,A3`, PC `0xc000ea94`, word
 `0x018c0958`, after 2,600,603 packets / 6,133,200 cycles. Trace SHA-256 is
 `e9e265bbda0b8ac8217b2b813bcfaa47adc970aafbc3fa3b0f354fbf7a4f9df6`;
 the repeated final checkpoint SHA-256 is
@@ -72,11 +72,47 @@ The rebuilt 15-second connected MAIN/Blackfin run
 packet count and cycle count, exits the GUI with status zero and publishes a
 frame. This is connected execution evidence, not full boot or working audio.
 
-Focused and complete validation passes: 180 tests passed / 43 skipped, and the
-C674x harness passes AddressSanitizer/UndefinedBehaviorSanitizer. Next inventory
-the reachable external-stage floating-point/conversion cluster around INTSP
-and implement the useful TI-documented family as a batch, including latency,
-IEEE-754 boundaries, predicates, parallel issue and fault atomicity. Do not
+The current scalar floating-point batch implements `INTSP`, `INTSPU`, `SPINT`,
+`SPTRUNC` and `MPYSP`. Conversion and multiplication are performed directly on
+integer bit patterns, independently of the host floating-point environment.
+They implement all four FADCR/FMCR rounding modes, TI's denormal-as-zero and
+underflow-flush rules, signed zero, infinity, quiet/signaling NaNs, saturation,
+and sticky status flags. Operands are sampled in E1 and results plus status are
+published in E4. An ABI-neutral `size == 0` entry in the existing delayed-load
+queue preserves in-flight computed results in schema-1 checkpoints without
+changing `CdjC674x` size. `ADDSP`/`SUBSP` and the remaining floating-point ISA
+are still unsupported and are not implied by this batch.
+
+Table-driven tests cover both units and cross paths, rounding boundaries,
+exception/status behavior, predicates, fault atomicity, delayed write hazards,
+and a checkpoint containing an in-flight E4 result. The complete suite remains
+180 passed / 43 skipped, and the C674x harness passes
+AddressSanitizer/UndefinedBehaviorSanitizer. Source SHA-256 values for the
+connected/replay evidence are `647c9a7caf4b3016f91168e21e0a9a59db9037871ed8a06ff002befeda774c57`
+for `cdj_c674x.c` and
+`148b31568d2745ccabb202946bcaa5b3bb075b6f81579ec3639a0230621187f5`
+for `cdj_c674x.h`.
+
+Chained deterministic replays advanced from `INTSP` to `MPYSP`, then
+`SPTRUNC`, and finally through 20 additional packets to a different integer
+family. `runs/dsp-fp-connected-events-1 --verify-repeat` gates all 39 stops in
+the newest connected transcript and repeats exact trace, serialized state, L2
+and SDRAM. It stops at PC `0xc0012644`, word `0x020c9572`, after 2,600,629
+packets / 6,133,250 cycles with one legitimate pending E4 result. Trace
+SHA-256 is `9f75a60dbe1d4e094ae0fef9ec078219a5662b751e75c8cba0550c0a59497613`;
+the final checkpoint SHA-256 is
+`6787287c81eafa09bf86eb32b283d16a19f0261cd0a0719fd4db61fdd6a27e10`.
+The rebuilt connected run `runs/nxs-fp-convert-connected` independently agrees
+at the same PC, word and counts; its bounded GUI exits zero and publishes a
+frame. This is exact replay and connected execution evidence, not full boot or
+working audio.
+
+The current word is the full-width `.L2X` `ADDU` extended-result form (GNU
+format `l_1_or_2_src`, operation field `0x2b`) and writes a register pair. Next
+implement the useful TI-documented extended integer add/subtract family as one
+batch, including 40-bit/register-pair semantics, operand-extension rules,
+cross paths, predicates, timing, parallel hazards and checkpoint preservation.
+Then continue automatically to the next genuinely different family. Do not
 relax checkpoint gates or infer correctness from packet count alone.
 
 ### Previous SYSCFG checkpoint

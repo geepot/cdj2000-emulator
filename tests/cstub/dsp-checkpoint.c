@@ -32,13 +32,20 @@ int main(int argc, char **argv)
     before.cpu.stores[0].address = 0xc0001000;
     before.cpu.stores[0].value = UINT64_C(0x123456789abcdef0);
     before.cpu.stores[0].size = 8;
-    before.cpu.load_count = 1;
+    before.cpu.load_count = 2;
     before.cpu.loads[0].due = 6132081;
     before.cpu.loads[0].address = 0x11802000;
     before.cpu.loads[0].bank = 1;
     before.cpu.loads[0].dst = 7;
     before.cpu.loads[0].size = 4;
     before.cpu.loads[0].sign_extend = true;
+    before.cpu.loads[1].due = 6132083;
+    before.cpu.loads[1].value = 0x4f800000;
+    before.cpu.loads[1].address = 1u << 23;
+    before.cpu.loads[1].bank = 1;
+    before.cpu.loads[1].dst = 9;
+    before.cpu.loads[1].size = 0;
+    before.cpu.loads[1].sign_extend = true;
     before.cpu.loop_active = true;
     before.cpu.loop_wait = 2;
     before.cpu.loop_tags = 9;
@@ -81,7 +88,11 @@ int main(int argc, char **argv)
     assert(memcmp(&before, &after, sizeof(before)) == 0);
     assert(memcmp(l2, restored_l2, sizeof(l2)) == 0);
     assert(memcmp(sdram, restored_sdram, sizeof(sdram)) == 0);
-    assert(after.cpu.store_count == 1 && after.cpu.load_count == 1);
+    assert(after.cpu.store_count == 1 && after.cpu.load_count == 2);
+    assert(after.cpu.loads[1].size == 0 &&
+           after.cpu.loads[1].value == 0x4f800000 &&
+           after.cpu.loads[1].address == (1u << 23) &&
+           after.cpu.loads[1].sign_extend);
     assert(after.cpu.loop_active && after.cpu.loop.tags[2][7] == 91);
     assert(after.cpu.loop_instructions[91].word == 0xfeedbeef);
 
