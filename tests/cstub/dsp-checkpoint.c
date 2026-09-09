@@ -33,7 +33,7 @@ static uint64_t test_checksum(const void *data, size_t size)
     return hash;
 }
 
-static void downgrade_to_schema9(const char *path)
+static void downgrade_to_schema10(const char *path)
 {
     FILE *file = fopen(path, "rb");
     assert(file && fseek(file, 0, SEEK_END) == 0);
@@ -45,9 +45,49 @@ static void downgrade_to_schema9(const char *path)
 
     TestCheckpointHeader *header = (TestCheckpointHeader *)bytes;
     assert(header->header_size == sizeof(*header) &&
+           header->schema == 11 &&
            header->state_size == sizeof(CdjDspCheckpointState) &&
            header->payload_size == size - sizeof(*header));
     size_t alignment = _Alignof(CdjDspCheckpointState);
+    size_t schema10_state_size = (offsetof(CdjDspCheckpointState, scheduler) +
+                                  alignment - 1) / alignment * alignment;
+    assert(schema10_state_size <= header->state_size);
+    size_t removed = header->state_size - schema10_state_size;
+    memmove(bytes + sizeof(*header) + schema10_state_size,
+            bytes + sizeof(*header) + header->state_size,
+            header->payload_size - header->state_size);
+    memcpy(header->magic, "CDJDSP10", sizeof(header->magic));
+    header->schema = 10;
+    header->state_size = schema10_state_size;
+    header->component_size[8] -= sizeof(CdjDspScheduler);
+    header->payload_size -= removed;
+    header->payload_checksum = test_checksum(bytes + sizeof(*header),
+                                             header->payload_size);
+    size -= removed;
+
+    file = fopen(path, "wb");
+    assert(file && fwrite(bytes, 1, size, file) == size &&
+           fflush(file) == 0 && fclose(file) == 0);
+    free(bytes);
+}
+
+static void downgrade_schema10_to_schema9(const char *path)
+{
+    FILE *file = fopen(path, "rb");
+    assert(file && fseek(file, 0, SEEK_END) == 0);
+    long end = ftell(file);
+    assert(end > 0 && fseek(file, 0, SEEK_SET) == 0);
+    size_t size = (size_t)end;
+    uint8_t *bytes = malloc(size);
+    assert(bytes && fread(bytes, 1, size, file) == size && fclose(file) == 0);
+
+    TestCheckpointHeader *header = (TestCheckpointHeader *)bytes;
+    size_t alignment = _Alignof(CdjDspCheckpointState);
+    size_t schema10_state_size = (offsetof(CdjDspCheckpointState, scheduler) +
+                                  alignment - 1) / alignment * alignment;
+    assert(header->header_size == sizeof(*header) &&
+           header->schema == 10 && header->state_size == schema10_state_size &&
+           header->payload_size == size - sizeof(*header));
     size_t schema9_state_size = (offsetof(CdjDspCheckpointState, spi_transfer) +
                                  alignment - 1) / alignment * alignment;
     assert(schema9_state_size <= header->state_size);
@@ -70,9 +110,28 @@ static void downgrade_to_schema9(const char *path)
     free(bytes);
 }
 
+static void assert_schema8_peripheral_tail_preserved(
+    const CdjDspCheckpointState *state)
+{
+    assert(state->mcasp_control.gblctl[1] == 0x1f00 &&
+           state->mcasp_control.xfmt[1] == 0xf2 &&
+           state->mcasp_control.srctl[1][3] == 1 &&
+           state->mcasp_control.xrdy[1] == (1u << 3));
+    assert(state->edma.drae[1] == 0x28 &&
+           state->edma.param[3][0] == 0x00103200 &&
+           state->edma.param[3][5] == 0x00024400 &&
+           state->edma.irq_notifications == (1u << 2));
+    assert(state->syscfg_priority.mstpri[0] == 0x44442122 &&
+           state->syscfg_priority.mstpri[1] == 0x44442000 &&
+           state->syscfg_priority.mstpri[2] == 0x54604404);
+    assert(state->intc_delivery.cpu_request == (1u << 8));
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
+    assert(offsetof(CdjDspCheckpointState, scheduler) +
+           sizeof(CdjDspScheduler) == sizeof(CdjDspCheckpointState));
     CdjDspCheckpointState before = {0}, after = {0};
     before.hpi_address = 0x11801234;
     before.boot_phase = 3;
@@ -200,6 +259,14 @@ int main(int argc, char **argv)
     before.spi_transfer.phase = 2;
     before.spi_transfer.queued_valid = 1;
     before.spi_transfer.tx_full = 1;
+    cdj_dsp_scheduler_reset(&before.scheduler);
+    assert(cdj_dsp_scheduler_request(&before.scheduler));
+    assert(cdj_dsp_scheduler_begin(&before.scheduler) ==
+           CDJ_DSP_SCHEDULER_SLICE_STEPS);
+    assert(cdj_dsp_scheduler_request(&before.scheduler));
+    assert(cdj_dsp_scheduler_end(&before.scheduler,
+                                 CDJ_DSP_SCHEDULER_SLICE_STEPS,
+                                 false, false));
     l2[0] = 0x68;
     l2[sizeof(l2) - 1] = 0xa5;
     shared_ram[0] = 0x56;
@@ -272,13 +339,50 @@ int main(int argc, char **argv)
            after.spi_transfer.phase == 2 && after.spi_transfer.queued_valid &&
            after.spi_transfer.tx_full &&
            cdj_c6747_spi_transfer_valid(&after.spi_transfer));
+    assert(after.scheduler.activation_id == 1 &&
+           after.scheduler.slice_id == 1 &&
+           after.scheduler.remaining ==
+               CDJ_DSP_SCHEDULER_ACTIVATION_STEPS -
+               CDJ_DSP_SCHEDULER_SLICE_STEPS &&
+           after.scheduler.slice_steps == CDJ_DSP_SCHEDULER_SLICE_STEPS &&
+           after.scheduler.pending && after.scheduler.rearm &&
+           after.scheduler.mode == CDJ_DSP_SCHEDULER_MODE_DEFERRED_V1 &&
+           cdj_dsp_scheduler_valid(&after.scheduler));
     CdjDspCheckpointState invalid = before;
     invalid.spi_transfer.reserved[0] = 1;
     assert(!cdj_dsp_checkpoint_write(argv[1], &invalid, l2, sizeof(l2),
                                      shared_ram, sizeof(shared_ram), sdram,
                                      sizeof(sdram), error, sizeof(error)));
+    invalid = before;
+    invalid.scheduler.reserved = 1;
+    assert(!cdj_dsp_checkpoint_write(argv[1], &invalid, l2, sizeof(l2),
+                                     shared_ram, sizeof(shared_ram), sdram,
+                                     sizeof(sdram), error, sizeof(error)));
 
-    downgrade_to_schema9(argv[1]);
+    downgrade_to_schema10(argv[1]);
+    memset(&after, 0xa5, sizeof(after));
+    assert(cdj_dsp_checkpoint_read(argv[1], &after, restored_l2,
+                                   sizeof(restored_l2), restored_shared_ram,
+                                   sizeof(restored_shared_ram), restored_sdram,
+                                   sizeof(restored_sdram), error, sizeof(error)));
+    CdjDspScheduler legacy_scheduler = {0};
+    assert(memcmp(&after.scheduler, &legacy_scheduler,
+                  sizeof(legacy_scheduler)) == 0 &&
+           after.scheduler.mode == CDJ_DSP_SCHEDULER_MODE_LEGACY &&
+           cdj_dsp_scheduler_valid(&after.scheduler));
+    assert(after.spi_transfer.half_ticks_remaining == 775 &&
+           after.spi_transfer.active_control == 0x1ff &&
+           after.spi_transfer.queued_control == 0x3ff &&
+           after.spi_transfer.phase == 2 && after.spi_transfer.queued_valid &&
+           after.spi_transfer.tx_full &&
+           cdj_c6747_spi_transfer_valid(&after.spi_transfer));
+    assert(after.wm8740.program[0] == 0x1ff &&
+           after.wm8740.program[1] == 0x1fe &&
+           after.wm8740.last_word == 0x3fe &&
+           after.wm8740.transfers == 2);
+    assert_schema8_peripheral_tail_preserved(&after);
+
+    downgrade_schema10_to_schema9(argv[1]);
     memset(&after, 0xa5, sizeof(after));
     assert(cdj_dsp_checkpoint_read(argv[1], &after, restored_l2,
                                    sizeof(restored_l2), restored_shared_ram,
@@ -294,6 +398,10 @@ int main(int argc, char **argv)
            after.wm8740.transfers == 2 &&
            after.wm8740.active_attenuation[0] == 0xff &&
            after.wm8740.active_attenuation[1] == 0xfe);
+    assert(memcmp(&after.scheduler, &legacy_scheduler,
+                  sizeof(legacy_scheduler)) == 0 &&
+           cdj_dsp_scheduler_valid(&after.scheduler));
+    assert_schema8_peripheral_tail_preserved(&after);
     assert(memcmp(l2, restored_l2, sizeof(l2)) == 0);
     assert(memcmp(shared_ram, restored_shared_ram, sizeof(shared_ram)) == 0);
     assert(memcmp(sdram, restored_sdram, sizeof(sdram)) == 0);
@@ -304,6 +412,6 @@ int main(int argc, char **argv)
                                     sizeof(restored_l2), restored_shared_ram,
                                     sizeof(restored_shared_ram), restored_sdram,
                                     sizeof(restored_sdram), error, sizeof(error)));
-    puts("DSP checkpoint schema-10 timed SPI round trip and schema-9 migration passed");
+    puts("DSP checkpoint schema-11 scheduler round trip and schema-10/9 migrations passed");
     return 0;
 }

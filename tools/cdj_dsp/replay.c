@@ -720,10 +720,11 @@ static const char *limit_reached(const ReplayLimits *limits)
     return NULL;
 }
 
-static const char *run_budget(ReplayLimits *limits, uint32_t breakpoint)
+static const char *run_quota(ReplayLimits *limits, uint32_t breakpoint,
+                             unsigned quota)
 {
     const char *reason = "phase budget exhausted";
-    for (unsigned step = 0; step < CDJ_DSP_COOPERATIVE_BUDGET; ++step) {
+    for (unsigned step = 0; step < quota; ++step) {
         const char *limited = limit_reached(limits);
         if (limited) return limited;
         if (breakpoint && cpu.pc == breakpoint) return "breakpoint";
@@ -749,6 +750,11 @@ static const char *run_budget(ReplayLimits *limits, uint32_t breakpoint)
         if (hpi.hint) return "HINT host-event yield";
     }
     return reason;
+}
+
+static const char *run_budget(ReplayLimits *limits, uint32_t breakpoint)
+{
+    return run_quota(limits, breakpoint, CDJ_DSP_COOPERATIVE_BUDGET);
 }
 
 typedef enum {
@@ -779,10 +785,27 @@ static EventReplayResult replay_external_events(
     char line[768];
     uint64_t expected = 0;
     bool stop_pending = false, fault_matched = false;
+    bool schedule_pending = false, slice_end_pending = false;
+    uint32_t slice_executed = 0;
+    CdjDspScheduler *scheduler = &checkpoint_state.scheduler;
+    bool deferred = scheduler->mode == CDJ_DSP_SCHEDULER_MODE_DEFERRED_V1;
+    bool initial_schedule = deferred && checkpoint_state.dsp_started &&
+        !checkpoint_state.dsp_halted &&
+        (!strcmp(checkpoint_state.stop_reason, "DSP start boundary") ||
+         !strcmp(checkpoint_state.stop_reason, "boot-phase boundary"));
     unsigned verified_stops = 0;
     *reason = "event_eof";
-    if (!strcmp(checkpoint_state.stop_reason, "DSP start boundary") ||
-        !strcmp(checkpoint_state.stop_reason, "boot-phase boundary")) {
+    /* QEMU captures these boundaries after the triggering event but BEFORE
+     * run_dsp requests an activation (or coalesces a pending activation). */
+    if (initial_schedule) {
+        if (!cdj_dsp_scheduler_request(scheduler)) {
+            fclose(file);
+            return EVENT_REPLAY_ERROR;
+        }
+        schedule_pending = true;
+    }
+    if (!deferred && (!strcmp(checkpoint_state.stop_reason, "DSP start boundary") ||
+        !strcmp(checkpoint_state.stop_reason, "boot-phase boundary"))) {
         *reason = run_budget(limits, breakpoint);
         stop_pending = true;
     }
@@ -804,13 +827,43 @@ static EventReplayResult replay_external_events(
          * one.  An immediately following DSP stop may still prove that the
          * limit happened to coincide with a genuine recorded boundary. */
         if (limit_reached(limits) && !cpu.fault &&
-            (strcmp(event.type, "dsp_stop") || !stop_pending)) {
+            ((strcmp(event.type, "dsp_stop") &&
+              !(deferred && (!strcmp(event.type, "dsp_slice_end") ||
+                             !strcmp(event.type, "dsp_hpic_write")))) || !stop_pending)) {
             EventReplayResult result = event_budget_exhausted(&event, limits);
             fclose(file);
             return result;
         }
         bool trigger = false;
-        if (!strcmp(event.type, "boot_phase")) {
+        uint32_t begin_quota = 0;
+        if (schedule_pending && strcmp(event.type, "dsp_schedule")) goto mismatch;
+        if (deferred && stop_pending && strcmp(event.type, "dsp_hpic_write") &&
+            strcmp(event.type, slice_end_pending ? "dsp_slice_end" : "dsp_stop"))
+            goto mismatch;
+        if (!strcmp(event.type, "dsp_schedule")) {
+            if (!deferred || !schedule_pending ||
+                event.offset != scheduler->activation_id || event.address != scheduler->slice_id ||
+                event.value != scheduler->remaining ||
+                event.size != (unsigned)(scheduler->pending | scheduler->rearm << 1) ||
+                event.packets != cpu.packets || event.cycles != cpu.cycles) goto mismatch;
+            schedule_pending = false;
+        } else if (!strcmp(event.type, "dsp_slice_begin")) {
+            if (!deferred || !checkpoint_state.dsp_started || checkpoint_state.dsp_halted ||
+                stop_pending || cpu.fault || hpic_count || hpic_overflow)
+                goto mismatch;
+            begin_quota = cdj_dsp_scheduler_begin(scheduler);
+            if (!begin_quota || event.offset != scheduler->activation_id ||
+                event.address != scheduler->slice_id || event.value != scheduler->remaining ||
+                event.size != begin_quota || event.packets != cpu.packets ||
+                event.cycles != cpu.cycles) goto mismatch;
+        } else if (!strcmp(event.type, "dsp_slice_end")) {
+            if (!deferred || !slice_end_pending || hpic_count || hpic_overflow ||
+                !cdj_dsp_scheduler_end(scheduler, slice_executed, hpi.hint, !!cpu.fault) ||
+                event.offset != scheduler->activation_id || event.address != scheduler->slice_id ||
+                event.value != scheduler->remaining || event.size != slice_executed ||
+                event.packets != cpu.packets || event.cycles != cpu.cycles) goto mismatch;
+            slice_end_pending = false;
+        } else if (!strcmp(event.type, "boot_phase")) {
             if (event.offset || event.address || event.size || event.value > 7)
                 goto mismatch;
             trigger = event.value != checkpoint_state.boot_phase;
@@ -891,7 +944,29 @@ static EventReplayResult replay_external_events(
         } else goto mismatch;
         if (event.boot_phase != checkpoint_state.boot_phase ||
             event.hint != hpi.hint || event.dspint != hpi.dspint) goto mismatch;
-        if (trigger) {
+        if (begin_quota) {
+            uint64_t before_steps = limits->steps_remaining;
+            *reason = run_quota(limits, breakpoint, begin_quota);
+            if (!strcmp(*reason, "phase budget exhausted"))
+                *reason = "deferred slice boundary";
+            slice_executed = before_steps - limits->steps_remaining;
+            stop_pending = slice_end_pending = true;
+            if (slice_executed != begin_quota && !hpi.hint && !cpu.fault) {
+                EventReplayResult result = event_budget_exhausted(&event, limits);
+                fclose(file);
+                return result;
+            }
+        }
+        if (trigger && deferred && (!checkpoint_state.dsp_started ||
+                                   checkpoint_state.dsp_halted)) {
+            /* run_dsp ignores triggers outside its runnable lifecycle. */
+            trigger = false;
+        }
+        if (trigger && deferred) {
+            if (stop_pending || cpu.fault || !cdj_dsp_scheduler_request(scheduler))
+                goto mismatch;
+            schedule_pending = true;
+        } else if (trigger) {
             if (stop_pending || cpu.fault) goto mismatch;
             if (limit_reached(limits)) {
                 EventReplayResult result = event_budget_exhausted(&event, limits);
@@ -920,6 +995,7 @@ mismatch:
         return EVENT_REPLAY_ERROR;
     }
     bool ok = !ferror(file) && verified_stops && !stop_pending && !hpic_count &&
+              !schedule_pending && !slice_end_pending &&
               !hpic_overflow && (fault_matched || !cpu.fault);
     fclose(file);
     if (!ok) fputs("event transcript ended before a deterministic DSP boundary\n", stderr);
@@ -969,7 +1045,8 @@ int main(int argc, char **argv)
                        !memcmp(magic, "CDJDSP7\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP8\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP9\0", sizeof(magic)) ||
-                       !memcmp(magic, "CDJDSP10", sizeof(magic)));
+                       !memcmp(magic, "CDJDSP10", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP11", sizeof(magic)));
     rewind(f);
     bool valid = false;
     if (!checkpoint)
@@ -1056,6 +1133,11 @@ int main(int argc, char **argv)
             return ferror(stdout) || tx_capture_failed || tx_status ? 2 : 3;
         }
     } else {
+        if (checkpoint && checkpoint_state.scheduler.mode == CDJ_DSP_SCHEDULER_MODE_DEFERRED_V1 &&
+            checkpoint_state.scheduler.pending) {
+            fputs("pending deferred DSP checkpoint requires event transcript\n", stderr);
+            return 2;
+        }
         for (;;) {
             const char *limited = limit_reached(&limits);
             if (limited) { reason = limited; break; }

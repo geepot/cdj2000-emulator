@@ -114,26 +114,65 @@ def test_schema1_checkpoint_remains_readable_without_invented_shared_ram():
     assert SHARED_RAM_BASE not in memories
 
 
-def test_schema10_magic_is_accepted_by_checkpoint_metadata_readers(tmp_path):
+@pytest.mark.parametrize(('schema', 'magic'), [
+    (10, b'CDJDSP10'),
+    (11, b'CDJDSP11'),
+])
+def test_current_checkpoint_magics_are_accepted_by_metadata_readers(
+        tmp_path, schema, magic):
     from tools.cdj_dsp.replay import checkpoint_info
     from tools.cdj_main.nxs_vm import checkpoint_metadata
 
-    state = bytes(16)
+    state = (struct.pack('<QQIIBBBB', 0, 0, 0, 4096, 0, 0, 1, 0) +
+             bytes(4) if schema >= 11 else bytes(16))
     l2 = bytes(0x40000)
     shared = bytes(SHARED_RAM_SIZE)
     bitmap = bytes(1024)
     payload = state + l2 + shared + bitmap
     header = CHECKPOINT_HEADER.pack(
-        b'CDJDSP10', 10, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        magic, schema, 0x01020304, CHECKPOINT_HEADER.size, len(state),
         *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 0,
         len(payload), _fnv1a(payload),
     )
     raw = header + payload
     _, inventory_info = read_input(raw)
     replay_info = checkpoint_info(raw)
-    path = tmp_path / 'schema10.cdjdsp'
+    path = tmp_path / f'schema{schema}.cdjdsp'
     path.write_bytes(raw)
     vm_info = checkpoint_metadata(path)
-    assert inventory_info['schema'] == 10
-    assert replay_info['schema'] == 10
-    assert vm_info['schema'] == 10
+    assert inventory_info['schema'] == schema
+    assert replay_info['schema'] == schema
+    assert vm_info['schema'] == schema
+    expected_scheduler = schema >= 11
+    assert inventory_info['scheduler_state_captured'] is expected_scheduler
+    assert replay_info['scheduler_state_captured'] is expected_scheduler
+    assert vm_info['scheduler_state_captured'] is expected_scheduler
+    expected_mode = 'deferred-v1' if schema >= 11 else 'legacy'
+    assert inventory_info['dsp_scheduler_mode'] == expected_mode
+    assert replay_info['dsp_scheduler_mode'] == expected_mode
+    assert vm_info['dsp_scheduler_mode'] == expected_mode
+
+
+def test_schema11_invalid_scheduler_mode_is_rejected_by_metadata_readers(tmp_path):
+    from tools.cdj_dsp.replay import checkpoint_info
+    from tools.cdj_main.nxs_vm import checkpoint_metadata
+
+    state = struct.pack('<QQIIBBBB', 0, 0, 0, 4096, 0, 0, 2, 0) + bytes(4)
+    l2 = bytes(0x40000)
+    shared = bytes(SHARED_RAM_SIZE)
+    bitmap = bytes(1024)
+    payload = state + l2 + shared + bitmap
+    header = CHECKPOINT_HEADER.pack(
+        b'CDJDSP11', 11, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 0,
+        len(payload), _fnv1a(payload),
+    )
+    raw = header + payload
+    with pytest.raises(ValueError, match='scheduler state is invalid'):
+        read_input(raw)
+    with pytest.raises(ValueError, match='scheduler state is invalid'):
+        checkpoint_info(raw)
+    path = tmp_path / 'invalid-scheduler.cdjdsp'
+    path.write_bytes(raw)
+    with pytest.raises(RuntimeError, match='scheduler state is invalid'):
+        checkpoint_metadata(path)

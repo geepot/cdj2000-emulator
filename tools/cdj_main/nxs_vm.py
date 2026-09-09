@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import socket
 from pathlib import Path
 import struct
 import subprocess
@@ -24,9 +25,57 @@ CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
                     7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0',
-                    10: b'CDJDSP10'}
+                    10: b'CDJDSP10', 11: b'CDJDSP11'}
+SCHEDULER_STATE = struct.Struct('<QQIIBBBB')
 SHARED_RAM_SIZE = 0x20000
 MAX_FRAME_BYTES = 16 * 1024 * 1024
+SYNC_PROFILE_COMMANDS = ('info sync-profile -n 30', 'info sync-profile -m -n 30')
+
+
+def capture_sync_profile(run: Path, process) -> dict:
+    """Read-only HMP observations before QEMU teardown; failure is evidence too."""
+    report = dict(commands=list(SYNC_PROFILE_COMMANDS), status='unavailable')
+    if process is None or process.poll() is not None:
+        report['error'] = 'QEMU is not running at collection time'
+        return report
+    output = bytearray()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as monitor:
+            monitor.settimeout(3)
+            # Relative names avoid macOS sockaddr_un's short pathname limit.
+            monitor.connect(os.path.relpath(run / 'qemu-monitor.sock'))
+
+            def prompt():
+                deadline = time.monotonic() + 3
+                response = bytearray()
+                while not response.endswith(b'(qemu) '):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError('QEMU monitor response timed out')
+                    monitor.settimeout(remaining)
+                    chunk = monitor.recv(4096)
+                    if not chunk:
+                        raise OSError('QEMU monitor closed before prompt')
+                    response.extend(chunk)
+                    output.extend(chunk)
+                    if len(output) > 1024 * 1024:
+                        raise OSError('QEMU monitor output exceeds diagnostic bound')
+
+            prompt()
+            for command in SYNC_PROFILE_COMMANDS:
+                monitor.sendall(command.encode('ascii') + b'\n')
+                prompt()
+        report['status'] = 'captured'
+    except (OSError, ValueError) as error:
+        report['error'] = str(error)
+    if output:
+        path = run / 'qemu-sync-profile.txt'
+        try:
+            path.write_bytes(output)
+            report.update(file=path.name, sha256=hashlib.sha256(output).hexdigest())
+        except OSError as error:
+            report.update(status='unavailable', error=str(error))
+    return report
 
 
 def fnv1a(data) -> int:
@@ -34,6 +83,35 @@ def fnv1a(data) -> int:
     for byte in data:
         value = ((value ^ byte) * 1099511628211) & 0xffffffffffffffff
     return value
+
+
+def checkpoint_scheduler_mode(raw, header_size, state_size, schema) -> str:
+    if schema < 11:
+        return 'legacy'
+    if state_size < 32:
+        raise RuntimeError('schema-11 DSP scheduler state is incomplete')
+    fields = SCHEDULER_STATE.unpack_from(raw, header_size + state_size - 32)
+    activation, slice_id, remaining, slice_steps, pending, rearm, mode, reserved = fields
+    if reserved or pending > 1 or rearm > 1:
+        raise RuntimeError('schema-11 DSP scheduler state is invalid')
+    if mode == 0:
+        valid = not any((activation, slice_id, remaining, slice_steps,
+                         pending, rearm))
+        name = 'legacy'
+    elif mode == 1:
+        valid = (slice_steps == 4096 and remaining <= 1000000 and
+                 pending == bool(remaining) and (not rearm or pending) and
+                 ((activation != 0) or
+                  not any((slice_id, remaining, pending, rearm))) and
+                 (slice_id != 0 or activation == 0 or remaining == 1000000) and
+                 (remaining == 0 or (1000000 - remaining) % slice_steps == 0))
+        name = 'deferred-v1'
+    else:
+        valid = False
+        name = None
+    if not valid:
+        raise RuntimeError('schema-11 DSP scheduler state is invalid')
+    return name
 
 
 def sha256(path: Path) -> str:
@@ -176,6 +254,9 @@ def checkpoint_metadata(path: Path) -> dict:
     return dict(file=path.name, sha256=hashlib.sha256(raw).hexdigest(),
                 size=len(raw), schema=schema, endian='little', state_size=state_size,
                 component_sizes=component_sizes, l2_size=l2_size,
+                scheduler_state_captured=schema >= 11,
+                dsp_scheduler_mode=checkpoint_scheduler_mode(
+                    raw, header_size, state_size, schema),
                 shared_ram_size=shared_size,
                 shared_ram_sha256=(hashlib.sha256(shared).hexdigest()
                                    if shared_size else None),
@@ -186,7 +267,8 @@ def checkpoint_metadata(path: Path) -> dict:
 
 def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: bool,
                            functional_dsp_audio: bool,
-                           capture_dsp_tx: bool) -> None:
+                           capture_dsp_tx: bool,
+                           dsp_scheduler_mode: str) -> None:
     checkpoint_dir = run / 'dsp-checkpoints'
     checkpoints = [checkpoint_metadata(path) for path in sorted(checkpoint_dir.glob('*.cdjdsp'))]
     events = run / 'dsp-events.jsonl'
@@ -211,12 +293,17 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
               sorted((ROOT / 'emulator/qemu').glob('cdj_c674*.h')) + \
               [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
                ROOT / 'emulator/qemu/cdj_dsp_checkpoint.h',
+               ROOT / 'emulator/qemu/cdj_dsp_scheduler.c',
+               ROOT / 'emulator/qemu/cdj_dsp_scheduler.h',
                ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
-    manifest = dict(schema=10, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA, SYSCFG priority, WM8740 control and timed SPI1 transfer state, '
+    manifest = dict(schema=11, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA, SYSCFG priority, WM8740 control, timed SPI1 transfer and declared DSP activation-scheduler state, '
                                      'L2 and shared RAM plus sparse zero-default SDRAM pages'),
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
         dsp_audio_mode=('coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
-        architectural_validation_eligible=not (functional_dsp_timing or functional_dsp_audio),
+        dsp_scheduler_mode=dsp_scheduler_mode,
+        architectural_validation_eligible=not (
+            functional_dsp_timing or functional_dsp_audio or
+            dsp_scheduler_mode != 'legacy'),
         byte_order=sys.byteorder,
         complete=bool(checkpoints and events.is_file() and
                       (not capture_dsp_tx or tx_capture is not None)),
@@ -231,7 +318,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
         source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
         approximations=[
             'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
-            'checkpoint schema 10 is ABI-bound and rejects structure-size or endianness changes',
+            'checkpoint schema 11 is ABI-bound and rejects structure-size or endianness changes',
             '128 KiB C6747 shared RAM is captured losslessly',
             'sparse SDRAM pages are lossless because omitted pages restore as zero',
             'SDRAM command timing, arbitration and retention are not modeled',
@@ -249,7 +336,10 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
               if functional_dsp_timing else []),
             *(['functional McASP scheduling advances one slot every 1024 executed DSP packets; '
                'not serializer-clock, sample-rate, or audio-output evidence']
-              if functional_dsp_audio else [])])
+              if functional_dsp_audio else []),
+            *(['deferred-v1 divides each bounded DSP activation into 4096-step QEMU timer slices; '
+               'this host scheduling approximation is not a DSP timing fix, frequency model, or hardware proof']
+              if dsp_scheduler_mode == 'deferred-v1' else [])])
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     (checkpoint_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
@@ -260,6 +350,8 @@ def main():
     parser.add_argument('--seconds', type=float, default=60)
     parser.add_argument('--frame-interval', type=float, default=0,
                         help='save complete framebuffer observations every N seconds (0 disables)')
+    parser.add_argument('--qemu-sync-profile', action='store_true',
+                        help='profile QEMU lock waits; observer overhead changes host timing')
     parser.add_argument('--ui', action='store_true',
                         help='open the interactive deck; closing it stops this run')
     parser.add_argument('--port', type=int, default=5980)
@@ -270,6 +362,8 @@ def main():
                         help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
     parser.add_argument('--capture-dsp-tx', action='store_true',
                         help='capture genuine XBUF words consumed by coarse McASP slot progression')
+    parser.add_argument('--deferred-dsp-scheduling', action='store_true',
+                        help='opt into diagnostic 4096-step deferred DSP scheduling (not timing evidence)')
     args = parser.parse_args()
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
@@ -292,6 +386,12 @@ def main():
         '-display', 'none', '-no-reboot', '-d', 'unimp,guest_errors', '-D', str(run / 'main.log'),
         '-serial', f'tcp:127.0.0.1:{args.port},server,nowait',
         '-serial', f'tcp:127.0.0.1:{args.port + 2},server,nowait', '-serial', 'null']
+    if args.qemu_sync_profile:
+        monitor_path = os.path.relpath(run / 'qemu-monitor.sock', ROOT)
+        if ',' in monitor_path or len(os.fsencode(monitor_path)) >= 104:
+            parser.error('sync profiling requires a shorter run path without commas')
+        main_command += ['-enable-sync-profile', '-monitor',
+                         f'unix:{monitor_path},server=on,wait=off']
     gui_command = [str(simulator), '--model', 'bf531', '--environment', 'operating', '--memory-region', '0,64M',
         '--hw-board-file', 'emulator/cdj2000-gui-nxs.hw', str(firmware / 'gui-boot-memory.elf')]
     overrides = dict(BFIN_PARALLEL_WRITEBACK='1', BFIN_GUI_COLOR='rgb555le',
@@ -306,6 +406,11 @@ def main():
     main_env['CDJ_NXS_HPI_DUMP'] = str(run / 'dsp-l2.bin')
     main_env['CDJ_NXS_DSP_EVENTS'] = str(run / 'dsp-events.jsonl')
     main_env['CDJ_NXS_DSP_CHECKPOINT_DIR'] = str(run / 'dsp-checkpoints')
+    dsp_scheduler_mode = ('deferred-v1' if args.deferred_dsp_scheduling else
+                          'legacy')
+    # Always override any inherited policy. Deferred scheduling changes the
+    # connected host/DSP interleaving and must be an explicit run option.
+    main_env['CDJ_NXS_DSP_SCHEDULER'] = dsp_scheduler_mode
     if args.functional_dsp_timing:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
@@ -319,7 +424,21 @@ def main():
     run_manifest = dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
         dsp='NXS UHPI plus partial C674x interpreter; incomplete ISA, ROM handoff abstraction', profile='experimental NXS',
-        input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval)
+        input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
+        dsp_scheduler_mode=dsp_scheduler_mode,
+        qemu_sync_profile=dict(enabled=args.qemu_sync_profile,
+            commands=list(SYNC_PROFILE_COMMANDS) if args.qemu_sync_profile else [],
+            monitor='qemu-monitor.sock' if args.qemu_sync_profile else None,
+            observer_overhead='Lock profiling and monitor collection add host overhead; '
+                              'timings are diagnostic observations, not uninstrumented performance'),
+        architectural_validation_eligible=not (
+            args.functional_dsp_timing or args.functional_dsp_audio or
+            args.deferred_dsp_scheduling),
+        scheduling_provenance=(
+            'deferred-v1 is an explicit 4096-step QEMU timer-slice host scheduling approximation; '
+            'it is not a DSP timing fix, frequency model, or hardware proof'
+            if args.deferred_dsp_scheduling else
+            'legacy synchronous bounded DSP activation'))
     if args.frame_interval:
         run_manifest['frame_snapshots_manifest'] = 'frames/manifest.json'
     (run / 'run.json').write_text(json.dumps(run_manifest, indent=2) + '\n')
@@ -327,6 +446,7 @@ def main():
     result = {}
     viewer = None
     snapshots = None
+    main_process = None
     with (run / 'main-stderr.log').open('w') as mainlog, (run / 'gui.log').open('w') as guilog:
         try:
             main_process = subprocess.Popen(main_command, cwd=ROOT, env=main_env, stdin=subprocess.DEVNULL, stdout=mainlog, stderr=mainlog)
@@ -359,6 +479,9 @@ def main():
                           frame_exists=(run / 'screen.ppm').exists())
             print(json.dumps(result), flush=True)
         finally:
+            if args.qemu_sync_profile:
+                run_manifest['qemu_sync_profile']['collection'] = capture_sync_profile(
+                    run, main_process)
             for process in reversed(processes):
                 if process.poll() is None:
                     process.terminate()
@@ -379,7 +502,8 @@ def main():
                                                        'not continuous file-mutation monitoring')
             (run / 'run.json').write_text(json.dumps(run_manifest, indent=2) + '\n')
             finalize_dsp_artifacts(run, firmware, args.functional_dsp_timing,
-                                   args.functional_dsp_audio, args.capture_dsp_tx)
+                                   args.functional_dsp_audio, args.capture_dsp_tx,
+                                   dsp_scheduler_mode)
             (run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     return 0 if result.get('viewer_closed') or (result.get('gui_exit') == 0 and result.get('frame_exists')) else 1
 

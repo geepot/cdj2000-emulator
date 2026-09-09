@@ -8,6 +8,68 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Legacy profile comparison `runs/nxs-legacy-sync-profile-1` also completed
+20 seconds with unchanged input hashes. It records the opposite contention:
+main-loop BQL wait 13.33982s, versus MAIN interrupt 0.02559s, MMIO read
+0.00830s and MMIO write 0.00175s. Legacy runs DSP in the vCPU MMIO callback
+and blocks the I/O thread; deferred-v1 moves the work into I/O timer callbacks
+and blocks the vCPU. Merely moving the callback does not provide balanced
+execution. Both are profiling diagnostics with observer overhead, not a
+controlled proof of the sole GUI deadlock cause. No root process remains live.
+
+Measured lock contention: `runs/nxs-deferred-sync-profile-1` (20 seconds,
+`--deferred-dsp-scheduling --qemu-sync-profile`) records BQL waits of 10.62940s
+at MAIN interrupt handling (`cpu-exec.c:802`, 12,888 acquisitions), 4.84882s
+at MMIO read (`cputlb.c:1984`, 131,024), and 3.81863s at MMIO write
+(`cputlb.c:2498`, 8,665). The three sites total 19.29685s, while main-loop
+reacquisition totals 0.03740s. This establishes severe MAIN lock contention
+in this diagnostic, not sole causation of the GUI deadlock or hardware timing.
+Raw report SHA-256:
+`d449e17da73a57c0dc5c2a62d74a0a7d7e1501afccd403862990eceb7d5ba5c2`.
+The opt-in profiler collects both total/mean sorted reports before teardown;
+its observer overhead is explicit in run.json. A matched legacy comparison
+is the next gate before selecting a scheduling correction.
+
+Deferred-v1 is NOT a demonstrated GUI fix: the GUI task's completed 90-second
+diagnostic reports unchanged link progress from approximately 35 seconds and
+no MENU frame response. Stopped RAM retains free pools 52/60=0, mailbox44=34
+and mailbox50=8: the same deadlock. The 20-second run spent 18.840210 seconds
+executing DSP slices plus 0.445879 seconds reporting;
+ending one timer-dispatch pass does not guarantee useful MAIN execution before
+the next. Investigate actual CPU/BQL scheduling and the independent Blackfin
+wall-clock model before promoting any policy. Full suite at this integration
+point: 354 passed, 28 optional skips. Default remains legacy; milestone open.
+
+First deferred diagnostic `runs/nxs-deferred-scheduler-diagnostic-1` completed
+20 seconds: 18,386 callbacks, execution median 1.036ms and maximum 5.232ms
+(legacy median 257.721ms). End state is 75,000,036 packets / 155,463,458 cycles,
+eight DAC transfers and no scheduler/checkpoint errors. The inspected final
+frame has rekordbox artwork and no error banner, but no interaction or liveness
+claim is established. `runs/dsp-deferred-tail-replay-1` replays checkpoint 169
+through the end, verifying 210 stops and exact repeat trace/state/memory and
+coverage. Trace SHA-256:
+`202f5cf64aa278d732fa75fbc2ab1aa85c20167a8a64f39f4b949d96d85f77ae`.
+Both artifacts remain explicitly architecturally ineligible. This is a tail
+replay, not complete startup validation. The GUI task is taking the separate
+90-second interaction/pool-state diagnostic gate, which failed as noted above.
+
+In-progress fairness diagnostic: QEMU now builds with opt-in
+`CDJ_NXS_DSP_SCHEDULER=deferred-v1`. Its pure scheduler preserves the remainder
+of a one-million-successful-step activation across 4,096-step slices, coalesces
+additional triggers into one rearm, and stops at HINT/fault. Focused scheduler
+tests and ASan/UBSan pass. Explicit schedule/begin/end events accompany every
+slice; scheduler state is appended in schema 11. Focused scheduler, deferred
+replay, launcher and migration tests pass (59 focused tests). Schema-11 state
+size is 15,808 bytes, scheduler offset 15,776; schema-10 migration preserves
+prior peripherals and initializes all-zero legacy scheduling. Readers derive
+mode from checkpoint bytes and reject conflicting manifest labels. Fresh
+`runs/dsp-deferred-tail-replay-2` again verifies the same 210 stops and exact
+repeat with explicit deferred provenance. Default legacy execution is retained.
+The next-timer deadline is
+callback-completion virtual time plus 1ns to yield the dispatch pass: this is
+a diagnostic host fairness policy, NOT a verified DSP clock ratio or eligible
+milestone evidence. Do not present a possible GUI improvement as timing proof.
+
 Boot-critical scheduler finding: `run_dsp` executes up to one million core
 steps synchronously inside MAIN's HPI write callback, with no MAIN execution
 between steps. With the launcher's non-icount QEMU clock, host time continues

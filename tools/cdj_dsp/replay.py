@@ -28,13 +28,15 @@ SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
      'cdj_c6747_spi.c',
      'cdj_c6747_cache.c',
      'cdj_c6747_edma.c',
+     'cdj_dsp_scheduler.c',
      'cdj_dsp_checkpoint.c')]]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
                     7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0',
-                    10: b'CDJDSP10'}
+                    10: b'CDJDSP10', 11: b'CDJDSP11'}
+SCHEDULER_STATE = struct.Struct('<QQIIBBBB')
 SHARED_RAM_SIZE = 0x20000
 DEFAULT_FORMATS = ROOT / 'build/gdb-17.2/include/opcode/tic6x-insn-formats.h'
 ANALYSIS_SOURCES = [ROOT / 'tools/cdj_dsp/coverage.py',
@@ -47,6 +49,35 @@ def _fnv1a(data):
     for byte in data:
         value = ((value ^ byte) * 1099511628211) & 0xffffffffffffffff
     return value
+
+
+def _checkpoint_scheduler_mode(data, header_size, state_size, schema):
+    if schema < 11:
+        return 'legacy'
+    if state_size < 32:
+        raise ValueError('schema-11 checkpoint scheduler state is incomplete')
+    fields = SCHEDULER_STATE.unpack_from(data, header_size + state_size - 32)
+    activation, slice_id, remaining, slice_steps, pending, rearm, mode, reserved = fields
+    if reserved or pending > 1 or rearm > 1:
+        raise ValueError('schema-11 checkpoint scheduler state is invalid')
+    if mode == 0:
+        valid = not any((activation, slice_id, remaining, slice_steps,
+                         pending, rearm))
+        name = 'legacy'
+    elif mode == 1:
+        valid = (slice_steps == 4096 and remaining <= 1000000 and
+                 pending == bool(remaining) and (not rearm or pending) and
+                 ((activation != 0) or
+                  not any((slice_id, remaining, pending, rearm))) and
+                 (slice_id != 0 or activation == 0 or remaining == 1000000) and
+                 (remaining == 0 or (1000000 - remaining) % slice_steps == 0))
+        name = 'deferred-v1'
+    else:
+        valid = False
+        name = None
+    if not valid:
+        raise ValueError('schema-11 checkpoint scheduler state is invalid')
+    return name
 
 
 def checkpoint_info(data: bytes) -> dict:
@@ -89,6 +120,9 @@ def checkpoint_info(data: bytes) -> dict:
                 checkpoint_sha256=hashlib.sha256(data).hexdigest(),
                 l2_sha256=hashlib.sha256(l2).hexdigest(),
                 shared_ram_captured=schema >= 2,
+                scheduler_state_captured=schema >= 11,
+                dsp_scheduler_mode=_checkpoint_scheduler_mode(
+                    data, header_size, state_size, schema),
                 shared_ram_sha256=(hashlib.sha256(shared).hexdigest()
                                    if schema >= 2 else None),
                 sdram_sha256=sdram_hash.hexdigest(), present_pages=present_pages)
@@ -157,7 +191,8 @@ def exploratory_ancestry(manifest):
     return bool(manifest and (
         manifest.get('architectural_validation_eligible') is False or
         manifest.get('dsp_timing_mode', 'strict') != 'strict' or
-        manifest.get('dsp_audio_mode', 'stopped-clock') != 'stopped-clock'))
+        manifest.get('dsp_audio_mode', 'stopped-clock') != 'stopped-clock' or
+        manifest.get('dsp_scheduler_mode', 'legacy') != 'legacy'))
 
 
 def newest_checkpoint(directory: Path, *, timing_mode=None, audio_mode=None,
@@ -280,6 +315,15 @@ def main():
     elif len(data) != 0x40000:
         parser.error('legacy dump must be exactly 256 KiB')
     event_data = args.events.read_bytes() if args.events is not None else None
+    checkpoint_scheduler_mode = (input_checkpoint['dsp_scheduler_mode']
+                                 if input_checkpoint else 'legacy')
+    dsp_scheduler_mode = (capture_manifest.get('dsp_scheduler_mode',
+                                               checkpoint_scheduler_mode)
+                          if capture_manifest else checkpoint_scheduler_mode)
+    if dsp_scheduler_mode not in {'legacy', 'deferred-v1'}:
+        parser.error('checkpoint manifest has an unsupported DSP scheduler mode')
+    if dsp_scheduler_mode != checkpoint_scheduler_mode:
+        parser.error('checkpoint scheduler state disagrees with its manifest declaration')
     if event_data is not None:
         if not checkpoint:
             parser.error('event injection requires a connected checkpoint')
@@ -328,8 +372,12 @@ def main():
                if args.functional_dsp_timing else []),
             *(['coarse packet-driven McASP slots; not audio-rate or cycle-accurate']
                if args.functional_dsp_audio else []),
+            *(['deferred-v1 replays captured host activation slices; this is scheduling '
+               'provenance, not DSP clock, frequency, cycle-accuracy, or hardware evidence']
+              if dsp_scheduler_mode == 'deferred-v1' else []),
         ]
-        inherited_exploratory = exploratory_ancestry(capture_manifest)
+        inherited_exploratory = (exploratory_ancestry(capture_manifest) or
+                                 dsp_scheduler_mode != 'legacy')
         inherited_approximations = (capture_manifest.get('approximations', [])
                                    if inherited_exploratory else [])
         if inherited_exploratory:
@@ -338,7 +386,8 @@ def main():
                 'input checkpoint inherits exploratory state; switching execution modes does not validate prior state',
             ]))
         validation_eligible = not (inherited_exploratory or
-                                  args.functional_dsp_timing or args.functional_dsp_audio)
+                                  args.functional_dsp_timing or args.functional_dsp_audio or
+                                  dsp_scheduler_mode != 'legacy')
         limits = dict(steps=args.steps, packets=args.packets, cycles=args.cycles,
                       packet_cycle_origin='input checkpoint counters',
                       boundary_semantics='checked between successful core steps; multicycle steps may cross a cycle ceiling')
@@ -347,6 +396,18 @@ def main():
                         limits=limits, approximations=approximations,
                         dsp_timing_mode=('functional-runahead' if args.functional_dsp_timing else 'strict'),
                         dsp_audio_mode=('coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
+                        dsp_scheduler_mode=dsp_scheduler_mode,
+                        dsp_scheduler_provenance={
+                            'declared_input_mode': dsp_scheduler_mode,
+                            'checkpoint_mode': checkpoint_scheduler_mode,
+                            'scheduler_state_captured': bool(
+                                checkpoint and input_checkpoint['schema'] >= 11),
+                            'execution': ('connected event-transcript schedule replay'
+                                          if event_data is not None else
+                                          'standalone replay loop'),
+                            'claim': ('host scheduling policy only; not a DSP clock, '
+                                      'frequency, cycle-accuracy, or hardware claim'),
+                        },
                         architectural_validation_eligible=validation_eligible,
                         inherited_exploratory_state=inherited_exploratory,
                         break_pc=args.break_pc, boot_phase=args.boot_phase,
@@ -416,7 +477,7 @@ def main():
                 limits=manifest['limits'],
                 resumable_checkpoint=None,
                 limitation=('execution stopped between connected transcript boundaries; '
-                            'pending HPI/cooperative scheduler state is not serialized, so no '
+                            'there is no matching external-event boundary provenance, so no '
                             'output checkpoint was written'),
             )
             failure_bytes = (json.dumps(failure, indent=2) + '\n').encode()

@@ -66,6 +66,7 @@ def make_checkpoint(tmp_path, stop_reason='boot-phase boundary'):
         '-I', str(ROOT / 'emulator/qemu'),
         str(ROOT / 'tests/cstub/dsp-event-checkpoint.c'),
         str(ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c'),
+        str(ROOT / 'emulator/qemu/cdj_dsp_scheduler.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_syscfg.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_intc.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_timer.c'),

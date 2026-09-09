@@ -20,8 +20,9 @@
 #include "cdj_c6747_spi.h"
 #include "cdj_c6747_cache.h"
 #include "cdj_c6747_edma.h"
+#include "cdj_dsp_scheduler.h"
 
-#define CDJ_DSP_CHECKPOINT_SCHEMA 10u
+#define CDJ_DSP_CHECKPOINT_SCHEMA 11u
 #define CDJ_DSP_L2_SIZE 0x40000u
 #define CDJ_DSP_SHARED_RAM_SIZE 0x20000u
 #define CDJ_DSP_SDRAM_SIZE 0x02000000u
@@ -45,7 +46,7 @@
  * model. Schema 8 appends McASP transmit-buffer, EDMA3 channel-controller and
  * SYSCFG master-priority state. Schema 9 appends the board's write-only
  * WM8740 DAC control state. Schema 10 appends the timed SPI1 transfer-engine
- * state;
+ * state. Schema 11 appends the declared DSP activation scheduler state;
  * older inputs initialize any absent peripheral state. */
 typedef struct {
     uint32_t hpi_address, boot_phase;
@@ -72,6 +73,7 @@ typedef struct {
     CdjC6747IntcDelivery intc_delivery;
     CdjWm8740 wm8740;
     CdjC6747SpiTransfer spi_transfer;
+    CdjDspScheduler scheduler;
 } CdjDspCheckpointState;
 
 void cdj_dsp_checkpoint_prepare(CdjDspCheckpointState *state,

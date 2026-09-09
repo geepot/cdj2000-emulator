@@ -31,6 +31,26 @@ int main(int argc, char **argv)
     l2[0x21] = 0xca;
     l2[0x22] = 0xad;
     l2[0x23] = 0xde;
+    if (argc == 3 && !strncmp(argv[2], "deferred-", 9)) {
+        cdj_dsp_scheduler_reset(&state.scheduler);
+        if (!strcmp(argv[2], "deferred-overflow")) {
+            state.scheduler.activation_id = UINT64_MAX;
+            state.scheduler.slice_id = UINT64_MAX - 1;
+        } else if (strcmp(argv[2], "deferred-start") &&
+                   strcmp(argv[2], "deferred-phase")) {
+            assert(cdj_dsp_scheduler_request(&state.scheduler));
+        }
+        if (!strcmp(argv[2], "deferred-high-ids")) {
+            state.scheduler.activation_id = UINT64_C(0x100000007);
+            state.scheduler.slice_id = UINT64_C(0x10000000b);
+        }
+        if (!strcmp(argv[2], "deferred-running")) {
+            memset(l2 + 0x20, 0, 0x24 - 0x20);
+            /* Full-width NOP packets until fault at the second slice. */
+            l2[0x20020] = 0xfe; l2[0x20021] = 0xca;
+            l2[0x20022] = 0xad; l2[0x20023] = 0xde;
+        }
+    }
     if (argc == 3 && !strcmp(argv[2], "phase budget exhausted")) {
         /* A pure later DSPINT must both resume replay and traverse the genuine
          * INTMUX/CPU interrupt path before the next instruction fetch. */
@@ -46,7 +66,10 @@ int main(int argc, char **argv)
         l2[0x1e3] = 0xde;
     }
     cdj_dsp_checkpoint_prepare(
-        &state, argc == 3 ? argv[2] : "boot-phase boundary");
+        &state, argc == 3 && !strcmp(argv[2], "deferred-start") ?
+        "DSP start boundary" : argc == 3 &&
+        (!strcmp(argv[2], "deferred-phase") || !strcmp(argv[2], "deferred-phase-pending")) ?
+        "boot-phase boundary" : argc == 3 ? argv[2] : "boot-phase boundary");
 
     char error[160] = {0};
     assert(cdj_dsp_checkpoint_write(argv[1], &state, l2, sizeof(l2),

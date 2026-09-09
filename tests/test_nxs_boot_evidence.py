@@ -13,6 +13,46 @@ from tools.cdj_main import nxs_vm
 FRAME = b'P6\n2 1\n255\n' + b'\n# \x00\xff\x80'
 
 
+def test_sync_profile_collects_commands_before_teardown(tmp_path, monkeypatch):
+    monitor = Mock()
+    monitor.__enter__ = Mock(return_value=monitor)
+    monitor.__exit__ = Mock(return_value=False)
+    monitor.recv.side_effect = [b'QEMU\r\n(qe', b'mu) ',
+                               b'total waits\r\n(qemu) ', b'mean waits\r\n(qemu) ']
+    factory = Mock(return_value=monitor)
+    monkeypatch.setattr(nxs_vm.socket, 'socket', factory)
+    process = Mock()
+    process.poll.return_value = None
+    result = nxs_vm.capture_sync_profile(tmp_path, process)
+    assert result['status'] == 'captured'
+    assert [call.args[0] for call in monitor.sendall.call_args_list] == [
+        b'info sync-profile -n 30\n', b'info sync-profile -m -n 30\n']
+    data = (tmp_path / result['file']).read_bytes()
+    assert result['sha256'] == hashlib.sha256(data).hexdigest()
+    process.terminate.assert_not_called()
+
+
+@pytest.mark.parametrize('failure', ['closed', 'timeout', 'missing'])
+def test_sync_profile_capture_failure_is_nonfatal(tmp_path, monkeypatch, failure):
+    monitor = Mock()
+    monitor.__enter__ = Mock(return_value=monitor)
+    monitor.__exit__ = Mock(return_value=False)
+    if failure == 'missing': monitor.connect.side_effect = FileNotFoundError('missing')
+    elif failure == 'timeout': monitor.recv.side_effect = TimeoutError('timeout')
+    else: monitor.recv.return_value = b''
+    monkeypatch.setattr(nxs_vm.socket, 'socket', Mock(return_value=monitor))
+    result = nxs_vm.capture_sync_profile(tmp_path, SimpleNamespace(poll=lambda: None))
+    assert result['status'] == 'unavailable' and result['error']
+
+
+def test_sync_profile_dead_qemu_does_not_open_socket(tmp_path, monkeypatch):
+    factory = Mock()
+    monkeypatch.setattr(nxs_vm.socket, 'socket', factory)
+    result = nxs_vm.capture_sync_profile(tmp_path, SimpleNamespace(poll=lambda: 1))
+    assert result['status'] == 'unavailable'
+    factory.assert_not_called()
+
+
 @pytest.mark.parametrize('raw', [
     FRAME, b'P6\n# comment\n2\t1\n255\n' + FRAME[-6:],
     b'P6\r\n2 1\r\n255\r\n' + FRAME[-6:],
@@ -93,6 +133,30 @@ def test_input_mutation_while_hashing_is_rejected(tmp_path, monkeypatch):
         nxs_vm.input_metadata(path)
 
 
+@pytest.mark.parametrize('mode,eligible', [
+    ('legacy', True), ('deferred-v1', False),
+])
+def test_dsp_artifact_manifest_records_scheduler_validation_scope(
+        tmp_path, mode, eligible):
+    firmware = tmp_path / 'firmware'
+    firmware.mkdir()
+    for name in ('main-firmware.bin', 'gui-boot-memory.elf',
+                 'gui-flash-image.bin'):
+        (firmware / name).write_bytes(name.encode())
+    run = tmp_path / 'run'
+    run.mkdir()
+    nxs_vm.finalize_dsp_artifacts(
+        run, firmware, False, False, False, mode)
+    manifest = json.loads((run / 'dsp-checkpoints/manifest.json').read_text())
+    assert manifest['dsp_scheduler_mode'] == mode
+    assert manifest['architectural_validation_eligible'] is eligible
+    scheduling = [item for item in manifest['approximations']
+                  if 'deferred-v1' in item]
+    assert bool(scheduling) is not eligible
+    if scheduling:
+        assert 'not a DSP timing fix' in scheduling[0]
+
+
 @pytest.mark.parametrize('interval', ['-1', 'nan', 'inf'])
 def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
     monkeypatch.setattr(nxs_vm.sys, 'argv', ['nxs_vm', 'unused', '--frame-interval', interval])
@@ -101,8 +165,11 @@ def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize('interval', [0, 0.5])
-def test_run_manifest_records_launched_inputs_and_optional_observations(tmp_path, monkeypatch, interval):
+@pytest.mark.parametrize('interval,deferred,profile', [
+    (0, False, False), (0.5, False, False), (0, True, False), (0, True, True),
+])
+def test_run_manifest_records_launched_inputs_and_optional_observations(
+        tmp_path, monkeypatch, interval, deferred, profile):
     paths = ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
              'firmware/nxs/main-firmware.bin', 'firmware/nxs/gui-boot-memory.elf',
              'firmware/nxs/gui-flash-image.bin')
@@ -112,12 +179,22 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(tmp_path
         path.write_bytes(name.encode())
     original_simulator = nxs_vm.sha256(tmp_path / paths[0])
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
-    monkeypatch.setattr(nxs_vm.sys, 'argv', ['nxs_vm', 'run', '--seconds', '2',
-                                          '--frame-interval', str(interval)])
+    argv = ['nxs_vm', 'run', '--seconds', '2', '--frame-interval', str(interval)]
+    if deferred:
+        argv.append('--deferred-dsp-scheduling')
+    if profile:
+        argv.append('--qemu-sync-profile')
+    monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
+    monkeypatch.setenv('CDJ_NXS_DSP_SCHEDULER', 'inherited-must-not-win')
     clock = [0.0]
     monkeypatch.setattr(nxs_vm.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(nxs_vm.time, 'sleep', lambda duration: clock.__setitem__(0, clock[0] + duration))
     monkeypatch.setattr(nxs_vm, 'finalize_dsp_artifacts', Mock())
+    def collect(run, process):
+        assert process.poll() is None and clock[0] >= 2.5
+        return {'status': 'captured', 'commands': list(nxs_vm.SYNC_PROFILE_COMMANDS)}
+    collector = Mock(side_effect=collect)
+    monkeypatch.setattr(nxs_vm, 'capture_sync_profile', collector)
     class Process:
         pid = 123
         def __init__(self, gui):
@@ -133,6 +210,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(tmp_path
         if not gui:
             assert kwargs['env']['CDJ_REQ_STATUS_FRESH'] == '0'
             assert kwargs['env']['CDJ_LINK_LINK_ROWS'] == 'off'
+            assert kwargs['env']['CDJ_NXS_DSP_SCHEDULER'] == (
+                'deferred-v1' if deferred else 'legacy')
         if gui:
             (tmp_path / 'run/screen.ppm').write_bytes(FRAME)
             (tmp_path / paths[0]).write_bytes(b'rebuilt after GUI launch')
@@ -141,6 +220,23 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(tmp_path
     assert nxs_vm.main() == 0
     manifest = json.loads((tmp_path / 'run/run.json').read_text())
     assert manifest['main_environment']['CDJ_LINK_LINK_ROWS'] == 'off'
+    expected_scheduler = 'deferred-v1' if deferred else 'legacy'
+    assert manifest['main_environment']['CDJ_NXS_DSP_SCHEDULER'] == expected_scheduler
+    assert manifest['dsp_scheduler_mode'] == expected_scheduler
+    assert manifest['qemu_sync_profile']['enabled'] is profile
+    assert ('-enable-sync-profile' in manifest['main']) is profile
+    if profile:
+        collector.assert_called_once()
+        assert manifest['qemu_sync_profile']['collection']['status'] == 'captured'
+        assert 'host overhead' in manifest['qemu_sync_profile']['observer_overhead']
+    else:
+        collector.assert_not_called()
+    assert manifest['architectural_validation_eligible'] is not deferred
+    if deferred:
+        assert 'not a DSP timing fix' in manifest['scheduling_provenance']
+    else:
+        assert manifest['scheduling_provenance'] == \
+            'legacy synchronous bounded DSP activation'
     assert len(manifest['input_artifacts']) == 5
     assert manifest['input_artifacts']['simulator']['sha256'] == original_simulator
     assert manifest['inputs_differ_at_exit'] == ['simulator']

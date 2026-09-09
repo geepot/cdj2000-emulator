@@ -82,7 +82,8 @@ def test_dsp_checkpoint_round_trip(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c6747_spi.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_cache.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_mcasp.c'),
-        str(ROOT / 'emulator/qemu/cdj_c6747_edma.c'), '-o', str(binary)], check=True)
+        str(ROOT / 'emulator/qemu/cdj_c6747_edma.c'),
+        str(ROOT / 'emulator/qemu/cdj_dsp_scheduler.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary), str(checkpoint)], check=True, timeout=5)
 
 def test_c6747_pll_cycle_clock(tmp_path):

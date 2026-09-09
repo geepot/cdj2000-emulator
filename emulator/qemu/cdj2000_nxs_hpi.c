@@ -25,6 +25,7 @@
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
 #include "cdj_dsp_checkpoint.h"
+#include "cdj_dsp_scheduler.h"
 
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
@@ -45,6 +46,8 @@ typedef struct {
     CdjC6747Hpi hpi;
     bool reset_released, dsp_started, dsp_halted, dsp_running;
     bool functional_audio;
+    CdjDspScheduler scheduler;
+    QEMUTimer *dsp_timer;
     unsigned boot_phase;
     uint64_t words;
     uint64_t event_sequence, checkpoint_sequence;
@@ -137,6 +140,7 @@ static void capture_checkpoint(NxsHpi *s, const char *reason)
     memcpy(state.timers, s->timers, sizeof(state.timers));
     memcpy(state.spis, s->spis, sizeof(state.spis));
     state.spi_transfer = s->spi_transfer;
+    state.scheduler = s->scheduler;
     state.wm8740 = s->wm8740;
     state.cache = s->cache;
     state.edma = s->edma;
@@ -167,6 +171,11 @@ void cdj_nxs_hpi_reset_line(bool released)
     if (!s || released == s->reset_released) return;
     s->reset_released = released;
     if (!released) {
+        if (s->dsp_timer) timer_del(s->dsp_timer);
+        uint8_t scheduler_mode = s->scheduler.mode;
+        cdj_dsp_scheduler_reset(&s->scheduler);
+        s->scheduler.mode = scheduler_mode;
+        if (!scheduler_mode) memset(&s->scheduler, 0, sizeof(s->scheduler));
         /* External DSP reset covers the HPI boot contract, C674x megamodule
          * INTC, Timer64P/SPI blocks, and interpreter lifecycle. Other device
          * peripheral reset domains remain explicit models. */
@@ -684,17 +693,19 @@ static void report_dsp(NxsHpi *s, const char *reason)
                 s->cpu.fault_word, reason, s->cpu.r[1][15], s->cpu.r[1][14], s->cpu.r[1][3]);
     record_event(s, "dsp_stop", 0, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
                  s->cpu.fault_word, 0);
-    capture_checkpoint(s, reason);
+    if (!s->scheduler.mode || !s->scheduler.pending || s->dsp_halted ||
+        !(s->scheduler.slice_id % 256)) capture_checkpoint(s, reason);
 }
 
-static void run_dsp(NxsHpi *s)
+static void execute_dsp(NxsHpi *s, unsigned quota)
 {
     if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
     int64_t entered_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     s->dsp_running = true;
-    const char *reason = "phase budget exhausted";
+    const char *reason = s->scheduler.mode ? "deferred slice boundary" :
+                                           "phase budget exhausted";
     unsigned steps = 0;
-    for (; steps < CDJ_DSP_COOPERATIVE_BUDGET; ++steps) {
+    while (steps < quota) {
         deliver_edma_notifications(s);
         if (!cdj_c674x_interrupt(
                 &s->cpu, cdj_c6747_intc_cpu_pending(&s->intc_delivery))) {
@@ -707,6 +718,7 @@ static void run_dsp(NxsHpi *s)
             s->dsp_halted = true;
             break;
         }
+        ++steps;
         if (s->spi_transfer.fault) {
             s->cpu.fault = "unsupported SPI transfer clock or state";
             s->cpu.fault_pc = s->cpu.pc;
@@ -723,12 +735,65 @@ static void run_dsp(NxsHpi *s)
         if (s->hpi.hint) { reason = "HINT host-event yield"; break; }
     }
     s->dsp_running = false;
+    if (s->scheduler.mode) {
+        if (!cdj_dsp_scheduler_end(&s->scheduler, steps, s->hpi.hint,
+                                   s->dsp_halted)) {
+            s->cpu.fault = "invalid deferred DSP slice completion";
+            s->cpu.fault_pc = s->cpu.pc;
+            s->dsp_halted = true;
+            reason = s->cpu.fault;
+        }
+        record_event(s, "dsp_slice_end", s->scheduler.activation_id,
+                     s->scheduler.slice_id, s->scheduler.remaining, steps);
+    }
     int64_t executed_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     report_dsp(s, reason);
     info_report("nxs-dsp-host-time: execution-ns=%" PRId64
                 " reporting-ns=%" PRId64,
                 executed_ns - entered_ns,
                 qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - executed_ns);
+}
+
+static void deferred_dsp_tick(void *opaque)
+{
+    NxsHpi *s = opaque;
+    if (!s->dsp_started || s->dsp_halted || !s->scheduler.pending) return;
+    unsigned quota = cdj_dsp_scheduler_begin(&s->scheduler);
+    if (!quota) {
+        s->cpu.fault = "invalid deferred DSP scheduler state";
+        s->cpu.fault_pc = s->cpu.pc;
+        s->dsp_halted = true;
+        report_dsp(s, s->cpu.fault);
+        return;
+    }
+    record_event(s, "dsp_slice_begin", s->scheduler.activation_id,
+                 s->scheduler.slice_id, s->scheduler.remaining, quota);
+    execute_dsp(s, quota);
+    /* Future relative to callback completion: never catch up in this timer
+     * dispatch pass. This is a host fairness policy, not a DSP clock ratio. */
+    if (s->scheduler.pending && !s->dsp_halted)
+        timer_mod(s->dsp_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
+}
+
+static void run_dsp(NxsHpi *s)
+{
+    if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
+    if (!s->scheduler.mode) {
+        execute_dsp(s, CDJ_DSP_COOPERATIVE_BUDGET);
+        return;
+    }
+    if (!cdj_dsp_scheduler_request(&s->scheduler)) {
+        s->cpu.fault = "invalid deferred DSP scheduling request";
+        s->cpu.fault_pc = s->cpu.pc;
+        s->dsp_halted = true;
+        report_dsp(s, s->cpu.fault);
+        return;
+    }
+    record_event(s, "dsp_schedule", s->scheduler.activation_id,
+                 s->scheduler.slice_id, s->scheduler.remaining,
+                 s->scheduler.pending | (s->scheduler.rearm << 1));
+    if (!timer_pending(s->dsp_timer))
+        timer_mod(s->dsp_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
 }
 
 static void start_dsp(NxsHpi *s)
@@ -834,6 +899,15 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     NxsHpi *s = g_new0(NxsHpi, 1);
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
+    const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
+    if (scheduler && !strcmp(scheduler, "deferred-v1")) {
+        cdj_dsp_scheduler_reset(&s->scheduler);
+        s->dsp_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, deferred_dsp_tick, s);
+        warn_report("nxs-c674x: deferred-v1 host scheduling diagnostic; not a hardware clock model");
+    } else if (scheduler && strcmp(scheduler, "legacy")) {
+        error_report("nxs-c674x: unsupported DSP scheduler %s", scheduler);
+        exit(EXIT_FAILURE);
+    }
     nxs_hpi = s;
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     s->functional_audio = audio && !strcmp(audio, "1");

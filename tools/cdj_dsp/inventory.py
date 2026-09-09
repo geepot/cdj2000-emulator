@@ -23,7 +23,37 @@ CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
                     7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0',
-                    10: b'CDJDSP10'}
+                    10: b'CDJDSP10', 11: b'CDJDSP11'}
+SCHEDULER_STATE = struct.Struct('<QQIIBBBB')
+
+
+def _checkpoint_scheduler_mode(data, header_size, state_size, schema):
+    if schema < 11:
+        return 'legacy'
+    if state_size < 32:
+        raise ValueError('schema-11 checkpoint scheduler state is incomplete')
+    fields = SCHEDULER_STATE.unpack_from(data, header_size + state_size - 32)
+    activation, slice_id, remaining, slice_steps, pending, rearm, mode, reserved = fields
+    if reserved or pending > 1 or rearm > 1:
+        raise ValueError('schema-11 checkpoint scheduler state is invalid')
+    if mode == 0:
+        valid = not any((activation, slice_id, remaining, slice_steps,
+                         pending, rearm))
+        name = 'legacy'
+    elif mode == 1:
+        valid = (slice_steps == 4096 and remaining <= 1000000 and
+                 pending == bool(remaining) and (not rearm or pending) and
+                 ((activation != 0) or
+                  not any((slice_id, remaining, pending, rearm))) and
+                 (slice_id != 0 or activation == 0 or remaining == 1000000) and
+                 (remaining == 0 or (1000000 - remaining) % slice_steps == 0))
+        name = 'deferred-v1'
+    else:
+        valid = False
+        name = None
+    if not valid:
+        raise ValueError('schema-11 checkpoint scheduler state is invalid')
+    return name
 
 
 def _fnv1a(data):
@@ -87,6 +117,9 @@ def read_input(data):
     return memories, dict(
         kind='checkpoint', schema=schema, state_size=state_size,
         component_sizes=list(component_sizes),
+        scheduler_state_captured=schema >= 11,
+        dsp_scheduler_mode=_checkpoint_scheduler_mode(
+            data, header_size, state_size, schema),
         shared_ram_captured=shared_ram is not None,
         present_sdram_pages=present_pages)
 

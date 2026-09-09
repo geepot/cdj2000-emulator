@@ -1,5 +1,23 @@
 # Building
 
+Deferred scheduling is an opt-in diagnostic, not a boot-validation mode:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_dsp_scheduler.py \
+  tests/test_dsp_deferred_replay.py tests/test_dsp_checkpoint_replay.py
+sh scripts/build-qemu-sh4.sh build/qemu
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/NEW_DEFERRED_DIAGNOSTIC \
+  --seconds 20 --frame-interval 5 --port 6080 \
+  --qemu build/qemu/build/qemu-system-sh4 --deferred-dsp-scheduling
+```
+
+Schema 11 appends serializable activation/slice state. Legacy schemas import
+with legacy scheduling. Deferred replay requires the captured transcript when
+continuation is pending; never infer missing host interleaving. The explicit
+mode remains architecturally ineligible, and short callbacks do not prove MAIN
+receives sufficient execution time. The first longer GUI diagnostic still
+stalls; do not promote this flag to the strict default.
+
 Connected replay limits are diagnostic, not firmware events. If a step,
 packet or cycle ceiling prevents reaching the next recorded boundary, replay
 exits nonzero with `outcome=event_budget_exhausted` in `failure.json` and its
