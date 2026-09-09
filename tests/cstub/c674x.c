@@ -31,6 +31,27 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* Full-width immediate BNOP: signed displacement bounds, both units,
+     * both fetch layouts and all N counts, with true/false predicates. */
+    const int displacements[] = {-2048,-1,0,1,2047};
+    for (unsigned layout = 0; layout < 2; ++layout)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned taken = 0; taken < 2; ++taken)
+    for (unsigned n = 0; n < 8; ++n)
+    for (unsigned d = 0; d < 5; ++d) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1004);
+        c.r[1][0] = taken;
+        memory[1] = (1u << 29) | (((uint32_t)displacements[d] & 4095) << 16) |
+                    (n << 13) | 0x120 | (side << 1);
+        if (layout) memory[7] = 0xe0000000;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        unsigned elapsed = taken && n > 5 ? 6 : n + 1;
+        assert(c.cycles == elapsed);
+        if (taken) {
+            while (c.cycles < 6) assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+            assert(c.pc == 0x1000u + (uint32_t)(displacements[d] * (layout ? 2 : 4)));
+        } else assert(c.pc == 0x1008 && !c.branch_due);
+    }
     /* Long-offset scalar loads/stores: all eight opcodes, both data banks,
      * both fixed B bases and displacement boundaries. Reuse real E3/E5 bus. */
     const unsigned long_offsets[] = {0, 1, 31, 256, 32767};

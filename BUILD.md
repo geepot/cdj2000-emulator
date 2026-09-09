@@ -746,3 +746,23 @@ Rebuilt connected run `runs/nxs-pll-go-connected` agrees at the same stop and
 packet/cycle counts. Its GUI exits 0 with a frame at the 15-second bound.
 The build exposed a missing brace around the shared peripheral-tick loop;
 it was fixed and rebuilt before this connected run. QEMU timestamp verified.
+
+### Immediate BNOP branch timing
+
+The full-width displacement BNOP follows SPRUFE8B pp165-167: signed 12-bit
+displacement from the containing fetch-packet base, scaled by two when the
+fetch packet has a compact header and by four otherwise. Predicates control
+the branch, not NOP insertion. Counts 6/7 truncate at the taken transfer but
+run fully for false predicates. Tests cover all counts, both units, both fetch
+layouts and signed offset extrema. The ordinary branch queue/pipeline handles
+the five delay slots. CALLP and loop control guards recognize the new form.
+
+`runs/dsp-bnop-immediate-1 --verify-repeat` passes at 1,147 packets / 1,402
+cycles, PC `0x11802ea8`, word `0x21940264`, a protected LDW from PLLSTAT
+inside a software-pipelined loop. This is the next scheduler work, not a
+missing standalone load decoder. Preserve its PROT delay and predicate behavior
+when extending loop loading/replay. Suite: 170 passed / 43 skipped; CPU
+address/undefined sanitizer passes. Full boot/audio remain incomplete and
+the existing PLL/PSC timing assumptions still apply.
+Rebuilt connected run `runs/nxs-bnop-immediate-connected` matches the stop
+and packet/cycle counts; GUI exits 0 with a frame at the 15-second bound.

@@ -8,6 +8,27 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Immediate BNOP is implemented for both units, all NOP counts 0..7, predicates
+and signed 12-bit displacements. Full-width instructions inside header-based
+fetch packets scale displacement by two; ordinary packets scale by four
+(SPRUFE8B pp165-167). Taken branches truncate NOP counts above five at transfer;
+false predicates retain the full NOP delay. CALLP/loop control guards include
+this form, and loop-body execution remains explicitly unsupported.
+
+`runs/dsp-bnop-immediate-1 --verify-repeat` matches at 1,147 packets / 1,402
+cycles, PC `0x11802ea8`, word `0x21940264`: protected LDW in a software loop.
+Trace SHA-256: `27e10b6bd271c1faa90f8b2699979602ad6bc64ab47944353ce2ca7400c4a379`.
+The load targets PLLSTAT through A5. Next implement protected-load scheduling
+and verify interaction with SPLOOPW/SPMASK, including false predicates and
+the four inserted cycles; do not simply remove the guard. Nearby discovery
+inventory `runs/pll-branch-inventory.json` has 104 candidates in 22 families.
+Suite: 170 passed / 43 skipped; CPU sanitizer passes. PLL approximations below
+still apply. Full boot and audio remain incomplete.
+Rebuilt connected run `runs/nxs-bnop-immediate-connected` matches the same
+stop and counts. GUI exits 0 with a frame at the 15-second bound.
+
+### Previous PLL GO checkpoint
+
 PLL legacy-bit and divider-GO batch supersedes the bit-4 stop below. Bit 4
 now retains writes as an explicitly unverified C6747 compatibility assumption:
 Linux v6.1 `drivers/clk/davinci/pll.c` names it PLLDIS and clears it during
@@ -275,7 +296,7 @@ include data and cannot be interpreted as instruction coverage percentages.
 The first inventory-driven batch implemented full/compact SPMASK with
 functional-unit classification and loop load/replay suppression, plus nearby
 predicated MVK. Later batches advanced through PSC and McASP pin configuration;
-the current blocker is opcode `0x3021a121`, as recorded at the top.
+the current blocker is loop protected-load scheduling, as recorded at the top.
 The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
 instructions and did not implement buffered suppression. Do not resurrect that
 special case. Implement the family, validate synthetic schedules and replay,

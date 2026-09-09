@@ -263,7 +263,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if (j == i) continue;
                 CdjC674xInstruction other = packet->instructions[j];
                 if ((!other.compact && ((other.word & 0x7c) == 0x10 ||
-                     (other.word & 0x1ffe) == 0x162 || (other.word & 0xffe) == 0x362)) ||
+                     (other.word & 0x1ffe) == 0x162 || (other.word & 0xffe) == 0x362 ||
+                     (other.word & 0x1ffc) == 0x120)) ||
                     compact_branch(&other))
                     return stop(cpu, pc, insn->word, "CALLP with parallel control instruction");
             }
@@ -598,6 +599,18 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)(sx((w >> 7) & 0x1fffff, 21) * 4)))
                     return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
             }
+        } else if ((w & 0x1ffc) == 0x120) {
+            /* SPRUFE8B BNOP displacement, pp165-167: NOPs are unconditional.
+             * A 32-bit BNOP in a header-based fetch packet uses halfword
+             * displacement units; without a header it uses words. */
+            unsigned n = (w >> 13) & 7;
+            reg_write = false;
+            if (n && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
+            if (n + 1 > elapsed) elapsed = n + 1;
+            if (enabled && !queue_branch(&out, cpu->cycles + 6,
+                    (pc & ~31u) + (uint32_t)(sx((w >> 16) & 4095, 12) *
+                                           (insn->header ? 2 : 4))))
+                return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
         } else if ((w & 0x0f830ffe) == 0x00800362) {
             unsigned n = (w >> 13) & 7;
             reg_write = false;
@@ -747,7 +760,7 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
              * during loading. Preserve the explicit stop until that exists. */
             if (protected_load(&insn) ||
                 (!insn.compact && ((w & 0x1ffe) == 0x162 || (w & 0x7c) == 0x10 ||
-                                  (w & 0xffe) == 0x362)) ||
+                                  (w & 0xffe) == 0x362 || (w & 0x1ffc) == 0x120)) ||
                 compact_branch(&insn))
                 return stop(cpu, insn.pc, w, "loop body control or protected instruction not implemented");
             if (has_mask && masking.mask) {
@@ -864,7 +877,8 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 return stop(cpu, other.pc, v, "SPMASK cannot share loop setup packet");
             if (protected_load(&other) ||
                 (nop_cycles(&other) > 1) ||
-                (!other.compact && ((v & 0xffe) == 0x362 || (v & 0x7c) == 0x10)) ||
+                (!other.compact && ((v & 0xffe) == 0x362 || (v & 0x7c) == 0x10 ||
+                                   (v & 0x1ffc) == 0x120)) ||
                 compact_branch(&other))
                 return stop(cpu, other.pc, v, "multicycle loop setup packet not implemented");
         }
