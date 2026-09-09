@@ -477,6 +477,7 @@ class UiViewer:
         self.control_note = tk.StringVar(value="")
         self.status = tk.StringVar(value="Starting Blackfin firmware…")
         self.held: dict[tuple[int, int], Control] = {}
+        self.momentary: dict[tuple[int, int], Control] = {}
         # Key -> the time its click's press is over (hold plus the board's
         # gap).  The board queues presses one behind the other, so a click
         # repeated while the first is still down does not land sooner: it
@@ -616,7 +617,8 @@ class UiViewer:
             click=self.click,
             rotate=lambda field, delta: self.rotate(
                 panel_control.ANALOG_CONTROLS[field], delta),
-            long_press=self.long_press, hold=self.toggle_hold)
+            long_press=self.long_press, hold=self.toggle_hold,
+            contact=self.contact)
         self.deck.place(relx=0.5, rely=0.5, anchor="center")
         self.resize_timer = None
         self.viewport.bind("<Configure>", self.queue_resize)
@@ -687,7 +689,7 @@ class UiViewer:
 
     def show_help(self) -> None:
         from tkinter import messagebox
-        messagebox.showinfo("Deck controls", "Click a key to press it.\n"
+        messagebox.showinfo("Deck controls", "Hold the mouse down to hold a key; release to let go.\n"
             "Shift-click: long press. Ctrl-click or right-click: latch / release.\n"
             "Browse knob: drag or scroll to turn; click to push.\n"
             "Keyboard: Tab to the deck, arrow keys to navigate, Enter / Space to press.\n"
@@ -696,7 +698,8 @@ class UiViewer:
             "Lights show host input feedback, not measured hardware LEDs.\n"
             "The jog center is not an emulated jog display. Jog rotation and tempo "
             "are not yet mapped to verified hardware controls.\n\n"
-            "Firmware responses can take several seconds; repeated presses are guarded.",
+            "Firmware responses can take several seconds. Keyboard and Inspector "
+            "presses use timed pulses; physical mouse holds do not queue pulses.",
             parent=self.root)
 
     def build_rack(self, parent: tk.Misc, built: list[Control]) -> None:
@@ -992,11 +995,39 @@ class UiViewer:
                               % (control.label, line.strip(), reply))
         if line.strip() == "clear" and not reply.startswith("err"):
             self.held.clear()
+            self.momentary.clear()
             self.in_flight.clear()
             if self.deck is not None:
                 for name in list(self.deck.latched):
                     self.deck.set_latched(name, False)
-        return reply
+        return None if reply.startswith("err") else reply
+
+    def contact(self, control: Control, down: bool) -> bool:
+        """Physical mouse contact, independent of the explicit right-click latch."""
+        if control.input_id is None or control.kind not in ("button", "hold"):
+            self.click(control)
+            return False
+        bit_id = control.input_id.split("-")[0]
+        byte, mask = panel_control.button_mask(bit_id)
+        key = (byte, mask)
+        if down == (key in self.momentary):
+            return True
+        # A mouse release must not undo an explicitly latched hardware key.
+        if key not in self.held:
+            if self.send(control, panel_control.encode_hold(byte, mask, down)) is None:
+                return False
+        if down:
+            self.momentary[key] = control
+        else:
+            self.momentary.pop(key, None)
+        self.show_contact(bit_id, key in self.held or down)
+        return True
+
+    def show_contact(self, bit_id: str, down: bool) -> None:
+        if self.deck is not None and bit_id in faceplate.PLACEMENTS:
+            self.deck.set_latched(bit_id, down)
+            if bit_id == "20.3":
+                self.deck.set_latched("20.3-hold", down)
 
     def click(self, control: Control) -> None:
         if control.kind == "hold" and control.input_id is not None:
@@ -1052,15 +1083,13 @@ class UiViewer:
         byte, mask = panel_control.button_mask(bit_id)
         key = (byte, mask)
         down = key not in self.held
-        if self.send(control, panel_control.encode_hold(byte, mask, down)):
+        if (key in self.momentary or
+                self.send(control, panel_control.encode_hold(byte, mask, down)) is not None):
             if down:
                 self.held[key] = control
             else:
                 self.held.pop(key, None)
-            if self.deck is not None:
-                self.deck.set_latched(bit_id, down)
-                if bit_id == "20.3":
-                    self.deck.set_latched("20.3-hold", down)
+            self.show_contact(bit_id, down or key in self.momentary)
             self.control_note.set("%s %s (held: %s)"
                                   % (control.label, "held down" if down
                                      else "released",
@@ -1293,6 +1322,10 @@ class UiViewer:
             f"(polling every {self.args.refresh_ms} ms)")
 
     def close(self) -> None:
+        # In attach mode the machine outlives this window. Release only our
+        # contacts, not analog values or queued input from another controller.
+        for (byte, mask), control in (self.held | self.momentary).items():
+            self.send(control, panel_control.encode_hold(byte, mask, False))
         if self.panel is not None:
             self.panel.close()
             self.panel = None

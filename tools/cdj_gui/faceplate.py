@@ -509,7 +509,8 @@ class Faceplate(tk.Canvas):
                  click: Callable[[object], None],
                  rotate: Callable[[int, int], None],
                  long_press: Callable[[object], None] | None = None,
-                 hold: Callable[[object], None] | None = None) -> None:
+                 hold: Callable[[object], None] | None = None,
+                 contact: Callable[[object, bool], bool] | None = None) -> None:
         self.scale = scale
         self.renderer = Renderer(2)
         self.assets: dict[object, Image.Image] = {}
@@ -518,6 +519,7 @@ class Faceplate(tk.Canvas):
         self.on_rotate = rotate
         self.on_long_press = long_press or click
         self.on_hold = hold or click
+        self.on_contact = contact
         self.last_frame = Image.new("RGB", (LCD_W, LCD_H))
         self.latched: set[str] = set()
         super().__init__(parent, width=PANEL_W * scale,
@@ -541,8 +543,7 @@ class Faceplate(tk.Canvas):
         self.hovered_name: str | None = None
         self.bind("<FocusIn>", lambda _event: self._show_resting(
             self.focused_name))
-        self.bind("<FocusOut>", lambda _event: self._show_resting(
-            self.focused_name, focused=False))
+        self.bind("<FocusOut>", self._focus_out)
         self.bind("<Left>", lambda _event: self._move_focus(-1, 0))
         self.bind("<Right>", lambda _event: self._move_focus(1, 0))
         self.bind("<Up>", lambda _event: self._move_focus(0, -1))
@@ -637,8 +638,8 @@ class Faceplate(tk.Canvas):
         return None
 
     def _pointer_down(self, event) -> None:
+        self.cancel_pointer()
         name = self.hit_control(event.x, event.y)
-        self.active_pointer = None
         if name is None:
             return
         if event.state & 4:
@@ -648,6 +649,12 @@ class Faceplate(tk.Canvas):
         elif PLACEMENTS[name].shape == "knob":
             self.active_pointer = name
             self._knob_down(event)
+        elif self.on_contact is not None and not name.endswith("-hold"):
+            self.focus_set()
+            self.focused_name = name
+            control = self.resolve(name)
+            if control is not None and self.on_contact(control, True):
+                self.active_pointer = name
         else:
             self._pressed(name)
 
@@ -657,13 +664,33 @@ class Faceplate(tk.Canvas):
             self._modified_press(name, self.on_hold)
 
     def _pointer_drag(self, event) -> None:
-        if self.active_pointer is not None:
+        if (self.active_pointer is not None and
+                PLACEMENTS[self.active_pointer].shape == "knob"):
             self._knob_drag(event, self.active_pointer)
 
     def _pointer_up(self, event) -> None:
-        if self.active_pointer is not None:
+        if (self.active_pointer is not None and
+                PLACEMENTS[self.active_pointer].shape == "knob"):
             self._knob_up(self.active_pointer)
+            self.active_pointer = None
+        else:
+            self.cancel_pointer()
+
+    def cancel_pointer(self) -> None:
+        """Release the original key even outside its hit box or after focus loss."""
+        name = self.active_pointer
         self.active_pointer = None
+        self._drag_angle = None
+        self._drag_started = False
+        if (name is not None and PLACEMENTS[name].shape != "knob"
+                and self.on_contact is not None):
+            control = self.resolve(name)
+            if control is not None:
+                self.on_contact(control, False)
+
+    def _focus_out(self, _event) -> None:
+        self.cancel_pointer()
+        self._show_resting(self.focused_name, focused=False)
 
     def _modified_press(self, name, callback):
         control = self.resolve(name)

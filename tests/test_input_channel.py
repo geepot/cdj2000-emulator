@@ -55,6 +55,10 @@ def toolchain() -> tuple[Path, Path] | None:
         gcc = here / ("gcc.exe" if sys.platform == "win32" else "gcc")
         if gcc.exists():
             return gcc, here
+        # macOS uses Apple's compiler with Homebrew's pkg-config/GLib.
+        # Only Windows needs the strict same-directory runtime pairing.
+        if sys.platform != "win32" and (compiler := shutil.which("cc")):
+            return Path(compiler), here
     return None
 
 
@@ -198,6 +202,23 @@ def field(frames: list[bytes], first: int, width: int) -> list[int]:
 
 
 # ------------------------------------------------------- the control case --
+def test_viewer_contacts_reach_payload_without_entering_pulse_queue(harness, tmp_path):
+    from unittest.mock import Mock
+
+    viewer = object.__new__(view_ui.UiViewer)
+    viewer.held, viewer.momentary = {}, {}
+    viewer.deck = None
+    viewer.send = Mock(return_value="ok")
+    control = next(c for c in view_ui.controls() if c.input_id == "16.0")
+    assert viewer.contact(control, True)
+    assert viewer.contact(control, False)
+    commands = [call.args[1].strip() for call in viewer.send.call_args_list]
+    segments = script(harness, [(commands[0], 50), (commands[1], 5)], tmp_path)
+    assert segments[0].frames and segments[1].frames
+    assert all(frame[16] & 1 for frame in segments[0].frames)
+    assert all(not (frame[16] & 1) for frame in segments[1].frames)
+
+
 def test_without_the_port_nothing_is_merged(harness):
     """A run without CDJ_INPUT_PORT has to be a control run in the strict sense.
 

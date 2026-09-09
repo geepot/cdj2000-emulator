@@ -17,10 +17,16 @@ drawn around it.
 The default device view fits the deck to the window, with the firmware LCD
 kept separate from the controls. Resize freely, or use **Full screen** and
 Escape. **Inspector** opens the unassigned digital/analogue inputs and control
-channel tools; **Controls ?** explains the gestures. Shift-click is a long
+channel tools; **Controls ?** explains the gestures. Ordinary mouse-down holds
+a key until mouse-up (including outside its hit box) or deck focus loss.
+Closing an attached viewer releases its owned contacts without clearing analog
+settings. Shift-click is a long
 press, Ctrl/right-click latches a key, and the browse knob accepts drag and
 scroll without also sending a push. Arrow keys navigate the focused deck;
-Enter or Space presses the focused control. Lights represent host input
+Enter or Space sends a timed pulse for the focused control, as do Inspector
+buttons. The UTILITY shortcut and browse push remain timed gestures. Mouse
+holds bypass the serialized pulse queue; rapid clicks can still miss firmware
+sampling, so hold a key deliberately when testing. Lights represent host input
 feedback, not decoded hardware LEDs. The existing `--skin lab` viewer remains
 available for bit-level work; `--scale` controls that view's integer zoom.
 
@@ -242,6 +248,16 @@ next execution blocker, not its architectural cause: decoding, packet
 grouping, and delayed-result/loop timing still need to be distinguished.
 The working tree's in-progress C674x changes were not rebuilt or altered by
 this communication diagnosis, so this result describes the tested binary.
+
+The later exploratory run `runs/nxs-interactive-exploratory-1` is not proof of
+responsive controls: its GUI link byte count stopped at 9,032 by wall time
+30 seconds and stayed there through 290 seconds. MAIN's input log nevertheless
+records applied key down/up transitions from 139 seconds onward. Repeated UI
+clicks also accumulated serialized 3.3-second pulses. Direct mouse contacts
+fix that host gesture/queue problem, but do not establish that the firmware's
+status delivery or display response is fixed. Native Tk gesture tests and the
+compiled C input harness verify delivery to panel payloads, not firmware UI
+response. The run ended because its viewer was closed.
 
 ### Existing tracing tools
 
