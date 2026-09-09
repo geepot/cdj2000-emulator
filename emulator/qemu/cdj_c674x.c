@@ -111,33 +111,59 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     for (unsigned i = 0; i < packet->count; ++i) {
         const CdjC674xInstruction *insn = &packet->instructions[i];
         uint32_t w = insn->word, pc = insn->pc, value = 0;
+        bool compact = insn->compact;
+        /* Figures C-8/C-9: lower compact immediate-offset transfers to the
+         * existing scalar pipeline, preserving header PROT and register RS.
+         * Pointer registers always come from A/B4-7, independent of RS. */
+        if (compact && (w & 0x0406) == 0x0004) {
+            unsigned dsz = (insn->header >> 16) & 7;
+            bool load = (w & 8) != 0, secondary = (w & 0x200) != 0;
+            unsigned reg = ((w >> 4) & 7) + ((insn->header & 0x80000) ? 16 : 0);
+            unsigned op, extended = 0;
+            if (!secondary && (dsz & 4)) {
+                bool nonaligned = (w & 0x10) != 0;
+                reg &= ~1u;
+                op = load ? (nonaligned ? 2 : 6) : (nonaligned ? 7 : 4);
+                extended = 0x100;
+            } else if (!secondary) op = load ? 6 : 7;
+            else {
+                static const unsigned loads[8] = {1, 2, 0, 4, 6, 2, 3, 4};
+                static const unsigned stores[8] = {3, 3, 5, 5, 7, 3, 5, 5};
+                op = load ? loads[dsz] : stores[dsz];
+                if (dsz == 6) extended = 0x100;
+            }
+            unsigned offset = ((w >> 13) & 7) | (((w >> 11) & 1) << 3);
+            w = reg << 23 | (4 + ((w >> 7) & 3)) << 18 | offset << 13 |
+                0x200 | extended | (w & 1) << 7 | op << 4 | 4 | ((w >> 12) & 1) << 1;
+            compact = false;
+        }
         unsigned side = (w >> 1) & 1, dst = (w >> 23) & 31;
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
-        bool callp = (!insn->compact && (w & 0xf000007c) == 0x10000010) ||
-                     (insn->compact && (insn->header & 0x8000) && (w & 0x3e) == 0x1a);
+        bool callp = (!compact && (w & 0xf000007c) == 0x10000010) ||
+                     (compact && (insn->header & 0x8000) && (w & 0x3e) == 0x1a);
         if (callp) {
-            side = insn->compact ? w & 1 : (w >> 1) & 1;
-            int32_t offset = insn->compact ? sx(w >> 6, 10) * 2
+            side = compact ? w & 1 : (w >> 1) & 1;
+            int32_t offset = compact ? sx(w >> 6, 10) * 2
                                           : sx((w >> 7) & 0x1fffff, 21) * 4;
             if (out.branch_due || elapsed > 1)
-                return stop(cpu, pc, w, "CALLP with pending branch or multicycle instruction");
+                return stop(cpu, pc, insn->word, "CALLP with pending branch or multicycle instruction");
             for (unsigned j = 0; j < packet->count; ++j) {
                 if (j == i) continue;
                 CdjC674xInstruction other = packet->instructions[j];
                 if ((!other.compact && ((other.word & 0x7c) == 0x10 ||
                      (other.word & 0x1ffe) == 0x162 || (other.word & 0xffe) == 0x362)) ||
                     (other.compact && ((other.header & 0x8000) || (other.word & 0x187f) == 0x6f)))
-                    return stop(cpu, pc, w, "CALLP with parallel control instruction");
+                    return stop(cpu, pc, insn->word, "CALLP with parallel control instruction");
             }
-            if (written[side][3]) return stop(cpu, pc, w, "parallel register write conflict");
+            if (written[side][3]) return stop(cpu, pc, insn->word, "parallel register write conflict");
             out.r[side][3] = packet->next_pc; written[side][3] = true;
             if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)offset))
-                return stop(cpu, pc, w, "CALLP branch queue conflict");
+                return stop(cpu, pc, insn->word, "CALLP branch queue conflict");
             elapsed = 6;
             continue;
         }
-        if (insn->compact) {
+        if (compact) {
             unsigned rs = (insn->header & 0x80000) ? 16 : 0;
             bool simple = true;
             side = w & 1;
@@ -174,23 +200,23 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 }
             } else simple = false;
             if (simple) {
-                if (written[side][dst]) return stop(cpu, pc, w, "parallel register write conflict");
+                if (written[side][dst]) return stop(cpu, pc, insn->word, "parallel register write conflict");
                 out.r[side][dst] = value; written[side][dst] = true;
                 continue;
             }
             if ((w & 0x187f) == 0x006f) { /* Figure F-32, register BNOP */
                 unsigned n = w >> 13;
-                if (n && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+                if (n && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
                 if (n + 1 > elapsed) elapsed = n + 1;
                 if (!queue_branch(&out, cpu->cycles + 6, cpu->r[1][(w >> 7) & 15]))
-                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
+                    return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
                 continue;
             }
             /* Figure F-31: compact MVC to ILC. SPLOOP observes a four-cycle
              * availability latency (section 7.4.3), tracked separately. */
             if ((w & 0xfc7f) == 0xd86f) {
                 unsigned src = ((w >> 7) & 7) + ((insn->header & 0x80000) ? 16 : 0);
-                if (controls[13]) return stop(cpu, pc, w, "parallel control write conflict");
+                if (controls[13]) return stop(cpu, pc, insn->word, "parallel control write conflict");
                 out.control[13] = cpu->r[1][src];
                 out.control_ready[13] = cpu->cycles + 4;
                 controls[13] = true;
@@ -207,11 +233,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 bool enabled = !(w & 0x20) ||
                     ((cpu->r[w & 1][0] != 0) ^ ((w >> 4) & 1));
                 if (n > 0 && elapsed > 1)
-                    return stop(cpu, pc, w, "multiple multicycle instructions");
+                    return stop(cpu, pc, insn->word, "multiple multicycle instructions");
                 if (n + 1 > elapsed) elapsed = n + 1;
                 if (enabled) {
                     if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)(displacement * 2)))
-                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
+                    return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
                 }
                 continue;
             }
@@ -224,12 +250,12 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 uint32_t address = cpu->r[1][15];
                 uint64_t data = cpu->r[bank][src];
                 if ((address & (size - 1)) || (size == 8 && (src & 1)))
-                    return stop(cpu, pc, w, "unaligned stack store or invalid register pair");
+                    return stop(cpu, pc, insn->word, "unaligned stack store or invalid register pair");
                 if (size == 8) data |= (uint64_t)cpu->r[bank][src + 1] << 32;
                 if (!write || !write(opaque, address, data, size, false))
-                    return stop(cpu, pc, w, "unmapped stack store");
-                if (written[1][15]) return stop(cpu, pc, w, "parallel register write conflict");
-                if (out.store_count == 24) return stop(cpu, pc, w, "store queue full");
+                    return stop(cpu, pc, insn->word, "unmapped stack store");
+                if (written[1][15]) return stop(cpu, pc, insn->word, "parallel register write conflict");
+                if (out.store_count == 24) return stop(cpu, pc, insn->word, "store queue full");
                 out.stores[out.store_count++] = (CdjC674xStore){
                     .due = cpu->cycles + 3, .value = data, .address = address, .size = size
                 };
@@ -248,13 +274,13 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 b = (w >> 7) & 7;
                 if (w & 0x40) { dst += ms; b += rs; }
                 else { dst += rs; b += ms; }
-                if (written[side][dst]) return stop(cpu, pc, w, "parallel register write conflict");
+                if (written[side][dst]) return stop(cpu, pc, insn->word, "parallel register write conflict");
                 out.r[side][dst] = cpu->r[cross][b]; written[side][dst] = true;
                 continue;
             }
             /* SPRUFE8B Figure D-4: compact .L ADD/SUB. */
             if ((w & 0x040e) != 0 || (insn->header & (1u << 14)))
-                return stop(cpu, pc, w, "compact instruction not implemented");
+                return stop(cpu, pc, insn->word, "compact instruction not implemented");
             rs = (insn->header & (1u << 19)) ? 16 : 0;
             side = w & 1;
             dst = ((w >> 4) & 7) + rs;
@@ -263,13 +289,13 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             cross = side ^ ((w >> 12) & 1);
             value = (w & 0x0800) ? cpu->r[side][a] - cpu->r[cross][b]
                                   : cpu->r[side][a] + cpu->r[cross][b];
-            if (written[side][dst]) return stop(cpu, pc, w, "parallel register write conflict");
+            if (written[side][dst]) return stop(cpu, pc, insn->word, "parallel register write conflict");
             out.r[side][dst] = value; written[side][dst] = true;
             continue;
         }
         unsigned creg = w >> 29, z = (w >> 28) & 1;
         bool enabled = true, reg_write = true, control_write = false;
-        if (creg == 7 || (!creg && z)) return stop(cpu, pc, w, "reserved predicate");
+        if (creg == 7 || (!creg && z)) return stop(cpu, pc, insn->word, "reserved predicate");
         if (creg) {
             static const unsigned bank[] = {0,1,1,1,0,0,0};
             static const unsigned index[] = {0,0,1,2,1,2,0};
@@ -277,8 +303,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
         if ((w & 0xfffe1ffeu) == 0) {
             unsigned n = ((w >> 13) & 15) + 1;
-            if (n > 9) return stop(cpu, pc, w, "reserved NOP count");
-            if (n > 1 && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+            if (n > 9) return stop(cpu, pc, insn->word, "reserved NOP count");
+            if (n > 1 && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
             if (n > elapsed) elapsed = n;
             reg_write = false;
         } else if ((w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154 ||
@@ -296,17 +322,17 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 scale = (w & (1u << 23)) ? 8 : 1;
                 dst &= ~1u;
             } else if (pair && (dst & 1)) {
-                return stop(cpu, pc, w, "invalid doubleword register pair");
+                return stop(cpu, pc, insn->word, "invalid doubleword register pair");
             }
             unsigned bank = (w >> 7) & 1, mode = (w >> 9) & 15;
             reg_write = false;
             if (!(mode & 8) && (mode & 2))
-                return stop(cpu, pc, w, "reserved memory addressing mode");
+                return stop(cpu, pc, insn->word, "reserved memory addressing mode");
             if (enabled) {
                 ++memory_count;
                 nonaligned_memory |= nonaligned;
                 if (b >= 4 && b <= 7 && cpu->control[0])
-                    return stop(cpu, pc, w, "circular memory addressing not implemented");
+                    return stop(cpu, pc, insn->word, "circular memory addressing not implemented");
                 uint32_t offset = ((mode & 4) ? cpu->r[bank][a] : a) * scale;
                 uint32_t base = cpu->r[bank][b];
                 uint32_t updated = (mode & 1) ? base + offset : base - offset;
@@ -316,34 +342,34 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if ((!nonaligned && (address & (size - 1))) ||
                     (is_store ? (!write || !write(opaque, address, store_value, size, false))
                               : !read_scalar(read, opaque, address, size, &dummy)))
-                    return stop(cpu, pc, w, "unaligned or unmapped scalar memory access");
+                    return stop(cpu, pc, insn->word, "unaligned or unmapped scalar memory access");
                 if (is_store) {
-                    if (out.store_count == 24) return stop(cpu, pc, w, "store queue full");
+                    if (out.store_count == 24) return stop(cpu, pc, insn->word, "store queue full");
                     out.stores[out.store_count++] = (CdjC674xStore){
                         .due = cpu->cycles + 3, .address = address,
                         .value = store_value, .size = size
                     };
                 } else {
-                    if (out.load_count == 40) return stop(cpu, pc, w, "load queue full");
+                    if (out.load_count == 40) return stop(cpu, pc, insn->word, "load queue full");
                     for (unsigned j = 0; j < out.load_count; ++j)
                         if (out.loads[j].due == cpu->cycles + 5 &&
                             out.loads[j].bank == side &&
                             out.loads[j].dst < dst + (pair ? 2 : 1) &&
                             dst < out.loads[j].dst + (out.loads[j].size == 8 ? 2 : 1))
-                            return stop(cpu, pc, w, "parallel load write conflict");
+                            return stop(cpu, pc, insn->word, "parallel load write conflict");
                     out.loads[out.load_count++] = (CdjC674xLoad){
                         .due = cpu->cycles + 5, .address = address, .bank = side, .dst = dst,
                         .size = size, .sign_extend = !extended && (op == 2 || op == 4)
                     };
                 }
                 if (mode & 8) {
-                    if (written[bank][b]) return stop(cpu, pc, w, "parallel register write conflict");
+                    if (written[bank][b]) return stop(cpu, pc, insn->word, "parallel register write conflict");
                     out.r[bank][b] = updated; written[bank][b] = true;
                 }
             }
             /* PROT inserts four NOPs, including for a false predicate. */
             if (!is_store && (insn->header & (1u << 20))) {
-                if (elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+                if (elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
                 elapsed = 5;
             }
         } else if ((w & 0x7c) == 0x28) {
@@ -393,44 +419,44 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = cpu->r[side][a] == cpu->r[cross][b];
         } else if ((w & 0xffe) == 0x3a2 && a == 0) {
             /* FADCR/FAUCR/FMCR storage only; FP operations are not decoded yet. */
-            if (dst != 13 && dst != 14 && (dst < 18 || dst > 20)) return stop(cpu, pc, w, "control register write not implemented");
+            if (dst != 13 && dst != 14 && (dst < 18 || dst > 20)) return stop(cpu, pc, insn->word, "control register write not implemented");
             control_write = true; reg_write = false; value = cpu->r[cross][b];
         } else if ((w & 0x7c) == 0x10) {
             reg_write = false;
             if (enabled) {
                 if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)(sx((w >> 7) & 0x1fffff, 21) * 4)))
-                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
+                    return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
             }
         } else if ((w & 0x0f830ffe) == 0x00800362) {
             unsigned n = (w >> 13) & 7;
             reg_write = false;
-            if (n && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+            if (n && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
             if (n + 1 > elapsed) elapsed = n + 1;
             if (enabled) {
                 if (!queue_branch(&out, cpu->cycles + 6, cpu->r[cross][b]))
-                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
+                    return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
             }
         } else if ((w & 0x0f83effe) == 0x362) {
             reg_write = false;
             if (enabled) {
                 if (!queue_branch(&out, cpu->cycles + 6, cpu->r[((w >> 12) & 1) ^ 1][b]))
-                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
+                    return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
             }
         } else if ((w & 0x1ffe) == 0x162) {
-            if (!side) return stop(cpu, pc, w, "ADDKPC requires S2");
+            if (!side) return stop(cpu, pc, insn->word, "ADDKPC requires S2");
             value = (pc & ~31u) + (uint32_t)(sx((w >> 16) & 127, 7) * 4);
             unsigned n = 1 + ((w >> 13) & 7);
-            if (enabled && n > 1 && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+            if (enabled && n > 1 && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
             if (enabled && n > elapsed) elapsed = n;
         } else {
-            return stop(cpu, pc, w, "instruction not implemented");
+            return stop(cpu, pc, insn->word, "instruction not implemented");
         }
         if (enabled && reg_write) {
-            if (written[side][dst]) return stop(cpu, pc, w, "parallel register write conflict");
+            if (written[side][dst]) return stop(cpu, pc, insn->word, "parallel register write conflict");
             out.r[side][dst] = value; written[side][dst] = true;
         }
         if (enabled && control_write) {
-            if (controls[dst]) return stop(cpu, pc, w, "parallel control write conflict");
+            if (controls[dst]) return stop(cpu, pc, insn->word, "parallel control write conflict");
             out.control[dst] = value; controls[dst] = true;
             if (dst == 13 || dst == 14) out.control_ready[dst] = cpu->cycles + 4;
         }

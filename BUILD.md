@@ -315,10 +315,11 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-pinmux` uploads
-13,781 words and executes 550 packets / 652 cycles. It commits both SYSCFG
-unlock keys, then writes PINMUX0 (`0x01c14120 = 0x11112180`). Execution stops
-on unsupported compact instruction `0x0065` at `0x11801e62`. Standalone replay
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-compact-memory` uploads
+13,781 words and executes 555 packets / 657 cycles. It commits both SYSCFG
+unlock keys, then writes PINMUX0 (`0x01c14120 = 0x11112180`) and PINMUX1
+(`0x01c14124 = 0x11111111`). Execution stops on compact store `0x0045` at
+`0x11801e74`, targeting unmapped PINMUX3 (`0x01c1412c`) with zero. Standalone replay
 and the connected run agree: `B15=0x11805ae8`, `B14=0x11806900` and
 `B3=0x118027c0`. The bounded GUI run exits 0 and produces a frame; this is
 not proof of a completed firmware boot.
@@ -328,6 +329,15 @@ Compact MVK.S now decodes the scattered unsigned eight-bit constant
 (Figure D-5, where zero encodes +8). Tests cover all 256 constant values,
 both register banks/subsets, all immediate offsets, cross-path reads and
 32-bit wrapping.
+
+Compact immediate-offset loads and stores (Figures C-8/C-9) use the same
+E1/E3/E5 pipeline as full-width instructions. The decoder handles the header's
+primary/secondary data sizes, signed narrow loads, register subsets, fixed
+A/B4-7 pointer selection, and byte-scaled nonaligned doubleword offsets.
+Protected loads retain their four NOPs. Faults report the original firmware
+opcode. Synthetic tests exercise every data-size selection, both register
+subsets, delayed stores, protected loads, unaligned doubleword layout, and
+out-of-bounds failure. Other compact memory addressing forms remain incomplete.
 
 `cdj_c6747_syscfg.c` implements KICK0R/KICK1R reset, readback, ordered unlock,
 and relock on a wrong key, following TI SPRUH91D sections 10.2.1.2 and 10.5.5.

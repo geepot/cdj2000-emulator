@@ -59,6 +59,57 @@ int main(void)
         assert(c.r[1][20] == 0xffffffffu + (uint32_t)offset);
         assert(c.r[0][20] == 0xffffffff);
     }
+    /* Compact immediate-offset transfers share E3/E5 timing with full words.
+     * Cover all header size selections and both register subsets. */
+    for (unsigned rs = 0; rs < 2; ++rs)
+        for (unsigned dsz = 0; dsz < 8; ++dsz)
+            for (unsigned secondary = 0; secondary < 2; ++secondary) {
+                static const unsigned sizes[8] = {1,1,2,2,4,1,4,2};
+                unsigned size = secondary ? sizes[dsz] : (dsz & 4 ? 8 : 4);
+                memset(memory, 0, sizeof(memory));
+                cdj_c674x_reset(&c, 0x1000);
+                c.r[1][4] = 0x1040; c.r[0][2 + rs * 16] = 0x87654321;
+                c.r[0][3 + rs * 16] = 0x12345678;
+                CdjC674xPacket p = {.count = 1, .next_pc = 0x1002,
+                    .instructions = {{.compact = true, .pc = 0x1000,
+                        .header = rs << 19 | dsz << 16,
+                        .word = 0x25 | secondary << 9 | 1u << 13}}};
+                assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+                assert(memory[16] == 0 && memory[17] == 0 && memory[18] == 0);
+                p.count = 0;
+                assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+                assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+                assert(memory[(0x40 + size) / 4] != 0);
+                c.r[0][2 + rs * 16] = 0;
+                c.r[0][3 + rs * 16] = 0;
+                p.count = 1; p.instructions[0].word |= 8;
+                p.instructions[0].header |= 1u << 20; /* PROT drains load. */
+                assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+                uint32_t expected = size == 1 ? 0x21 : size == 2 ? 0x4321 : 0x87654321;
+                assert(c.r[0][2 + rs * 16] == expected);
+                if (size == 8) assert(c.r[0][3 + rs * 16] == 0x12345678);
+                assert(c.r[1][4] == 0x1040);
+            }
+    /* Doff4DW nonaligned offsets are bytes, with an even register pair. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][4] = 0x1040; c.r[0][2] = 0x88776655; c.r[0][3] = 0xccbbaa99;
+    CdjC674xPacket compact_mem = {.count = 1, .next_pc = 0x1002,
+        .instructions = {{.compact = true, .pc = 0x1000, .header = 4u << 16,
+            .word = 0x6035}}};
+    assert(cdj_c674x_execute(&c, &compact_mem, read_word, write_memory, NULL));
+    compact_mem.count = 0;
+    assert(cdj_c674x_execute(&c, &compact_mem, read_word, write_memory, NULL));
+    assert(cdj_c674x_execute(&c, &compact_mem, read_word, write_memory, NULL));
+    assert(memory[16] == 0x55000000 && memory[17] == 0x99887766 && memory[18] == 0x00ccbbaa);
+    compact_mem.count = 1; compact_mem.instructions[0].word |= 8;
+    compact_mem.instructions[0].header |= 1u << 20;
+    c.r[0][2] = c.r[0][3] = 0;
+    assert(cdj_c674x_execute(&c, &compact_mem, read_word, write_memory, NULL));
+    assert(c.r[0][2] == 0x88776655 && c.r[0][3] == 0xccbbaa99);
+    cdj_c674x_reset(&c, 0x1000); c.r[1][4] = 0x10fc;
+    assert(!cdj_c674x_execute(&c, &compact_mem, read_word, write_memory, NULL));
+    assert(c.fault_word == 0x603d && c.cycles == 0);
     cdj_c674x_reset(&c, 0x1000);
     memory[0] = mvk(1, 15, -8);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
