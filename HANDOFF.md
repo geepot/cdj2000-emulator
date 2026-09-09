@@ -8,6 +8,59 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+AMR/circular-addressing batch implements AMR MVC read/write (id 0, mask
+0x03ffffff), per-base A4-A7/B4-B7 BK0/BK1 selection, all 32 block-size fields,
+and shared circular arithmetic for scalar/pair loads/stores and
+ADDAB/ADDAH/ADDAW/ADDAD/SUBAB/SUBAH/SUBAW. Other base registers and ordinary
+ADD/SUB remain linear. Nonaligned transfers wrap each byte within the circular
+buffer; blocks smaller than 32 bytes are undefined by TI and fail closed.
+Pending transfers retain issue-time circular width in their size field's high
+byte, preserving native checkpoint layout. Current readers are required for
+these checkpoints; old interpreters do not understand the encoded width.
+References: SPRUFE8B 2.8.3 and 3.9.2, including examples 3-4 through 3-6.
+
+The independent table harness covers all block widths, both banks, eligible
+bases, 14 address-arithmetic variants, 12 memory addressing modes, aligned
+and wrapped nonaligned 4/8-byte accesses, E3 sampling/E5 publication,
+AMR changes after issue, reserved modes, false predicates, and wrapped memory
+overlap/high-half register conflicts. Checkpoint tests preserve pending wrapped
+loads/stores. Full suite: 246 passed, 44 skipped; core and circular harnesses
+pass ASan/UBSan. The source inventory motivated this batch with 72 false-only
+load/store addresses; it does not establish exercised circular-mode firmware.
+
+AMR pipeline limitation remains explicit: after an executed MVC AMR, use of
+A4-A7/B4-B7 in the immediately following packet fails closed with
+`AMR use interlock not implemented`. A NOP permits the new mode to be used.
+SPRUFE8B 7.15.2 specifies a normal one-cycle stall but a missed-stall exception
+for loop-buffer instructions. Exact pre-predicate stall prediction (including
+false-predicated MVC), buffered-versus-memory distinctions, and IERR exception
+delivery are not modeled. This is not complete cycle-accurate AMR support.
+Reexamining 7.9.4/7.15 did not justify the strict SPLOOPD two-cycle workaround;
+the existing conflict and explicitly exploratory timing mode remain unchanged.
+
+Current-source `runs/dsp-circular-transcript-replay-1` matches all 71 previous
+connected stops, exact repeat state/memory, coverage and genuine TX records.
+It ends by phase budget at 58,099,500 packets / 120,392,283 cycles; trace
+SHA-256 `d523861d05899844d20c80a2ec9aab6fb752fe4e207a0822e87af32851f5e969`,
+coverage `bff725aa7ff787d5bbb5e793a8e36fd0c2fce97f8c6de6b493d151109664a668`.
+Inventory: 4,469 source packets, 5,396 instruction addresses, 4,585 encodings,
+33 probable addresses, 4,843 edges and zero faults. Strict regression
+`runs/dsp-circular-strict-replay-1` repeats its one connected stop at the same
+25,364,865 packets / 60,779,972 cycles and SPLOOPD conflict; trace
+`35734efde2f1b3aa09ad2e5ab6735d5b19fd7dd6c592305347f9dd069e391c33`.
+
+Fresh `runs/nxs-circular-connected-1` and
+`runs/dsp-circular-connected-replay-1` verify all 69 stops, exact repeat
+state/memory, coverage and TX. Final phase budget: 56,099,500 packets /
+116,888,772 cycles. Transcript: 105,288 events, SHA-256
+`e5c8aa47c4920464f48fbcba99c8ce93b4f27453cb56d1a8eeb8d7c400c9a5cc`;
+replay trace `3bb133579bc576f82174c8f9bc3fe9402e1ed35b6a4377a819bfdfb1b6b629c2`;
+coverage `a91b6914b80b0aabcdde348535bf14f0f883dd6b27d804d8a335f0c43f35619d`.
+All 59,988 XBUF words are zero (SHA-256
+`f84639275492f868d73c8bff2009bcbaaaa7a76b911ff133dd36b230489a17b4`).
+Exploratory timing/audio remain ineligible for architectural validation;
+neither full boot nor working audio is established.
+
 Source-predicate format audit now recognizes compact conditional MVK's
 CC=A0/!A0/B0/!B0 (SPRUFE8B Figure G-3), independently of side and RS.
 Explicitly audited unconditional formats are classified using section 3.6 and
@@ -116,7 +169,7 @@ Remaining milestone evidence gaps, in priority order:
   and re-piping the loop and requires software to save ILC/RILC/ITSR; it does
   not by itself justify inventing a second persistent hardware loop context
   across an ISR. Any replacement design needs that distinction resolved.
-- Remaining packed/multiply saturation, circular addressing, reload forms and unimplemented
+- Remaining packed/multiply saturation, AMR-use interlocks, reload forms and unimplemented
   control registers remain fail-closed. Current traces have not established
   them as terminal missing-opcode frontiers; probable code is not confirmation.
 

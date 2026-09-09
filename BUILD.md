@@ -1,5 +1,30 @@
 # Building
 
+AMR/circular-addressing validation:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_circular.py
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-circular.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c \
+  -o /tmp/cdj-circular-family-san
+/tmp/cdj-circular-family-san
+sh scripts/build-qemu-sh4.sh build/qemu
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/NEW_CIRCULAR_CONNECTED \
+  --seconds 15 --qemu build/qemu/build/qemu-system-sh4 \
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_CIRCULAR_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_CIRCULAR_REPLAY --steps 100000000 \
+  --events runs/NEW_CIRCULAR_CONNECTED/dsp-events.jsonl \
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx --verify-repeat
+```
+
+Use current sources for pending circular transfers: the existing queue's size
+high byte now retains circular width at issue. AMR-use interlocks remain
+fail-closed after executed MVC AMR; exact stall prediction and loop missed-stall
+exceptions are not implemented. See HANDOFF.md for measured results and limits.
+
 Reanalyze a captured predicate inventory without rerunning firmware:
 
 ```sh

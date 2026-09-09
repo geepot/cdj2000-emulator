@@ -9,11 +9,14 @@
 typedef struct {
     uint64_t due, value;
     uint32_t address;
+    /* Low byte: transfer size. High byte: issue-time circular address width
+     * (0=linear, 1..32 bits) for nonaligned transfers. */
     unsigned size;
 } CdjC674xStore;
 typedef struct {
     uint64_t due, value;
-    /* size 1/2/4/8 is a memory load; size 0 is an already-computed delayed
+    /* Low size byte 1/2/4/8 is a memory load; high byte retains circular
+     * address width as in CdjC674xStore. Size 0 is an already-computed delayed
      * scalar result and size 16 an already-computed register-pair result.
      * Sizes 32/33 are delayed IFR set/clear effects; their address field is
      * the interrupt mask and they never write a general register.

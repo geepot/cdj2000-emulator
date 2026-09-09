@@ -152,8 +152,8 @@ static int32_t sx(uint32_t value, unsigned bits)
 
 static bool queued_memory_load(const CdjC674xLoad *load)
 {
-    return load->size == 1 || load->size == 2 ||
-           load->size == 4 || load->size == 8;
+    unsigned size = load->size & 255;
+    return size == 1 || size == 2 || size == 4 || size == 8;
 }
 
 static unsigned queued_result_registers(const CdjC674xLoad *load)
@@ -161,12 +161,14 @@ static unsigned queued_result_registers(const CdjC674xLoad *load)
     if (load->size == CDJ_C674X_DELAYED_IFR_SET ||
         load->size == CDJ_C674X_DELAYED_IFR_CLEAR ||
         load->size == CDJ_C674X_DELAYED_SAT) return 0;
-    return load->size == 8 || load->size == 16 ? 2 : 1;
+    return (load->size & 255) == 8 || load->size == 16 ? 2 : 1;
 }
 
 static uint32_t control_read(const CdjC674x *cpu, unsigned id)
 {
     switch (id) {
+    case 0:                         /* AMR */
+        return cpu->control[id] & 0x03ffffffu;
     case 1:                         /* CSR */
         return cpu->control[id] & 0xffff03ffu;
     case 2:                         /* IFR */
@@ -202,14 +204,14 @@ static uint32_t control_read(const CdjC674x *cpu, unsigned id)
 
 static bool control_read_supported(unsigned id)
 {
-    return id == 1 || id == 2 || id == 4 || id == 5 || id == 6 || id == 7 ||
+    return id == 0 || id == 1 || id == 2 || id == 4 || id == 5 || id == 6 || id == 7 ||
            id == 13 || id == 14 || id == 26 || id == 27 ||
            (id >= 18 && id <= 21);
 }
 
 static bool control_write_supported(unsigned id)
 {
-    return (id >= 1 && id <= 7) || id == 13 || id == 14 ||
+    return id <= 7 || id == 13 || id == 14 ||
            id == 26 || id == 27 || (id >= 18 && id <= 21);
 }
 
@@ -218,6 +220,27 @@ static uint32_t saturate32(int64_t value, bool *saturated)
     *saturated = value > INT32_MAX || value < INT32_MIN;
     return value > INT32_MAX ? INT32_MAX : value < INT32_MIN ?
            (uint32_t)INT32_MIN : (uint32_t)value;
+}
+
+/* SPRUFE8B 2.8.3/3.9.2: only the selected base register controls
+ * circular arithmetic. Width 0 is linear; 1..32 are low address bits. */
+static bool address_width(const CdjC674x *cpu, unsigned bank, unsigned reg,
+                           unsigned *width)
+{
+    *width = 0;
+    if (reg < 4 || reg > 7) return true;
+    if (cpu->control_ready[0] > cpu->cycles) return false;
+    unsigned mode = (cpu->control[0] >> (bank * 8 + (reg - 4) * 2)) & 3;
+    if (mode == 3) return false;
+    if (mode) *width = ((cpu->control[0] >> (mode == 1 ? 16 : 21)) & 31) + 1;
+    return true;
+}
+
+static uint32_t circular_address(uint32_t base, uint32_t result, unsigned width)
+{
+    if (!width || width == 32) return result;
+    uint32_t mask = (1u << width) - 1;
+    return (base & ~mask) | (result & mask);
 }
 
 static uint32_t saturating_shift32(uint32_t source, unsigned count,
@@ -771,6 +794,37 @@ static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
         *value |= (uint64_t)word << (done * 8);
         done += n;
     }
+    return true;
+}
+
+/* High size byte retains issue-time circular width for nonaligned memory.
+ * Delayed E3 transactions must not re-read a subsequently changed AMR. */
+static bool read_transfer(CdjC674xRead read, void *opaque, uint32_t address,
+                          unsigned encoded_size, uint64_t *value)
+{
+    unsigned size = encoded_size & 255, width = encoded_size >> 8;
+    if (!width) return read_scalar(read, opaque, address, size, value);
+    *value = 0;
+    for (unsigned i = 0; i < size; ++i) {
+        uint64_t byte;
+        if (!read_scalar(read, opaque, circular_address(address, address + i, width), 1, &byte))
+            return false;
+        *value |= byte << (8 * i);
+    }
+    return true;
+}
+
+static bool write_transfer(CdjC674xWrite write, void *opaque, uint32_t address,
+                           uint64_t value, unsigned encoded_size, bool commit)
+{
+    if (!write) return false;
+    unsigned size = encoded_size & 255, width = encoded_size >> 8;
+    if (!width || circular_address(address, address + size - 1, width) ==
+                  (uint64_t)address + size - 1)
+        return write(opaque, address, value, size, commit);
+    for (unsigned i = 0; i < size; ++i)
+        if (!write(opaque, circular_address(address, address + i, width),
+                   (value >> (8 * i)) & 255, 1, commit)) return false;
     return true;
 }
 
@@ -1378,7 +1432,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                         if (out.loads[j].due == cpu->cycles + 5 &&
                             out.loads[j].bank == bank &&
                             out.loads[j].dst < reg + (size == 8 ? 2 : 1) &&
-                            reg < out.loads[j].dst + (out.loads[j].size == 8 ? 2 : 1))
+                            reg < out.loads[j].dst + queued_result_registers(&out.loads[j]))
                             return stop(cpu, pc, insn->word, "parallel load write conflict");
                     out.loads[out.load_count++] = (CdjC674xLoad){
                         .due = cpu->cycles + 5, .address = address, .bank = bank,
@@ -1550,27 +1604,35 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             reg_write = false;
             if (!(mode & 8) && (mode & 2))
                 return stop(cpu, pc, insn->word, "reserved memory addressing mode");
+            if (b >= 4 && b <= 7 && cpu->control_ready[0] > cpu->cycles)
+                return stop(cpu, pc, insn->word, "AMR use interlock not implemented");
             if (enabled) {
                 ++memory_count;
                 nonaligned_memory |= nonaligned;
-                if (b >= 4 && b <= 7 && cpu->control[0])
-                    return stop(cpu, pc, insn->word, "circular memory addressing not implemented");
+                unsigned width;
+                if (!address_width(cpu, bank, b, &width))
+                    return stop(cpu, pc, insn->word, cpu->control_ready[0] > cpu->cycles ?
+                                "AMR use interlock not implemented" : "reserved circular addressing mode");
+                if (nonaligned && width && width < 5)
+                    return stop(cpu, pc, insn->word, "nonaligned circular buffer smaller than 32 bytes");
                 uint32_t offset = (long_offset ? (w >> 8) & 32767 :
                                    (mode & 4) ? cpu->r[bank][a] : a) * scale;
                 uint32_t base = cpu->r[bank][b];
-                uint32_t updated = (mode & 1) ? base + offset : base - offset;
+                uint32_t updated = circular_address(base,
+                    (mode & 1) ? base + offset : base - offset, width);
                 uint32_t address = ((mode & 10) == 10) ? base : updated;
+                unsigned encoded_size = size | ((nonaligned ? width : 0) << 8);
                 uint64_t dummy, store_value = cpu->r[side][dst];
                 if (pair) store_value |= (uint64_t)cpu->r[side][dst + 1] << 32;
                 if ((!nonaligned && (address & (size - 1))) ||
-                    (is_store ? (!write || !write(opaque, address, store_value, size, false))
-                              : !read_scalar(read, opaque, address, size, &dummy)))
+                    (is_store ? !write_transfer(write, opaque, address, store_value, encoded_size, false)
+                              : !read_transfer(read, opaque, address, encoded_size, &dummy)))
                     return stop(cpu, pc, insn->word, "unaligned or unmapped scalar memory access");
                 if (is_store) {
                     if (out.store_count == 24) return stop(cpu, pc, insn->word, "store queue full");
                     out.stores[out.store_count++] = (CdjC674xStore){
                         .due = cpu->cycles + 3, .address = address,
-                        .value = store_value, .size = size
+                        .value = store_value, .size = encoded_size
                     };
                 } else {
                     if (out.load_count == 40) return stop(cpu, pc, insn->word, "load queue full");
@@ -1578,11 +1640,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                         if (out.loads[j].due == cpu->cycles + 5 &&
                             out.loads[j].bank == side &&
                             out.loads[j].dst < dst + (pair ? 2 : 1) &&
-                            dst < out.loads[j].dst + (out.loads[j].size == 8 ? 2 : 1))
+                            dst < out.loads[j].dst + queued_result_registers(&out.loads[j]))
                             return stop(cpu, pc, insn->word, "parallel load write conflict");
                     out.loads[out.load_count++] = (CdjC674xLoad){
                         .due = cpu->cycles + 5, .address = address, .bank = side, .dst = dst,
-                        .size = size, .sign_extend = !extended && (op == 2 || op == 4)
+                        .size = encoded_size, .sign_extend = !extended && (op == 2 || op == 4)
                     };
                 }
                 if (mode & 8) {
@@ -1604,12 +1666,19 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             /* ADDAB/H/W and SUBAB/H/W: same-bank operands, unsigned
              * five-bit immediate or register offset, scaled by 1/2/4. */
             unsigned op = (w >> 7) & 63;
-            if (enabled && b >= 4 && b <= 7 && cpu->control[0])
-                return stop(cpu, pc, insn->word, "circular address arithmetic not implemented");
+            if (b >= 4 && b <= 7 && cpu->control_ready[0] > cpu->cycles)
+                return stop(cpu, pc, insn->word, "AMR use interlock not implemented");
             /* ADDAD uses op 3c/3d; there is no SUBAD (TI page 117). */
             uint32_t offset = (op >= 0x3c ? op & 1 : op & 2) ? a : cpu->r[side][a];
             offset <<= (op - 0x30) / 4;
             value = (op < 0x3c && (op & 1)) ? cpu->r[side][b] - offset : cpu->r[side][b] + offset;
+            if (enabled) {
+                unsigned width;
+                if (!address_width(cpu, side, b, &width))
+                    return stop(cpu, pc, insn->word, cpu->control_ready[0] > cpu->cycles ?
+                                "AMR use interlock not implemented" : "reserved circular addressing mode");
+                value = circular_address(cpu->r[side][b], value, width);
+            }
         } else if ((w & 0x7c) == 0x40 && ((w >> 7) & 63) >= 0x10 &&
                    ((w >> 7) & 63) <= 0x13) {
             /* ADD/SUB .D without a cross path, SPRUFE8B pp110,529.
@@ -2261,6 +2330,9 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                     .size = dst == 2 ? CDJ_C674X_DELAYED_IFR_SET
                                      : CDJ_C674X_DELAYED_IFR_CLEAR
                 };
+            } else if (dst == 0) {
+                out.control[0] = value & 0x03ffffffu;
+                out.control_ready[0] = cpu->cycles + 2;
             } else if (dst == 1) {
                 /* PCC/DCC are documented as ignored on C674x. PWRD support is
                  * device-specific; actual C6747 CPU power-down is not yet
@@ -2308,11 +2380,16 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
      * this core does not yet model. Do not choose an invented ordering. */
     for (unsigned j = 0; j < out.load_count; ++j) {
         if (!queued_memory_load(&out.loads[j])) continue;
-        for (unsigned k = 0; k < out.store_count; ++k)
-            if (out.loads[j].due - 2 == out.stores[k].due &&
-                (uint64_t)out.loads[j].address < (uint64_t)out.stores[k].address + out.stores[k].size &&
-                (uint64_t)out.stores[k].address < (uint64_t)out.loads[j].address + out.loads[j].size)
-                return stop(cpu, cpu->pc, 0, "simultaneous overlapping RAM accesses not implemented");
+        for (unsigned k = 0; k < out.store_count; ++k) {
+            if (out.loads[j].due - 2 != out.stores[k].due) continue;
+            const CdjC674xLoad *load = &out.loads[j];
+            const CdjC674xStore *store = &out.stores[k];
+            for (unsigned l = 0; l < (load->size & 255); ++l)
+            for (unsigned s = 0; s < (store->size & 255); ++s)
+                if (circular_address(load->address, load->address + l, load->size >> 8) ==
+                    circular_address(store->address, store->address + s, store->size >> 8))
+                    return stop(cpu, cpu->pc, 0, "simultaneous overlapping RAM accesses not implemented");
+        }
     }
     /* Reject E5/E1 register collisions before any RAM transaction commits. */
     for (unsigned j = 0; j < out.load_count; ++j) {
@@ -2337,7 +2414,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         for (unsigned j = 0; j < out.store_count;) {
             CdjC674xStore *store = &out.stores[j];
             if (store->due > out.cycles) { ++j; continue; }
-            if (!write || !write(opaque, store->address, store->value, store->size, true))
+            if (!write_transfer(write, opaque, store->address, store->value, store->size, true))
                 return stop(cpu, cpu->pc, 0, "RAM store callback broke commit guarantee");
             memmove(store, store + 1, (--out.store_count - j) * sizeof(*store));
         }
@@ -2345,9 +2422,9 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             CdjC674xLoad *load = &out.loads[j];
             if (queued_memory_load(load) && load->due == out.cycles + 2) {
                 uint64_t data;
-                if (!read_scalar(read, opaque, load->address, load->size, &data))
+                if (!read_transfer(read, opaque, load->address, load->size, &data))
                     return stop(cpu, cpu->pc, 0, "RAM load mapping changed during execution");
-                if (load->sign_extend) data = sx(data, load->size * 8);
+                if (load->sign_extend) data = sx(data, (load->size & 255) * 8);
                 load->value = data;
             }
             if (load->due > out.cycles) { ++j; continue; }
