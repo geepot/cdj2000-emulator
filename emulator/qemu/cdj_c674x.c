@@ -463,6 +463,16 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = sx((w >> 7) & 0xffff, 16);
         } else if ((w & 0x7c) == 0x68) {
             value = (cpu->r[side][dst] & 0xffff) | (((w >> 7) & 0xffff) << 16);
+        } else if ((w & 0x7c) == 0x40 && ((w >> 7) & 63) >= 0x30 &&
+                   ((w >> 7) & 63) <= 0x3b) {
+            /* ADDAB/H/W and SUBAB/H/W: same-bank operands, unsigned
+             * five-bit immediate or register offset, scaled by 1/2/4. */
+            unsigned op = (w >> 7) & 63;
+            if (enabled && b >= 4 && b <= 7 && cpu->control[0])
+                return stop(cpu, pc, insn->word, "circular address arithmetic not implemented");
+            uint32_t offset = (op & 2) ? a : cpu->r[side][a];
+            offset <<= (op - 0x30) / 4;
+            value = (op & 1) ? cpu->r[side][b] - offset : cpu->r[side][b] + offset;
         } else if ((w & 0x7c1ffc) == 0x40) {
             value = sx(a, 5); /* MVK .D */
         } else if ((w & 0x3effc) == 0xa358) {
@@ -622,7 +632,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         CdjC674xPacket source;
         if (!cdj_c674x_fetch(&out, read, opaque, &source))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
-        if (++out.loop_packets > 14) return stop(cpu, cpu->pc, 0, "loop buffer packet capacity exceeded");
+        /* Section 7.7.3.3 indexes storage by LBC (cycle modulo II), not
+         * the number of source fetches. NOP/setup packets can exceed 14.
+         * The 48-cycle, 112-tag and simultaneous-issue limits still apply. */
+        ++out.loop_packets;
         bool finish = false;
         unsigned delay = 0, count = 0;
         uint32_t tags[8];

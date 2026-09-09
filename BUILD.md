@@ -504,3 +504,35 @@ PSC0 PTSTAT (`0x01c10128`). See SPRUH91D Table 8-6 and section 8.6.10.
 GUI exit 0/frame publication after 15 seconds is not full boot. PSC transition
 modeling is the next peripheral batch. Full suite: 164 passed, 43 skipped;
 the CPU harness passes address/undefined-behavior sanitizers.
+
+### PSC register-transition batch
+
+The shared `cdj_c6747_psc.c` model implements both controllers' MDCTL/MDSTAT,
+PTCMD and PTSTAT, following SPRUH91D chapter 8. The firmware's requested NEXT
+states are latched at GO, PTSTAT becomes busy, then MDSTAT changes when the
+transition finishes. Populated modules and restricted interconnect modules use
+Tables 8-1/8-2. Reads are side-effect-free, and write validation never mutates
+state. Tests exercise deferred transitions, GO snapshotting, both controllers,
+status bits, absent modules, restricted states and invalid accesses.
+
+Explicit approximations: a transition takes eight successful DSP steps, with
+one tick after each step including the committing step; this is not physical
+clock timing. Intermediate MDSTAT states are not modeled. Repeated GO while
+busy is ignored. PTCMD readback is assumed zero for the observed read/OR/write
+sequence; the manual labels GO write-only. Physical clock/reset routing is not
+implemented. DSP LRST starts deasserted under the ROM-handoff abstraction;
+self-reset, FORCE, emulation interrupt enables, auto-sleep/wake and domain
+power-down stop as unsupported. PSC state is not proof of peripheral readiness.
+
+The same batch adds linear ADDAB/H/W and SUBAB/H/W, register/immediate forms,
+with same-bank operands and modular scaled arithmetic. Circular addressing
+remains unsupported. The loop source-packet limit was corrected: storage is
+indexed by LBC (TI 7.7.3.3), so NOP/setup fetches can exceed 14 while dynamic
+length, total tags and simultaneous issue remain bounded.
+
+Repeated firmware replay reaches 833 packets / 958 cycles, stopping at
+`0x118021a0`, opcode `0x031c3ec0`. Full suite: 165 passed / 43 skipped;
+CPU and PSC harnesses pass address/undefined-behavior sanitizers.
+The rebuilt connected MAIN/Blackfin run `runs/nxs-psc-batch-connected` agrees
+at the same stop and logs firmware MDCTL/GO writes for EDMA, GPIO and HPI.
+Its GUI exits 0 with a frame after 15 seconds; full boot remains incomplete.

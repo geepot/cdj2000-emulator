@@ -8,6 +8,34 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+PSC batch: `cdj_c6747_psc.c` now supplies PSC0/PSC1 MDCTL, MDSTAT, PTCMD and
+PTSTAT to both replay and connected DSP execution. Module/domain assignments
+and initial states follow SPRUH91D Tables 8-1/8-2. GO snapshots NEXT; status
+changes after eight successful DSP steps. This is synthetic step timing, not
+measured PSC clock timing. Reads have no side effects. Clock/reset wires are
+not connected. DSP local reset starts deasserted as part of the existing ROM
+handoff abstraction; self-reset requests stop. FORCE, emulation interrupts,
+auto-sleep/wake and power-domain control remain unsupported. Repeated GO while
+busy is ignored (model assumption). MDSTAT retains its old state until completion.
+PTCMD reads return zero: firmware uses read/OR/write, but this write-only
+register's readback is not hardware-verified. Do not claim physical readiness.
+
+Also added the 12 register/immediate ADDAB/H/W and SUBAB/H/W forms with linear
+address scaling and wraparound. Circular addressing still stops. Corrected the
+loop limit: source fetches are not the 14 LBC-indexed storage slots (TI 7.7.3.3).
+NOP/setup fetches may exceed 14; 48-cycle/112-tag/issue limits remain enforced.
+
+Replay `runs/dsp-psc-batch-4` and `runs/dsp-psc-batch-repeat` agree at 833 packets /
+958 cycles, stopping at `0x118021a0`, opcode `0x031c3ec0` (next .D arithmetic
+family to decode). Trace SHA-256:
+`3f16df16bb63ac57916c6dbb6ae76250090736f77c7986d5a8eba0d699de891c`.
+Full suite: 165 passed, 43 skipped; PSC and CPU sanitizer harnesses pass.
+Rebuilt connected run `runs/nxs-psc-batch-connected` matches 833/958 and the
+same opcode/PC. It records MDCTL+GO writes for PSC0 modules 0/1/2 and PSC1
+modules 3/4. GUI exits 0 after 15 seconds with a frame. Full boot is incomplete.
+
+### Previous SPMASK checkpoint
+
 Latest batch: full-width and compact SPMASK, functional-unit classification,
 load-time exclusion, buffered suppression before issue-capacity checks, and
 epilog replacement are implemented. Compact Figure G-3 predicated MVK covers

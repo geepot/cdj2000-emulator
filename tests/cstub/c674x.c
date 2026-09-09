@@ -31,6 +31,28 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* Address arithmetic families: unsigned constants, signed-register
+     * bit patterns, scaling and modular wrap, on both banks. */
+    for (unsigned op = 0x30; op <= 0x3b; ++op)
+        for (unsigned side = 0; side < 2; ++side) {
+            cdj_c674x_reset(&c, 0x1000);
+            c.r[side][5] = 2; c.r[side][31] = 0xffffffff;
+            memory[0] = 6u << 23 | 5u << 18 | 31u << 13 | op << 7 | 0x40 | side << 1;
+            uint32_t offset = (op & 2 ? 31u : 0xffffffffu) * (1u << ((op - 0x30) / 4));
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(c.r[side][6] == ((op & 1) ? 2 - offset : 2 + offset));
+        }
+    /* More than 14 source packets fit when they occupy no functional slots. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[13] = 1;
+    memory[0] = 0x06838000; /* SPLOOP 14 */
+    memory[21] = 0x34000;
+    unsigned long_body_steps = 0;
+    do {
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(++long_body_steps < 50);
+    } while (c.loop_active);
+    assert(c.loop_packets == 21 && c.loop_tags == 0);
     /* Figure G-3 predicate MVK: all predicate polarities, units, sides,
      * register subsets and constants. Predicates always use low A0/B0. */
     for (unsigned cc = 0; cc < 4; ++cc)

@@ -10,6 +10,7 @@
 #include "cdj2000_nxs_hpi.h"
 #include "cdj_c674x.h"
 #include "cdj_c6747_syscfg.h"
+#include "cdj_c6747_psc.h"
 
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
@@ -24,6 +25,7 @@ typedef struct {
     uint64_t words;
     CdjC674x cpu;
     CdjC6747Syscfg syscfg;
+    CdjC6747Psc psc;
     void (*hint)(void *, bool);
     void *opaque;
 } NxsHpi;
@@ -44,6 +46,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
 {
     NxsHpi *s = opaque;
     if (cdj_c6747_syscfg_read(&s->syscfg, address, value)) return true;
+    if (cdj_c6747_psc_read(&s->psc, address, value)) return true;
     if (address >= 0x00800000 && address < 0x00840000) address += 0x11000000;
     if ((address & 3) || address < L2_BASE || address > L2_BASE + L2_SIZE - 4) return false;
     *value = ldl_le_p(s->l2 + address - L2_BASE);
@@ -54,6 +57,10 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     NxsHpi *s = opaque;
+    if (cdj_c6747_psc_write(&s->psc, address, value, size, commit)) {
+        if (commit) info_report("nxs-psc: write address=%#x value=%#x", address, (uint32_t)value);
+        return true;
+    }
     if (cdj_c6747_syscfg_write(&s->syscfg, address, value, size, commit)) {
         if (commit) info_report("nxs-syscfg: write address=%#x value=%#x unlocked=%d",
                                 address, (uint32_t)value, s->syscfg.unlocked);
@@ -77,7 +84,8 @@ static void start_dsp(NxsHpi *s)
      * No claim to execute the unavailable ROM. The uploaded code is decoded. */
     cdj_c674x_reset(&s->cpu, ldl_le_p(s->l2));
     unsigned budget = 10000;
-    while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {}
+    while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s))
+        cdj_c6747_psc_tick(&s->psc);
     info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
                 s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
@@ -145,6 +153,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     NxsHpi *s = g_new0(NxsHpi, 1);
     nxs_hpi = s;
     cdj_c6747_syscfg_reset(&s->syscfg);
+    cdj_c6747_psc_reset(&s->psc);
     s->hint = hint;
     s->opaque = opaque;
     memory_region_init_io(&s->registers, NULL, &hpi_ops, s, "nxs.uhpi", 0x100000);

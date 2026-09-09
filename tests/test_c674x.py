@@ -5,6 +5,15 @@ import subprocess
 import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
+def test_c6747_psc_transitions(tmp_path):
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'psc-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-psc.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_psc.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=5)
+
 def test_c674x_packets_and_branch_delays(tmp_path):
     cc = shutil.which('cc')
     if not cc: pytest.skip('requires C compiler')

@@ -7,14 +7,17 @@
 #include <inttypes.h>
 #include "cdj_c674x.h"
 #include "cdj_c6747_syscfg.h"
+#include "cdj_c6747_psc.h"
 static uint8_t ram[0x40000];
 static CdjC6747Syscfg syscfg;
+static CdjC6747Psc psc;
 static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }
 static bool read_bus(void *unused, uint32_t a, uint32_t *v)
 {
     (void)unused;
     if (cdj_c6747_syscfg_read(&syscfg, a, v)) return true;
+    if (cdj_c6747_psc_read(&psc, a, v)) return true;
     a = global(a);
     if ((a & 3) || a < 0x11800000 || a > 0x1183fffc) return false;
     a -= 0x11800000;
@@ -25,6 +28,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
 {
     (void)unused;
     bool ok = cdj_c6747_syscfg_write(&syscfg, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_psc_write(&psc, a, v, size, commit);
     uint32_t physical = global(a);
     if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
         physical >= 0x11800000 && physical <= 0x11840000 - size) {
@@ -53,6 +57,7 @@ int main(int argc, char **argv)
     fclose(f);
     if (!valid) { fputs("expected exactly 256 KiB of L2\n", stderr); return 2; }
     CdjC674x c;
+    cdj_c6747_psc_reset(&psc);
     uint32_t entry;
     read_bus(NULL, 0x11800000, &entry);
     cdj_c674x_reset(&c, entry);
@@ -63,6 +68,7 @@ int main(int argc, char **argv)
                ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
                c.pc, c.cycles, c.loop_active ? "true" : "false", c.branch_due);
         if (!cdj_c674x_step(&c, read_bus, write_bus, NULL)) { reason = "fault"; break; }
+        cdj_c6747_psc_tick(&psc);
     }
     /* Fault strings originate in the interpreter and contain no JSON escapes. */
     printf("{\"event\":\"stop\",\"reason\":\"%s\",\"fault\":\"%s\",\"pc\":%" PRIu32
