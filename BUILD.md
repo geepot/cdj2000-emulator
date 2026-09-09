@@ -1,5 +1,19 @@
 # Building
 
+Check the captured NXS MAIN/DSP ready/clear/ack sequence without executing or
+modifying firmware:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.boot_handshake runs/RUN/dsp-events.jsonl
+```
+
+Exit 0 means the final reset epoch contains an ordered MAIN read of exactly 1
+at 0x1183fff4, clear of 0x1183ffec, then acknowledgement of 0x1183fff0. Exit 1
+means that evidence is absent; malformed/incomplete records fail with exit 2.
+The tool hashes the transcript and names the firmware address-map hash, but
+does not authenticate its origin or establish boot, GUI liveness, or absence
+of a later error. Use it alongside strict replay and the connected visual gate.
+
 Deferred scheduling is an opt-in diagnostic, not a boot-validation mode:
 
 ```sh

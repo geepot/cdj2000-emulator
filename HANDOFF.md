@@ -8,6 +8,17 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Read-only handshake checker `python -m tools.cdj_dsp.boot_handshake EVENTS`
+now distinguishes observed DSP readiness from packet-count progress. Against
+`nxs-e7010-strict-baseline-1`, it reports 3,000 readiness reads and no ordered
+handshake (exit 1). Against `nxs-spi-gap-strict-90s-1` and the recent legacy
+profile-2 run, it identifies ready/clear/ack events 104211/104213/104215
+(exit 0). Deferred profile-2 has the same sequence at 123144/123146/123148.
+The result is transcript evidence only, with source-map and transcript hashes;
+it does not authenticate provenance, assert strict semantics, or satisfy the
+GUI/error-free-duration/repeated-cold-boot gates. Reset/start invalidates stale
+ready evidence, and malformed/gapped transcripts fail rather than guessing.
+
 Repeat profiling pair `runs/nxs-deferred-sync-profile-2` and
 `runs/nxs-legacy-sync-profile-2` uses identical five input-artifact hashes and
 neither changes at exit. Deferred MAIN waits: interrupt 11.79737s, MMIO read
