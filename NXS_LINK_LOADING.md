@@ -72,3 +72,8 @@ DMINT3 in INT2STAT. A polling transfer with IE clear stays non-interrupting.
 The actual-QEMU regression fails on the old build at the missing DMINT3
 assertion and passes after the fix; HPI and address-mode tests: 13 passed.
 Cold firmware retesting is still required; this is not audio-load success.
+
+The link-dump decoder now distinguishes command-0 status from nonzero
+payload commands instead of classifying by length alone. Regression tests
+cover a 64-byte list, its real delivered count/announcement, and a 64-byte
+player-state payload alongside an NXS 8800-prefixed status record (5 passed).

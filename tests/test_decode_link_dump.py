@@ -56,6 +56,25 @@ class DecodeLinkDumpTests(unittest.TestCase):
         self.assertIn("(1, 448) =  896 bytes  records 2..3  delivered x0  <-- never delivered", report)
         self.assertTrue(any("w29=1 w30=448" in line for line in lines))
 
+    def test_64_byte_nxs_list_is_payload_not_status(self) -> None:
+        status = announcing(1, 32)
+        payload = build_type1_list(["SD", "TESTTONE.WAV"], word_count=32)
+        lines, summary = decode(framed(status, payload, payload, status))
+        self.assertEqual(len(payload), 64)
+        self.assertEqual(summary.delivered[64], 2)
+        self.assertEqual(summary.announcements, [(1, 32, 1, 4)])
+        self.assertIn("'TESTTONE.WAV'", "\n".join(lines))
+        self.assertIn("payload   64 bytes x2", "\n".join(lines))
+        self.assertNotIn("never delivered", "\n".join(format_summary(summary)))
+
+    def test_nxs_status_prefix_and_64_byte_player_payload(self) -> None:
+        status = build_status_record(overrides={1: 0x8800})
+        payload = struct.pack('<32H', 0x19, *([0] * 31))
+        lines, summary = decode(framed(status, payload))
+        self.assertEqual(summary.player_states, 1)
+        self.assertEqual(summary.delivered[64], 1)
+        self.assertEqual(sum(' status ' in line for line in lines), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

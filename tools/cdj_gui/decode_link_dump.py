@@ -2,11 +2,12 @@
 
 The simulator appends each record it hands to the firmware's receive DMA as
 ``"SPRX"`` + little-endian 32-bit length + body (``dv-bfin_ppi.c``,
-``bfin_sport_link_dump``).  64-byte records are status records; the model
-repeats the last one between MAIN's transmissions, so their count is not
-MAIN's send count (that is ``link-tx: sent`` in MAIN's -D log).  Every other
-length is a payload MAIN announced in status halfwords 29 and 30 (count,
-length in halfwords) and the firmware fetched.
+``bfin_sport_link_dump``). Status records are 64 bytes with command word 0.
+Payloads can also be 64 bytes (notably short NXS browser lists), so length
+alone cannot distinguish them. In cached-delivery mode the model repeats
+status between MAIN transmissions; that count is not MAIN's send count
+(``link-tx: sent`` in MAIN's -D log). Payloads are announced in status
+halfwords 29 and 30 (count, length in halfwords) and fetched by firmware.
 
 Printed, in record order:
 
@@ -165,8 +166,8 @@ def decode(blob: bytes, *, hex_words: int = 0, collapse: bool = True, limit: int
         summary.lengths[len(body)] += 1
         if limit and index > limit:
             break
-        if len(body) == STATUS_LENGTH:
-            words = words_of(body)
+        words = words_of(body)
+        if len(body) == STATUS_LENGTH and words[0] == 0:
             current = tuple(words[word] for word in WATCHED_WORDS)
             pair = (words[29], words[30])
             if pair != announcement:
@@ -182,7 +183,6 @@ def decode(blob: bytes, *, hex_words: int = 0, collapse: bool = True, limit: int
                 watched = current
             continue
         summary.delivered[len(body)] += 1
-        words = words_of(body)
         if words and words[0] == PLAYER_STATE_COMMAND:
             summary.player_states += 1
         if collapse and body == last_payload:
