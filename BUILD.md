@@ -319,7 +319,8 @@ The connected stock MAIN/Blackfin run in `runs/nxs-c674x-pinmux-bank` uploads
 13,781 words and executes 597 packets / 699 cycles. It commits both SYSCFG
 unlock keys and all 20 PINMUX register writes, ending with PINMUX19 = 2
 (the documented UHPI_HRDY output selection). Execution stops on unsupported
-instruction `0x4683e000` at `0x11801f20`. Standalone replay
+instruction `0x4683e000` at `0x11801f20`. This decodes as `[B1] SPLOOPW 14`
+(TI SPRUFE8B section 7.10); predicate-controlled loop scheduling remains missing. Standalone replay
 and the connected run agree: `B15=0x11805ae8`, `B14=0x11806900` and
 `B3=0x118027c0`. The bounded GUI run exits 0 and produces a frame; this is
 not proof of a completed firmware boot.
@@ -409,3 +410,35 @@ false-predicate BNOP timing, six simultaneous in-flight
 branches, captured targets, and branch cancellation of SPLOOP. The connected NXS run
 above verifies the firmware's loop and return path. Sanitizers and the
 160-test host suite pass (42 platform/dependency tests skipped).
+
+### Deterministic DSP replay diagnostics
+
+Replay the pre-execution 256 KiB L2 dump captured by a connected NXS run:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-c674x-pinmux-bank/dsp-l2.bin runs/dsp-debug
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-c674x-pinmux-bank/dsp-l2.bin runs/dsp-break --break-pc 0x11801f20
+```
+
+Output directories must be new. The tool compiles the current C674x and SYSCFG
+models with the system C compiler into a temporary directory. It snapshots and
+hashes the dump, records source/header hashes in `manifest.json`, and writes
+`trace.jsonl`: step PCs/cycles and loop/branch state, committed/rejected writes,
+and a final report containing all 64 general registers and pending memory counts.
+`--steps` sets the maximum number of core steps (default 10000). `--break-pc`
+stops before execution at that PC; a breakpoint in a buffered loop refers to
+the core program counter, not every buffered instruction's original address.
+Fault, step-limit and breakpoint outcomes are distinct. Exit zero means the
+report was produced; it never means firmware booted.
+
+This is headless DSP replay from an explicit ROM-handoff abstraction. It does
+not run MAIN/Blackfin concurrently, execute the boot ROM, or supply missing
+peripheral responses. Both global and local L2 addresses are supported.
+`runs/dsp-replay-pinmux` reproduces 597 packets / 699 cycles and the same
+SPLOOPW stop as the connected run. `runs/dsp-replay-before-sploopw` stops just
+before it, with two pending stores and no CPU fault. The real-firmware replay
+also passes AddressSanitizer/UndefinedBehaviorSanitizer. Synthetic tests check
+byte-identical repeat traces, local L2 aliases, breakpoint/limit semantics, and
+malformed-input rejection. This replaces the untracked development probe as
+the repeatable diagnostic entry point; interactive stepping/resume and general
+memory inspection remain future work.
