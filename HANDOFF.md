@@ -8,6 +8,71 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Primary milestone is now a genuine cold connected boot without E-7010, with
+at least 60 seconds of subsequent fault-free operation and basic GUI interaction,
+repeated from cold startup. No exploratory DSP switches qualify. Instruction
+inventory expansion is secondary to the actual startup path. This milestone
+remains incomplete; no core timing fix was made in the boot-evidence batch.
+
+NXS-specific handshake trace (do not substitute original-CDJ `caution.py`
+addresses): MAIN loader `0x041fc698` calls final handler `0x041fc646`, which
+polls `0x1183fff4` for exactly 1 and acknowledges through `0x1183fff0`.
+NXS status function `0x042a6524` stores device 1 at `0x04cf2468`; state 2 maps
+to caution code 2, whose table entry at `0xa40b5eb8` is `{2,0x7010}`.
+Success calls status `(1,1)` at `0x041fc794`; failure calls `(1,2)` at
+`0x041fc7b0` or `0x041fc7bc`. DSP stage 1 publishes ready with its store at
+`0x1180304c`. Trace applies to MAIN firmware SHA-256
+`02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85`.
+
+New decoding hypothesis needs independent TI-toolchain confirmation:
+SPRUFE8B Figure H-7 visually labels compact SPKERNEL bits 15:14 as field[4:3],
+9:7 as field[2:0], and bit 0 as field[5]. The current/GNU scatter instead maps
+these to field[5:4], [3:1], and [0]. Literal H-7 plus Table 3-29 interprets
+`0xdc66` at II=1 as stage 6, whereas current/GNU decoding says stage 3.
+This could explain the overlap without changing scheduling; it is a hypothesis,
+not yet a confirmed GNU/core defect. Obtain a TI assembler/disassembler result
+for stages 3, 6 and 24 before changing strict semantics. The original PDF
+pages 482 and 766 were visually checked; packet grouping and dynlen=7 were
+independently rechecked and do not explain the conflict.
+
+Fresh rebuilt `runs/nxs-e7010-strict-baseline-1` ran for 75 seconds and visibly
+shows `E-7010: DSP DEVICE ERROR`. The DSP stops at the unchanged strict loop
+conflict: 25,364,865 packets / 60,779,972 cycles, PC `0xc004f306`, word `0x2627`.
+MAIN reads DSP readiness address `0x1183fff4` exactly 3,000 times, always zero
+(first event 104210). Its transcript SHA-256 is
+`1924222cae24905987a7dc8388760ff615e658615ad604596f3a172bfd23e758`;
+final PPM SHA-256 is
+`7f9a690c3fefc5ce337708898eb49f0a0860a944037a7fce1c6a574d6d321c92`.
+
+The comparison `runs/nxs-e7010-timing-only-diagnostic-1` also ran 75 seconds,
+using only `--functional-dsp-timing`, NOT the functional audio scheduler.
+MAIN reads the same readiness address once, receiving 1 (event 104211), then
+writes 0 to `0x1183ffec` and 1 to `0x1183fff0`. The inspected final screen is
+the normal `Not Loaded.` player screen without an error banner. DSP execution
+ends at its cooperative budget, 287,099,500 packets / 531,739,182 cycles, not
+an instruction fault. Transcript SHA-256:
+`475168aa0b05f4b1c3077d8425bd851438a47fe12ed4b8af02683f1ad74d391b`;
+final PPM SHA-256:
+`9ea6b13c57b8b37eb842d2811e0519f0499a7de86e9d8025bd48dbbbd9f0978b`.
+Both used rebuilt QEMU SHA-256
+`60a6e93ed80a839fdca0c34883e5e95e2ab5247022044ccd89e58f3fb76fd1f5`.
+This isolates the readiness failure from the coarse audio scheduler. It does
+not validate the timing workaround, prove continuous banner absence, or establish
+interaction, audio, strict boot, or milestone completion.
+
+The launcher now accepts optional `--frame-interval N`. Complete P6 frames are
+saved with monotonic observation times and hashes under `frames/`; missing,
+incomplete and duplicate observations remain explicit. Duplicate images do not
+prove renderer liveness. `run.json` records hashes of resolved QEMU, simulator,
+and three firmware inputs before launch and after exit, flagging differences.
+This is not continuous input-mutation monitoring or an automatic boot oracle.
+Focused boot-evidence and DSP replay tests: 31 passed.
+Connected instrumentation check `runs/nxs-e7010-frame-evidence-1` captures
+complete frames at approximately 5.10, 10.06, 15.09 and 20.01 seconds, with an
+explicit missing frame at launch. The last two hashes match the strict error
+screen above, and no binary/firmware input hashes differ at exit. This is
+evidence of the continuing failure, not a successful boot.
+
 Exact semantic inventory tooling now runs GNU libopcodes only at confirmed
 source addresses, validates checkpoint hash, captured words/headers and decoded
 widths, and retains mnemonic aliases, predicates, units and exact operand text.

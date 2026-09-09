@@ -1,5 +1,25 @@
 # Building
 
+Boot-error milestone evidence (strict, no exploratory DSP flags):
+
+```sh
+sh scripts/build-qemu-sh4.sh build/qemu
+.venv/bin/python -m pytest -q tests/test_nxs_boot_evidence.py tests/test_dsp_replay.py
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/NEW_STRICT_BOOT \
+  --seconds 90 --frame-interval 5 --ui \
+  --qemu build/qemu/build/qemu-system-sh4
+```
+
+Use a new run directory each time. Closing the UI ends the run. The command
+collects evidence; a zero launcher exit is NOT a successful-boot result. Inspect
+the frame timeline and DSP fault/handshake state, record basic interactions,
+and require at least 60 seconds after error-free startup before repeating a
+cold boot. Current strict firmware still displays E-7010; see HANDOFF.md.
+`frames/manifest.json` records observation times, hashes and incomplete/missing
+frames. Unchanged images do not prove liveness. `run.json` records the actual
+binary/firmware hashes before launch and after exit. No frame capture or input
+hashing changes firmware traffic, error conditions, or DSP timing semantics.
+
 Exact-address mnemonic/operand inventory (macOS): the GNU source tree prepared
 by the dependency build is reused; these ignored libraries are not in Git.
 From a fresh `build/tic6x-binutils` directory, configure and build:
