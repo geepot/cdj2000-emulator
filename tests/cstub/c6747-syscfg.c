@@ -1,18 +1,35 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include "cdj_c6747_syscfg.h"
+#include "cdj_c6747_pll.h"
 #include "cdj_c674x.h"
+static CdjC6747Pll pll;
 static bool write_bus(void *p, uint32_t a, uint64_t v, unsigned n, bool commit)
-{ return cdj_c6747_syscfg_write(p, a, v, n, commit); }
+{
+    CdjC6747Syscfg *s = p;
+    if (cdj_c6747_syscfg_write(s, a, v, n, commit)) return true;
+    if (cdj_c6747_syscfg_pll_locked(s) && cdj_c6747_pll_write_mapped(a, n)) return true;
+    return cdj_c6747_pll_write(&pll, a, v, n, commit);
+}
 static bool read_bus(void *p, uint32_t a, uint32_t *v)
-{ return cdj_c6747_syscfg_read(p, a, v); }
+{ return cdj_c6747_syscfg_read(p, a, v) || cdj_c6747_pll_read(&pll, a, v); }
 int main(void)
 {
     CdjC6747Syscfg s;
     uint32_t v;
     cdj_c6747_syscfg_reset(&s);
+    cdj_c6747_pll_reset(&pll);
     assert(!s.unlocked);
+    const uint32_t cfg_defaults[] = {0, 0, 0xef00, 0xff00, 0};
+    for (unsigned i = 0; i < 5; ++i) {
+        assert(read_bus(&s, CDJ_C6747_CFGCHIP0 + i * 4, &v));
+        assert(v == cfg_defaults[i]);
+        assert(write_bus(&s, CDJ_C6747_CFGCHIP0 + i * 4,
+                         i == 2 ? 0xef09 : i >= 3 ? 0xff07 : 1, 4, true));
+        assert(read_bus(&s, CDJ_C6747_CFGCHIP0 + i * 4, &v) && v == cfg_defaults[i]);
+    }
     for (unsigned i = 0; i < 20; ++i) {
         assert(write_bus(&s, CDJ_C6747_PINMUX0 + i * 4, i == 19 ? 0xf : 0xffffffff, 4, true));
         assert(read_bus(&s, CDJ_C6747_PINMUX0 + i * 4, &v) && !v);
@@ -31,6 +48,31 @@ int main(void)
     assert(!s.unlocked); /* Checking a pending store has no effects. */
     assert(write_bus(&s, CDJ_C6747_KICK1, 0x95a4f1e0, 4, true));
     assert(s.unlocked);
+    assert(write_bus(&s, CDJ_C6747_CFGCHIP0, 0x1a, 4, false));
+    assert(!cdj_c6747_syscfg_pll_locked(&s));
+    assert(write_bus(&s, CDJ_C6747_CFGCHIP0, 0x1a, 4, true));
+    assert(cdj_c6747_syscfg_pll_locked(&s));
+    CdjC6747Pll pll_before = pll;
+    assert(write_bus(&s, 0x01c11100, 0x1c0, 4, true));
+    assert(!memcmp(&pll, &pll_before, sizeof(pll)));
+    assert(write_bus(&s, CDJ_C6747_CFGCHIP0, 0, 4, true));
+    assert(!cdj_c6747_syscfg_pll_locked(&s));
+    assert(write_bus(&s, 0x01c11100, 0x1c0, 4, true));
+    assert(pll.config[0] == 0x1c0);
+    assert(write_bus(&s, CDJ_C6747_CFGCHIP0 + 4, 0x10000, 4, true));
+    assert(read_bus(&s, CDJ_C6747_CFGCHIP0 + 4, &v) && v == 0x10000);
+    assert(write_bus(&s, CDJ_C6747_CFGCHIP0 + 8, 0x3ef09, 4, true));
+    assert(read_bus(&s, CDJ_C6747_CFGCHIP0 + 8, &v) && v == 0xef09);
+    assert(write_bus(&s, CDJ_C6747_CFGCHIP0 + 12, 0xff07, 4, true));
+    assert(write_bus(&s, CDJ_C6747_CFGCHIP0 + 16, 0xff07, 4, true));
+    assert(read_bus(&s, CDJ_C6747_CFGCHIP0 + 16, &v) && v == 0);
+    assert(s.amute_clear_pulses == 7);
+    assert(!write_bus(&s, CDJ_C6747_CFGCHIP0, 3, 4, true));
+    assert(!write_bus(&s, CDJ_C6747_CFGCHIP0 + 4, 0x6000, 4, true));
+    assert(!write_bus(&s, CDJ_C6747_CFGCHIP0 + 4, 0x13u << 27, 4, true));
+    assert(!write_bus(&s, CDJ_C6747_CFGCHIP0 + 8, 10, 4, true));
+    assert(!write_bus(&s, CDJ_C6747_CFGCHIP0 + 12, 7, 4, true));
+    assert(!write_bus(&s, CDJ_C6747_CFGCHIP0 + 16, 0xff08, 4, true));
     assert(read_bus(&s, CDJ_C6747_KICK0, &v) && v == 0x83e70b13);
     assert(read_bus(&s, CDJ_C6747_KICK1, &v) && v == 0x95a4f1e0);
     assert(write_bus(&s, CDJ_C6747_KICK0, 0x83e70b13, 4, true));
@@ -77,6 +119,8 @@ int main(void)
     cdj_c6747_syscfg_reset(&s);
     assert(!s.unlocked && !s.kick[0] && !s.kick[1]);
     for (unsigned i = 0; i < 20; ++i) assert(s.pinmux[i] == 0);
+    assert(s.cfgchip[0] == 0 && s.cfgchip[1] == 0 && s.cfgchip[2] == 0xef00 &&
+           s.cfgchip[3] == 0xff00 && !s.amute_clear_pulses);
     assert(!write_bus(&s, CDJ_C6747_PINMUX0 + 76, 0x10, 4, false));
     assert(!write_bus(&s, CDJ_C6747_PINMUX0 + 76, 0x10, 4, true));
     assert(!write_bus(&s, CDJ_C6747_PINMUX0 + 77, 0, 4, true));

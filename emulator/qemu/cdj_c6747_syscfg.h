@@ -6,11 +6,12 @@
 #define CDJ_C6747_KICK0 0x01c14038u
 #define CDJ_C6747_KICK1 0x01c1403cu
 #define CDJ_C6747_PINMUX0 0x01c14120u
+#define CDJ_C6747_CFGCHIP0 0x01c1417cu
 /* TI SPRUH91D sections 10.2.1.2, 10.5.5 and 10.5.10. Kick registers
- * and PINMUX0-19 configuration storage only; physical pin routing, other
- * SYSCFG registers and privilege faults remain unsupported. */
+ * PINMUX0-19 and CFGCHIP0-4. Physical routing/clock consumers, AMUTE latches,
+ * other SYSCFG registers and privilege faults remain unsupported. */
 typedef struct {
-    uint32_t kick[2], pinmux[20];
+    uint32_t kick[2], pinmux[20], cfgchip[4], amute_clear_pulses;
     bool unlocked;
 } CdjC6747Syscfg;
 void cdj_c6747_syscfg_reset(CdjC6747Syscfg *s);
@@ -20,4 +21,5 @@ bool cdj_c6747_syscfg_read(const CdjC6747Syscfg *s, uint32_t address,
  * These registers have side-effect-free readback. Caller must be supervisor. */
 bool cdj_c6747_syscfg_write(CdjC6747Syscfg *s, uint32_t address,
                            uint64_t value, unsigned size, bool commit);
+bool cdj_c6747_syscfg_pll_locked(const CdjC6747Syscfg *s);
 #endif

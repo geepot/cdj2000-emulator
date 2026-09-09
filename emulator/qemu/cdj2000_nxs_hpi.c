@@ -69,6 +69,12 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     NxsHpi *s = opaque;
+    if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
+        cdj_c6747_pll_write_mapped(address, size)) {
+        if (commit) info_report("nxs-pll: locked write ignored address=%#x value=%#x",
+                                address, (uint32_t)value);
+        return true;
+    }
     if (cdj_c6747_pll_write(&s->pll, address, value, size, commit)) {
         if (commit) info_report("nxs-pll: write address=%#x value=%#x legacy-bit4-assumption=%d",
                                 address, (uint32_t)value, s->pll.legacy_bit4_used);
@@ -132,6 +138,9 @@ static void start_dsp(NxsHpi *s)
     info_report("nxs-pll: oscin-cycles=%" PRIu64 " reset-age=%u lock-wait-remaining=%u early-enable=%d",
                 s->pll.oscin_cycles, s->pll.reset_age, s->pll.lock_wait_remaining,
                 s->pll.early_enable);
+    info_report("nxs-syscfg: cfgchip=%#x,%#x,%#x,%#x amute-clear-pulses=%#x",
+                s->syscfg.cfgchip[0], s->syscfg.cfgchip[1], s->syscfg.cfgchip[2],
+                s->syscfg.cfgchip[3], s->syscfg.amute_clear_pulses);
 }
 
 static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)

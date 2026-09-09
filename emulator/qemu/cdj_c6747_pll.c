@@ -31,6 +31,10 @@ static int index_of(uint32_t address)
         if (address == 0x01c11000u + offsets[i]) return i;
     return -1;
 }
+bool cdj_c6747_pll_write_mapped(uint32_t address, unsigned size)
+{
+    return size == 4 && (address == 0x01c11138u || index_of(address) >= 0);
+}
 void cdj_c6747_pll_reset(CdjC6747Pll *s)
 {
     *s = (CdjC6747Pll){0};

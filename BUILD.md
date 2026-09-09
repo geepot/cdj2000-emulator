@@ -891,3 +891,29 @@ Replay and connected execution agree at 1,179 packets / 1,450 cycles,
 diagnostics agree at OSCIN=1430, reset-age=17, lock-wait=411,
 early-enable=true. The 15-second connected GUI exits 0 and has a frame; this is
 not full boot. Analog lock, physical clocks and working audio remain unverified.
+
+### SYSCFG CFGCHIP family
+
+CFGCHIP0-4 at `0x01c1417c..0x01c1418c` implement documented reset values,
+field validity and kicker protection. CFGCHIP0's PLL lock causes mapped PLL
+writes to complete without effects. CFGCHIP1 stores routing/HPI controls;
+CFGCHIP2 masks read-only PHY status; CFGCHIP3 preserves reserved-one `0xff00`;
+CFGCHIP4 reads zero and records AMUTE clear pulses diagnostically. Downstream
+pin, clock, USB, eCAP, HPI and McASP effects remain unconnected except PLL write
+lockout. Privilege checking is not modeled.
+
+```sh
+.venv/bin/pytest -q
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-syscfg.c emulator/qemu/cdj_c6747_syscfg.c emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-cfgchip-san
+/tmp/cdj-cfgchip-san
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-pll-enable-connected/dsp-l2.bin runs/dsp-cfgchip-1 --verify-repeat
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-cfgchip-connected --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+```
+
+Suite: 171 passed / 43 skipped; sanitizer passes. Repeat trace SHA-256 is
+`e4143aed27d7a25d38001782924b05dab01cec7681cb6f16b118cb93f96a0469`.
+Replay and connected runs agree at 1,190 packets / 1,469 cycles,
+`0x11802fd0` / `0x020c0264`, reading DSP-side HPIC `0x01e10030` after firmware
+sets CFGCHIP1=`0x18000` and relocks KICK. Connected GUI exit 0/frame exists is
+not boot completion. HPI flow control, full boot and audio remain incomplete.

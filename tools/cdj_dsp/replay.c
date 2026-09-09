@@ -49,6 +49,8 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
     if (!ok) ok = cdj_c6747_mcasp_write(&mcasp, a, v, size, commit);
     if (!ok) ok = cdj_c6747_gpio_write(&gpio, a, v, size, commit);
     if (!ok) ok = cdj_c6747_i2c_write(&i2c, a, v, size, commit);
+    if (!ok && cdj_c6747_syscfg_pll_locked(&syscfg) &&
+        cdj_c6747_pll_write_mapped(a, size)) ok = true;
     if (!ok) ok = cdj_c6747_pll_write(&pll, a, v, size, commit);
     uint32_t physical = global(a);
     if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
@@ -108,9 +110,12 @@ int main(int argc, char **argv)
     }
     printf("],\"pending_stores\":%u,\"pending_loads\":%u,\"syscfg_unlocked\":%s,\"pll_legacy_bit4_used\":%s,"
            "\"pll_oscin_cycles\":%" PRIu64 ",\"pll_reset_age\":%u,\"pll_lock_wait_remaining\":%u,"
-           "\"pll_early_enable\":%s}\n",
+           "\"pll_early_enable\":%s,\"cfgchip\":[%u,%u,%u,%u],"
+           "\"amute_clear_pulses\":%u}\n",
            c.store_count, c.load_count, syscfg.unlocked ? "true" : "false",
            pll.legacy_bit4_used ? "true" : "false", pll.oscin_cycles,
-           pll.reset_age, pll.lock_wait_remaining, pll.early_enable ? "true" : "false");
+           pll.reset_age, pll.lock_wait_remaining, pll.early_enable ? "true" : "false",
+           syscfg.cfgchip[0], syscfg.cfgchip[1], syscfg.cfgchip[2],
+           syscfg.cfgchip[3], syscfg.amute_clear_pulses);
     return ferror(stdout) ? 2 : 0;
 }

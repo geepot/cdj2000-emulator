@@ -8,6 +8,34 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+SYSCFG CFGCHIP0-4 are implemented as a family from SPRUH91D 10.5.14-18:
+documented reset values, reserved-value checks, legal CAP/AMUTE/USB reference
+selectors, read-only USB status masking, CFGCHIP4 read-zero clear pulses and
+kicker-protected commits. CFGCHIP0 PLL_MASTER_LOCK makes modeled PLL writes
+complete without effects; clearing it requires the existing KICK unlock flow.
+PLLDIV1-7 retain documented post-release GO programmability. Physical eCAP,
+HPI pin selection, TBCLK, USB PHY, EMIF clock mux and AMUTE latch effects are
+not yet connected. `amute_clear_pulses` is diagnostic bookkeeping only;
+privilege faults remain unmodeled.
+
+Genuine firmware unlocks KICK0/1, sets CFGCHIP1 HPIENA+HPIBYTEAD to `0x18000`,
+then relocks both keys. `runs/dsp-cfgchip-1 --verify-repeat` reaches 1,190
+packets / 1,469 cycles, PC `0x11802fd0`, full LDW `0x020c0264`, reading the
+DSP-side HPIC at `0x01e10030`. Trace SHA-256:
+`e4143aed27d7a25d38001782924b05dab01cec7681cb6f16b118cb93f96a0469`.
+Final CFGCHIP state is `[0,0x18000,0xef00,0xff00]`; KICK is relocked.
+Rebuilt connected `runs/nxs-cfgchip-connected` agrees exactly; GUI exits 0
+with a frame at the 15-second bound. Suite: 171 passed / 43 skipped; combined
+SYSCFG/PLL/CPU sanitizer passes. Full boot/audio remain incomplete.
+
+Next implement DSP-side HPI registers and connect HPIC.HINT/DSPINT semantics to
+the existing SH4-side UHPI model. Parent evidence identifies `0x01e10030` bit 2
+as per-chunk HINT flow control. Standalone replay needs an explicit deterministic
+host-event script or fail-closed stop; it must not fabricate incoming chunks or
+handshake edges. CFGCHIP1 now proves HPI is enabled in byte-address mode.
+
+### Previous PLL-enable checkpoint
+
 PLLEN now latches when source, power, reset and operating-point fields are
 valid. TI describes the lock delay as an application wait before PLLEN, not a
 write rejection, and PLLSTAT exposes no lock bit. Firmware sets PLLEN only four

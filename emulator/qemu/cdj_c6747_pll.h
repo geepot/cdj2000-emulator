@@ -26,4 +26,5 @@ void cdj_c6747_pll_reset(CdjC6747Pll *s);
 bool cdj_c6747_pll_read(const CdjC6747Pll *s, uint32_t address, uint32_t *value);
 bool cdj_c6747_pll_write(CdjC6747Pll *s, uint32_t address,
                         uint64_t value, unsigned size, bool commit);
+bool cdj_c6747_pll_write_mapped(uint32_t address, unsigned size);
 #endif
