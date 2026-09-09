@@ -28,13 +28,34 @@ int main(void)
     }
     assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x10, 4, true));
     assert(cdj_c6747_pll_read(&s, 0x01c11100, &v) && v == 0xd0);
-    assert(!cdj_c6747_pll_write(&s, 0x01c11100, 0x1c0, 4, true));
+    assert(!s.legacy_bit4_used);
+    assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c0, 4, false));
+    assert(!s.legacy_bit4_used);
+    assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c0, 4, true));
+    assert(s.legacy_bit4_used);
+    assert(cdj_c6747_pll_read(&s, 0x01c11100, &v) && v == 0x1c0);
+    assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1d0, 4, true));
+    assert(s.legacy_bit4_used); /* Diagnostic is sticky until reset. */
     assert(!cdj_c6747_pll_write(&s, 0x01c11100, 0xd8, 4, true));
     assert(!cdj_c6747_pll_write(&s, 0x01c11100, 0xd1, 4, true));
     assert(!cdj_c6747_pll_write(&s, 0x01c11104, 0x15, 4, true));
+    assert(cdj_c6747_pll_read(&s, 0x01c1113c, &v) && v == 4);
+    before = s;
+    assert(cdj_c6747_pll_write(&s, 0x01c11138, 1, 4, false));
+    assert(!memcmp(&s, &before, sizeof(s)));
+    assert(cdj_c6747_pll_write(&s, 0x01c11138, 1, 4, true));
+    assert(cdj_c6747_pll_read(&s, 0x01c1113c, &v) && v == 5);
     assert(!cdj_c6747_pll_write(&s, 0x01c11138, 1, 4, true));
-    assert(!cdj_c6747_pll_read(&s, 0x01c1113c, &v));
+    assert(!cdj_c6747_pll_write(&s, 0x01c11118, 0x8001, 4, true));
+    assert(cdj_c6747_pll_write(&s, 0x01c11138, 0, 4, true));
+    assert(cdj_c6747_pll_read(&s, 0x01c11138, &v) && v == 0);
+    for (unsigned i = 0; i < 7; ++i) cdj_c6747_pll_tick(&s);
+    assert(s.active_dividers[0] == 0x8000 && s.go_remaining == 1);
+    cdj_c6747_pll_tick(&s);
+    assert(s.active_dividers[0] == 0x801f && !s.go_remaining);
+    assert(cdj_c6747_pll_read(&s, 0x01c1113c, &v) && v == 4);
     cdj_c6747_pll_reset(&s);
+    assert(!s.legacy_bit4_used);
     for (unsigned i = 0; i < 13; ++i) assert(s.config[i] == defaults[i]);
     return 0;
 }

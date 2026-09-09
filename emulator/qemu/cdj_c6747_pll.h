@@ -3,9 +3,16 @@
 #define CDJ_C6747_PLL_H
 #include <stdbool.h>
 #include <stdint.h>
-/* SPRUH91D 7.4.3-15. Reset-held PLL configuration only. POR defaults
- * substitute for unknown ROM handoff values; clocks are not yet driven. */
-typedef struct { uint32_t config[13]; } CdjC6747Pll;
+/* SPRUH91D 7.4.3-17. Configuration plus synthetic divider GO transition.
+ * POR defaults substitute for ROM handoff; physical clocks are not driven. */
+typedef struct {
+    uint32_t config[13];
+    bool legacy_bit4_used; /* Explicit unverified C6747 readback assumption. */
+    uint32_t active_dividers[7], target_dividers[7], command;
+    unsigned go_remaining;
+} CdjC6747Pll;
+/* Synthetic eight-successful-step GO latency, not OSCIN/PLL timing. */
+void cdj_c6747_pll_tick(CdjC6747Pll *s);
 void cdj_c6747_pll_reset(CdjC6747Pll *s);
 bool cdj_c6747_pll_read(const CdjC6747Pll *s, uint32_t address, uint32_t *value);
 bool cdj_c6747_pll_write(CdjC6747Pll *s, uint32_t address,

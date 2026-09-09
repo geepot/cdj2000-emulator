@@ -70,7 +70,8 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
 {
     NxsHpi *s = opaque;
     if (cdj_c6747_pll_write(&s->pll, address, value, size, commit)) {
-        if (commit) info_report("nxs-pll: write address=%#x value=%#x", address, (uint32_t)value);
+        if (commit) info_report("nxs-pll: write address=%#x value=%#x legacy-bit4-assumption=%d",
+                                address, (uint32_t)value, s->pll.legacy_bit4_used);
         return true;
     }
     if (cdj_c6747_i2c_write(&s->i2c, address, value, size, commit)) {
@@ -112,8 +113,10 @@ static void start_dsp(NxsHpi *s)
      * No claim to execute the unavailable ROM. The uploaded code is decoded. */
     cdj_c674x_reset(&s->cpu, ldl_le_p(s->l2));
     unsigned budget = 10000;
-    while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s))
+    while (budget-- && cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
         cdj_c6747_psc_tick(&s->psc);
+        cdj_c6747_pll_tick(&s->pll);
+    }
     info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
                 s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,

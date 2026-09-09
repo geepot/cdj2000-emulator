@@ -89,6 +89,7 @@ int main(int argc, char **argv)
                c.pc, c.cycles, c.loop_active ? "true" : "false", c.branch_due);
         if (!cdj_c674x_step(&c, read_bus, write_bus, NULL)) { reason = "fault"; break; }
         cdj_c6747_psc_tick(&psc);
+        cdj_c6747_pll_tick(&pll);
     }
     /* Fault strings originate in the interpreter and contain no JSON escapes. */
     printf("{\"event\":\"stop\",\"reason\":\"%s\",\"fault\":\"%s\",\"pc\":%" PRIu32
@@ -100,7 +101,8 @@ int main(int argc, char **argv)
         for (unsigned i = 0; i < 32; ++i) printf("%s%" PRIu32, i ? "," : "", c.r[bank][i]);
         printf("]");
     }
-    printf("],\"pending_stores\":%u,\"pending_loads\":%u,\"syscfg_unlocked\":%s}\n",
-           c.store_count, c.load_count, syscfg.unlocked ? "true" : "false");
+    printf("],\"pending_stores\":%u,\"pending_loads\":%u,\"syscfg_unlocked\":%s,\"pll_legacy_bit4_used\":%s}\n",
+           c.store_count, c.load_count, syscfg.unlocked ? "true" : "false",
+           pll.legacy_bit4_used ? "true" : "false");
     return ferror(stdout) ? 2 : 0;
 }

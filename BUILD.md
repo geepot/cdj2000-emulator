@@ -715,3 +715,34 @@ address/undefined sanitizer harness passes. Full boot and audio are incomplete.
 Full suite: 170 passed / 43 skipped. Rebuilt connected run
 `runs/nxs-pll-config-connected` agrees at 1,117 packets / 1,351 cycles and
 the same stop; its bounded GUI exits 0 with a frame. QEMU timestamp checked.
+
+### PLL legacy-bit and synthetic divider GO
+
+The previous strict bit-4 stop is superseded by a flagged writable-latch
+assumption. [Linux v6.1's primary PLL driver source](https://raw.githubusercontent.com/torvalds/linux/v6.1/drivers/clk/davinci/pll.c)
+defines bit 4 as PLLDIS and clears it in `davinci_pllen_rate_change`. Its
+platform registration includes DA830. This supports legacy software usage,
+not C6747 hardware equivalence; TI Table 7-5 still calls it reserved-one.
+The C6747 forum example also clears it but is user-supplied, not authoritative
+silicon documentation. No physical PLLDIS effect is claimed. Replay emits
+`pll_legacy_bit4_used` and connected writes log `legacy-bit4-assumption`.
+
+PLLCMD/PLLSTAT follow the command/status interface of SPRUH91D 7.4.16-17.
+GO snapshots PLLDIV1-7, reports busy and commits the captured ratios after
+eight successful DSP steps, including the committing step. This is explicitly
+synthetic timing. Configuration changes and another GO while busy stop;
+writing command zero does not cancel the transition. STABLE assumes the
+oscillator counter completed before the missing-ROM handoff, not PLL lock.
+Physical phase alignment, clock output, PLL enable/reset release and peripheral
+frequency coupling remain unimplemented. Replay manifests list these assumptions.
+
+`runs/dsp-pll-go-final --verify-repeat --expect-trace runs/dsp-pll-go-1/trace.jsonl`
+passes both equivalence gates: 1,142 packets / 1,392 cycles, unsupported word
+`0x3021a121` at `0x11802e94`. Suite: 170 passed / 43 skipped; PLL sanitizer
+passes. Tests cover bit-4 validation/commit diagnostics, GO snapshot/latency,
+busy-state rejection, command clear without cancellation and reset behavior.
+Full boot/audio are incomplete; no PLL lock/ready response is fabricated.
+Rebuilt connected run `runs/nxs-pll-go-connected` agrees at the same stop and
+packet/cycle counts. Its GUI exits 0 with a frame at the 15-second bound.
+The build exposed a missing brace around the shared peripheral-tick loop;
+it was fixed and rebuilt before this connected run. QEMU timestamp verified.

@@ -8,6 +8,34 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+PLL legacy-bit and divider-GO batch supersedes the bit-4 stop below. Bit 4
+now retains writes as an explicitly unverified C6747 compatibility assumption:
+Linux v6.1 `drivers/clk/davinci/pll.c` names it PLLDIS and clears it during
+reset/enable. This corroborates a legacy software pattern, not the physical
+meaning on this chip, and does not override the conflict with TI Table 7-5.
+Replay final state records `pll_legacy_bit4_used`; connected PLL writes log it.
+
+GO snapshots seven programmed divider values, reports GOSTAT busy, then commits
+the snapshot after eight successful DSP steps. This latency is synthetic, not
+PLL/OSCIN cycles. Writes during GO and repeated GO while busy stop. Writing
+PLLCMD=0 clears its command latch without cancelling a pending transition.
+PLLSTAT.STABLE assumes oscillator-counter completion before ROM handoff; it
+is not PLL lock. PLLEN activation/PLLRST release still stop; physical clocks,
+alignment details and clock ratios affecting CPU/peripherals are not modeled.
+These assumptions are included in replay manifests.
+
+`runs/dsp-pll-go-final` passes repeat and baseline equivalence against
+`runs/dsp-pll-go-1`: 1,142 packets / 1,392 cycles, unsupported `0x3021a121`
+at `0x11802e94`. Trace SHA-256:
+`c10c5972c7502b54a66e135a2c45003157c0d535f2662e24775d1f0e394fe1bd`.
+Suite: 170 passed / 43 skipped; PLL sanitizer passes. Next decode the nearby
+instruction family and continue PLL reset/lock timing. Full boot/audio remain
+incomplete; increased counts are conditional on the documented assumptions.
+Rebuilt connected run `runs/nxs-pll-go-connected` matches the stop and logs
+PLLDIV3/5/7 and GO writes. GUI exits 0 with a frame at the 15-second bound.
+
+### Previous strict PLL configuration checkpoint
+
 PLL reset-held configuration batch adds PLLCTL, OCSEL, PLLM, PREDIV,
 POSTDIV, OSCDIV and PLLDIV1-7 to both DSP execution paths. Power-on defaults
 are an explicit substitute for unknown boot-ROM handoff state. No clock
@@ -247,7 +275,7 @@ include data and cannot be interpreted as instruction coverage percentages.
 The first inventory-driven batch implemented full/compact SPMASK with
 functional-unit classification and loop load/replay suppression, plus nearby
 predicated MVK. Later batches advanced through PSC and McASP pin configuration;
-the current blocker is the PLLCTL reserved-bit write, as recorded at the top.
+the current blocker is opcode `0x3021a121`, as recorded at the top.
 The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
 instructions and did not implement buffered suppression. Do not resurrect that
 special case. Implement the family, validate synthetic schedules and replay,

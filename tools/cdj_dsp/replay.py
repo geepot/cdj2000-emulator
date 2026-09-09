@@ -61,6 +61,10 @@ def main():
         manifest = dict(dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
                         break_pc=args.break_pc, boot_rom_executed=False,
+                        pll_assumptions=['POR configuration at ROM handoff',
+                                         'oscillator counter complete at handoff, not PLL lock',
+                                         'legacy PLLCTL bit 4 writable latch; C6747 effect unverified',
+                                         'divider GO completes after eight successful DSP steps; not clock timing'],
                         sources={str(p.relative_to(ROOT)): hashlib.sha256(content).hexdigest()
                                  for p, content in source_data.items()})
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
