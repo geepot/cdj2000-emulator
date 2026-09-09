@@ -4,7 +4,7 @@
 #define KEY1 0x95a4f1e0u
 static bool pinmux_address(uint32_t address)
 {
-    return address >= CDJ_C6747_PINMUX0 && address <= CDJ_C6747_PINMUX0 + 8 &&
+    return address >= CDJ_C6747_PINMUX0 && address <= CDJ_C6747_PINMUX0 + 19 * 4 &&
            !(address & 3);
 }
 void cdj_c6747_syscfg_reset(CdjC6747Syscfg *s)
@@ -26,6 +26,10 @@ bool cdj_c6747_syscfg_write(CdjC6747Syscfg *s, uint32_t address,
                            uint64_t value, unsigned size, bool commit)
 {
     if (size == 4 && pinmux_address(address)) {
+        /* PINMUX19 bits 31:4 are reserved zero (Table 10-41). Stop on
+         * unsupported programming rather than inventing reserved readback. */
+        if (address == CDJ_C6747_PINMUX0 + 19 * 4 && (value & 0xfffffff0u))
+            return false;
         /* Protection is evaluated when the bus transfer commits, not when
          * the CPU queues it. Locked writes leave configuration unchanged. */
         if (commit && s->unlocked)

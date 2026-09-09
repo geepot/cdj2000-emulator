@@ -13,8 +13,8 @@ int main(void)
     uint32_t v;
     cdj_c6747_syscfg_reset(&s);
     assert(!s.unlocked);
-    for (unsigned i = 0; i < 3; ++i) {
-        assert(write_bus(&s, CDJ_C6747_PINMUX0 + i * 4, 0xffffffff, 4, true));
+    for (unsigned i = 0; i < 20; ++i) {
+        assert(write_bus(&s, CDJ_C6747_PINMUX0 + i * 4, i == 19 ? 0xf : 0xffffffff, 4, true));
         assert(read_bus(&s, CDJ_C6747_PINMUX0 + i * 4, &v) && !v);
     }
     assert(read_bus(&s, CDJ_C6747_KICK0, &v) && !v);
@@ -22,8 +22,8 @@ int main(void)
     assert(!write_bus(&s, CDJ_C6747_KICK0, 0, 8, true));
     assert(!write_bus(&s, CDJ_C6747_KICK0 + 1, 0, 4, true));
     assert(!write_bus(&s, CDJ_C6747_KICK0, 0, 1, true));
-    assert(!write_bus(&s, 0x01c1412c, 0, 4, true));
-    assert(!read_bus(&s, 0x01c1412c, &v));
+    assert(!write_bus(&s, 0x01c14170, 0, 4, true));
+    assert(!read_bus(&s, 0x01c14170, &v));
     assert(write_bus(&s, CDJ_C6747_KICK1, 0x95a4f1e0, 4, true));
     assert(write_bus(&s, CDJ_C6747_KICK0, 0x83e70b13, 4, true));
     assert(!s.unlocked); /* Correct keys in reverse order do not unlock. */
@@ -63,17 +63,22 @@ int main(void)
     assert(s.kick[0] == 0x83e70b13 && !s.unlocked);
     assert(cdj_c674x_execute(&c, &p, read_bus, write_bus, &s));
     assert(s.unlocked && s.kick[1] == 0x95a4f1e0);
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < 20; ++i) {
         uint32_t a = CDJ_C6747_PINMUX0 + i * 4;
-        assert(write_bus(&s, a, 0x11112180 + i, 4, false));
+        uint32_t data = i == 19 ? 2 : 0x11112180 + i;
+        assert(write_bus(&s, a, data, 4, false));
         assert(read_bus(&s, a, &v) && !v);
-        assert(write_bus(&s, a, 0x11112180 + i, 4, true));
-        assert(read_bus(&s, a, &v) && v == 0x11112180 + i);
+        assert(write_bus(&s, a, data, 4, true));
+        assert(read_bus(&s, a, &v) && v == data);
     }
     assert(write_bus(&s, CDJ_C6747_KICK0, 0, 4, true));
     assert(write_bus(&s, CDJ_C6747_PINMUX0, 0, 4, true));
     assert(read_bus(&s, CDJ_C6747_PINMUX0, &v) && v == 0x11112180);
     cdj_c6747_syscfg_reset(&s);
     assert(!s.unlocked && !s.kick[0] && !s.kick[1]);
+    for (unsigned i = 0; i < 20; ++i) assert(s.pinmux[i] == 0);
+    assert(!write_bus(&s, CDJ_C6747_PINMUX0 + 76, 0x10, 4, false));
+    assert(!write_bus(&s, CDJ_C6747_PINMUX0 + 76, 0x10, 4, true));
+    assert(!write_bus(&s, CDJ_C6747_PINMUX0 + 77, 0, 4, true));
     puts("C6747 SYSCFG tests passed");
 }

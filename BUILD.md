@@ -315,11 +315,11 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-compact-memory` uploads
-13,781 words and executes 555 packets / 657 cycles. It commits both SYSCFG
-unlock keys, then writes PINMUX0 (`0x01c14120 = 0x11112180`) and PINMUX1
-(`0x01c14124 = 0x11111111`). Execution stops on compact store `0x0045` at
-`0x11801e74`, targeting unmapped PINMUX3 (`0x01c1412c`) with zero. Standalone replay
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-pinmux-bank` uploads
+13,781 words and executes 597 packets / 699 cycles. It commits both SYSCFG
+unlock keys and all 20 PINMUX register writes, ending with PINMUX19 = 2
+(the documented UHPI_HRDY output selection). Execution stops on unsupported
+instruction `0x4683e000` at `0x11801f20`. Standalone replay
 and the connected run agree: `B15=0x11805ae8`, `B14=0x11806900` and
 `B3=0x118027c0`. The bounded GUI run exits 0 and produces a frame; this is
 not proof of a completed firmware boot.
@@ -341,10 +341,13 @@ out-of-bounds failure. Other compact memory addressing forms remain incomplete.
 
 `cdj_c6747_syscfg.c` implements KICK0R/KICK1R reset, readback, ordered unlock,
 and relock on a wrong key, following TI SPRUH91D sections 10.2.1.2 and 10.5.5.
-PINMUX0-2 provide protected configuration storage with zero reset values
-(sections 10.5.10.1-3). Locked writes leave configuration unchanged. Writes
+PINMUX0-19 provide protected configuration storage with zero reset values
+(section 10.5.10). Locked writes leave configuration unchanged. Writes
 must be aligned 32-bit transfers and apply at the CPU store's E3 phase;
-checking a queued store has no effects. Physical pin routing, other SYSCFG
+checking a queued store has no effects. PINMUX19 reserved bits 31:4 must be
+zero; nonzero programming stops as unsupported, rather than inventing behavior
+for reserved bits. Tests cover each register's reset, protection and readback,
+the bank boundary and reserved-bit rejection. Physical pin routing, other SYSCFG
 registers, PSC, and clock hardware remain unimplemented. Privilege enforcement
 is not implemented: this startup path assumes supervisor access, pending a
 complete CPU privilege model. No physical pin behavior or readiness is implied
