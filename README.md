@@ -79,6 +79,30 @@ images, no disassembly, no screenshots.
 
 ## Getting started
 
+### NXS research branch: interactive deck
+
+For the NXS firmware already prepared under `firmware/nxs/`, use the dedicated
+launcher from this repository directory:
+
+```sh
+python -m tools.cdj_main.nxs_vm runs/nxs-interactive --seconds 3600 --ui
+```
+
+Choose a new run-directory name each time. `--ui` opens the current interactive
+deck and connects its buttons to that run's panel port; without it the run is
+headless. Close the deck to stop both emulators. Restart an older viewer to pick
+up Python changes, and rebuild `bin/cdj-run` after simulator patch changes.
+
+Ordinary hardware buttons support mouse-down/up and Enter/Space holds, including
+release outside the button or on focus loss. MENU holds now open the real
+firmware's UTILITY screen after the SIC mask-order fix (`69d0d88`). The separate
+E-7206 auth-chip error remains; NXS USB/SD track loading and audio playback are
+not yet validated. The legacy functionality described above is not an NXS
+completion claim. See [RUNNING.md](RUNNING.md) and
+[NXS_GUI_STALL.md](NXS_GUI_STALL.md) for current evidence and limitations.
+
+### Original CDJ-2000 setup
+
 ```sh
 pip install -r requirements.txt
 sh scripts/build-bfin-sim.sh                                   # the GUI board
