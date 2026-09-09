@@ -300,7 +300,10 @@ operations freeze with the core on an unsupported packet. Circular addressing,
 RAM arbitration for simultaneous overlapping accesses, and register-result
 collisions stop explicitly. Read callbacks currently require stable, side-effect-free RAM. Every execute packet
 reads the pre-packet state; writes commit together. Branches take effect after
-five delay slots, including inserted NOP cycles. Unsupported instructions stop with PC and opcode, without committing part of the
+five delay slots, including inserted NOP cycles. Up to six taken branches
+can be in flight, with targets captured at issue; multiple taken branches in
+one packet are rejected. A taken branch cancels the active non-reloading loop
+buffer, including when issued before SPLOOP (TI section 7.14). Unsupported instructions stop with PC and opcode, without committing part of the
 failed packet. This is not a complete ISA, pipeline, privilege or interrupt model.
 
 On DSPINT the host-port device reads the uploaded entry pointer at global L2
@@ -309,15 +312,14 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-loop` uploads
-13,781 words and executes 62 packets / 73 cycles. It completes the
-`SPLOOP 2` at `0x11804838` and returns from the copy routine to its caller.
-Execution then stops on overlapping delayed branches at `0x118042e8`
-(`0xc0009c10`), which the single-pending-branch model cannot yet execute.
-`B15=0x11805ae0`, `B14=0x11806900` and `B3=0x118042c8`. This agrees
-with standalone replay of the uploaded L2 image. The older prototype's listing
-omits register-extension bits, sometimes the cross path on moves, and the
-extended load/store selector; it must not be treated as an execution oracle.
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-branches` uploads
+13,781 words and executes 525 packets / 617 cycles. It completes multiple
+copy loops, handles branches around short loops, returns to startup, and stops
+at compact opcode `0xfe27` at `0x118048b0`. `B15=0x11805af8`,
+`B14=0x11806900` and `B3=0x11801dec`. This agrees with standalone replay
+of the uploaded L2 image. The older prototype's listing omits register-extension
+bits, sometimes the cross path on moves, and the extended load/store selector;
+it must not be treated as an execution oracle.
 Remaining compact instructions, loop/control-register behavior, extended memory
 operations, integer and floating-point instructions, interrupts and peripherals
 are still required for DSP boot and audio. No DSP-ready result is fabricated.
@@ -358,6 +360,7 @@ The independent schedule test matches all 14 cycles of TI SPRUFE8B Table 7-1.
 CPU tests additionally decode the complete copy program through normal
 `cdj_c674x_step`, verify eight copied words and pointer updates, and verify
 zero iterations perform no memory operations. Tests cover ILC readiness,
-composite faults, and false-predicate BNOP timing. The connected NXS run
+composite faults, false-predicate BNOP timing, six simultaneous in-flight
+branches, captured targets, and branch cancellation of SPLOOP. The connected NXS run
 above verifies the firmware's loop and return path. Sanitizers and the
 160-test host suite pass (42 platform/dependency tests skipped).

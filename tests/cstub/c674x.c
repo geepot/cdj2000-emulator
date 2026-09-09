@@ -554,5 +554,44 @@ int main(void)
     memory[0] = (6u << 29) | 0x008ca362;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.cycles == 6 && c.pc == 0x1004 && !c.branch_due);
+    /* Six consecutive taken branches fill the pipeline. Each redirects on
+     * its own cycle, even after earlier branches have changed the fetch PC. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    for (unsigned j = 0; j < 6; ++j) {
+        c.r[1][j + 1] = 0x1040 + j * 4;
+        memory[j] = ((j + 1) << 18) | 0x362;
+    }
+    for (unsigned j = 0; j < 6; ++j) assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1040 && c.branch_count == 4 && c.branch_due == 7);
+    c.r[1][2] = 0x1080; /* in-flight target must already be captured */
+    for (unsigned j = 1; j < 6; ++j) {
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.pc == 0x1040 + j * 4 && c.cycles == 6 + j);
+    }
+    assert(!c.branch_due && !c.branch_count);
+
+    /* Two taken branches in one execute packet remain an explicit fault. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = (1u << 18) | 0x363; memory[1] = (2u << 18) | 0x362;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && !c.branch_due && !c.branch_count);
+
+    /* TI section 7.14: a branch started before SPLOOP cancels its buffer
+     * when the fifth delay slot completes. It must not replay at the target. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][3] = 0x1040; c.control[13] = 10;
+    memory[0] = (3u << 18) | 0x362;
+    memory[1] = 2u << 13; /* NOP 3 */
+    memory[2] = 0x38000;
+    memory[3] = mvk(0, 4, 7);
+    memory[16] = mvk(0, 5, 9);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop_active && c.cycles == 5);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.loop_active && c.pc == 0x1040 && c.cycles == 6 && c.r[0][4] == 7);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][5] == 9);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

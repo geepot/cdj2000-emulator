@@ -41,6 +41,21 @@ static bool stop(CdjC674x *cpu, uint32_t pc, uint32_t word, const char *why)
     return false;
 }
 
+/* One taken branch may enter E1 each cycle; all six pipeline positions can
+ * be occupied. Preserve later branches when an older branch redirects fetch. */
+static bool queue_branch(CdjC674x *out, uint64_t due, uint32_t target)
+{
+    if (!out->branch_due) {
+        out->branch_due = due; out->branch_target = target;
+        return true;
+    }
+    if (out->branch_due == due || out->branch_count == 5 ||
+        (out->branch_count && out->branch_queue[out->branch_count - 1].due == due)) return false;
+    out->branch_queue[out->branch_count].due = due;
+    out->branch_queue[out->branch_count++].target = target;
+    return true;
+}
+
 bool cdj_c674x_fetch(CdjC674x *cpu, CdjC674xRead read, void *opaque,
                      CdjC674xPacket *packet)
 {
@@ -124,9 +139,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                     return stop(cpu, pc, w, "multiple multicycle instructions");
                 if (n + 1 > elapsed) elapsed = n + 1;
                 if (enabled) {
-                    if (out.branch_due) return stop(cpu, pc, w, "overlapping branches not implemented");
-                    out.branch_target = (pc & ~31u) + (uint32_t)(displacement * 2);
-                    out.branch_due = cpu->cycles + 6;
+                    if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)(displacement * 2)))
+                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
                 }
                 continue;
             }
@@ -313,9 +327,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         } else if ((w & 0x7c) == 0x10) {
             reg_write = false;
             if (enabled) {
-                if (out.branch_due) return stop(cpu, pc, w, "overlapping branches not implemented");
-                out.branch_target = (pc & ~31u) + (uint32_t)(sx((w >> 7) & 0x1fffff, 21) * 4);
-                out.branch_due = cpu->cycles + 6;
+                if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)(sx((w >> 7) & 0x1fffff, 21) * 4)))
+                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
             }
         } else if ((w & 0x0f830ffe) == 0x00800362) {
             unsigned n = (w >> 13) & 7;
@@ -323,16 +336,14 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             if (n && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
             if (n + 1 > elapsed) elapsed = n + 1;
             if (enabled) {
-                if (out.branch_due) return stop(cpu, pc, w, "overlapping branches not implemented");
-                out.branch_target = cpu->r[cross][b];
-                out.branch_due = cpu->cycles + 6;
+                if (!queue_branch(&out, cpu->cycles + 6, cpu->r[cross][b]))
+                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
             }
         } else if ((w & 0x0f83effe) == 0x362) {
             reg_write = false;
             if (enabled) {
-                if (out.branch_due) return stop(cpu, pc, w, "overlapping branches not implemented");
-                out.branch_target = cpu->r[((w >> 12) & 1) ^ 1][b];
-                out.branch_due = cpu->cycles + 6;
+                if (!queue_branch(&out, cpu->cycles + 6, cpu->r[((w >> 12) & 1) ^ 1][b]))
+                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
             }
         } else if ((w & 0x1ffe) == 0x162) {
             if (!side) return stop(cpu, pc, w, "ADDKPC requires S2");
@@ -398,7 +409,16 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
         }
         if (out.branch_due && out.cycles == out.branch_due) {
-            out.pc = out.branch_target; out.branch_due = 0; out.idle_cycles = 0; break;
+            out.pc = out.branch_target;
+            out.loop_active = false; /* SPRUFE8B 7.14: taken branch idles the loop buffer. */
+            if (out.branch_count) {
+                out.branch_due = out.branch_queue[0].due;
+                out.branch_target = out.branch_queue[0].target;
+                memmove(out.branch_queue, out.branch_queue + 1,
+                        --out.branch_count * sizeof(out.branch_queue[0]));
+            } else out.branch_due = 0;
+            out.idle_cycles = 0;
+            break;
         }
     }
     ++out.packets;
@@ -506,14 +526,13 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         uint32_t w = packet.instructions[0].word;
         if (w >> 28) return stop(cpu, cpu->pc, w, "nested SPLOOP not implemented");
         if (cpu->cycles < cpu->control_ready[13]) return stop(cpu, cpu->pc, w, "ILC not yet available");
-        if (cpu->branch_due) return stop(cpu, cpu->pc, w, "SPLOOP in branch delay not implemented");
         CdjC674x out = *cpu;
         if (!cdj_c674x_loop_init(&out.loop, ((w >> 23) & 31) + 1, cpu->control[13]))
             return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
         memmove(packet.instructions, packet.instructions + 1, (--packet.count) * sizeof(packet.instructions[0]));
         if (!cdj_c674x_execute(&out, &packet, read, write, opaque))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
-        out.loop_active = true; out.loop_wait = out.loop_tags = out.loop_packets = 0;
+        out.loop_active = !(cpu->branch_due && out.cycles >= cpu->branch_due); out.loop_wait = out.loop_tags = out.loop_packets = 0;
         if (out.control[13]) --out.control[13];
         *cpu = out;
         return true;

@@ -32,6 +32,8 @@ typedef struct {
     uint64_t cycles, packets, branch_due;
     uint64_t control_ready[32];
     uint32_t branch_target, fault_pc, fault_word;
+    struct { uint64_t due; uint32_t target; } branch_queue[5];
+    unsigned branch_count;
     const char *fault;
     CdjC674xStore stores[24];
     unsigned store_count;
