@@ -70,7 +70,9 @@ bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *loop, uint32_t tags[8], unsigne
     for (unsigned origin = 0; origin < loop->length; ++origin) {
         if (origin > loop->cycle) continue;
         uint64_t age = loop->cycle - origin;
-        if (age % loop->ii || (!loop->predicate_loop && age / loop->ii >= loop->iterations)) continue;
+        if (age % loop->ii ||
+            (!loop->predicate_loop && age / loop->ii >= loop->iterations))
+            continue;
         for (unsigned j = 0; j < loop->count[origin]; ++j) {
             uint32_t tag = loop->tags[origin][j];
             if (allow && !allow(opaque, tag)) continue;
@@ -83,5 +85,20 @@ bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *loop, uint32_t tags[8], unsigne
     *post_fetch = loop->sealed && loop->cycle >= loop->post_cycle;
     *drained = loop->sealed && loop->cycle >= loop->end_cycle;
     ++loop->cycle;
+    return true;
+}
+
+bool cdj_c674x_loop_interrupt_drain(CdjC674xLoop *loop)
+{
+    if (!loop || !loop->sealed || !loop->ii ||
+        loop->cycle % loop->ii || !loop->cycle)
+        return false;
+    uint64_t launched = loop->cycle / loop->ii;
+    if (launched > UINT32_MAX) return false;
+    uint64_t end = (launched - 1) * loop->ii + loop->length;
+    if (end < loop->cycle) return false;
+    loop->iterations = launched;
+    /* Interrupt draining never fetches the post-SPKERNEL program stream. */
+    loop->post_cycle = loop->end_cycle = end;
     return true;
 }

@@ -4,6 +4,14 @@
 
 #define CDJ_C674X_TSR_SPLX (1u << 14)
 #define CDJ_C674X_LOOP_RETURNING (1u << 3)
+#define CDJ_C674X_LOOP_CONTEXT 31u
+#define CDJ_C674X_LOOP_SETUP_PC UINT64_C(0xffffffff)
+#define CDJ_C674X_LOOP_INTERRUPT_SHIFT 32u
+#define CDJ_C674X_LOOP_INTERRUPT_MASK (UINT64_C(15) << CDJ_C674X_LOOP_INTERRUPT_SHIFT)
+#define CDJ_C674X_LOOP_CONTEXT_VALID (UINT64_C(1) << 56)
+#define CDJ_C674X_LOOP_HAS_SPMASK (UINT64_C(1) << 57)
+#define CDJ_C674X_LOOP_INTERRUPT_ARMED (UINT64_C(1) << 62)
+#define CDJ_C674X_LOOP_INTERRUPT_DRAINING (UINT64_C(1) << 63)
 
 /* SPRUFE8B 7.7.3.2 makes TSR.SPLX hardware-owned loop-buffer state.  Keep
  * it synchronized here instead of adding a second checkpointed state bit. */
@@ -12,6 +20,53 @@ static void loop_set_active(CdjC674x *cpu, bool active)
     cpu->loop_active = active;
     if (active) cpu->control[26] |= CDJ_C674X_TSR_SPLX;
     else cpu->control[26] &= ~CDJ_C674X_TSR_SPLX;
+}
+
+static uint32_t loop_setup_pc(const CdjC674x *cpu)
+{
+    return cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+           CDJ_C674X_LOOP_SETUP_PC;
+}
+
+static bool loop_interrupt_draining(const CdjC674x *cpu)
+{
+    return cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+           CDJ_C674X_LOOP_INTERRUPT_DRAINING;
+}
+
+static bool loop_interrupt_armed(const CdjC674x *cpu)
+{
+    return cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+           CDJ_C674X_LOOP_INTERRUPT_ARMED;
+}
+
+static unsigned loop_selected_interrupt(const CdjC674x *cpu)
+{
+    return (cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+            CDJ_C674X_LOOP_INTERRUPT_MASK) >>
+           CDJ_C674X_LOOP_INTERRUPT_SHIFT;
+}
+
+static void loop_set_setup(CdjC674x *cpu, uint32_t setup_pc)
+{
+    cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] =
+        CDJ_C674X_LOOP_CONTEXT_VALID | setup_pc;
+}
+
+static void loop_set_interrupt_phase(CdjC674x *cpu, unsigned interrupt,
+                                     uint64_t phase)
+{
+    uint64_t context = cpu->control_ready[CDJ_C674X_LOOP_CONTEXT];
+    context &= ~(CDJ_C674X_LOOP_INTERRUPT_MASK |
+                 CDJ_C674X_LOOP_INTERRUPT_ARMED |
+                 CDJ_C674X_LOOP_INTERRUPT_DRAINING);
+    context |= (uint64_t)interrupt << CDJ_C674X_LOOP_INTERRUPT_SHIFT;
+    cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] = context | phase;
+}
+
+static void loop_clear_interrupt_phase(CdjC674x *cpu)
+{
+    loop_set_interrupt_phase(cpu, 0, 0);
 }
 
 static int32_t sx(uint32_t value, unsigned bits)
@@ -615,34 +670,91 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
      * makes IFR sticky until ICR or acceptance clears a bit. */
     cpu->control[2] = (cpu->control[2] | pending) & maskable;
     uint32_t eligible = cpu->control[2] & cpu->control[4] & maskable;
-    if (!(cpu->control[1] & 1u) || !(cpu->control[4] & 2u) || !eligible)
+    if (!(cpu->control[1] & 1u) || !(cpu->control[4] & 2u) || !eligible) {
+        if (!cpu->loop_active && loop_interrupt_draining(cpu))
+            loop_clear_interrupt_phase(cpu);
         return true;
+    }
 
     /* Section 5.4.2 forbids recognition in a branch's five delay packets.
      * The interpreter represents taken branches explicitly, so defer while
      * one is live. False conditional branches do not yet have pipeline state.
      */
     if (cpu->branch_due || cpu->branch_count) return true;
-    if (cpu->loop_active)
-        return stop(cpu, cpu->pc, 0,
-                    "maskable interrupt during SPLOOP not implemented");
+    if (cpu->loop_active) {
+        if (loop_interrupt_armed(cpu) || loop_interrupt_draining(cpu))
+            return true;
+
+        /* SPRUFE8B 7.13.1: wait for a stage boundary with a false normal
+         * termination condition, after loading and the protected opening
+         * cycles.  SPLOOP(D) additionally needs enough ILC to restart its
+         * complete prolog after B IRP. */
+        uint64_t boundary_cycle = cpu->loop.cycle + 1;
+        bool boundary = cpu->loop.sealed && cpu->loop.ii &&
+                        boundary_cycle % cpu->loop.ii == 0;
+        /* The two-cycle pre-SPLOOP automatic-disable window is not modeled
+         * independently. Waiting through the documented four-cycle opening
+         * is conservative for every supported unconditional form. */
+        bool opening = boundary_cycle < 4;
+        bool terminating = cpu->loop.predicate_loop ?
+            (boundary_cycle >= 4 && !(cpu->loop_pred_history & 4u)) :
+            cpu->loop.cycle >= (uint64_t)cpu->loop.iterations * cpu->loop.ii;
+        uint32_t loading_stages =
+            (cpu->loop.length + cpu->loop.ii - 1) / cpu->loop.ii;
+        bool enough_ilc = cpu->loop.predicate_loop ||
+                          cpu->control[13] >= loading_stages;
+        if (!boundary || opening || terminating || !enough_ilc) return true;
+        if (cpu->loop.predicate_loop)
+            return stop(cpu, cpu->pc, 0,
+                        "SPLOOPW interrupt drain not implemented");
+        uint64_t context = cpu->control_ready[CDJ_C674X_LOOP_CONTEXT];
+        if (!(context & CDJ_C674X_LOOP_CONTEXT_VALID))
+            return stop(cpu, cpu->pc, 0,
+                        "SPLOOP interrupt setup address unavailable");
+        if (context & CDJ_C674X_LOOP_HAS_SPMASK)
+            return stop(cpu, cpu->pc, 0,
+                        "SPLOOP interrupt SPMASK resume not implemented");
+        unsigned interrupt = 4;
+        while (!(eligible & (1u << interrupt))) ++interrupt;
+        /* Detection is on this stage boundary; draining begins on the next
+         * cycle. Keep the selected request stable while the epilog drains. */
+        loop_set_interrupt_phase(cpu, interrupt,
+                                 CDJ_C674X_LOOP_INTERRUPT_ARMED);
+        return true;
+    }
     if (cpu->control[26] & (1u << 9))
         return stop(cpu, cpu->pc, 0,
                     "nested maskable interrupt not implemented");
+
+    bool interrupted_loop = loop_interrupt_draining(cpu);
+    unsigned interrupt = interrupted_loop ? loop_selected_interrupt(cpu) : 0;
+    if (interrupted_loop &&
+        (interrupt < 4 || interrupt > 15 || !(eligible & (1u << interrupt)))) {
+        /* Section 7.13.6: if loop code disables the request while draining,
+         * finish the epilog and continue after SPKERNEL without vectoring. */
+        loop_clear_interrupt_phase(cpu);
+        interrupted_loop = false;
+        if (!eligible) return true;
+    }
 
     /* INT4 has highest maskable priority (Table 5-1). The interpreter has no
      * speculative fetch pipeline, so the current PC is exactly the first
      * execute packet annulled by the interrupt and therefore the IRP value.
      * Existing delayed E2..E5 effects belong to older, non-annulled packets
      * and remain queued to mature while the handler executes (5.4.4). */
-    unsigned interrupt = 4;
-    while (!(eligible & (1u << interrupt))) ++interrupt;
+    if (!interrupted_loop) {
+        interrupt = 4;
+        while (!(eligible & (1u << interrupt))) ++interrupt;
+    }
     uint32_t saved_tsr = (cpu->control[26] & 0x0000c6deu) |
                          (cpu->control[1] & 1u);
-    saved_tsr &= ~((1u << 15) | (1u << 14));
+    saved_tsr &= ~(1u << 15);
+    if (interrupted_loop) saved_tsr |= CDJ_C674X_TSR_SPLX;
+    else saved_tsr &= ~CDJ_C674X_TSR_SPLX;
     cpu->control[27] = saved_tsr;
-    cpu->control[6] = cpu->pc;
+    cpu->control[6] = interrupted_loop ? loop_setup_pc(cpu) : cpu->pc;
     cpu->control[2] &= ~(1u << interrupt);
+    loop_clear_interrupt_phase(cpu);
 
     /* Table 5-3: save TSR in ITSR, enter supervisor interrupt context, retain
      * GEE/DBGM, clear GIE/SGIE/XEN/CXM/EXC/SPLX, and assert INT/IB. PGIE and
@@ -2047,7 +2159,10 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             /* SPRUFE8B 7.14: a taken branch idles an active loop buffer.
              * Do not clear the special idle SPLX state restored by B IRP;
              * section 7.7.3.2 requires it until the return SPLOOP starts. */
-            if (out.loop_active) loop_set_active(&out, false);
+            if (out.loop_active) {
+                loop_set_active(&out, false);
+                loop_clear_interrupt_phase(&out);
+            }
             if (out.branch_count) {
                 out.branch_due = out.branch_queue[0].due;
                 out.branch_target = out.branch_queue[0].target;
@@ -2085,6 +2200,9 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         unsigned delay = 0, count = 0;
         uint32_t tags[8];
         bool has_mask = spmask_decode(&source.instructions[0], &masking.mask);
+        if (has_mask)
+            out.control_ready[CDJ_C674X_LOOP_CONTEXT] |=
+                CDJ_C674X_LOOP_HAS_SPMASK;
         if ((out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) && has_mask)
             return stop(cpu, source.instructions[0].pc,
                         source.instructions[0].word,
@@ -2171,7 +2289,9 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         if (!cdj_c674x_loop_load(&out.loop, NULL, 0, false, 0))
             return stop(cpu, cpu->pc, 0, "loop dynamic length exceeded");
     }
-    if (post && !out.idle_cycles) {
+    bool interrupt_armed = loop_interrupt_armed(&out);
+    bool interrupt_draining = loop_interrupt_draining(&out);
+    if (post && !interrupt_draining && !out.idle_cycles) {
         CdjC674xPacket source;
         if (!cdj_c674x_fetch(&out, read, opaque, &source))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
@@ -2215,13 +2335,31 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         /* SPLOOPD forces termination false and suppresses ILC decrement
          * during the first three loop cycles.  At later stage boundaries,
          * test ILC before conditionally decrementing it (7.9.2/7.9.3). */
-        if (out.loop.cycle >= 4 && out.loop.cycle % out.loop.ii == 0 &&
+        if (!interrupt_armed && !interrupt_draining &&
+            out.loop.cycle >= 4 && out.loop.cycle % out.loop.ii == 0 &&
             out.control[13])
             --out.control[13];
-    } else if (!out.loop.predicate_loop)
+    } else if (!out.loop.predicate_loop &&
+               !interrupt_armed && !interrupt_draining)
         out.control[13] = launched < out.loop.iterations ? out.loop.iterations - launched : 0;
-    if (end_while) loop_set_active(&out, false);
-    if (drained && scheduler_post) loop_set_active(&out, false);
+    if (interrupt_armed) {
+        if (!cdj_c674x_loop_interrupt_drain(&out.loop))
+            return stop(cpu, cpu->pc, 0,
+                        "SPLOOP interrupt drain schedule invalid");
+        loop_set_interrupt_phase(&out, loop_selected_interrupt(&out),
+                                 CDJ_C674X_LOOP_INTERRUPT_DRAINING);
+    }
+    if (end_while) {
+        loop_set_active(&out, false);
+        /* SPLOOPW may terminate while interrupt draining.  Section 7.10.3
+         * then interrupts the post-loop packet rather than restarting the
+         * loop setup address. */
+        if (interrupt_draining)
+            loop_clear_interrupt_phase(&out);
+    }
+    if (drained && scheduler_post &&
+        (!interrupt_draining || (!out.load_count && !out.store_count)))
+        loop_set_active(&out, false);
     *cpu = out;
     return true;
 }
@@ -2283,6 +2421,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                                     : ((w >> 23) & 31) + 1;
         if (!cdj_c674x_loop_init(&out.loop, ii, cpu->control[13]))
             return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
+        loop_set_setup(&out, first.pc);
         out.loop.predicate_loop = while_loop;
         out.loop.delayed_count = delayed_loop;
         out.loop_pred_history = returning ? CDJ_C674X_LOOP_RETURNING : 0;

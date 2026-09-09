@@ -2403,8 +2403,8 @@ int main(void)
     assert(cdj_c674x_interrupt(&c, 0));
     assert(c.pc == 0x10a0 && c.control[6] == 0x1040);
 
-    /* Invalid request bits and currently unsupported nested/SPLOOP entry
-     * fail closed rather than inventing vector or loop-resume semantics. */
+    /* Invalid request bits, nested entry and a legacy active-loop checkpoint
+     * without its setup address fail closed rather than inventing state. */
     cdj_c674x_reset(&c, 0x1000);
     assert(!cdj_c674x_interrupt(&c, 1u << 3));
     assert(!c.cycles && c.pc == 0x1000 && !c.control[2]);
@@ -2415,9 +2415,72 @@ int main(void)
     assert(c.control[2] == (1u << 4));
     cdj_c674x_reset(&c, 0x1000);
     c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
-    c.loop_active = true;
+    c.loop_active = true; c.loop.sealed = true; c.loop.ii = 1;
+    c.loop.length = 1; c.loop.iterations = 10; c.loop.cycle = 3;
+    c.control[13] = 9;
     assert(!cdj_c674x_interrupt(&c, 1u << 4));
     assert(c.control[2] == (1u << 4));
+
+    /* Interrupt return reverses SPMASK program/buffer selection. Until that
+     * retained provenance exists, an otherwise eligible loop fails closed. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
+    c.control[13] = 12;
+    memory[0] = 0x38000; memory[1] = 0x130001; /* SPLOOP; SPMASK S1. */
+    memory[2] = 0; memory[3] = 0x34000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (!c.loop.sealed)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (c.loop.cycle < 3)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!cdj_c674x_interrupt(&c, 1u << 4));
+    assert(!strcmp(c.fault, "SPLOOP interrupt SPMASK resume not implemented"));
+
+    /* A maskable interrupt detected on a legal SPLOOP boundary executes that
+     * boundary, freezes ILC, drains only the buffered epilog and vectors only
+     * after the loop is idle. IRP names the setup packet and ITSR records
+     * SPLX, so the real B IRP path restarts it as an interrupted loop. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1;
+    c.control[4] = (1u << 4) | (1u << 7) | 3u;
+    c.control[13] = 12;
+    memory[0] = 0x38000;                    /* SPLOOP 1. */
+    memory[1] = 3u << 23 | 3u << 18 | 1u << 13 | 0x58;
+    memory[2] = 0; memory[3] = 0x34000;     /* NOP; SPKERNEL 0,0. */
+    memory[56] = 0x001800e2;                /* INT7 handler: B IRP. */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (!c.loop.sealed)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop.cycle == 3 && c.control[13] == 8);
+    assert(cdj_c674x_interrupt(&c, 1u << 7));
+    assert(c.loop_active && c.pc == 0x1010 && c.control[2] == (1u << 7));
+    c.loads[0] = (CdjC674xLoad){.due = c.cycles + 5,
+        .value = 0x12345678, .bank = 0, .dst = 9, .size = 0};
+    c.load_count = 1;
+    uint32_t frozen_ilc = c.control[13];
+    unsigned drain_steps = 0;
+    do {
+        /* A later higher-priority request remains pending; the INT7 chosen
+         * at drain detection is stable through the epilog. */
+        assert(cdj_c674x_interrupt(&c,
+            drain_steps ? 0 : (1u << 4)));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.control[13] == frozen_ilc);
+        assert(++drain_steps < 10);
+    } while (c.loop_active);
+    assert(drain_steps == 5 && c.pc == 0x1010 &&
+           c.r[0][9] == 0x12345678);
+    assert(cdj_c674x_interrupt(&c, 0));
+    assert(c.pc == 0x10e0 && c.control[6] == 0x1000 &&
+           c.control[2] == (1u << 4));
+    assert((c.control[27] & (1u << 14)) && !(c.control[26] & (1u << 14)));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    for (unsigned i = 0; i < 5; ++i)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1000 && (c.control[26] & (1u << 14)));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop_active && c.control[13] == frozen_ilc - 1);
 
     /* Execute TI's copy-loop schedule with the real instruction core. The
      * replayed load, move and store share the same pre-cycle register state. */

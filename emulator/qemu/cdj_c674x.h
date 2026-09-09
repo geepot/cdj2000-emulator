@@ -46,6 +46,10 @@ typedef struct {
      * Like bus commits, external effects cannot roll back a broken callback. */
     void (*cycle_tick)(void *);
     void *cycle_opaque;
+    /* Delayed control-register availability. ID 31 is not a C674x control
+     * register exposed by this core; its otherwise-unused slot preserves the
+     * software-loop setup PC and interrupt-drain flag in existing schema-8
+     * checkpoints without changing their native ABI. */
     uint64_t control_ready[32];
     uint32_t branch_target, fault_pc, fault_word;
     struct { uint64_t due; uint32_t target; } branch_queue[5];

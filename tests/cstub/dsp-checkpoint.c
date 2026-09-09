@@ -57,6 +57,7 @@ int main(int argc, char **argv)
     before.cpu.loop_wait = 2;
     before.cpu.loop_tags = 9;
     before.cpu.loop_packets = 5;
+    before.cpu.control_ready[31] = UINT64_C(0x8100000711803000);
     before.cpu.loop.ii = 4;
     before.cpu.loop.length = 3;
     before.cpu.loop.iterations = 14;

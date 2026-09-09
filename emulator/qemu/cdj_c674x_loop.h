@@ -37,4 +37,8 @@ bool cdj_c674x_loop_issue(CdjC674xLoop *, uint32_t tags[8], unsigned *count,
 bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *, uint32_t tags[8], unsigned *count,
                                  bool *post_fetch, bool *drained,
                                  bool (*allow)(void *, uint32_t), void *opaque);
+/* At a legal stage boundary, stop launching iterations and convert the
+ * existing schedule into its interrupt epilog. The caller is responsible for
+ * the architectural eligibility checks and for vectoring after drain. */
+bool cdj_c674x_loop_interrupt_drain(CdjC674xLoop *);
 #endif
