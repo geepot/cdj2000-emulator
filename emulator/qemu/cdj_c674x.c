@@ -756,13 +756,21 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 if (n > 1) out.loop_wait = n - 1;
                 continue;
             }
-            /* Multicycle masked operations need program-fetch stall handling
-             * during loading. Preserve the explicit stop until that exists. */
-            if (protected_load(&insn) ||
-                (!insn.compact && ((w & 0x1ffe) == 0x162 || (w & 0x7c) == 0x10 ||
+            /* SPRUFE8B 3.10 and 7.7.3.3: PROT expands the program stream
+             * with four empty loading cycles. Buffered instructions continue
+             * issuing during those cycles, just as for explicit NOP 4.
+             * Do not reinsert fetch delays when the load is replayed. This
+             * expansion applies even when predicated false or SPMASKed. */
+            if (protected_load(&insn)) {
+                if (finish || out.loop_wait)
+                    return stop(cpu, insn.pc, w, "invalid protected loop load packet");
+                out.loop_wait = 4;
+                insn.header &= ~(1u << 20);
+            }
+            if ((!insn.compact && ((w & 0x1ffe) == 0x162 || (w & 0x7c) == 0x10 ||
                                   (w & 0xffe) == 0x362 || (w & 0x1ffc) == 0x120)) ||
                 compact_branch(&insn))
-                return stop(cpu, insn.pc, w, "loop body control or protected instruction not implemented");
+                return stop(cpu, insn.pc, w, "loop body control instruction not implemented");
             if (has_mask && masking.mask) {
                 unsigned unit = instruction_unit(&insn);
                 if (!unit) return stop(cpu, insn.pc, w, "SPMASK unit not implemented");

@@ -8,6 +8,30 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Protected loop loads now expand into four empty program-stream cycles while
+buffered operations continue issuing (SPRUFE8B 3.10, 7.7.3.3). PROT is removed
+from the buffered/direct lowered instruction, so replay does not reinsert fetch
+delays. Tests compare every cycle against explicit LD; NOP 4 for II=1..7,
+full/compact loads, compact RS banks, masked one-shot execution, false full-width
+predicates, and E3 sampling/E5 writeback with changing RAM. Invalid parallel
+SPKERNEL/protected-load and multiple-multicycle packets fault atomically.
+Interrupt restart and the assembler's preceding-packet SPKERNEL restriction
+are not fully modeled; these tests are not a hardware timing oracle.
+
+`runs/dsp-protected-loop-1 --verify-repeat` matches at 1,162 packets / 1,420
+cycles, PC `0x11802ecc`, compact word `0x0134`. The rejected store is
+PLLCTL (`0x01c11100`) = `0x1c8`: PLLRST release, still deliberately unsupported.
+Trace SHA-256: `65dba25926a35dc30506d2cb4bbf955a47dafb5e23c53bdfbecab93c2df5a1c0`.
+Rebuilt connected run `runs/nxs-protected-loop-connected` agrees at the same
+stop/counts, GUI exit 0 and a frame after the 15-second bound. Suite: 170 passed /
+43 skipped; CPU address/undefined sanitizer passes. No new peripheral response
+was added. PLL/PSC timing assumptions below still apply. Full boot/audio remain
+incomplete. Next: model PLL reset-release/clock timing from SPRUH91D 7.2.2 and
+the C6747 datasheet timing requirements; do not simply latch reset release and
+claim clock lock. Firmware has exited its GO-status polling loop.
+
+### Previous immediate BNOP checkpoint
+
 Immediate BNOP is implemented for both units, all NOP counts 0..7, predicates
 and signed 12-bit displacements. Full-width instructions inside header-based
 fetch packets scale displacement by two; ordinary packets scale by four

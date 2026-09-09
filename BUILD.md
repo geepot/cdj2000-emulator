@@ -766,3 +766,32 @@ address/undefined sanitizer passes. Full boot/audio remain incomplete and
 the existing PLL/PSC timing assumptions still apply.
 Rebuilt connected run `runs/nxs-bnop-immediate-connected` matches the stop
 and packet/cycle counts; GUI exits 0 with a frame at the 15-second bound.
+
+### Protected loads during software-loop loading
+
+PROT contributes four empty loading cycles, not four cycles freezing the loop
+buffer. Lowered loads no longer carry PROT when buffered/reissued. The focused
+CPU harness compares against explicit LD; NOP 4 each cycle across II=1..7,
+full/compact forms, compact low/high register sets, SPMASK, and false full-width
+predicates. Changing RAM checks E3 capture/E5 completion. Invalid parallel
+SPKERNEL and multiple-multicycle packets reject without CPU-state changes.
+Primary basis: SPRUFE8B 3.10, 7.7.3.3, SPKERNEL p481. This is model testing,
+not measured silicon timing; interrupt restart and the preceding-packet
+SPKERNEL restriction remain incomplete.
+
+```sh
+.venv/bin/pytest -q
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-prot-loop-san
+/tmp/cdj-prot-loop-san
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-bnop-immediate-connected/dsp-l2.bin runs/dsp-protected-loop-1 --verify-repeat
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-protected-loop-connected --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+```
+
+Use fresh output directories when repeating commands. Suite: 170 passed /
+43 skipped; CPU sanitizers pass. Replay exact-repeat gate passes; connected
+execution agrees at 1,162 packets / 1,420 cycles, PC `0x11802ecc`, compact
+`0x0134`. The PLLCTL=`0x1c8` store attempts reset release and remains rejected.
+Trace SHA-256 `65dba25926a35dc30506d2cb4bbf955a47dafb5e23c53bdfbecab93c2df5a1c0`.
+Connected GUI exit 0/frame is not boot completion. No working audio or physical
+PLL lock/clock propagation has been established.

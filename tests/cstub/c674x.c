@@ -31,6 +31,65 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* PROT in a software loop is equivalent cycle by cycle to LD; NOP 4.
+     * Cover overlapping replay (II < 5), masked one-shot loads, and false
+     * predicates with invalid addresses. Mutate RAM between E1/E3/E5 to
+     * check actual sampling, not merely the final instruction count. */
+    for (unsigned ii = 1; ii <= 7; ++ii)
+    for (unsigned masked = 0; masked < 2; ++masked)
+    for (unsigned enabled = 0; enabled < 2; ++enabled)
+    for (unsigned compact = 0; compact < 2; ++compact)
+    for (unsigned rs = 0; rs <= compact; ++rs) {
+        if (compact && !enabled) continue; /* this compact form is unconditional */
+        CdjC674x reference[24];
+        for (unsigned prot = 0; prot < 2; ++prot) {
+            memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+            c.r[1][1] = 1; c.r[1][0] = enabled;
+            c.r[0][5] = enabled ? 0x10c0 : 0xffffffff;
+            memory[0] = 0x4003e000 | (ii - 1) << 23; /* [B1] SPLOOPW */
+            unsigned slot = 1;
+            if (masked) memory[slot++] = 0x430001; /* SPMASK D1 || */
+            unsigned load_slot = slot;
+            /* [B0] LDW *A5,A3, or compact LDW *A5,A3/A19; NOP 1 */
+            memory[slot++] = compact ? 0x0c6e00bc : 0x21940264;
+            if (!prot) memory[slot++] = 3u << 13; /* NOP 4 */
+            memory[slot++] = 0; /* separate SPKERNEL from multicycle op */
+            memory[slot] = 0x34000;
+            memory[7] = 0xe0000000 | prot << 20 | rs << 19 |
+                        (compact ? 1u << (21 + load_slot) : 0);
+            for (unsigned cycle = 0; cycle < 24; ++cycle) {
+                memory[48] = 1000 + cycle;
+                assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+                assert(c.cycles == cycle + 1 && !c.idle_cycles);
+                if (!prot) reference[cycle] = c;
+                else {
+                    const CdjC674x *r = &reference[cycle];
+                    assert(!memcmp(c.r, r->r, sizeof(c.r)));
+                    assert(c.load_count == r->load_count);
+                    assert(!memcmp(c.loads, r->loads, c.load_count * sizeof(c.loads[0])));
+                    assert(c.loop.cycle == r->loop.cycle && c.loop.length == r->loop.length);
+                    assert(c.loop.sealed == r->loop.sealed && c.loop_tags == r->loop_tags);
+                    assert(c.loop_pred_history == r->loop_pred_history);
+                }
+            }
+            assert(c.loop_tags == (masked ? 0u : 1u));
+            if (!enabled) assert(c.r[0][3 + rs * 16] == 0);
+            else if (masked) assert(c.r[0][3 + rs * 16] == 1003);
+            else assert(c.r[0][3 + rs * 16] > 1003);
+        }
+    }
+    /* SPKERNEL cannot share a protected-load packet (SPRUFE8B p481).
+     * Nor may this implementation silently combine two multicycle ops. */
+    for (unsigned kernel = 0; kernel < 2; ++kernel) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        assert(cdj_c674x_loop_init(&c.loop, 1, 2)); c.loop_active = true;
+        c.r[0][5] = 0x10c0;
+        memory[0] = kernel ? 0x34001 : 0x01940265;
+        memory[1] = kernel ? 0x01940264 : 1u << 13;
+        memory[7] = 0xe0100000;
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 0 && c.loop_tags == 0 && c.loop.length == 0 && !c.load_count);
+    }
     /* Full-width immediate BNOP: signed displacement bounds, both units,
      * both fetch layouts and all N counts, with true/false predicates. */
     const int displacements[] = {-2048,-1,0,1,2047};
