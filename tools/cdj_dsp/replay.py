@@ -14,6 +14,8 @@ import subprocess
 import tempfile
 import sys
 
+from .coverage import build_coverage
+
 ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
     ROOT / 'emulator/qemu' / name for name in
@@ -24,6 +26,9 @@ SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0'}
 SHARED_RAM_SIZE = 0x20000
+DEFAULT_FORMATS = ROOT / 'build/gdb-17.2/include/opcode/tic6x-insn-formats.h'
+ANALYSIS_SOURCES = [ROOT / 'tools/cdj_dsp/coverage.py',
+                    ROOT / 'tools/cdj_dsp/inventory.py']
 
 
 def _fnv1a(data):
@@ -78,9 +83,60 @@ def checkpoint_info(data: bytes) -> dict:
                 sdram_sha256=sdram_hash.hexdigest(), present_pages=present_pages)
 
 
+def checkpoint_provenance(path: Path, data: bytes, info: dict) -> dict:
+    """Validate a connected or exact-repeat checkpoint's local provenance."""
+    manifest_path = path.parent / 'manifest.json'
+    if not manifest_path.is_file():
+        raise ValueError('checkpoint requires its manifest.json provenance file')
+    manifest_data = manifest_path.read_bytes()
+    capture_manifest = json.loads(manifest_data)
+    matching = [item for item in capture_manifest.get('checkpoints', [])
+                if item.get('file') == path.name]
+    result = dict(capture_manifest=capture_manifest,
+                  manifest_sha256=hashlib.sha256(manifest_data).hexdigest(),
+                  gate_sha256=None)
+    if (capture_manifest.get('complete') and len(matching) == 1 and
+            matching[0].get('sha256') == info['checkpoint_sha256']):
+        result['origin'] = 'connected_checkpoint'
+        return result
+    gate_path = path.parent / 'gate.json'
+    gate_data = gate_path.read_bytes() if gate_path.is_file() else b''
+    gate = json.loads(gate_data) if gate_data else {}
+    key = ('final_checkpoint' if path.name == 'final.cdjdsp' else
+           'repeat_final_checkpoint' if path.name == 'repeat-final.cdjdsp' else None)
+    recorded = gate.get(key, {}) if key else {}
+    if (not gate.get('passed') or not gate.get('repeat_matches') or
+            not gate.get('final_state_and_memory_match') or
+            recorded.get('checkpoint_sha256') != info['checkpoint_sha256']):
+        raise ValueError('checkpoint is absent from a complete connected manifest or exact replay gate')
+    result.update(origin='deterministic_replay_checkpoint',
+                  gate_sha256=hashlib.sha256(gate_data).hexdigest())
+    return result
+
+
+def newest_checkpoint(directory: Path):
+    """Return newest structurally valid, provenance-bearing checkpoint below a directory."""
+    candidates = sorted((path for path in directory.rglob('*.cdjdsp')
+                         if path.name != 'repeat-final.cdjdsp'),
+                        key=lambda path: (path.stat().st_mtime_ns, str(path)), reverse=True)
+    failures = []
+    for path in candidates:
+        try:
+            data = path.read_bytes()
+            info = checkpoint_info(data)
+            provenance = checkpoint_provenance(path, data, info)
+            return path, data, info, provenance
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            if len(failures) < 3:
+                failures.append(f'{path}: {error}')
+    detail = '; '.join(failures) if failures else 'no .cdjdsp files found'
+    raise ValueError(f'no compatible provenance-bearing checkpoint under {directory}: {detail}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('dump', type=Path)
+    parser.add_argument('dump', type=Path,
+                        help='checkpoint/raw L2 file, or directory whose newest valid checkpoint is selected')
     parser.add_argument('output', type=Path, help='new directory for manifest and trace')
     parser.add_argument('--steps', type=int, default=10000)
     parser.add_argument('--break-pc', type=lambda value: int(value, 0), default=0,
@@ -93,21 +149,34 @@ def main():
                         help='also require byte-identical output to this saved trace; not a boot test')
     parser.add_argument('--events', type=Path,
                         help='inject later events from the checkpoint connected-run transcript')
+    parser.add_argument('--formats', type=Path, default=DEFAULT_FORMATS,
+                        help='GNU tic6x-insn-formats.h used for automatic coverage')
     args = parser.parse_args()
     if (not 0 < args.steps <= 100000000 or not 0 <= args.break_pc <= 0xffffffff or
             not 0 <= args.boot_phase <= 7):
         parser.error('steps must be 1..100000000, breakpoint must fit 32 bits, and boot phase must be 0..7')
-    if not args.dump.is_file():
-        parser.error('input dump/checkpoint must be an existing file')
+    selected_checkpoint = None
+    selected_provenance = None
+    if args.dump.is_dir():
+        try:
+            selected_path, data, selected_checkpoint, selected_provenance = newest_checkpoint(args.dump)
+        except ValueError as error:
+            parser.error(str(error))
+        args.dump = selected_path
+        print(f'Selected newest compatible checkpoint: {args.dump}', file=sys.stderr)
+    elif not args.dump.is_file():
+        parser.error('input dump/checkpoint must be an existing file or directory')
     if args.expect_trace is not None and not args.expect_trace.is_file():
         parser.error('expected trace must be an existing file')
     if args.events is not None and not args.events.is_file():
         parser.error('event transcript must be an existing file')
+    if not args.formats.is_file():
+        parser.error('C6x format header is required (build dependencies per BUILD.md or use --formats)')
     cc = shutil.which('cc')
     if not cc:
         parser.error('C compiler required (install Xcode command line tools)')
     # Snapshot input so hashing and execution always describe the same bytes.
-    data = args.dump.read_bytes()
+    data = data if selected_checkpoint is not None else args.dump.read_bytes()
     checkpoint = data.startswith((b'CDJDSP1\0', b'CDJDSP2\0'))
     capture_manifest = None
     input_checkpoint = None
@@ -116,33 +185,15 @@ def main():
     checkpoint_gate_sha256 = None
     if checkpoint:
         try:
-            input_checkpoint = checkpoint_info(data)
-        except ValueError as error:
+            input_checkpoint = selected_checkpoint or checkpoint_info(data)
+            provenance = selected_provenance or checkpoint_provenance(
+                args.dump, data, input_checkpoint)
+        except (ValueError, json.JSONDecodeError) as error:
             parser.error(str(error))
-        manifest_path = args.dump.parent / 'manifest.json'
-        if not manifest_path.is_file():
-            parser.error('checkpoint requires its manifest.json provenance file')
-        manifest_data = manifest_path.read_bytes()
-        checkpoint_manifest_sha256 = hashlib.sha256(manifest_data).hexdigest()
-        capture_manifest = json.loads(manifest_data)
-        matching = [item for item in capture_manifest.get('checkpoints', [])
-                    if item.get('file') == args.dump.name]
-        if (capture_manifest.get('complete') and len(matching) == 1 and
-                matching[0].get('sha256') == input_checkpoint['checkpoint_sha256']):
-            checkpoint_origin = 'connected_checkpoint'
-        else:
-            gate_path = args.dump.parent / 'gate.json'
-            gate_data = gate_path.read_bytes() if gate_path.is_file() else b''
-            gate = json.loads(gate_data) if gate_data else {}
-            key = ('final_checkpoint' if args.dump.name == 'final.cdjdsp' else
-                   'repeat_final_checkpoint' if args.dump.name == 'repeat-final.cdjdsp' else None)
-            recorded = gate.get(key, {}) if key else {}
-            if (not gate.get('passed') or not gate.get('repeat_matches') or
-                    not gate.get('final_state_and_memory_match') or
-                    recorded.get('checkpoint_sha256') != input_checkpoint['checkpoint_sha256']):
-                parser.error('checkpoint is absent from a complete connected manifest or exact replay gate')
-            checkpoint_origin = 'deterministic_replay_checkpoint'
-            checkpoint_gate_sha256 = hashlib.sha256(gate_data).hexdigest()
+        capture_manifest = provenance['capture_manifest']
+        checkpoint_manifest_sha256 = provenance['manifest_sha256']
+        checkpoint_origin = provenance['origin']
+        checkpoint_gate_sha256 = provenance['gate_sha256']
     elif len(data) != 0x40000:
         parser.error('legacy dump must be exactly 256 KiB')
     event_data = args.events.read_bytes() if args.events is not None else None
@@ -161,6 +212,8 @@ def main():
     # worktree edit must not make the manifest describe a different binary.
     inputs = SOURCES + [p.with_suffix('.h') for p in SOURCES[1:]]
     source_data = {p: p.read_bytes() for p in inputs}
+    format_data = args.formats.read_bytes()
+    analysis_data = {path: path.read_bytes() for path in ANALYSIS_SOURCES}
     with tempfile.TemporaryDirectory(prefix='cdj-dsp-replay-') as temp:
         binary = Path(temp) / 'replay'
         snapshot = Path(temp) / 'l2.bin'
@@ -208,7 +261,12 @@ def main():
                                          'legacy PLLCTL bit 4 writable latch; C6747 effect unverified',
                                          'divider GO completes after eight subsequent DSP cycles; not physical clock timing'],
                         sources={str(p.relative_to(ROOT)): hashlib.sha256(content).hexdigest()
-                                 for p, content in source_data.items()})
+                                 for p, content in source_data.items()},
+                        analysis_sources={
+                            **{str(path.relative_to(ROOT)): hashlib.sha256(content).hexdigest()
+                               for path, content in analysis_data.items()},
+                            str(args.formats.resolve()): hashlib.sha256(format_data).hexdigest(),
+                        })
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         command = [str(binary), str(snapshot), str(args.steps), str(args.break_pc),
                    str(args.boot_phase), str(args.output / 'final.cdjdsp')]
@@ -221,6 +279,34 @@ def main():
             repeat_command[5] = str(args.output / 'repeat-final.cdjdsp')
             with (args.output / 'repeat.jsonl').open('w') as trace:
                 subprocess.run(repeat_command, stdout=trace, check=True)
+    coverage_data = {}
+    for trace_name, checkpoint_name, output_name in [
+            ('trace.jsonl', 'final.cdjdsp', 'coverage.json'),
+            *(([('repeat.jsonl', 'repeat-final.cdjdsp', 'repeat-coverage.json')]
+               if args.verify_repeat else []))]:
+        checkpoint_bytes = (args.output / checkpoint_name).read_bytes()
+        trace_bytes = (args.output / trace_name).read_bytes()
+        try:
+            coverage = build_coverage(checkpoint_bytes, trace_bytes, format_data)
+        except (ValueError, json.JSONDecodeError) as error:
+            parser.error(f'coverage generation failed: {error}')
+        coverage['sha256'] = {
+            'checkpoint': hashlib.sha256(checkpoint_bytes).hexdigest(),
+            'trace': hashlib.sha256(trace_bytes).hexdigest(),
+            'formats': hashlib.sha256(format_data).hexdigest(),
+            **{str(path.relative_to(ROOT)): hashlib.sha256(content).hexdigest()
+               for path, content in analysis_data.items()},
+        }
+        serialized = (json.dumps(coverage, indent=2) + '\n').encode()
+        (args.output / output_name).write_bytes(serialized)
+        coverage_data[output_name] = (coverage, serialized)
+    manifest['coverage'] = {
+        'file': 'coverage.json',
+        'sha256': hashlib.sha256(coverage_data['coverage.json'][1]).hexdigest(),
+        'counts': coverage_data['coverage.json'][0]['counts'],
+        'validation_eligible': coverage_data['coverage.json'][0]['validation_eligible'],
+    }
+    (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     with (args.output / 'trace.jsonl').open() as trace:
         last = None
         for line in trace:
@@ -229,7 +315,11 @@ def main():
     if args.verify_repeat or expected is not None:
         actual = (args.output / 'trace.jsonl').read_bytes()
         gate = dict(scope='trace equivalence only; not architectural correctness or boot',
-                    trace_sha256=hashlib.sha256(actual).hexdigest(), passed=True)
+                    trace_sha256=hashlib.sha256(actual).hexdigest(),
+                    coverage_sha256=manifest['coverage']['sha256'],
+                    coverage_counts=manifest['coverage']['counts'],
+                    coverage_validation_eligible=manifest['coverage']['validation_eligible'],
+                    passed=True)
         if event_data is not None:
             verified_stops = sum(
                 json.loads(line).get('event') == 'verified_connected_stop'
@@ -247,6 +337,10 @@ def main():
             gate['repeat_final_checkpoint'] = checkpoint_info(repeat_final)
             gate['final_state_and_memory_match'] = final == repeat_final
             gate['passed'] &= gate['final_state_and_memory_match']
+            repeated_coverage = coverage_data['repeat-coverage.json'][1]
+            gate['repeat_coverage_sha256'] = hashlib.sha256(repeated_coverage).hexdigest()
+            gate['repeat_coverage_matches'] = coverage_data['coverage.json'][1] == repeated_coverage
+            gate['passed'] &= gate['repeat_coverage_matches']
         if expected is not None:
             gate['expected_path'] = str(args.expect_trace.resolve())
             gate['expected_sha256'] = hashlib.sha256(expected).hexdigest()

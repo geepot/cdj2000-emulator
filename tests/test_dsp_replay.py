@@ -40,6 +40,8 @@ def test_replay_determinism_breakpoints_and_limits(tmp_path):
     manifest = json.loads((tmp_path / 'first/manifest.json').read_text())
     assert manifest['boot_rom_executed'] is False and len(manifest['dump_sha256']) == 64
     assert 'emulator/qemu/cdj_c674x.h' in manifest['sources']
+    assert manifest['coverage']['counts']['confirmed_source_packets'] == 1
+    assert (tmp_path / 'first/coverage.json').is_file()
 
 
 def test_replay_rejects_invalid_input_without_artifacts(tmp_path):
@@ -63,6 +65,8 @@ def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
     assert json.loads(result.stdout)['reason'] == 'fault'
     gate = json.loads((first / 'gate.json').read_text())
     assert gate['passed'] and gate['repeat_matches']
+    assert gate['repeat_coverage_matches']
+    assert not gate['coverage_validation_eligible']
     assert gate['trace_sha256'] == gate['repeat_sha256']
     assert 'not architectural correctness or boot' in gate['scope']
     # An exactly repeated final checkpoint is a provenance-bearing resume
@@ -76,6 +80,15 @@ def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
         gate['final_checkpoint']['checkpoint_sha256']
     assert chained_manifest['input_manifest_sha256'] and \
         chained_manifest['input_gate_sha256']
+    # A directory input selects the newest provenance-valid checkpoint and
+    # ignores a newer corrupt artifact instead of requiring manual filename selection.
+    (first / 'newer-invalid.cdjdsp').write_bytes(b'not a checkpoint')
+    newest = tmp_path / 'newest'
+    result = run(first, newest, '--steps', '1', '--verify-repeat')
+    assert result.returncode == 0, result.stderr
+    newest_manifest = json.loads((newest / 'manifest.json').read_text())
+    assert newest_manifest['dump_path'] == str((first / 'final.cdjdsp').resolve())
+    assert 'Selected newest compatible checkpoint' in result.stderr
     baseline = first / 'trace.jsonl'
     second = tmp_path / 'second'
     result = run(dump, second, '--verify-repeat', '--expect-trace', str(baseline))

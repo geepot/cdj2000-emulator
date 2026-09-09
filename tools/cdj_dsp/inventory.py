@@ -2,7 +2,7 @@
 """Inventory candidate C6x format families without executing or skipping code.
 
 Reads GNU's external tic6x-insn-formats.h as data and scans either a raw L2
-image or the L2/SDRAM regions in a schema-1 checkpoint. This is a format scan,
+image or the L2/shared-RAM/SDRAM regions in a supported checkpoint. This is a format scan,
 not a disassembler or proof of reachability, valid operands, or emulator
 support. Explicit address ranges are required because firmware images also
 contain data.
@@ -31,7 +31,7 @@ def _fnv1a(data):
 
 
 def read_input(data):
-    """Return address-keyed memory images from raw L2 or a schema-1 checkpoint."""
+    """Return address-keyed memory images from raw L2 or a supported checkpoint."""
     if len(data) == 0x40000 and not data.startswith((b'CDJDSP1\0', b'CDJDSP2\0')):
         return {BASE: data}, dict(kind='raw_l2', schema=None)
     if len(data) < CHECKPOINT_HEADER.size:
@@ -60,11 +60,11 @@ def read_input(data):
     expected_size = pages_start + present_pages * page_size
     if len(payload) != expected_size:
         raise ValueError('checkpoint sparse memory layout is incomplete')
-    l2 = bytes(payload[l2_start:bitmap_start])
     if shared_size:
         l2 = bytes(payload[l2_start:shared_start])
         shared_ram = bytes(payload[shared_start:bitmap_start])
     else:
+        l2 = bytes(payload[l2_start:bitmap_start])
         shared_ram = None
     bitmap = payload[bitmap_start:pages_start]
     sdram = bytearray(sdram_size)
@@ -104,15 +104,147 @@ def expression(text):
     return value
 
 
-def read_formats(text):
+def _split_arguments(text):
+    """Split one macro invocation without treating nested commas as separators."""
+    fields, start, depth = [], 0, 0
+    for index, char in enumerate(text):
+        if char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+            if depth < 0:
+                raise ValueError('unbalanced format expression')
+        elif char == ',' and depth == 0:
+            fields.append(text[start:index].strip())
+            start = index + 1
+    if depth:
+        raise ValueError('unbalanced format expression')
+    fields.append(text[start:].strip())
+    return fields
+
+
+def _format_blocks(text):
+    """Yield complete FMT argument lists from the GNU table."""
     text = re.sub(r'/\*.*?\*/', '', text, flags=re.S)
-    formats = []
-    for name, width, value, mask in re.findall(
-            r'\bFMT\(\s*(\w+)\s*,\s*(16|32)\s*,\s*([^,]+),\s*([^,]+),', text):
-        formats.append((name, int(width), expression(value), expression(mask)))
-    if not formats:
+    position = 0
+    while True:
+        match = re.search(r'\bFMT\s*\(', text[position:])
+        if not match:
+            return
+        opening = position + match.end() - 1
+        depth = 1
+        cursor = opening + 1
+        while cursor < len(text) and depth:
+            if text[cursor] == '(':
+                depth += 1
+            elif text[cursor] == ')':
+                depth -= 1
+            cursor += 1
+        if depth:
+            raise ValueError('unterminated GNU C6x format')
+        arguments = _split_arguments(text[opening + 1:cursor - 1])
+        if len(arguments) != 5:
+            raise ValueError(f'GNU C6x format has {len(arguments)} arguments, expected 5')
+        yield arguments
+        position = cursor
+
+
+def read_format_specs(text):
+    """Parse format masks and simple field positions used by coverage reports."""
+    specs = []
+    for name, width, value, mask, field_expression in _format_blocks(text):
+        if not re.fullmatch(r'\w+', name) or width not in ('16', '32'):
+            raise ValueError('invalid GNU C6x format name or width')
+        fields = {}
+        if 'CFLDS' in field_expression:
+            fields.update(p=(0, 1), creg=(29, 3), z=(28, 1))
+        elif 'NFLDS' in field_expression:
+            fields['p'] = (0, 1)
+        elif 'SFLDS' in field_expression:
+            fields['s'] = (0, 1)
+        for field_name, pos, field_width in re.findall(
+                r'\bFLD\(\s*(\w+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)',
+                field_expression):
+            fields[field_name] = (int(pos), int(field_width))
+        composites = sorted(set(re.findall(r'\bCOMPFLD\(\s*(\w+)', field_expression)))
+        specs.append(dict(name=name, width=int(width), value=expression(value),
+                          mask=expression(mask), fields=fields,
+                          composite_fields=composites))
+    if not specs:
         raise ValueError('no GNU C6x formats found')
-    return formats
+    return specs
+
+
+def read_formats(text):
+    """Compatibility tuple view used by the discovery scanner."""
+    return [(spec['name'], spec['width'], spec['value'], spec['mask'])
+            for spec in read_format_specs(text)]
+
+
+def _format_values(item):
+    if isinstance(item, dict):
+        return item['name'], item['width'], item['value'], item['mask']
+    return item
+
+
+def decode_one(data, base, pc, formats):
+    """Decode the fetch width/layout and most-specific GNU format at one PC."""
+    offset = pc - base
+    if offset < 0 or offset + 2 > len(data):
+        raise ValueError(f'instruction address is outside memory at {pc:#x}')
+    header_offset = (offset & ~31) + 28
+    if header_offset + 4 > len(data):
+        raise ValueError(f'instruction fetch packet is incomplete at {pc:#x}')
+    header = struct.unpack_from('<I', data, header_offset)[0]
+    mixed = header >> 28 == 14
+    packet_offset = offset & 31
+    if mixed and packet_offset == 28:
+        raise ValueError(f'instruction points at compact header at {pc:#x}')
+    if mixed and packet_offset == 30:
+        raise ValueError(f'instruction points into compact header at {pc:#x}')
+    slot = packet_offset // 4
+    compact = bool(mixed and (header >> (21 + slot)) & 1)
+    width = 16 if compact else 32
+    size = width // 8
+    if pc % size or offset + size > len(data):
+        raise ValueError(f'instruction is unaligned or incomplete at {pc:#x}')
+    word = int.from_bytes(data[offset:offset + size], 'little')
+    expanded = word
+    if compact:
+        expanded |= ((header >> 14) & 1) << 16
+        expanded |= ((header >> 15) & 1) << 17
+        expanded |= ((header >> 16) & 7) << 18
+    matches = [(name, mask.bit_count()) for item in formats
+               for name, bits, value, mask in [_format_values(item)]
+               if bits == width and expanded & mask == value]
+    specificity = max((bits for _, bits in matches), default=0)
+    families = sorted(name for name, bits in matches if bits == specificity)
+    next_pc = pc + size
+    if mixed and (next_pc & 31) == 28:
+        next_pc += 4
+    return dict(pc=pc, word=word, expanded=expanded, width=width,
+                compact=compact, header=header if mixed else 0,
+                parallel=bool((header >> (packet_offset // 2)) & 1)
+                if compact else bool(word & 1),
+                next_pc=next_pc, families=families or ['unclassified'])
+
+
+def decode_packet(memories, pc, formats):
+    """Decode one execute packet starting at a dynamically confirmed source PC."""
+    rows = []
+    while True:
+        matches = [(base, image) for base, image in memories.items()
+                   if base <= pc < base + len(image)]
+        if len(matches) != 1:
+            raise ValueError(f'instruction address is not in exactly one memory at {pc:#x}')
+        base, image = matches[0]
+        row = decode_one(image, base, pc, formats)
+        rows.append(row)
+        if not row['parallel']:
+            return rows
+        if len(rows) == 8:
+            raise ValueError(f'execute packet exceeds eight instructions at {rows[0]["pc"]:#x}')
+        pc = row['next_pc']
 
 
 def scan(data, base, start, end, formats):
@@ -125,25 +257,12 @@ def scan(data, base, start, end, formats):
         if mixed and slot == 7:
             pc = (pc & ~31) + 32
             continue
-        compact = mixed and (header >> (21 + slot)) & 1
-        width = 16 if compact else 32
-        if pc % (width // 8) or pc + width // 8 > end:
+        row = decode_one(data, base, pc, formats)
+        if row['next_pc'] > end and pc + row['width'] // 8 > end:
             raise ValueError(f'range splits an instruction at {pc:#x}')
-        word = int.from_bytes(data[offset:offset + width // 8], 'little')
-        expanded = word
-        if compact:
-            expanded |= ((header >> 14) & 1) << 16
-            expanded |= ((header >> 15) & 1) << 17
-            expanded |= ((header >> 16) & 7) << 18
-        matches = [(name, mask.bit_count()) for name, bits, value, mask in formats
-                   if bits == width and expanded & mask == value]
-        specificity = max((bits for _, bits in matches), default=0)
-        families = sorted(name for name, bits in matches if bits == specificity)
-        yield dict(pc=pc, word=word, width=width, header=header if mixed else 0,
-                   parallel=bool((header >> ((offset & 31) // 2)) & 1)
-                   if compact else bool(word & 1),
-                   families=families or ['unclassified'])
-        pc += width // 8
+        yield {key: row[key] for key in
+               ('pc', 'word', 'width', 'header', 'parallel', 'families')}
+        pc = row['next_pc']
 
 
 def build_report(data, ranges, formats, trace):

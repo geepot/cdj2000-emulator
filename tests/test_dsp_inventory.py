@@ -5,7 +5,8 @@ import pytest
 
 from tools.cdj_dsp.inventory import (
     BASE, CHECKPOINT_HEADER, SHARED_RAM_BASE, SHARED_RAM_SIZE, SDRAM_BASE,
-    _fnv1a, build_report, expression, read_formats, read_input,
+    _fnv1a, build_report, decode_one, expression, read_format_specs,
+    read_formats, read_input,
 )
 
 
@@ -41,6 +42,26 @@ def test_header_bits_select_distinct_formats():
                              FMT(branch, 16, BR(1), BR(1), ignored)''')
     report = build_report(data, [(BASE, BASE + 2)], formats, [])
     assert report['instructions'][0]['families'] == ['branch']
+
+
+def test_balanced_format_parser_preserves_fields_and_specific_decode():
+    source = '''
+        /* commas inside fields must not split FMT arguments */
+        FMT(generic, 32, 0x20, 0x3c,
+            CFLDS3(FLD(s, 1, 1), FLD(x, 12, 1),
+                   COMPFLD(cst, BFLD2(BFLD(7, 2, 0), BFLD(13, 3, 2)))))
+        FMT(specific, 32, 0xa0, 0xfc,
+            NFLDS1(FLD(dst, 23, 5)))
+    '''
+    specs = read_format_specs(source)
+    assert [spec['name'] for spec in specs] == ['generic', 'specific']
+    assert specs[0]['fields']['creg'] == (29, 3)
+    assert specs[0]['fields']['x'] == (12, 1)
+    assert specs[0]['composite_fields'] == ['cst']
+    data = bytearray(0x40)
+    struct.pack_into('<I', data, 0, 0xa0)
+    row = decode_one(data, BASE, BASE, specs)
+    assert row['families'] == ['specific'] and row['next_pc'] == BASE + 4
 
 
 def test_checkpoint_shared_ram_sparse_sdram_inventory_and_corruption_rejection():

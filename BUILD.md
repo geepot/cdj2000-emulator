@@ -1172,3 +1172,70 @@ trace/state/L2/shared-RAM/SDRAM exactly. Its trace SHA-256 is
 Full boot and working audio are still unproven. The next engineering boundary
 is the control-flow-aware confirmed-code coverage report, followed by DSP
 interrupt-controller/delivery work if the stable branch is an interrupt wait.
+
+### Control-flow-aware DSP coverage gate
+
+Replay now captures exact fetch-time packet encodings only after a DSP step
+completes. It distinguishes direct and software-loop source fetches from parked
+software-loop scheduler cycles and idle cycles. The automatic `coverage.json`
+groups confirmed instructions by format family, raw encoding, functional unit,
+side, compact/full form, cross path, predication, branch delay slots and broad
+architectural state. It also records dynamic source transitions, direct
+branch/call targets, loop sources, probable uncompleted targets, unsupported
+faults and packet/cycle deltas. This is execution evidence, not proof of TI
+semantic equivalence; unvisited memory remains unclassified.
+
+The GNU format header is read from the GDB build by default. Pass `--formats`
+only for a nonstandard build location. A directory in the input position makes
+replay select its newest structurally valid, provenance-bearing checkpoint;
+corrupt, incomplete and ungated replay checkpoints are ignored.
+
+Reproduce focused, complete and sanitizer validation:
+
+```sh
+.venv/bin/python -m pytest -q \
+  tests/test_dsp_inventory.py tests/test_dsp_coverage.py tests/test_dsp_replay.py
+.venv/bin/python -m pytest -q
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c \
+  emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-coverage-san
+/tmp/cdj-c674x-coverage-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/dsp-checkpoint.c \
+  emulator/qemu/cdj_dsp_checkpoint.c -o /tmp/cdj-checkpoint-coverage-san
+/tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c \
+  emulator/qemu/cdj_c674x_loop.c emulator/qemu/cdj_c6747_syscfg.c \
+  emulator/qemu/cdj_c6747_psc.c emulator/qemu/cdj_c6747_mcasp.c \
+  emulator/qemu/cdj_c6747_gpio.c emulator/qemu/cdj_c6747_i2c.c \
+  emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c6747_hpi.c \
+  emulator/qemu/cdj_c6747_emifb.c emulator/qemu/cdj_dsp_checkpoint.c \
+  -o /tmp/cdj-replay-coverage-san
+/tmp/cdj-replay-coverage-san \
+  runs/nxs-sploopd-shared-connected-3/dsp-checkpoints/00000000000000000001.cdjdsp \
+  10000 0 0 /tmp/cdj-replay-coverage-san.cdjdsp
+```
+
+Canonical connected-transcript replay:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-sploopd-shared-connected-3/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_DSP_COVERAGE --steps 100000000 \
+  --events runs/nxs-sploopd-shared-connected-3/dsp-events.jsonl \
+  --verify-repeat
+```
+
+`runs/dsp-sploopd-shared-coverage-3` passes all 40 connected-stop, trace,
+coverage and final state/memory repeat gates. It contains 1,525 confirmed source
+packets, 1,957 instruction addresses, 1,721 distinct encodings, 1,581 dynamic
+source transitions, 114 direct targets, 56 software-loop source packets, five
+probable uncompleted targets and zero unsupported faults. Trace SHA-256 is
+`c74366da1e1b0d13f78ea5be70f6ee284c8fcebfd460df0a4f70a7e6a49d8562` and
+coverage SHA-256 is
+`4d3faa11813fd445747af2803d87863bfb9aa55a4a182865b2e6741873f0684f`.
+The suite reports 184 passed / 43 skipped and all three sanitizer checks pass.
+The high visit counts include stable wait/service loops; they are not full-boot
+or audio evidence. Interrupt delivery and DMA/EDMA are the next DSP subsystem
+boundary.

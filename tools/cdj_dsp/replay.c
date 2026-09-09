@@ -38,6 +38,186 @@ typedef struct {
 static PendingHpicEvent hpic_events[16];
 static unsigned hpic_count;
 static bool hpic_overflow;
+static bool read_bus(void *unused, uint32_t address, uint32_t *value);
+
+/* Compact dynamic coverage is emitted once at the end of a run. Keeping it
+ * here avoids millions of per-step JSON records during connected-event replay
+ * while preserving exact packet-start and transition counts. */
+#define COVERAGE_PC_SLOTS 131072u
+#define COVERAGE_EDGE_SLOTS 262144u
+typedef struct {
+    uint32_t pc;
+    uint64_t direct_fetches, loop_fetches, scheduler_cycles, idle_cycles;
+    CdjC674xPacket packet;
+    bool used, has_packet, encoding_changed;
+} CoveragePc;
+typedef struct {
+    uint32_t from, to;
+    uint64_t count;
+    bool used;
+} CoverageEdge;
+static CoveragePc coverage_pcs[COVERAGE_PC_SLOTS];
+static CoverageEdge coverage_edges[COVERAGE_EDGE_SLOTS];
+static unsigned coverage_pc_count, coverage_edge_count;
+static unsigned coverage_source_pc_count;
+static uint64_t coverage_source_fetches, coverage_scheduler_cycles, coverage_idle_cycles;
+static uint64_t coverage_initial_packets, coverage_initial_cycles;
+static uint32_t coverage_first_pc, coverage_last_pc;
+static bool coverage_started, coverage_overflow;
+
+static uint32_t coverage_mix(uint64_t value)
+{
+    value ^= value >> 33;
+    value *= UINT64_C(0xff51afd7ed558ccd);
+    value ^= value >> 33;
+    return value;
+}
+
+static bool coverage_loop_fetch(const CdjC674x *state)
+{
+    if (!state->loop_active || state->loop_wait) return false;
+    if (!state->loop.sealed) return true;
+    return state->loop.cycle >= state->loop.post_cycle && !state->idle_cycles;
+}
+
+static bool coverage_packet_equal(const CdjC674xPacket *left,
+                                  const CdjC674xPacket *right)
+{
+    if (left->count != right->count || left->next_pc != right->next_pc)
+        return false;
+    for (unsigned i = 0; i < left->count; ++i) {
+        const CdjC674xInstruction *a = &left->instructions[i];
+        const CdjC674xInstruction *b = &right->instructions[i];
+        if (a->pc != b->pc || a->word != b->word ||
+            a->compact != b->compact || a->header != b->header)
+            return false;
+    }
+    return true;
+}
+
+static bool coverage_capture(const CdjC674x *before, CdjC674xPacket *packet)
+{
+    bool source_fetch = (!before->loop_active && !before->idle_cycles) ||
+        coverage_loop_fetch(before);
+    if (!source_fetch) return false;
+    CdjC674x scratch = *before;
+    return cdj_c674x_fetch(&scratch, read_bus, NULL, packet);
+}
+
+static void coverage_record(const CdjC674x *before,
+                            const CdjC674xPacket *packet)
+{
+    uint32_t pc = before->pc;
+    bool loop_fetch = coverage_loop_fetch(before);
+    bool direct_fetch = !before->loop_active && !before->idle_cycles;
+    bool source_fetch = packet != NULL;
+    unsigned slot = coverage_mix(pc) & (COVERAGE_PC_SLOTS - 1);
+    CoveragePc *matched = NULL;
+    for (unsigned probes = 0; probes < COVERAGE_PC_SLOTS; ++probes) {
+        CoveragePc *entry = &coverage_pcs[slot];
+        if (!entry->used) {
+            *entry = (CoveragePc){.pc = pc, .used = true};
+            ++coverage_pc_count;
+        }
+        if (entry->pc == pc) {
+            if (direct_fetch) ++entry->direct_fetches;
+            if (loop_fetch) ++entry->loop_fetches;
+            if (before->loop_active) ++entry->scheduler_cycles;
+            if (!before->loop_active && before->idle_cycles) ++entry->idle_cycles;
+            matched = entry;
+            break;
+        }
+        slot = (slot + 1) & (COVERAGE_PC_SLOTS - 1);
+        if (probes + 1 == COVERAGE_PC_SLOTS) coverage_overflow = true;
+    }
+    if (before->loop_active) ++coverage_scheduler_cycles;
+    if (!before->loop_active && before->idle_cycles) ++coverage_idle_cycles;
+    if (!source_fetch) return;
+    if (matched && !matched->has_packet) {
+        matched->packet = *packet;
+        matched->has_packet = true;
+        ++coverage_source_pc_count;
+    } else if (matched && !coverage_packet_equal(&matched->packet, packet)) {
+        matched->encoding_changed = true;
+    }
+    ++coverage_source_fetches;
+    if (coverage_started) {
+        uint64_t key = (uint64_t)coverage_last_pc << 32 | pc;
+        slot = coverage_mix(key) & (COVERAGE_EDGE_SLOTS - 1);
+        for (unsigned probes = 0; probes < COVERAGE_EDGE_SLOTS; ++probes) {
+            CoverageEdge *edge = &coverage_edges[slot];
+            if (!edge->used) {
+                *edge = (CoverageEdge){.from = coverage_last_pc, .to = pc,
+                                       .used = true};
+                ++coverage_edge_count;
+            }
+            if (edge->from == coverage_last_pc && edge->to == pc) {
+                ++edge->count;
+                break;
+            }
+            slot = (slot + 1) & (COVERAGE_EDGE_SLOTS - 1);
+            if (probes + 1 == COVERAGE_EDGE_SLOTS) coverage_overflow = true;
+        }
+    } else {
+        coverage_first_pc = pc;
+        coverage_started = true;
+    }
+    coverage_last_pc = pc;
+}
+
+static void coverage_emit(void)
+{
+    printf("{\"event\":\"coverage_summary\",\"first_pc\":%" PRIu32
+           ",\"last_pc\":%" PRIu32 ",\"unique_pcs\":%u,"
+           "\"unique_edges\":%u,\"unique_source_pcs\":%u,"
+           "\"source_fetches\":%" PRIu64
+           ",\"scheduler_cycles\":%" PRIu64 ",\"idle_cycles\":%" PRIu64
+           ",\"initial_packets\":%" PRIu64 ",\"final_packets\":%" PRIu64
+           ",\"packet_delta\":%" PRIu64
+           ",\"initial_cycles\":%" PRIu64 ",\"final_cycles\":%" PRIu64
+           ",\"cycle_delta\":%" PRIu64
+           ",\"overflow\":%s}\n",
+           coverage_first_pc, coverage_last_pc, coverage_pc_count,
+           coverage_edge_count, coverage_source_pc_count, coverage_source_fetches,
+           coverage_scheduler_cycles, coverage_idle_cycles,
+           coverage_initial_packets, cpu.packets,
+           cpu.packets - coverage_initial_packets,
+           coverage_initial_cycles, cpu.cycles,
+           cpu.cycles - coverage_initial_cycles,
+           coverage_overflow ? "true" : "false");
+    for (unsigned i = 0; i < COVERAGE_PC_SLOTS; ++i) {
+        CoveragePc *entry = &coverage_pcs[i];
+        if (!entry->used) continue;
+        printf("{\"event\":\"coverage_pc\",\"pc\":%" PRIu32
+               ",\"direct_fetches\":%" PRIu64
+               ",\"loop_fetches\":%" PRIu64
+               ",\"scheduler_cycles\":%" PRIu64
+               ",\"idle_cycles\":%" PRIu64
+               ",\"encoding_changed\":%s}\n",
+               entry->pc, entry->direct_fetches, entry->loop_fetches,
+               entry->scheduler_cycles, entry->idle_cycles,
+               entry->encoding_changed ? "true" : "false");
+        if (!entry->has_packet) continue;
+        for (unsigned j = 0; j < entry->packet.count; ++j) {
+            const CdjC674xInstruction *insn = &entry->packet.instructions[j];
+            printf("{\"event\":\"coverage_instruction\",\"source_pc\":%" PRIu32
+                   ",\"packet_next_pc\":%" PRIu32 ",\"index\":%u,"
+                   "\"pc\":%" PRIu32 ",\"word\":%" PRIu32
+                   ",\"header\":%" PRIu32 ",\"compact\":%s,"
+                   "\"parallel\":%s}\n",
+                   entry->pc, entry->packet.next_pc, j, insn->pc, insn->word,
+                   insn->header, insn->compact ? "true" : "false",
+                   j + 1 < entry->packet.count ? "true" : "false");
+        }
+    }
+    for (unsigned i = 0; i < COVERAGE_EDGE_SLOTS; ++i) {
+        CoverageEdge *edge = &coverage_edges[i];
+        if (!edge->used) continue;
+        printf("{\"event\":\"coverage_edge\",\"from\":%" PRIu32
+               ",\"to\":%" PRIu32 ",\"count\":%" PRIu64 "}\n",
+               edge->from, edge->to, edge->count);
+    }
+}
 
 static void restore_devices(const CdjDspCheckpointState *state)
 {
@@ -203,8 +383,12 @@ static const char *run_budget(unsigned long long *remaining, uint32_t breakpoint
     for (unsigned step = 0; step < CDJ_DSP_COOPERATIVE_BUDGET && *remaining;
          ++step, --*remaining) {
         if (breakpoint && cpu.pc == breakpoint) return "breakpoint";
+        CdjC674x before = cpu;
+        CdjC674xPacket coverage_packet;
+        bool has_coverage_packet = coverage_capture(&before, &coverage_packet);
         if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL))
             return cpu.fault ? cpu.fault : "CPU stopped";
+        coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
         cdj_c6747_psc_tick(&psc);
         if (hpi.hint) return "HINT host-event yield";
     }
@@ -397,6 +581,8 @@ int main(int argc, char **argv)
         checkpoint_state.reset_released = checkpoint_state.dsp_started = true;
     }
     cpu.cycle_tick = cycle_tick;
+    coverage_initial_packets = cpu.packets;
+    coverage_initial_cycles = cpu.cycles;
     const char *reason = "step_limit";
     if (argc == 7) {
         if (!checkpoint || !replay_external_events(argv[6], limit, breakpoint, &reason))
@@ -407,11 +593,16 @@ int main(int argc, char **argv)
             printf("{\"event\":\"step\",\"pc\":%" PRIu32 ",\"cycles\":%" PRIu64
                    ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
                    cpu.pc, cpu.cycles, cpu.loop_active ? "true" : "false", cpu.branch_due);
+            CdjC674x before = cpu;
+            CdjC674xPacket coverage_packet;
+            bool has_coverage_packet = coverage_capture(&before, &coverage_packet);
             if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL)) { reason = "fault"; break; }
+            coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
             cdj_c6747_psc_tick(&psc);
             if (hpi.hint) { reason = "host_event_required"; break; }
         }
     }
+    coverage_emit();
     /* Fault strings originate in the interpreter and contain no JSON escapes. */
     printf("{\"event\":\"stop\",\"reason\":\"%s\",\"fault\":\"%s\",\"pc\":%" PRIu32
            ",\"fault_pc\":%" PRIu32 ",\"fault_word\":%" PRIu32

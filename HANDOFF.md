@@ -75,14 +75,43 @@ DSP-start checkpoint, `runs/dsp-sploopd-shared-connected-events-1
 HPI/phase state, and byte-identical repeat state/memory. Trace SHA-256 is
 `92ea9014bcec73588b3477f43927b2b51401225b2a53de912d2db10585314639`.
 
-The complete suite is 181 passed / 43 skipped. Full boot remains incomplete:
-the DSP interrupt controller and interrupt delivery, DMA/EDMA activity, broader
-static ISA coverage, physical peripheral timing, storage/control interaction,
-and audio generation are not established. Next build the control-flow-aware
-confirmed-code inventory and instruction-family coverage report from this
-connected transcript, then use it to distinguish unreachable missing ISA from
-the next interrupt/peripheral work. Do not infer readiness from the large
-packet count accumulated in the stable branch.
+The control-flow-aware replay gate is now
+`runs/dsp-sploopd-shared-coverage-3`. Replay records exact instructions in each
+successfully completed source packet at fetch time, so later HPI writes cannot
+silently change the inventory. Software-loop source fetches, scheduler-only
+cycles and direct idle cycles are separate. Source transitions, direct
+branch/call targets, loop-source packets, predicates, cross paths, unit/side,
+compact/full encodings, delay slots and affected architectural-state classes
+are emitted in `coverage.json`. Addresses reached only by an uncompleted direct
+target remain probable code; all other memory remains unclassified rather than
+being guessed as code.
+
+The exact-repeat gate verifies all 40 connected stops and byte-identical trace,
+coverage, state, L2, shared RAM and SDRAM. It reports 1,525 confirmed source
+packets, 1,957 confirmed instruction addresses, 1,721 distinct observed
+encodings, 1,581 dynamic source transitions, 114 direct branch/call targets,
+56 software-loop source packets, five probable uncompleted target addresses,
+and zero unsupported faults. Trace SHA-256 is
+`c74366da1e1b0d13f78ea5be70f6ee284c8fcebfd460df0a4f70a7e6a49d8562`;
+coverage SHA-256 is
+`4d3faa11813fd445747af2803d87863bfb9aa55a4a182865b2e6741873f0684f`.
+The 27,099,500-packet / 71,188,299-cycle delta includes 1,734,733 observed
+transitions around the final self-branch and must not be read as useful boot
+progress. A completed packet proves only that the current core accepted the
+observed encoding, not architectural correctness or that its predicate body
+executed.
+
+Replay accepts a run directory as input and selects its newest structurally
+valid checkpoint with connected-manifest or exact-repeat-gate provenance. One
+command now always emits coverage, provenance hashes and packet/cycle deltas;
+`--verify-repeat` also gates the coverage artifact. The complete suite is 184
+passed / 43 skipped; core, checkpoint and replay coverage ASan/UBSan harnesses
+pass. Full boot remains incomplete: the DSP interrupt controller and interrupt
+delivery, DMA/EDMA activity, physical peripheral timing, storage/control
+interaction, and audio generation are not established. The next subsystem
+boundary is interrupt-controller/delivery investigation at the stable branch,
+while the five probable packets remain deliberately unclaimed. Do not infer
+readiness from the large packet count accumulated in wait/service loops.
 
 ### Previous SYSCFG checkpoint
 
