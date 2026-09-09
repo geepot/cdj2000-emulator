@@ -7,6 +7,7 @@
 #include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qemu/bswap.h"
+#include "qemu/timer.h"
 #include "cdj2000_nxs_hpi.h"
 #include "cdj_c674x.h"
 #include "cdj_c6747_syscfg.h"
@@ -689,6 +690,7 @@ static void report_dsp(NxsHpi *s, const char *reason)
 static void run_dsp(NxsHpi *s)
 {
     if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
+    int64_t entered_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     s->dsp_running = true;
     const char *reason = "phase budget exhausted";
     unsigned steps = 0;
@@ -721,7 +723,12 @@ static void run_dsp(NxsHpi *s)
         if (s->hpi.hint) { reason = "HINT host-event yield"; break; }
     }
     s->dsp_running = false;
+    int64_t executed_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     report_dsp(s, reason);
+    info_report("nxs-dsp-host-time: execution-ns=%" PRId64
+                " reporting-ns=%" PRId64,
+                executed_ns - entered_ns,
+                qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - executed_ns);
 }
 
 static void start_dsp(NxsHpi *s)

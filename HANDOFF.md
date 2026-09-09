@@ -8,6 +8,18 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Boot-critical scheduler finding: `run_dsp` executes up to one million core
+steps synchronously inside MAIN's HPI write callback, with no MAIN execution
+between steps. With the launcher's non-icount QEMU clock, host time continues
+advancing MAIN virtual time. Instrumented strict 20-second run
+`runs/nxs-dsp-host-latency-1` records 91 callbacks: execution median 257.721ms,
+maximum 311.222ms; reporting/checkpoint median 1.809ms, maximum 2.434ms.
+The execution minimum 0.033ms includes short HINT yields. This establishes
+long callback blocking, not by itself the complete cause of GUI pool depletion.
+Next implementation priority is fair deferred DSP slices with explicit replay
+events and checkpoint scheduling state. Merely reducing the per-trigger budget
+would alter DSP progress/interleaving without preserving continuation.
+
 Independent GUI capture audit (`/tmp/cdj-panel-capture-trace-2`): MAIN log
 records 83 sends (14 status, 67 240-byte command-9 payloads, two 48-byte
 command-0x10 payloads). SPORT dump records 29,946 status deliveries, 1,602
