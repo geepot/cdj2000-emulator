@@ -8,6 +8,16 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+The requested E-7010 DSP startup milestone is verified by the repeated strict
+120-second cold runs below. See `DSP_BOOT_MILESTONE_AUDIT.md` for commands,
+source/binary/firmware hashes, frame timing, handshake and replay evidence.
+Full regression after harness-only commit `1ecb971`: 407 passed, 27 optional
+skips with TI tools enabled. The prior missing ping reply was a test collector
+race, corrected with bounded complete-line collection and negative timeout
+coverage; emulator binaries and firmware behavior did not change.
+This closes only the DSP-error startup goal. E-7206 authentication remains;
+faithful peripherals/storage, full DSP coverage/timing and audio remain backlog.
+
 Two longer strict cold captures now exist: `runs/nxs-sic-mask-strict-120s-1`
 and `-2`, with identical five input hashes and no changes at exit. Both
 complete the genuine ready/clear/ack sequence at events 104211/104213/104215,
@@ -21,7 +31,7 @@ comparison. `runs/dsp-sic-mask-120s-tail-1` verifies the final nine run-1 stops
 and exact repeat trace/state/memory/coverage, SHA-256
 `74bddf5f3dd1d7529b4bb14f966e007d784d9a10c9de2086472aebc7c10aa0a9`.
 This is a tail replay, not a full-startup replay. Completion audit and source
-hash record are being collected separately; do not infer full DSP parity/audio.
+hashes are in `DSP_BOOT_MILESTONE_AUDIT.md`; do not infer full DSP parity/audio.
 
 Independent strict post-SIC captures `runs/nxs-sic-mask-strict-90s-1` and `-2`
 both complete 90 seconds with default legacy DSP scheduling and no functional

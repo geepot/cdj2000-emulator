@@ -162,13 +162,23 @@ support the explicit E-7010 milestone. This does **not** prove a clean full boot
 the authentication peripheral still raises E-7206. Frame sampling leaves
 unobserved intervals and broad hardware fidelity remains incomplete.
 
-Before closing the milestone, finish HANDOFF/BUILD updates and a coherent
-local evidence commit. No push is authorized. Retain authentication, faithful
+HANDOFF/BUILD and the evidence were committed locally in `c96c8af`, with this
+final gate update following the harness correction. No push is authorized.
+Retain authentication, faithful
 peripherals/storage, full DSP parity and working audio as separate backlog
 items rather than treating this DSP-specific result as readiness.
 
 Final full-suite rerun with TI tools enabled: 403 passed, 27 skipped, one
 failure in `test_every_control_of_the_window_moves_the_payload`: the ping
-segment received no reply. This remains under investigation; do not describe
-the full regression gate as passing. Connected DSP evidence is independent
-of this missing test reply, but the regression must be triaged before closure.
+segment received no reply. Harness-only correction `1ecb971` reassembles TCP
+lines and waits for each command's reply before advancing its segment marker,
+without adding guest frames/time. Missing replies still fail after one second;
+fragmented and deferred replies have focused regressions. No emulator binary
+changed. Subsequent complete suite passed **407 tests, 27 optional skips**
+in 53.28 seconds with `C6X_TI_BIN` set as above. This closes the regression
+gate; the original failure is retained here for an honest evidence history.
+
+All explicit DSP-startup milestone gates are satisfied by the evidence above.
+This conclusion is limited to the specified E-7010 goal, not clean full boot,
+full hardware fidelity or working audio. No firmware bypass or exploratory
+DSP override was used in the qualifying cold runs.
