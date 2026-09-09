@@ -61,18 +61,20 @@ static void transfer_tests(void)
     assert(!cdj_sh7764_iic_attach(&s, &endpoint, &b));
     /* Status clear alone cannot release ESG. Clearing control then launches. */
     put(&s, 0xc, 0); assert(!cdj_sh7764_iic_event_pending(&s));
-    put(&s, 4, 0x8a); assert(s.phase == CDJ_IIC_BYTE);
+    put(&s, 4, 0x8a); assert(s.phase == CDJ_IIC_TX_READY);
+    put(&s, 0xc, 0); assert(s.phase == CDJ_IIC_BYTE);
     assert(cdj_sh7764_iic_advance(&s));
-    assert(b.writes == 1 && b.byte == 0xab && read8(&s, 0xc) == 0xc);
+    assert(b.writes == 1 && b.byte == 0xab && read8(&s, 0xc) == 4);
     assert(s.phase == CDJ_IIC_STOP);
     assert(cdj_sh7764_iic_advance(&s));
-    assert(b.stops == 1 && read8(&s, 0xc) == 0x1c);
+    assert(b.stops == 1 && read8(&s, 0xc) == 0x14);
     /* Real byte supplied by endpoint, not RX=TX or a controller identity. */
     put(&s, 0xc, 0); put(&s, 0x20, 0x21); put(&s, 4, 0x89);
     assert(cdj_sh7764_iic_advance(&s));
     assert(read8(&s, 0xc) == 3 && b.reads == 0);
     put(&s, 4, 0x8a); assert(s.phase == CDJ_IIC_WAIT);
     put(&s, 0xc, 0); assert(s.phase == CDJ_IIC_BYTE);
+    reject(&s, 4, 1, 0x88); /* Changing active RX FSB must not be ignored. */
     b.unavailable = true;
     CdjSh7764Iic before = s;
     assert(!cdj_sh7764_iic_advance(&s));
@@ -90,9 +92,10 @@ static void transfer_tests(void)
     put(&s, 0xc, 0); put(&s, 0x20, 0x20); put(&s, 4, 0x89);
     assert(cdj_sh7764_iic_advance(&s));
     put(&s, 0x24, 0x42); put(&s, 4, 0x88); put(&s, 0xc, 0);
+    put(&s, 0xc, 0);
     b.nack = true;
     assert(cdj_sh7764_iic_advance(&s));
-    assert(read8(&s, 0xc) == 0x4c && s.phase == CDJ_IIC_STOP);
+    assert(read8(&s, 0xc) == 0x44 && s.phase == CDJ_IIC_STOP);
     assert(cdj_sh7764_iic_advance(&s));
     assert(b.stops == 3);
     cdj_sh7764_iic_reset(&s);
@@ -113,15 +116,24 @@ static void tx_staging_tests(void)
         put(&s, 4, 0x89); assert(cdj_sh7764_iic_advance(&s));
         /* Exact firmware sequence 0427fd54..66: ESG, MAT, MDE clears. */
         put(&s, 4, 0x88); put(&s, 0xc, 8); put(&s, 0xc, 0);
-        assert(s.phase == CDJ_IIC_BYTE && read8(&s, 0xc) == 8);
+        assert(s.phase == CDJ_IIC_TX_READY && read8(&s, 0xc) == 8);
         assert(s.tx_shift == 0x63 && !s.tx_pending);
         unsigned writes = b.writes;
-        if (late) assert(cdj_sh7764_iic_advance(&s));
+        for (unsigned i = 0; i < 1000 * late; ++i) {
+            assert(!cdj_sh7764_iic_event_pending(&s));
+            assert(cdj_sh7764_iic_advance(&s));
+            assert(b.writes == writes && !(read8(&s, 0xc) & 0x14));
+        }
         /* 0427fdd6..e8: last-byte FSB after seeing MDE, then clear it. */
         put(&s, 4, 0x8a);
+        for (unsigned i = 0; i < 1000 * late; ++i) {
+            assert(cdj_sh7764_iic_advance(&s));
+            assert(s.phase == CDJ_IIC_TX_READY && b.writes == writes);
+        }
         put(&s, 0xc, read8(&s, 0xc) & 0xfe);
         put(&s, 0xc, read8(&s, 0xc) & 0xf7);
-        if (!late) assert(cdj_sh7764_iic_advance(&s));
+        assert(s.phase == CDJ_IIC_BYTE && cdj_sh7764_iic_event_pending(&s));
+        assert(cdj_sh7764_iic_advance(&s));
         assert(s.phase == CDJ_IIC_STOP && b.writes == writes + 1);
         assert(b.byte == 0x63 && read8(&s, 0xc) == 4);
         assert(cdj_sh7764_iic_advance(&s));
@@ -136,7 +148,7 @@ static void tx_staging_tests(void)
     put(&s, 0x24, 0x22); put(&s, 0xc, 0);
     assert(cdj_sh7764_iic_advance(&s));
     assert(b.byte == 0x11); /* Buffered new TXD cannot overwrite shifter. */
-    assert(s.phase == CDJ_IIC_BYTE && s.tx_shift == 0x22);
+    assert(s.phase == CDJ_IIC_TX_READY && s.tx_shift == 0x22);
     put(&s, 4, 0x8a); put(&s, 0xc, 0);
     assert(cdj_sh7764_iic_advance(&s));
     assert(b.byte == 0x22 && s.phase == CDJ_IIC_STOP);

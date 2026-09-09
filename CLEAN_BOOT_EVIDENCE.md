@@ -1,5 +1,30 @@
 # NXS clean startup evidence
 
+Subsequent mounted-SD test `runs/nxs-sd-track-1` reproduced E-7206 despite the
+two successful runs below. Therefore those runs establish successful instances,
+not robust startup with media. The trace shows MST published before a firmware
+status read-modify-write clears it. Investigation targets the MDE clock-stretch
+boundary before physical TX, not an arbitrary STOP delay or suppressed error.
+
+Follow-up: explicit TX_READY now holds the shift-loaded byte while MDE remains
+set. No timer/event can transmit it or generate STOP until firmware clears MDE.
+This interpretation follows SH7764 section16.4.8 SCL hold and is corroborated
+by Linux's related i2c-rcar SHIFT/FSB/MDE sequence; it is not measured pin timing.
+Tests advance 1,000 times while held without sending a byte, cover queued data,
+and fail closed on unmodeled active-RX FSB changes. Sanitizers pass.
+
+`runs/nxs-iic-tx-ready-sd-1` completes120s with protected mounted SD image and
+media tracing, including SD hold/release at Unix1788974409.0294452 /
+1788974419.231354. Both genuine identity reads complete; final inspected browser
+shows Wait without E-7206/E-7010. Track loading is NOT established. DSP has
+447 budget stops/13 HINT yields, no fault, ready/clear/ack104211/104213/104215.
+Inputs unchanged; QEMU SHA256
+`34e9503f7964b0cd62296d55983af6f8c5a4b2fabbdf0138495eeb2558339378`.
+Transcript SHA256
+`9718b719159fbf5e3daf7f27b8353a408b468b6934b698427f08ccc8f2ebbbc3`.
+Full suite420passed/27optional skips. Separate repeated mounted-media validation
+remains in progress; this is one successful reproduction of the failing case.
+
 2026-09-09. This addresses reaching the genuine normal player/UTILITY screens
 without the E-7010 DSP or E-7206 authentication banners. It does not establish
 audio, storage/media loading, every control, complete ISA coverage, cryptographic

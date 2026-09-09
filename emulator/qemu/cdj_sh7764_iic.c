@@ -33,6 +33,9 @@ static void release_byte(CdjSh7764Iic *s)
     unsigned flag = (s->issued_address & 1) ? MDR : MDE;
     if (s->phase == CDJ_IIC_WAIT_STOP && !(s->status & MDR)) {
         s->phase = CDJ_IIC_STOP;
+    } else if (s->phase == CDJ_IIC_TX_READY && !(s->status & MDE)) {
+        s->stop_after_byte = (s->control & FSB) != 0;
+        s->phase = CDJ_IIC_BYTE;
     } else if (s->phase == CDJ_IIC_WAIT && !(s->control & ESG) &&
                !(s->status & flag)) {
         if (!(s->issued_address & 1)) {
@@ -46,6 +49,12 @@ static void release_byte(CdjSh7764Iic *s)
             s->tx_pending = false;
             /* 16.3.6: MDE is buffer-to-shifter load, MDT is byte completion. */
             s->status |= MDE;
+            /* Interpret 16.4.8's MDE SCL hold at each shift-loaded boundary,
+             * consistent with 16.6.1 and Linux i2c-rcar irq_send's last-byte
+             * SHIFT -> FSB -> clear-MDE sequence. This is reference-supported
+             * event ordering, not measured SH7764 pin/cycle timing. */
+            s->phase = CDJ_IIC_TX_READY;
+            return;
         }
         s->stop_after_byte = (s->control & FSB) != 0;
         s->phase = CDJ_IIC_BYTE;
@@ -97,6 +106,10 @@ bool cdj_sh7764_iic_write(CdjSh7764Iic *s, uint32_t offset,
             /* No aborts, repeated START or controller disable mid-transfer. */
             if (!(control & MIE) || (control & ESG)) return false;
             if ((control ^ s->control) & MDBS) return false;
+            /* RX final ACK/STOP is fixed before receiving the byte. Mid-byte
+             * changes need pin-phase modeling and must not silently succeed. */
+            if (s->phase == CDJ_IIC_BYTE && (s->issued_address & 1) &&
+                ((control ^ s->control) & FSB)) return false;
         } else if (control & ESG) {
             /* Attached transfers support the documented single-buffer path.
              * Double buffering needs separate data-register staging. */
@@ -135,7 +148,7 @@ bool cdj_sh7764_iic_write(CdjSh7764Iic *s, uint32_t offset,
         return true;
     case 0x24:
         if (s->phase != CDJ_IIC_IDLE &&
-            !((s->phase == CDJ_IIC_WAIT || s->phase == CDJ_IIC_BYTE) &&
+            !((s->phase == CDJ_IIC_WAIT || s->phase == CDJ_IIC_TX_READY) &&
               !(s->issued_address & 1) &&
               (s->status & MDE))) return false;
         s->tx = value;
@@ -148,7 +161,8 @@ bool cdj_sh7764_iic_write(CdjSh7764Iic *s, uint32_t offset,
 bool cdj_sh7764_iic_advance(CdjSh7764Iic *s)
 {
     switch (s->phase) {
-    case CDJ_IIC_IDLE: case CDJ_IIC_WAIT: case CDJ_IIC_WAIT_STOP: return true;
+    case CDJ_IIC_IDLE: case CDJ_IIC_WAIT: case CDJ_IIC_WAIT_STOP:
+    case CDJ_IIC_TX_READY: return true;
     case CDJ_IIC_ADDRESS:
         s->selected = s->endpoint && s->endpoint->start(s->opaque,
             s->issued_address >> 1, (s->issued_address & 1) != 0);

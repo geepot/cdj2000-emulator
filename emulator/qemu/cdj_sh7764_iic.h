@@ -11,7 +11,7 @@
  * Offset API deliberately leaves P4/Area7 mapping to the integration layer.
  */
 enum { CDJ_IIC_IDLE, CDJ_IIC_ADDRESS, CDJ_IIC_STOP,
-       CDJ_IIC_WAIT, CDJ_IIC_BYTE, CDJ_IIC_WAIT_STOP };
+       CDJ_IIC_WAIT, CDJ_IIC_BYTE, CDJ_IIC_WAIT_STOP, CDJ_IIC_TX_READY };
 typedef struct CdjSh7764IicEndpoint {
     bool (*start)(void *opaque, uint8_t address7, bool read);
     bool (*write_byte)(void *opaque, uint8_t value); /* ACK / NACK */
