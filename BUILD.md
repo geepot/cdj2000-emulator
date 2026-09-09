@@ -315,15 +315,29 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-callp` uploads
-13,781 words and executes 540 packets / 642 cycles. CALLP now enters the
-hardware initialization routine, which stops on `STW` at `0x11801e30`.
-Standalone replay identifies its address/value as `0x01c14038 = 0x83e70b13`:
-the SYSCFG KICK0R unlock documented in the independent DSP identification
-notes. This peripheral is not mapped; the write has not been performed.
-`B15=0x11805ae8`, `B14=0x11806900` and `B3=0x118027c0` agree between
-connected and standalone execution. CALLP saves the next execute-packet
-address and inserts five NOPs; parallel operand reads still see the old link.
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-syscfg` uploads
+13,781 words and executes 545 packets / 647 cycles. It commits the real
+`0x01c14038 = 0x83e70b13` KICK0R write, then stops on unsupported compact
+instruction `0x8673` at `0x11801e48`. The KICK1R write is pending in the store
+pipeline when execution stops; the SYSCFG module is still locked. Standalone
+replay and the connected run agree. `B15=0x11805ae8`, `B14=0x11806900` and
+`B3=0x118027c0`. The bounded GUI run exits 0 and produces a frame; this is
+not proof of a completed firmware boot.
+
+`cdj_c6747_syscfg.c` implements KICK0R/KICK1R reset, readback, ordered unlock,
+and relock on a wrong key, following TI SPRUH91D sections 10.2.1.2 and 10.5.5.
+Only aligned 32-bit accesses to those two registers are supported. Writes
+apply at the CPU store's E3 phase; checking a queued store has no effects.
+Other SYSCFG registers (including pin multiplexing), PSC, and clock hardware
+remain unmapped. Privilege enforcement is not implemented: this startup path
+assumes supervisor access, pending a complete CPU privilege model. No physical
+pin behavior or readiness is implied by the unlock state. MMIO read-clear and
+other side-effecting reads require a future bus transaction interface.
+
+Synthetic tests cover reset/readback, reversed keys, wrong-key relocking,
+unsupported access widths/addresses, and adjacent CPU stores unlocking only
+at E3. The complete suite reports 161 passed / 42 skipped; the SYSCFG/pipeline
+harness also passes AddressSanitizer and UndefinedBehaviorSanitizer.
 
 An earlier run (`runs/nxs-c674x-compact`) recorded a Blackfin GUI double fault
 at `0x00d290a6` after illegal instructions at `0x00d0cf42`. Its immediate

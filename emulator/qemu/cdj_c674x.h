@@ -44,11 +44,13 @@ typedef struct {
     CdjC674xLoop loop;
     CdjC674xInstruction loop_instructions[112];
 } CdjC674x;
-/* Read callbacks currently describe stable, side-effect-free RAM only. */
+/* Reads must be side-effect-free and remain mapped between E1 validation and
+ * E3 sampling. Read-clear registers require a future bus transaction API. */
 typedef bool (*CdjC674xRead)(void *, uint32_t, uint32_t *);
-/* commit=false checks a RAM write without effects. A successful check must
+/* commit=false checks a write without effects. A successful check must
  * guarantee a later commit succeeds; callbacks must write the whole transfer.
- * Device/MMIO stores require a future bus transaction interface. */
+ * Simple MMIO registers can apply effects at commit; mapping/acceptance must
+ * remain stable, even if an earlier in-flight store changes register state. */
 typedef bool (*CdjC674xWrite)(void *, uint32_t, uint64_t, unsigned, bool commit);
 /* Fetch and execution are separate so loop-buffer instructions retain their
  * original PC/header and share one architectural commit with overlaid code. */
