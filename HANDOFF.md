@@ -8,6 +8,36 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+The genuine MAIN/HPI upload now crosses every observed 32 KiB DSP chunk and
+enters MAIN boot phase 3. A shared portable HPI model connects host HPIC
+control to DSP-side HPIC, including ROM-ready state, HINT acknowledgement and
+DSPINT state. MAIN PTDAT_H boot-phase outputs drive the observed DSP GPIO4
+inputs. EMIFB configuration/readback and a zero-initialized 32 MiB external
+SDRAM window are present; SDRAM command timing, arbitration and retention are
+still approximations. The CPU adds compact Dpp/Dstk stack memory forms,
+word-scaled compact CALLP displacement and the PACK2/PACKH2/PACKHL2/PACKLH2/
+PACKL4/PACKH4 family with focused tests.
+
+`runs/dsp-phase2-callp-fixed --boot-phase 2 --verify-repeat` reaches the
+genuine HINT host-event boundary at 1,315 packets / 1,749 cycles with an exact
+repeat trace. Rebuilt connected `runs/nxs-pack4-connected` completes the
+repeated phase 0/2 chunk handshakes, observes phase 3, and then fails closed at
+2,599,580 packets / 6,132,079 cycles, PC `0x11804468`, word `0xc09868c0`.
+That word is the next unsupported reachable instruction; it is not skipped.
+The bounded GUI run exits 0 and produced a frame, which is not evidence of full
+boot or audio. Suite: 173 passed / 43 skipped.
+
+Immediate priority is a lossless, versioned connected-DSP checkpoint plus
+ordered MAIN-to-DSP event transcript. It must retain CPU pipeline/loop state,
+all modeled peripherals, boot phase, L2 and SDRAM; reject incompatible or
+incomplete input; and prove deterministic state/memory/fault equivalence.
+Only after that gate is operational should `0xc09868c0` and its coherent TI
+instruction family be implemented. Until transcript replay exists, standalone
+phase selection is a deterministic discovery aid, not a faithful replacement
+for connected MAIN execution.
+
+### Previous SYSCFG checkpoint
+
 SYSCFG CFGCHIP0-4 are implemented as a family from SPRUH91D 10.5.14-18:
 documented reset values, reserved-value checks, legal CAP/AMUTE/USB reference
 selectors, read-only USB status masking, CFGCHIP4 read-zero clear pulses and

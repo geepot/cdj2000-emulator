@@ -917,3 +917,28 @@ Replay and connected runs agree at 1,190 packets / 1,469 cycles,
 `0x11802fd0` / `0x020c0264`, reading DSP-side HPIC `0x01e10030` after firmware
 sets CFGCHIP1=`0x18000` and relocks KICK. Connected GUI exit 0/frame exists is
 not boot completion. HPI flow control, full boot and audio remain incomplete.
+
+### Connected HPI chunk flow and phase-3 entry
+
+DSP-side HPIC now shares state with the SH4 UHPI path. MAIN HPI control,
+HINT/DSPINT transitions, PTDAT_H-derived GPIO4 boot phases, EMIFB register
+configuration and 32 MiB SDRAM storage are exercised by focused tests. The
+standalone runner accepts an explicit `--boot-phase`; this is deliberately not
+an invented host-event stream.
+
+```sh
+.venv/bin/pytest -q
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-boot-phase-connected-3/dsp-l2.bin runs/dsp-phase2-callp-fixed --boot-phase 2 --verify-repeat --steps 20000
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-pack4-connected --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+```
+
+Suite: 173 passed / 43 skipped. Phase-2 replay stops at the genuine HINT
+host-event boundary at 1,315 packets / 1,749 cycles and repeats exactly.
+Connected execution completes the observed 32 KiB HPI chunk flow, reaches MAIN
+phase 3, and fails closed at 2,599,580 packets / 6,132,079 cycles,
+`0x11804468` / `0xc09868c0`. The GUI exit 0 and frame only prove bounded
+frontend execution. Full boot and audio remain incomplete. SDRAM command
+timing/arbitration, physical HPI pins/HRDY/FIFO behavior and DSP interrupt
+delivery remain unmodeled; the portable register state must not be described as
+those physical effects.

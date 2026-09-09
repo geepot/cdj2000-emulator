@@ -1550,6 +1550,10 @@ typedef struct {
  */
 #define DSP_EVENT_REG   0xfff10040
 #define DSP_EVENT_BIT   0x0010
+#define DSP_RESET_REG   0xfff10054
+#define DSP_RESET_BIT   0x0040
+#define DSP_PHASE_REG   0xfff1005c
+#define DSP_PHASE_MASK  0x0007
 
 typedef struct {
     CdjIntc2State *intc2;
@@ -1611,13 +1615,24 @@ static void cdj_link_flag_write(void *opaque, hwaddr offset, uint64_t value,
                                 unsigned size)
 {
     CdjLinkFlagState *flag = opaque;
+    bool old_dsp_reset = false;
 
     if (offset + size > SOC_BLOCK_SIZE) {
         return;
     }
+    if (cdj_nxs_profile && offset == DSP_RESET_REG - SOC_BLOCK_BASE) {
+        old_dsp_reset = (flag->reg[offset >> 1] & DSP_RESET_BIT) != 0;
+    }
     flag->reg[offset >> 1] = value;
     if (size > 2) {
         flag->reg[(offset >> 1) + 1] = value >> 16;
+    }
+    if (cdj_nxs_profile && offset == DSP_RESET_REG - SOC_BLOCK_BASE &&
+        old_dsp_reset != ((value & DSP_RESET_BIT) != 0)) {
+        cdj_nxs_hpi_reset_line((value & DSP_RESET_BIT) != 0);
+    }
+    if (cdj_nxs_profile && offset == DSP_PHASE_REG - SOC_BLOCK_BASE) {
+        cdj_nxs_hpi_boot_phase(value & DSP_PHASE_MASK);
     }
 }
 

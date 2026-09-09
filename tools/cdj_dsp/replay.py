@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
     ROOT / 'emulator/qemu' / name for name in
     ('cdj_c674x.c', 'cdj_c674x_loop.c', 'cdj_c6747_syscfg.c', 'cdj_c6747_psc.c',
-     'cdj_c6747_mcasp.c', 'cdj_c6747_gpio.c', 'cdj_c6747_i2c.c', 'cdj_c6747_pll.c')]]
+     'cdj_c6747_mcasp.c', 'cdj_c6747_gpio.c', 'cdj_c6747_i2c.c', 'cdj_c6747_pll.c',
+     'cdj_c6747_hpi.c', 'cdj_c6747_emifb.c')]]
 
 
 def main():
@@ -27,13 +28,16 @@ def main():
     parser.add_argument('--steps', type=int, default=10000)
     parser.add_argument('--break-pc', type=lambda value: int(value, 0), default=0,
                         help='stop before executing this program counter (0 disables)')
+    parser.add_argument('--boot-phase', type=lambda value: int(value, 0), default=0,
+                        help='fixed external MAIN boot-phase GPIO value, 0..7 (default: captured phase 0)')
     parser.add_argument('--verify-repeat', action='store_true',
                         help='run the same compiled binary twice and gate on identical traces')
     parser.add_argument('--expect-trace', type=Path,
                         help='also require byte-identical output to this saved trace; not a boot test')
     args = parser.parse_args()
-    if not 0 < args.steps <= 100000000 or not 0 <= args.break_pc <= 0xffffffff:
-        parser.error('steps must be 1..100000000 and breakpoint must fit 32 bits')
+    if (not 0 < args.steps <= 100000000 or not 0 <= args.break_pc <= 0xffffffff or
+            not 0 <= args.boot_phase <= 7):
+        parser.error('steps must be 1..100000000, breakpoint must fit 32 bits, and boot phase must be 0..7')
     if not args.dump.is_file() or args.dump.stat().st_size != 0x40000:
         parser.error('dump must be exactly 256 KiB')
     if args.expect_trace is not None and not args.expect_trace.is_file():
@@ -60,11 +64,15 @@ def main():
         args.output.mkdir(parents=True, exist_ok=False)
         manifest = dict(dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
-                        break_pc=args.break_pc, boot_rom_executed=False,
+                        break_pc=args.break_pc, boot_phase=args.boot_phase,
+                        boot_rom_executed=False,
                         pll_assumptions=['POR configuration at ROM handoff',
                                          'initial bypass; NXS OSCIN 16934400 Hz, active SYSCLK1 division',
                                          'catalog PLL reset/lock bounds applied to custom DSP; not measured lock',
                                          'early PLL enable latches and is flagged; analog acquisition not simulated',
+                                         'HPIC begins after MAIN HWOB setup and DSPINT; no later host events replayed',
+                                         'EMIFB register readback and 32 MiB storage modeled; SDRAM command timing and arbitration omitted',
+                                         f'MAIN-to-DSP GPIO boot phase fixed at {args.boot_phase}; other external GPIO inputs default low',
                                          'oscillator counter complete at handoff, not PLL lock',
                                          'legacy PLLCTL bit 4 writable latch; C6747 effect unverified',
                                          'divider GO completes after eight subsequent DSP cycles; not physical clock timing'],
@@ -72,11 +80,13 @@ def main():
                                  for p, content in source_data.items()})
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         with (args.output / 'trace.jsonl').open('w') as trace:
-            subprocess.run([str(binary), str(snapshot), str(args.steps), str(args.break_pc)],
+            subprocess.run([str(binary), str(snapshot), str(args.steps), str(args.break_pc),
+                            str(args.boot_phase)],
                            stdout=trace, check=True)
         if args.verify_repeat:
             with (args.output / 'repeat.jsonl').open('w') as trace:
-                subprocess.run([str(binary), str(snapshot), str(args.steps), str(args.break_pc)],
+                subprocess.run([str(binary), str(snapshot), str(args.steps), str(args.break_pc),
+                                str(args.boot_phase)],
                                stdout=trace, check=True)
     with (args.output / 'trace.jsonl').open() as trace:
         last = None

@@ -580,6 +580,51 @@ int main(void)
     assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(memory[60] == 0x89abcdef && memory[61] == 0x76543210 && !c.store_count);
 
+    /* The paired Dpp loads pre-increment B15, sample RAM in E3 and publish
+     * word/doubleword destinations in E5. Register side comes from t; RS is
+     * ignored just as it is for the store forms. */
+    memory[60] = 0x13579bdf; memory[62] = 0x2468ace0;
+    memory[63] = 0xfdb97531;
+    cdj_c674x_reset(&c, 0x1000); c.r[1][15] = 0x10e8;
+    memory[0] = 0xc17771f7; memory[7] = 0xe0280000;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][15] == 0x10f0 && c.r[1][3] == 0 && c.load_count == 1);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][15] == 0x10f8 && c.r[0][2] == 0 && c.load_count == 2);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][3] == 0 && c.r[0][2] == 0);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][3] == 0 && c.r[0][2] == 0);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][3] == 0x13579bdf && c.r[0][2] == 0);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[0][2] == 0x2468ace0 && c.r[0][3] == 0xfdb97531 &&
+           !c.load_count);
+
+    /* Dstk uses B15 plus an unsigned scaled five-bit constant without base
+     * update. Cover captured STW *+B15[1],B4 and the matching RS load. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][15] = 0x10e8; c.r[1][4] = 0xa5a55a5a;
+    memory[0] = 0xbc45bc4d; memory[7] = 0xe0200000;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][15] == 0x10e8 && c.load_count == 1 && c.store_count == 0);
+    for (unsigned j = 0; j < 4; ++j)
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    /* The following store captures the old B4 in E1 before the load's E5
+     * writeback, and commits it one cycle before that writeback. */
+    assert(c.r[1][4] == 0 && c.r[1][15] == 0x10e8 &&
+           !c.load_count && !c.store_count);
+    assert(memory[(0x10ec - 0x1000) / 4] == 0xa5a55a5a);
+
+    cdj_c674x_reset(&c, 0x1000); c.r[1][15] = 0x10e8;
+    memory[(0x10ec - 0x1000) / 4] = 0xface1234;
+    memory[0] = 0xbc4d; memory[7] = 0xe0280000 | (1u << 19);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    for (unsigned j = 0; j < 4; ++j)
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][20] == 0xface1234 && c.r[1][4] == 0 &&
+           c.r[1][15] == 0x10e8);
+
     /* Unsupported parallel operation must not enqueue the earlier store. */
     memset(memory, 0, sizeof(memory));
     cdj_c674x_reset(&c, 0x1000); c.r[1][15] = 0x10f8;
@@ -1126,11 +1171,56 @@ int main(void)
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.pc == 0x1040 && c.r[1][3] == 0x1008 && c.r[0][4] == 0x2222 && c.cycles == 6);
 
-    /* Compact CALLP retains halfword target and return addresses. */
+    /* Compact CALLP retains its word-scaled displacement while its return
+     * address may be a halfword instruction boundary. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     memory[0] = (17u << 6) | 0x1a; memory[7] = 0xe0208000;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(c.pc == 0x1022 && c.r[0][3] == 0x1002 && c.cycles == 6);
+    assert(c.pc == 0x1044 && c.r[0][3] == 0x1002 && c.cycles == 6);
+    /* Captured firmware Scs10 at 0x118028e4 calls the aligned helper at
+     * 0x118027ec. Halfword scaling would incorrectly target 0x11802866. */
+    CdjC674xPacket captured_call = {.count = 1, .next_pc = 0x118028e6,
+        .instructions = {{.compact = true, .pc = 0x118028e4,
+            .header = 0xe8c08000, .word = 0xf0db}}};
+    cdj_c674x_reset(&c, 0x118028e4);
+    assert(cdj_c674x_execute(&c, &captured_call, read_word, NULL, NULL));
+    assert(c.pc == 0x118027ec && c.r[1][3] == 0x118028e6 && c.cycles == 6);
+
+    /* The 16-bit halfword pack family has parallel .L/.S encodings. Test
+     * every operation on both sides with the cross path selected. */
+    static const unsigned pack_l[] = {0x018, 0x3d8, 0x398, 0x378};
+    static const unsigned pack_s[] = {0xff0, 0x260, 0x220, 0x420};
+    static const uint32_t pack_result[] = {
+        0x3344ccdd, 0x1122aabb, 0x1122ccdd, 0x3344aabb
+    };
+    for (unsigned bank = 0; bank < 2; ++bank)
+        for (unsigned op = 0; op < 4; ++op)
+            for (unsigned unit = 0; unit < 2; ++unit) {
+                cdj_c674x_reset(&c, 0x1000);
+                c.r[bank][1] = 0x11223344;
+                c.r[bank ^ 1][2] = 0xaabbccdd;
+                uint32_t encoding = unit ? pack_s[op] : pack_l[op];
+                CdjC674xPacket p = {.count = 1, .next_pc = 0x1004,
+                    .instructions = {{.pc = 0x1000, .word =
+                        3u << 23 | 2u << 18 | 1u << 13 | 1u << 12 |
+                        encoding | bank << 1}}};
+                assert(cdj_c674x_execute(&c, &p, read_word, NULL, NULL));
+                assert(c.r[bank][3] == pack_result[op]);
+                assert(c.r[bank ^ 1][3] == 0 && c.cycles == 1);
+            }
+    static const unsigned pack4[] = {0xd18, 0xd38};
+    static const uint32_t pack4_result[] = {0x2244bbdd, 0x1133aacc};
+    for (unsigned bank = 0; bank < 2; ++bank)
+        for (unsigned op = 0; op < 2; ++op) {
+            cdj_c674x_reset(&c, 0x1000);
+            c.r[bank][5] = 0x11223344; c.r[bank ^ 1][6] = 0xaabbccdd;
+            CdjC674xPacket p = {.count = 1, .next_pc = 0x1004,
+                .instructions = {{.pc = 0x1000, .word =
+                    7u << 23 | 6u << 18 | 5u << 13 | 1u << 12 |
+                    pack4[op] | bank << 1}}};
+            assert(cdj_c674x_execute(&c, &p, read_word, NULL, NULL));
+            assert(c.r[bank][7] == pack4_result[op]);
+        }
 
     /* CALLP cannot be issued behind another pending branch. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);

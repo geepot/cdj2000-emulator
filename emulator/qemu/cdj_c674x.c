@@ -255,7 +255,10 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                      (compact && (insn->header & 0x8000) && (w & 0x3e) == 0x1a);
         if (callp) {
             side = compact ? w & 1 : (w >> 1) & 1;
-            int32_t offset = compact ? sx(w >> 6, 10) * 2
+            /* CALLP retains a word-scaled PC-relative displacement in its
+             * compact Scs10 form (SPRUFE8B CALLP description / Figure F-19).
+             * Compact BNOP is the branch family that uses halfword scaling. */
+            int32_t offset = compact ? sx(w >> 6, 10) * 4
                                           : sx((w >> 7) & 0x1fffff, 21) * 4;
             if (out.branch_due || elapsed > 1)
                 return stop(cpu, pc, insn->word, "CALLP with pending branch or multicycle instruction");
@@ -375,25 +378,86 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 }
                 continue;
             }
-            /* SPRUFE8B Figure C-21: compact stack pushes. Sources and
-             * address are sampled in E1; B15 updates now, RAM in E3. */
-            if ((w & 0x487f) == 0x0077) {
+            /* SPRUFE8B Figure C-16: compact word transfer at a positive
+             * constant offset from B15. Unlike Dpp, this form does not
+             * update B15 and its three-bit register observes header RS. */
+            if ((w & 0x8c07) == 0x8c05) {
                 ++memory_count;
-                unsigned bank = (w >> 12) & 1, src = (w >> 7) & 15;
+                bool load = (w & 8) != 0;
+                unsigned bank = (w >> 12) & 1;
+                unsigned reg = ((w >> 4) & 7) + rs;
+                unsigned offset = ((w >> 13) & 3) | (((w >> 7) & 7) << 2);
+                uint32_t address = cpu->r[1][15] + offset * 4;
+                uint64_t dummy;
+                if ((address & 3) ||
+                    (load ? !read_scalar(read, opaque, address, 4, &dummy) :
+                            (!write || !write(opaque, address,
+                                              cpu->r[bank][reg], 4, false))))
+                    return stop(cpu, pc, insn->word, "unmapped B15 stack transfer");
+                if (load) {
+                    if (out.load_count == 40)
+                        return stop(cpu, pc, insn->word, "load queue full");
+                    for (unsigned j = 0; j < out.load_count; ++j)
+                        if (out.loads[j].due == cpu->cycles + 5 &&
+                            out.loads[j].bank == bank && out.loads[j].dst == reg)
+                            return stop(cpu, pc, insn->word,
+                                        "parallel load write conflict");
+                    out.loads[out.load_count++] = (CdjC674xLoad){
+                        .due = cpu->cycles + 5, .address = address,
+                        .bank = bank, .dst = reg, .size = 4
+                    };
+                } else {
+                    if (out.store_count == 24)
+                        return stop(cpu, pc, insn->word, "store queue full");
+                    out.stores[out.store_count++] = (CdjC674xStore){
+                        .due = cpu->cycles + 3, .value = cpu->r[bank][reg],
+                        .address = address, .size = 4
+                    };
+                }
+                continue;
+            }
+            /* SPRUFE8B Figure C-21: compact B15 stack forms. Stores use
+             * post-decrement and commit in E3; loads use pre-increment and
+             * write their destination in E5. Dpp ignores header RS. */
+            if ((w & 0x087f) == 0x0077) {
+                ++memory_count;
+                unsigned bank = (w >> 12) & 1, reg = (w >> 7) & 15;
                 unsigned size = (w & 0x8000) ? 8 : 4;
-                uint32_t address = cpu->r[1][15];
-                uint64_t data = cpu->r[bank][src];
-                if ((address & (size - 1)) || (size == 8 && (src & 1)))
-                    return stop(cpu, pc, insn->word, "unaligned stack store or invalid register pair");
-                if (size == 8) data |= (uint64_t)cpu->r[bank][src + 1] << 32;
-                if (!write || !write(opaque, address, data, size, false))
-                    return stop(cpu, pc, insn->word, "unmapped stack store");
+                bool load = (w & 0x4000) != 0;
+                uint32_t old_sp = cpu->r[1][15];
+                uint32_t delta = size * (((w >> 13) & 1) + 1);
+                uint32_t address = load ? old_sp + delta : old_sp;
+                uint64_t data = cpu->r[bank][reg], dummy;
+                if ((address & (size - 1)) || (size == 8 && (reg & 1)))
+                    return stop(cpu, pc, insn->word,
+                                "unaligned stack access or invalid register pair");
+                if (size == 8) data |= (uint64_t)cpu->r[bank][reg + 1] << 32;
+                if (load ? !read_scalar(read, opaque, address, size, &dummy) :
+                           (!write || !write(opaque, address, data, size, false)))
+                    return stop(cpu, pc, insn->word, "unmapped stack access");
                 if (written[1][15]) return stop(cpu, pc, insn->word, "parallel register write conflict");
-                if (out.store_count == 24) return stop(cpu, pc, insn->word, "store queue full");
-                out.stores[out.store_count++] = (CdjC674xStore){
-                    .due = cpu->cycles + 3, .value = data, .address = address, .size = size
-                };
-                out.r[1][15] = address - size * (((w >> 13) & 1) + 1);
+                if (load) {
+                    if (out.load_count == 40)
+                        return stop(cpu, pc, insn->word, "load queue full");
+                    for (unsigned j = 0; j < out.load_count; ++j)
+                        if (out.loads[j].due == cpu->cycles + 5 &&
+                            out.loads[j].bank == bank &&
+                            out.loads[j].dst < reg + (size == 8 ? 2 : 1) &&
+                            reg < out.loads[j].dst + (out.loads[j].size == 8 ? 2 : 1))
+                            return stop(cpu, pc, insn->word, "parallel load write conflict");
+                    out.loads[out.load_count++] = (CdjC674xLoad){
+                        .due = cpu->cycles + 5, .address = address, .bank = bank,
+                        .dst = reg, .size = size
+                    };
+                } else {
+                    if (out.store_count == 24)
+                        return stop(cpu, pc, insn->word, "store queue full");
+                    out.stores[out.store_count++] = (CdjC674xStore){
+                        .due = cpu->cycles + 3, .value = data,
+                        .address = address, .size = size
+                    };
+                }
+                out.r[1][15] = load ? address : old_sp - delta;
                 written[1][15] = true;
                 continue;
             }
@@ -526,6 +590,32 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = sx(a, 5); /* MVK .D */
         } else if ((w & 0x3effc) == 0xa358) {
             value = sx(b, 5); /* MVK .L */
+        } else if ((w & 0xffc) == 0x018 || (w & 0xffc) == 0xff0 ||
+                   (w & 0xffc) == 0x3d8 || (w & 0xffc) == 0x260 ||
+                   (w & 0xffc) == 0x398 || (w & 0xffc) == 0x220 ||
+                   (w & 0xffc) == 0x378 || (w & 0xffc) == 0x420 ||
+                   (w & 0xffc) == 0xd18 || (w & 0xffc) == 0xd38) {
+            /* PACK2/PACKH2/PACKHL2/PACKLH2 (.L/.S) and PACKL4/PACKH4
+             * (.L), SPRUFE8B.
+             * src1 supplies the upper result half and src2 the lower. */
+            uint32_t left = cpu->r[side][a], right = cpu->r[cross][b];
+            switch (w & 0xffc) {
+            case 0x018: case 0xff0: /* PACK2 */
+                value = left << 16 | (right & 0xffff); break;
+            case 0x3d8: case 0x260: /* PACKH2 */
+                value = (left & 0xffff0000) | (right >> 16); break;
+            case 0x398: case 0x220: /* PACKHL2 */
+                value = (left & 0xffff0000) | (right & 0xffff); break;
+            case 0x378: case 0x420: /* PACKLH2 */
+                value = left << 16 | (right >> 16); break;
+            case 0xd18:             /* PACKL4 */
+                value = (left & 0x00ff0000) << 8 | (left & 0xff) << 16 |
+                        (right & 0x00ff0000) >> 8 | (right & 0xff); break;
+            default:                /* PACKH4 */
+                value = (left & 0xff000000) | (left & 0x0000ff00) << 8 |
+                        (right & 0xff000000) >> 16 |
+                        (right & 0x0000ff00) >> 8; break;
+            }
         } else if ((w & 0xffc) == 0x7a0 || (w & 0xffc) == 0xf58 || (w & 0xffc) == 0x9f0) {
             value = (uint32_t)sx(a, 5) & cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x7e0 || (w & 0xffc) == 0xf78 || (w & 0xffc) == 0x9b0) {

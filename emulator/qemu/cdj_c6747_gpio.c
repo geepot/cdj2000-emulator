@@ -15,6 +15,15 @@ void cdj_c6747_gpio_reset(CdjC6747Gpio *s)
     *s = (CdjC6747Gpio){0};
     for (unsigned p = 0; p < 4; ++p) s->dir[p] = UINT32_MAX;
 }
+bool cdj_c6747_gpio_set_input(CdjC6747Gpio *s, unsigned bank, unsigned pin,
+                              bool high)
+{
+    if (bank >= 8 || pin >= 16) return false;
+    unsigned pair = bank / 2, bit = pin + (bank & 1) * 16;
+    if (high) s->input[pair] |= 1u << bit;
+    else s->input[pair] &= ~(1u << bit);
+    return true;
+}
 bool cdj_c6747_gpio_read(const CdjC6747Gpio *s, uint32_t address, uint32_t *value)
 {
     unsigned p, o;
@@ -23,9 +32,11 @@ bool cdj_c6747_gpio_read(const CdjC6747Gpio *s, uint32_t address, uint32_t *valu
     switch (o) {
     case 0: *value = s->dir[p]; break;
     case 4: case 8: case 12: *value = s->output[p]; break;
+    case 16: *value = (s->output[p] & ~s->dir[p]) |
+                      (s->input[p] & s->dir[p]); break;
     case 20: case 24: *value = s->rising[p]; break;
     case 28: case 32: *value = s->falling[p]; break;
-    /* IN_DATA and INTSTAT need pin/event state, not guessed zero values. */
+    /* INTSTAT needs edge/event state, not a guessed zero value. */
     default: return false;
     }
     return true;

@@ -12,13 +12,18 @@
 #include "cdj_c6747_gpio.h"
 #include "cdj_c6747_i2c.h"
 #include "cdj_c6747_pll.h"
+#include "cdj_c6747_hpi.h"
+#include "cdj_c6747_emifb.h"
 static uint8_t ram[0x40000];
+static uint8_t sdram[0x2000000];
 static CdjC6747Syscfg syscfg;
 static CdjC6747Psc psc;
 static CdjC6747Mcasp mcasp;
 static CdjC6747Gpio gpio;
 static CdjC6747I2c i2c;
 static CdjC6747Pll pll;
+static CdjC6747Hpi hpi;
+static CdjC6747Emifb emifb;
 static void cycle_tick(void *unused)
 {
     (void)unused;
@@ -35,6 +40,15 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
     if (cdj_c6747_gpio_read(&gpio, a, v)) return true;
     if (cdj_c6747_i2c_read(&i2c, a, v)) return true;
     if (cdj_c6747_pll_read(&pll, a, v)) return true;
+    if (cdj_c6747_emifb_read(&emifb, a, v)) return true;
+    if ((syscfg.cfgchip[1] & 0x8000) && cdj_c6747_hpi_cpu_read(&hpi, a, v)) return true;
+    if (cdj_c6747_emifb_sdram_enabled(&emifb) && !(a & 3) &&
+        a >= 0xc0000000 && a <= 0xc1fffffc) {
+        unsigned offset = a - 0xc0000000;
+        *v = sdram[offset] | (uint32_t)sdram[offset + 1] << 8 |
+             (uint32_t)sdram[offset + 2] << 16 | (uint32_t)sdram[offset + 3] << 24;
+        return true;
+    }
     a = global(a);
     if ((a & 3) || a < 0x11800000 || a > 0x1183fffc) return false;
     a -= 0x11800000;
@@ -52,6 +66,16 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
     if (!ok && cdj_c6747_syscfg_pll_locked(&syscfg) &&
         cdj_c6747_pll_write_mapped(a, size)) ok = true;
     if (!ok) ok = cdj_c6747_pll_write(&pll, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_emifb_write(&emifb, a, v, size, commit);
+    if (!ok && (syscfg.cfgchip[1] & 0x8000))
+        ok = cdj_c6747_hpi_cpu_write(&hpi, a, v, size, commit);
+    if (!ok && cdj_c6747_emifb_sdram_enabled(&emifb) &&
+        (size == 1 || size == 2 || size == 4 || size == 8) &&
+        a >= 0xc0000000 && a <= 0xc2000000 - size) {
+        ok = true;
+        if (commit) for (unsigned i = 0; i < size; ++i)
+            sdram[a - 0xc0000000 + i] = v >> (8 * i);
+    }
     uint32_t physical = global(a);
     if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
         physical >= 0x11800000 && physical <= 0x11840000 - size) {
@@ -66,7 +90,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
 }
 int main(int argc, char **argv)
 {
-    if (argc != 4) return 2;
+    if (argc != 5) return 2;
     char *end;
     errno = 0;
     unsigned long long limit = strtoull(argv[2], &end, 10);
@@ -74,17 +98,29 @@ int main(int argc, char **argv)
     errno = 0;
     unsigned long long breakpoint = strtoull(argv[3], &end, 0);
     if (errno || *end || breakpoint > UINT32_MAX) return 2;
+    errno = 0;
+    unsigned long boot_phase = strtoul(argv[4], &end, 0);
+    if (errno || *end || boot_phase > 7) return 2;
     FILE *f = fopen(argv[1], "rb");
     if (!f) { perror("dump"); return 2; }
     bool valid = fread(ram, 1, sizeof(ram), f) == sizeof(ram) && fgetc(f) == EOF && !ferror(f);
     fclose(f);
     if (!valid) { fputs("expected exactly 256 KiB of L2\n", stderr); return 2; }
     CdjC674x c;
+    cdj_c6747_syscfg_reset(&syscfg);
     cdj_c6747_psc_reset(&psc);
     cdj_c6747_mcasp_reset(&mcasp);
     cdj_c6747_gpio_reset(&gpio);
     cdj_c6747_i2c_reset(&i2c);
     cdj_c6747_pll_reset(&pll);
+    cdj_c6747_hpi_reset(&hpi);
+    cdj_c6747_emifb_reset(&emifb);
+    cdj_c6747_gpio_set_input(&gpio, 4, 5, boot_phase & 1);
+    cdj_c6747_gpio_set_input(&gpio, 4, 2, boot_phase & 2);
+    cdj_c6747_gpio_set_input(&gpio, 4, 3, boot_phase & 4);
+    cdj_c6747_hpi_rom_boot_ready(&hpi);
+    cdj_c6747_hpi_host_write(&hpi, 0x01050105); /* MAIN acks ROM HINT and selects HWOB. */
+    cdj_c6747_hpi_host_write(&hpi, 0x01030103); /* Captured dump precedes DSPINT. */
     uint32_t entry;
     read_bus(NULL, 0x11800000, &entry);
     cdj_c674x_reset(&c, entry);
@@ -97,6 +133,7 @@ int main(int argc, char **argv)
                c.pc, c.cycles, c.loop_active ? "true" : "false", c.branch_due);
         if (!cdj_c674x_step(&c, read_bus, write_bus, NULL)) { reason = "fault"; break; }
         cdj_c6747_psc_tick(&psc);
+        if (hpi.hint) { reason = "host_event_required"; break; }
     }
     /* Fault strings originate in the interpreter and contain no JSON escapes. */
     printf("{\"event\":\"stop\",\"reason\":\"%s\",\"fault\":\"%s\",\"pc\":%" PRIu32
@@ -111,11 +148,18 @@ int main(int argc, char **argv)
     printf("],\"pending_stores\":%u,\"pending_loads\":%u,\"syscfg_unlocked\":%s,\"pll_legacy_bit4_used\":%s,"
            "\"pll_oscin_cycles\":%" PRIu64 ",\"pll_reset_age\":%u,\"pll_lock_wait_remaining\":%u,"
            "\"pll_early_enable\":%s,\"cfgchip\":[%u,%u,%u,%u],"
-           "\"amute_clear_pulses\":%u}\n",
+           "\"amute_clear_pulses\":%u,\"hpi\":{\"reset\":%s,\"hwob\":%s,"
+           "\"dspint\":%s,\"hint\":%s},\"emifb\":{\"sdcfg\":%u,"
+           "\"sdrfc\":%u,\"sdtim1\":%u,\"sdtim2\":%u,"
+           "\"init_sequences\":%u}}\n",
            c.store_count, c.load_count, syscfg.unlocked ? "true" : "false",
            pll.legacy_bit4_used ? "true" : "false", pll.oscin_cycles,
            pll.reset_age, pll.lock_wait_remaining, pll.early_enable ? "true" : "false",
            syscfg.cfgchip[0], syscfg.cfgchip[1], syscfg.cfgchip[2],
-           syscfg.cfgchip[3], syscfg.amute_clear_pulses);
+           syscfg.cfgchip[3], syscfg.amute_clear_pulses,
+           hpi.hpirst ? "true" : "false", hpi.hwob ? "true" : "false",
+           hpi.dspint ? "true" : "false", hpi.hint ? "true" : "false",
+           emifb.sdcfg, emifb.sdrfc, emifb.sdtim1, emifb.sdtim2,
+           emifb.init_sequences);
     return ferror(stdout) ? 2 : 0;
 }

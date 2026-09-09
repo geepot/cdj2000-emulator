@@ -41,8 +41,19 @@ def test_host_addressing_and_fixed_port_dma():
             def write(address, value): command(f'writel {address:#x} {value:#x}')
             def read(address): return int(command(f'readl {address:#x}')[0], 0)
             control, address, auto, fixed = 0xc000000, 0xc040000, 0xc080000, 0xc0c0000
-            write(control, 0x01010101)
-            assert read(control) == 0x01010101
+            # Reset defaults high on active-low HINT and holds HPIRST. Releasing
+            # CPU_DSP_RST enters the documented ROM HPI boot path, which
+            # releases HPIRST and asserts HINT low for MAIN.
+            assert read(control) == 0x00c800c8
+            assert int(command('readw 0xfff10040')[0], 0) & 0x10
+            command('writew 0xfff10054 0x40')
+            assert read(control) == 0x004c004c
+            assert not (int(command('readw 0xfff10040')[0], 0) & 0x10)
+            write(control, 0x01050105)
+            # HPIC includes reserved reset-one fields 6 and 3; HWOB also
+            # appears in read-only HWOBSTAT bit 8 and is mirrored per halfword.
+            assert read(control) == 0x01490149
+            assert int(command('readw 0xfff10040')[0], 0) & 0x10
             write(address, 0x11801da0)
             write(auto, 0x12345678)
             write(auto, 0x90abcdef)

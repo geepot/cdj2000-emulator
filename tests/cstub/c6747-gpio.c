@@ -16,6 +16,11 @@ int main(void)
     for (unsigned p = 0; p < 4; ++p) {
         uint32_t base = 0x01e26010 + p * 0x28;
         assert(cdj_c6747_gpio_read(&s, base, &v) && v == UINT32_MAX);
+        assert(cdj_c6747_gpio_set_input(&s, p * 2, 0, true));
+        assert(cdj_c6747_gpio_set_input(&s, p * 2 + 1, 0, true));
+        assert(cdj_c6747_gpio_read(&s, base + 16, &v) && v == 0x00010001);
+        assert(cdj_c6747_gpio_set_input(&s, p * 2, 0, false));
+        assert(cdj_c6747_gpio_set_input(&s, p * 2 + 1, 0, false));
         before = s;
         for (unsigned o = 0; o < 36; o += 4) {
             if (o == 16) continue;
@@ -35,7 +40,7 @@ int main(void)
             assert(cdj_c6747_gpio_read(&s, base + set[i], &v) && v == 0x5afffffe);
         }
         assert(cdj_c6747_gpio_read(&s, base + 4, &v) && v == 0x5afffffe);
-        assert(!cdj_c6747_gpio_read(&s, base + 16, &v));
+        assert(cdj_c6747_gpio_read(&s, base + 16, &v) && v == 0x5afffffe);
         assert(!cdj_c6747_gpio_read(&s, base + 36, &v));
         before = s;
         assert(!cdj_c6747_gpio_write(&s, base + 36, 0, 4, true));
@@ -46,6 +51,8 @@ int main(void)
             assert(s.dir[other] == UINT32_MAX && s.output[other] == 0);
     }
     assert(!cdj_c6747_gpio_read(&s, 0x01e260b0, &v));
+    assert(!cdj_c6747_gpio_set_input(&s, 8, 0, true));
+    assert(!cdj_c6747_gpio_set_input(&s, 0, 16, true));
     assert(!cdj_c6747_gpio_write(&s, 0x01e260b0, 0, 4, true));
     return 0;
 }
