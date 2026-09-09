@@ -8,6 +8,26 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Latest instruction/header batch: ADDAD register/immediate is implemented
+(there is no SUBAD), and full-width OR/XOR now cover L/S/D register/immediate
+forms with cross paths. PROT/BR loop guards now inspect instruction kinds,
+rather than rejecting every operation in a fetch packet carrying those bits.
+PROT still protects loads; protected loads and actual control transfers inside
+the loop body retain explicit unsupported stops.
+
+Replays `runs/dsp-logic-batch-1` and `runs/dsp-logic-batch-repeat` are identical:
+1,003 packets / 1,156 cycles, stopping at PC `0x11802ca8`, opcode `0x020c0264`,
+LDW from `0x01d00014`. This is McASP0 PDIR: see the C6747 datasheet memory
+map and SPRUH91D section 24.1.4. Trace SHA-256:
+`dd45d5fd1c6f2f86898f5de6a88530df1817bc30c5abf61759c873a56074d5db`.
+Full suite: 165 passed, 43 skipped; CPU address/undefined sanitizer passes.
+Rebuilt connected run `runs/nxs-logic-batch-connected` agrees at 1,003/1,156
+and the same stop. GUI exits 0 with a frame at the 15-second bound.
+Next batch: McASP control initialization with explicit clock/reset/audio limits.
+Full boot and audio are incomplete.
+
+### Previous PSC checkpoint
+
 PSC batch: `cdj_c6747_psc.c` now supplies PSC0/PSC1 MDCTL, MDSTAT, PTCMD and
 PTSTAT to both replay and connected DSP execution. Module/domain assignments
 and initial states follow SPRUH91D Tables 8-1/8-2. GO snapshots NEXT; status

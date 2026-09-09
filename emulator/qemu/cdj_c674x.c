@@ -73,6 +73,25 @@ static unsigned instruction_unit(const CdjC674xInstruction *insn)
 }
 
 typedef struct { CdjC674x *cpu; unsigned mask; bool unknown; } LoopMask;
+static bool compact_branch(const CdjC674xInstruction *i)
+{
+    unsigned w = i->word;
+    return i->compact && ((w & 0x187f) == 0x006f ||
+        ((i->header & 0x8000) && ((w & 0x3e) == 0x0a ||
+         (w & 0x3e) == 0x1a || (w & 0x2e) == 0x2a)));
+}
+static bool protected_load(const CdjC674xInstruction *i)
+{
+    if (!(i->header & (1u << 20))) return false;
+    uint32_t w = i->word;
+    if (i->compact) return (w & 6) == 4 && (w & 8);
+    if ((w & 0x10c) != 4 && (w & 0x17c) != 0x134 &&
+        (w & 0x17c) != 0x154 && (w & 0x17c) != 0x124 &&
+        (w & 0x17c) != 0x174 && (w & 0x17c) != 0x164 &&
+        (w & 0x17c) != 0x144) return false;
+    unsigned op = (w >> 4) & 7;
+    return op != 5 && op != 7 && op != ((w & 0x100) ? 4u : 3u);
+}
 static bool loop_allow(void *opaque, uint32_t tag)
 {
     LoopMask *context = opaque;
@@ -240,7 +259,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 CdjC674xInstruction other = packet->instructions[j];
                 if ((!other.compact && ((other.word & 0x7c) == 0x10 ||
                      (other.word & 0x1ffe) == 0x162 || (other.word & 0xffe) == 0x362)) ||
-                    (other.compact && ((other.header & 0x8000) || (other.word & 0x187f) == 0x6f)))
+                    compact_branch(&other))
                     return stop(cpu, pc, insn->word, "CALLP with parallel control instruction");
             }
             if (written[side][3]) return stop(cpu, pc, insn->word, "parallel register write conflict");
@@ -464,15 +483,16 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         } else if ((w & 0x7c) == 0x68) {
             value = (cpu->r[side][dst] & 0xffff) | (((w >> 7) & 0xffff) << 16);
         } else if ((w & 0x7c) == 0x40 && ((w >> 7) & 63) >= 0x30 &&
-                   ((w >> 7) & 63) <= 0x3b) {
+                   ((w >> 7) & 63) <= 0x3d) {
             /* ADDAB/H/W and SUBAB/H/W: same-bank operands, unsigned
              * five-bit immediate or register offset, scaled by 1/2/4. */
             unsigned op = (w >> 7) & 63;
             if (enabled && b >= 4 && b <= 7 && cpu->control[0])
                 return stop(cpu, pc, insn->word, "circular address arithmetic not implemented");
-            uint32_t offset = (op & 2) ? a : cpu->r[side][a];
+            /* ADDAD uses op 3c/3d; there is no SUBAD (TI page 117). */
+            uint32_t offset = (op >= 0x3c ? op & 1 : op & 2) ? a : cpu->r[side][a];
             offset <<= (op - 0x30) / 4;
-            value = (op & 1) ? cpu->r[side][b] - offset : cpu->r[side][b] + offset;
+            value = (op < 0x3c && (op & 1)) ? cpu->r[side][b] - offset : cpu->r[side][b] + offset;
         } else if ((w & 0x7c1ffc) == 0x40) {
             value = sx(a, 5); /* MVK .D */
         } else if ((w & 0x3effc) == 0xa358) {
@@ -493,10 +513,14 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = sx(a, 5) > (int32_t)cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x8f8) {
             value = (int32_t)cpu->r[side][a] > (int32_t)cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0xfd8) {
+        } else if ((w & 0xffc) == 0xfd8 || (w & 0xffc) == 0x6a0 || (w & 0xffc) == 0x8f0) {
             value = (uint32_t)sx(a, 5) | cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0xff8) {
+        } else if ((w & 0xffc) == 0xff8 || (w & 0xffc) == 0x6e0 || (w & 0xffc) == 0x8b0) {
             value = cpu->r[side][a] | cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0xdd8 || (w & 0xffc) == 0x2a0 || (w & 0xffc) == 0xbf0) {
+            value = (uint32_t)sx(a, 5) ^ cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0xdf8 || (w & 0xffc) == 0x2e0 || (w & 0xffc) == 0xbb0) {
+            value = cpu->r[side][a] ^ cpu->r[cross][b];
         } else if ((w & 0xfbc) == 0x9a0 || (w & 0xfbc) == 0xda0 ||
                    (w & 0xfbc) == 0xca0) {
             /* Scalar .S shifts; register counts use only six low bits. */
@@ -671,10 +695,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
             }
             /* Multicycle masked operations need program-fetch stall handling
              * during loading. Preserve the explicit stop until that exists. */
-            if ((insn.header & (1u << 20)) ||
+            if (protected_load(&insn) ||
                 (!insn.compact && ((w & 0x1ffe) == 0x162 || (w & 0x7c) == 0x10 ||
                                   (w & 0xffe) == 0x362)) ||
-                (insn.compact && ((insn.header & 0x8000) || (w & 0x187f) == 0x006f)))
+                compact_branch(&insn))
                 return stop(cpu, insn.pc, w, "loop body control or protected instruction not implemented");
             if (has_mask && masking.mask) {
                 unsigned unit = instruction_unit(&insn);
@@ -788,10 +812,10 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             unsigned mask;
             if (spmask_decode(&other, &mask))
                 return stop(cpu, other.pc, v, "SPMASK cannot share loop setup packet");
-            if ((other.header & (1u << 20)) ||
+            if (protected_load(&other) ||
                 (nop_cycles(&other) > 1) ||
                 (!other.compact && ((v & 0xffe) == 0x362 || (v & 0x7c) == 0x10)) ||
-                (other.compact && ((other.header & 0x8000) || (v & 0x187f) == 0x006f)))
+                compact_branch(&other))
                 return stop(cpu, other.pc, v, "multicycle loop setup packet not implemented");
         }
         memmove(packet.instructions, packet.instructions + 1, (--packet.count) * sizeof(packet.instructions[0]));

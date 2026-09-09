@@ -31,16 +31,43 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* OR/XOR on all three units, immediates/registers, banks and cross paths. */
+    const unsigned logic_ops[] = {0xfd8,0xff8,0x6a0,0x6e0,0x8f0,0x8b0,
+                                  0xdd8,0xdf8,0x2a0,0x2e0,0xbf0,0xbb0};
+    for (unsigned op = 0; op < 12; ++op)
+        for (unsigned side = 0; side < 2; ++side)
+            for (unsigned cross = 0; cross < 2; ++cross) {
+                cdj_c674x_reset(&c, 0x1000);
+                c.r[side][31] = 0x12345678; c.r[side ^ cross][5] = 0x87654321;
+                CdjC674xPacket p = {.count=1, .next_pc=0x1004,
+                    .instructions={{.pc=0x1000, .word=6u<<23 | 5u<<18 | 31u<<13 |
+                        cross<<12 | logic_ops[op] | side<<1}}};
+                assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+                uint32_t a = op & 1 ? 0x12345678 : UINT32_MAX;
+                assert(c.r[side][6] == (op < 6 ? (a | 0x87654321) : (a ^ 0x87654321)));
+            }
+    /* PROT/BR are fetch-header selectors, not attributes of every opcode. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[13] = 1;
+    memory[0] = 0x38000; memory[1] = mvk(0, 4, 99);
+    memory[2] = 0x0c6e0012; /* compact MVK 0,A0; NOP */
+    memory[3] = 0x34000; memory[7] = 0xe0908000; /* PROT, BR, compact slot 2 */
+    unsigned header_steps = 0;
+    do {
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(++header_steps < 12);
+    } while (c.loop_active);
+    assert(c.r[0][4] == 99);
     /* Address arithmetic families: unsigned constants, signed-register
      * bit patterns, scaling and modular wrap, on both banks. */
-    for (unsigned op = 0x30; op <= 0x3b; ++op)
+    for (unsigned op = 0x30; op <= 0x3d; ++op)
         for (unsigned side = 0; side < 2; ++side) {
             cdj_c674x_reset(&c, 0x1000);
             c.r[side][5] = 2; c.r[side][31] = 0xffffffff;
             memory[0] = 6u << 23 | 5u << 18 | 31u << 13 | op << 7 | 0x40 | side << 1;
-            uint32_t offset = (op & 2 ? 31u : 0xffffffffu) * (1u << ((op - 0x30) / 4));
+            uint32_t offset = ((op >= 0x3c ? op & 1 : op & 2) ? 31u : 0xffffffffu) * (1u << ((op - 0x30) / 4));
             assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
-            assert(c.r[side][6] == ((op & 1) ? 2 - offset : 2 + offset));
+            assert(c.r[side][6] == ((op < 0x3c && (op & 1)) ? 2 - offset : 2 + offset));
         }
     /* More than 14 source packets fit when they occupy no functional slots. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);

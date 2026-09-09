@@ -536,3 +536,25 @@ CPU and PSC harnesses pass address/undefined-behavior sanitizers.
 The rebuilt connected MAIN/Blackfin run `runs/nxs-psc-batch-connected` agrees
 at the same stop and logs firmware MDCTL/GO writes for EDMA, GPIO and HPI.
 Its GUI exits 0 with a frame after 15 seconds; full boot remains incomplete.
+
+### Address/logic and fetch-header batch
+
+ADDAD register/immediate forms extend address scaling to eight bytes (TI
+SPRUFE8B page 117 explicitly specifies no SUBAD). OR and XOR cover the
+full-width L/S/D register and signed-immediate variants with cross paths.
+Tests cover both banks, cross paths, sign extension and wrapping.
+
+Loop setup/body and CALLP companion checks now distinguish actual compact
+branches from unrelated instructions sharing a BR header. PROT checks apply
+to loads rather than all instructions in the fetch packet (TI section 3.10).
+Mixed-header tests verify normal arithmetic/MVK can execute with PROT/BR set.
+Protected loads within the loop body remain explicitly unsupported.
+
+Identical deterministic replay traces (`runs/dsp-logic-batch-1` and `-repeat`)
+reach 1,003 packets / 1,156 cycles, PC `0x11802ca8`, word `0x020c0264`.
+The unmapped read is McASP0 PDIR at `0x01d00014` (C6747 datasheet memory map;
+SPRUH91D section 24.1.4). This begins the next peripheral initialization batch;
+it is not evidence of audio operation or full boot. Suite: 165 passed / 43
+skipped; CPU address/undefined-behavior sanitizer passes.
+The rebuilt connected run `runs/nxs-logic-batch-connected` agrees at the same
+PC/opcode and packet/cycle counts; its GUI exits 0 with a frame after 15 seconds.
