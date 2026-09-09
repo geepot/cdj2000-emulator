@@ -107,6 +107,9 @@ mounts. Generate a plain WAV/FAT32 fixture with
 `runs/test-media/test-track.img`. Each image uses a disposable QEMU overlay;
 guest writes are discarded when the run closes. Image attachment does not
 establish firmware track loading or audible playback, which remain unverified.
+Add `--trace-media` to record SD-controller and USB-host register activity in
+`main-stderr.log`. This diagnostic adds host overhead and can change timing;
+it does not enable the legacy fake media-state RAM write.
 
 ### Original CDJ-2000 setup
 

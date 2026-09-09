@@ -358,6 +358,8 @@ def main():
                         help='raw FAT32 SD image; writes go to a temporary overlay')
     parser.add_argument('--usb', type=Path,
                         help='raw FAT32 USB image; writes go to a temporary overlay')
+    parser.add_argument('--trace-media', action='store_true',
+                        help='log SD/USB host activity for media diagnosis (changes host timing)')
     parser.add_argument('--port', type=int, default=5980)
     parser.add_argument('--qemu', type=Path, default=ROOT / 'build/qemu/build/qemu-system-sh4')
     parser.add_argument('--functional-dsp-timing', action='store_true',
@@ -414,6 +416,9 @@ def main():
     gui_env.update(overrides)
     main_env = {k:v for k,v in os.environ.items() if not k.startswith('CDJ_')}
     main_env['CDJ_INPUT_PORT'] = str(args.port + 4)
+    if args.trace_media:
+        main_env['CDJ_SDHI_TRACE'] = '1'
+        main_env['CDJ_USBH_TRACE'] = '1'
     main_env['CDJ_NXS_HPI_DUMP'] = str(run / 'dsp-l2.bin')
     main_env['CDJ_NXS_DSP_EVENTS'] = str(run / 'dsp-events.jsonl')
     main_env['CDJ_NXS_DSP_CHECKPOINT_DIR'] = str(run / 'dsp-checkpoints')

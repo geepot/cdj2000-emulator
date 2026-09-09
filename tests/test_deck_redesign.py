@@ -254,7 +254,10 @@ def test_attach_mode_does_not_start_a_simulator_or_remove_frame(tmp_path):
     viewer.status.set.assert_called_once()
 
 
-def test_nxs_window_attaches_and_closing_it_stops_owned_boards(tmp_path, monkeypatch):
+@pytest.mark.parametrize('media', [None, 'sd', 'usb'])
+@pytest.mark.parametrize('trace_media', [False, True])
+def test_nxs_window_attaches_and_closing_it_stops_owned_boards(tmp_path, monkeypatch,
+                                                            media, trace_media):
     from tools.cdj_main import nxs_vm
     for name in ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
                  'firmware/nxs/main-firmware.bin', 'firmware/nxs/gui-boot-memory.elf',
@@ -263,21 +266,37 @@ def test_nxs_window_attaches_and_closing_it_stops_owned_boards(tmp_path, monkeyp
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
-    monkeypatch.setattr(nxs_vm.sys, 'argv', ['nxs_vm', 'run', '--ui'])
+    argv = ['nxs_vm', 'run', '--ui']
+    if media:
+        media_path = tmp_path / 'track.img'
+        media_path.write_bytes(bytes(512))
+        argv.extend(['--' + media, str(media_path)])
+    if trace_media:
+        argv.append('--trace-media')
+    monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
     monkeypatch.setattr(nxs_vm.time, 'sleep', lambda _: None)
     monkeypatch.setattr(nxs_vm, 'finalize_dsp_artifacts', Mock())
     launched = []
+    environments = []
     def start(command, **kwargs):
         process = Mock(pid=len(launched)+100)
         process.poll.return_value = 0 if '--attach' in command else None
         process.returncode = process.poll.return_value
         launched.append((command, process))
+        environments.append(kwargs.get('env', {}))
         return process
     monkeypatch.setattr(nxs_vm.subprocess, 'Popen', start)
     assert nxs_vm.main() == 0
     assert len(launched) == 3
     assert '--attach' in launched[2][0]
     assert '--control-port' in launched[2][0]
+    for name in ('CDJ_SDHI_TRACE', 'CDJ_USBH_TRACE'):
+        assert environments[0].get(name) == ('1' if trace_media else None)
+    if media:
+        drive = launched[0][0][launched[0][0].index('-drive') + 1]
+        assert 'snapshot=on' in drive
+        assert str(media_path) in drive
+        assert media_path.read_bytes() == bytes(512)
     for _, process in launched[:2]:
         process.terminate.assert_called_once()
 
