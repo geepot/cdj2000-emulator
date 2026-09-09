@@ -18,6 +18,30 @@ def test_fit_keeps_the_entire_deck_in_the_viewport(width, height):
     assert round(faceplate.PANEL_H * scale) <= height - 24
 
 
+def test_publication_age_does_not_claim_firmware_is_stopped():
+    assert view_ui.publication_age_note(100_000_000_000, 104) is None
+    assert view_ui.publication_age_note(110_000_000_000, 100) is None
+    note = view_ui.publication_age_note(100_000_000_000, 160)
+    assert '60s ago' in note
+    assert 'liveness unverified' in note
+
+
+def test_unchanged_frame_replaces_old_fps_with_publication_age(tmp_path, monkeypatch):
+    frame = tmp_path / 'screen.ppm'
+    Image.new('RGB', (2, 2), 'white').save(frame)
+    viewer = object.__new__(view_ui.UiViewer)
+    viewer.args = SimpleNamespace(attach=True, output=frame, refresh_ms=25)
+    viewer.process = None
+    viewer.root, viewer.status = Mock(), Mock()
+    viewer.last_mtime_ns = frame.stat().st_mtime_ns
+    viewer.fps, viewer.shown, viewer.published = 30, 30, 30
+    monkeypatch.setattr(view_ui.time, 'time', lambda: frame.stat().st_mtime + 60)
+    viewer.refresh()
+    assert '60s ago' in viewer.status.set.call_args.args[0]
+    assert viewer.fps == 0
+    assert viewer.shown == viewer.published == 0
+
+
 def test_controls_never_overlap_the_lcd_or_leave_the_deck():
     lcd = (faceplate.LCD_X, faceplate.LCD_Y, faceplate.LCD_W, faceplate.LCD_H)
     def overlaps(a, b):

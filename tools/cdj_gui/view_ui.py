@@ -248,6 +248,15 @@ def firmware_name(byte: int, bit: int) -> str:
 # short one cannot be delivered on this link at all.
 WINDOW_HOLD_MS = 3300
 
+
+def publication_age_note(mtime_ns: int, now: float) -> str | None:
+    """Publication age is observable; an unchanged image cannot prove a stall."""
+    age = max(0.0, now - mtime_ns / 1_000_000_000)
+    if age < 5:
+        return None
+    return (f"Last framebuffer publication {int(age)}s ago — "
+            "display may be static; emulator liveness unverified")
+
 # A long press.  The firmware tells a short MENU from a held one by whether
 # the key is still down in the *next* status record, so on this link "held"
 # means held across two of MAIN's 3.05 s record builds.  Measured, MENU
@@ -1289,7 +1298,13 @@ class UiViewer:
 
         try:
             mtime_ns = self.args.output.stat().st_mtime_ns
+            age_note = publication_age_note(mtime_ns, time.time())
             if mtime_ns == self.last_mtime_ns:
+                if age_note:
+                    self.status.set(age_note)
+                    self.fps = 0.0
+                    self.shown = self.published = 0
+                    self.rate_since = time.monotonic()
                 return
             with Image.open(self.args.output) as source:
                 frame = source.convert("RGB")
@@ -1308,6 +1323,9 @@ class UiViewer:
         except (FileNotFoundError, OSError):
             # A frame caught mid-publish, or the rename losing a race with this
             # read.  Both are single dropped frames at 30 fps, not errors.
+            if time.monotonic() - self.boot_started >= 5:
+                self.status.set("Waiting for a complete framebuffer — "
+                                "emulator liveness unverified")
             return
 
         now = time.monotonic()
@@ -1315,7 +1333,7 @@ class UiViewer:
             self.fps = self.shown / (now - self.rate_since)
             self.shown = self.published = 0
             self.rate_since = now
-        self.status.set(
+        self.status.set(age_note or
             f"{self.fps:4.1f} fps — {source_size[0]}×{source_size[1]} captured, "
             f"shown as {PANEL_WIDTH}×{PANEL_HEIGHT} at "
             f"{self.deck.scale if self.deck is not None else self.args.scale:.2f}x "

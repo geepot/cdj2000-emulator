@@ -47,7 +47,10 @@ python -m tools.cdj_gui.view_ui --attach --device-name CDJ-2000NXS \
 ```
 
 An attached viewer can also display a saved frame; a static image alone is
-not evidence that either emulator is running.
+not evidence that either emulator is running. After five seconds without a
+framebuffer publication, the status bar reports its age and marks emulator
+liveness unverified rather than retaining an old FPS value. This does not
+mean the emulator is stopped: firmware may simply leave the picture unchanged.
 
 **It takes half a minute to become interesting.** Measured with
 `boot_vm --poll-every 5 --frames`: black until about 15 s, the Pioneer logo at
@@ -258,6 +261,17 @@ fix that host gesture/queue problem, but do not establish that the firmware's
 status delivery or display response is fixed. Native Tk gesture tests and the
 compiled C input harness verify delivery to panel payloads, not firmware UI
 response. The run ended because its viewer was closed.
+
+A strict panel-delivery recheck on 2026-09-09 used the SPKERNEL-fixed binary
+without functional DSP switches, with `CDJ_REQ_STATUS_FRESH=0` and
+`CDJ_LINK_LINK_ROWS=off` to preserve request and answer bytes. A ten-second
+`down 20 08` / `up 20 08` MENU contact opened the firmware's UTILITY screen.
+Control snapshots showed frame counts 7,721, 9,986 and 12,258, the expected
+held bit followed by released bits, and an empty pulse queue. GUI link bytes
+grew from 492,432 at 40 seconds to 833,528 at 60 seconds. This establishes a
+genuine panel-to-MAIN-to-GUI response, not complete boot: the visible E-7206
+auth-chip banner and strict SPI1 DSP stop remain. Local temporary evidence is
+in `/tmp/cdj-panel-delivery-strict-1`; it is not a committed test fixture.
 
 ### Existing tracing tools
 
