@@ -110,6 +110,13 @@ int main(int argc, char **argv)
     before.syscfg_priority.mstpri[1] = 0x44442000;
     cdj_c6747_intc_delivery_reset(&before.intc_delivery);
     before.intc_delivery.cpu_request = 1u << 8;
+    cdj_wm8740_reset(&before.wm8740);
+    before.wm8740.program[0] = 0x1ff;
+    before.wm8740.program[1] = 0x1fe;
+    before.wm8740.last_word = 0x3fe;
+    before.wm8740.transfers = 2;
+    before.wm8740.active_attenuation[0] = 0xff;
+    before.wm8740.active_attenuation[1] = 0xfe;
     l2[0] = 0x68;
     l2[sizeof(l2) - 1] = 0xa5;
     shared_ram[0] = 0x56;
@@ -164,6 +171,12 @@ int main(int argc, char **argv)
            after.syscfg_priority.mstpri[1] == 0x44442000 &&
            after.syscfg_priority.mstpri[2] == 0x54604404);
     assert(after.intc_delivery.cpu_request == (1u << 8));
+    assert(after.wm8740.program[0] == 0x1ff &&
+           after.wm8740.program[1] == 0x1fe &&
+           after.wm8740.last_word == 0x3fe &&
+           after.wm8740.transfers == 2 &&
+           after.wm8740.active_attenuation[0] == 0xff &&
+           after.wm8740.active_attenuation[1] == 0xfe);
 
     FILE *file = fopen(argv[1], "r+b");
     assert(file && fputc('X', file) != EOF && fclose(file) == 0);

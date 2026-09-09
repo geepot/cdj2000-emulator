@@ -33,7 +33,7 @@ SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
-                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0'}
+                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0'}
 SHARED_RAM_SIZE = 0x20000
 DEFAULT_FORMATS = ROOT / 'build/gdb-17.2/include/opcode/tic6x-insn-formats.h'
 ANALYSIS_SOURCES = [ROOT / 'tools/cdj_dsp/coverage.py',
@@ -265,6 +265,14 @@ def main():
             'no later MAIN/HPI events injected; replay stops when an external event is required')
         approximations = [
             *(['two-cycle SPLOOPD functional run-ahead; not cycle-accurate']
+               if args.functional_dsp_timing else []),
+            *(['SPI1 WM8740 control transfers complete at commit; serial timing is not modeled']
+               if args.functional_dsp_timing else []),
+            *(['interrupt-return SPMASK pipe-up is reconstructed from the stable program image; retained-buffer timing is not modeled']
+               if args.functional_dsp_timing else []),
+            *(['an ISR SPLOOP may replace retained loop validation state; a later SPLX return is reconstructed from the current program image and self-modifying loop bodies are unsupported']
+               if args.functional_dsp_timing else []),
+            *(['interrupt entry retires already-issued results with minimum empty cycles; exact interrupt pipeline latency is not modeled']
                if args.functional_dsp_timing else []),
             *(['coarse packet-driven McASP slots; not audio-rate or cycle-accurate']
                if args.functional_dsp_audio else []),

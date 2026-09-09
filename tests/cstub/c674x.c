@@ -2342,6 +2342,7 @@ int main(void)
      * restored bit through redirect; a return SPLOOPD then has ordinary
      * SPLOOP counting and suppresses its parallel setup operation (7.13.2). */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    cdj_c674x_loop_set_functional_timing(true);
     c.control[27] = 1u << 14; c.control[6] = 0x1040; c.control[13] = 2;
     c.r[0][4] = 11;
     memory[0] = 0x001800e2;                  /* B .S2 IRP. */
@@ -2363,18 +2364,59 @@ int main(void)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
         assert(++return_steps < 20);
     }
-    assert(!(c.control[26] & (1u << 14)) && c.r[0][4] == 11);
+    assert(!(c.control[26] & (1u << 14)) &&
+           !(c.loop_pred_history & 8) && c.r[0][4] == 11);
+    cdj_c674x_loop_set_functional_timing(false);
 
-    /* Retained-buffer SPMASK reversal needs state absent from legacy
-     * checkpoints, so this still fails closed instead of inventing replay. */
+    /* A legacy/partial checkpoint cannot provide the interrupted buffer.
+     * Strict mode fails at returned setup instead of silently reconstructing
+     * it from program memory. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.control[26] = 1u << 14; c.control[13] = 2;
     memory[0] = 0x0003a000; memory[1] = 0x00030000;
-    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(c.loop_active && !c.loop.delayed_count && c.cycles == 1);
     assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(c.cycles == 1 &&
-           !strcmp(c.fault, "SPLOOP interrupt-return SPMASK not implemented"));
+    assert(!c.cycles &&
+           !strcmp(c.fault, "SPLOOP interrupt-return buffer unavailable"));
+
+    /* Breadth mode reconstructs the documented return reversal from retained
+     * tags: the D1 program operation beside SPMASK is a NOP, while the older
+     * overlapping D1 buffered ADD executes instead. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    cdj_c674x_loop_set_functional_timing(true);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1; c.control[4] = (1u << 7) | 3u;
+    c.control[13] = 12;
+    memory[0] = 0x00038000;                 /* SPLOOP 1 */
+    memory[1] = 3u << 23 | 3u << 18 | 1u << 13 |
+                0x12u << 7 | 0x40;          /* ADD .D1 A3,1,A3 */
+    memory[2] = 0x00430001;                 /* SPMASK D1 || */
+    memory[3] = 4u << 23 | 4u << 18 | 7u << 13 |
+                0x12u << 7 | 0x40;          /* ADD .D1 A4,7,A4 */
+    memory[4] = 0x00034000;
+    memory[56] = 0x001800e2;                /* INT7 handler: B IRP */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (!c.loop.sealed)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == 2 && c.r[0][4] == 7 && c.loop_tags == 1);
+    assert(cdj_c674x_interrupt(&c, 1u << 7));
+    while (c.loop_active)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_interrupt(&c, 0));
+    assert(c.pc == 0x10e0 && c.control[6] == 0x1000);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    for (unsigned i = 0; i < 5; ++i)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL)); /* returned setup */
+    uint32_t before_return_a3 = c.r[0][3], before_return_a4 = c.r[0][4];
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == before_return_a3 + 1 &&
+           c.r[0][4] == before_return_a4);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == before_return_a3 + 2 &&
+           c.r[0][4] == before_return_a4);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop.sealed && !c.fault && !(c.loop_pred_history & 8));
+    cdj_c674x_loop_set_functional_timing(false);
 
     /* In-flight results were issued by older, non-annulled execute packets;
      * vectoring preserves them and the handler's first cycle publishes them. */
@@ -2388,6 +2430,29 @@ int main(void)
     assert(c.pc == 0x1080 && c.load_count == 1 && c.r[0][9] == 0);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][9] == 0xfeedface && !c.load_count);
+
+    /* Breadth mode preserves the same older writeback but inserts the
+     * minimum empty interval before fetching an ISR instruction that writes
+     * the same register. This is deliberately not an exact interrupt-latency
+     * claim: strict mode retains the collision as a validation stop. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    cdj_c674x_loop_set_functional_timing(true);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
+    c.loads[0] = (CdjC674xLoad){.due = 5, .value = 0xfeedface,
+                                .bank = 1, .dst = 0, .size = 0};
+    c.load_count = 1;
+    memory[32] = 0x0008c06a;                 /* MVKH .S2 0x1180,B0. */
+    assert(cdj_c674x_interrupt(&c, 1u << 4));
+    assert(c.pc == 0x1080 && c.idle_cycles == 5 && c.load_count == 1);
+    for (unsigned i = 0; i < 5; ++i)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 5 && !c.idle_cycles && !c.load_count &&
+           c.r[1][0] == 0xfeedface && c.pc == 0x1080);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.fault && c.cycles == 6 && c.pc == 0x1084 &&
+           c.r[1][0] == 0x1180face);
+    cdj_c674x_loop_set_functional_timing(false);
 
     /* A live branch pipeline defers recognition but not IFR latching. Once
      * the delay slots drain, the current branch target becomes IRP. */
@@ -2481,6 +2546,72 @@ int main(void)
     assert(c.pc == 0x1000 && (c.control[26] & (1u << 14)));
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.loop_active && c.control[13] == frozen_ilc - 1);
+
+    /* SPLOOPW uses the same bounded epilog drain but no ILC minimum.  After
+     * B IRP, the returned setup keeps the predicate termination false for
+     * the first three cycles even when the current condition is false. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1; c.control[4] = (1u << 7) | 3u;
+    c.control[13] = 0x55aa55aa; c.r[1][1] = 1;
+    memory[0] = 0x4003e000;                  /* [B1] SPLOOPW 1. */
+    memory[1] = mvk(0, 8, 9);
+    memory[2] = 0; memory[3] = 0x34000;      /* NOP; SPKERNEL 0,0. */
+    memory[56] = 0x001800e2;                 /* INT7 handler: B IRP. */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (!c.loop.sealed)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop.cycle == 3 && c.control[13] == 0x55aa55aa);
+    assert(cdj_c674x_interrupt(&c, 1u << 7));
+    unsigned while_drain_steps = 0;
+    do {
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.control[13] == 0x55aa55aa);
+        assert(++while_drain_steps < 10);
+    } while (c.loop_active);
+    assert(cdj_c674x_interrupt(&c, 0));
+    assert(c.pc == 0x10e0 && c.control[6] == 0x1000 &&
+           (c.control[27] & (1u << 14)));
+    c.r[1][1] = 0;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    for (unsigned i = 0; i < 5; ++i)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1000 && (c.control[26] & (1u << 14)));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop_active && (c.loop_pred_history & 8));
+    unsigned returned_while_steps = 0;
+    while (c.loop_active) {
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(++returned_while_steps < 12);
+    }
+    assert(returned_while_steps >= 4 && c.control[13] == 0x55aa55aa);
+
+    /* If SPLOOPW's delayed condition becomes true while its interrupt epilog
+     * is draining, section 7.10.3 resumes after SPKERNEL and interrupts that
+     * post-loop packet instead of restarting the loop setup address. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1; c.control[4] = (1u << 7) | 3u;
+    c.r[1][1] = 1;
+    memory[0] = 0x4003e000;                  /* [B1] SPLOOPW 1. */
+    for (unsigned i = 1; i < 7; ++i) memory[i] = 0;
+    memory[7] = 0x34000;                     /* SPKERNEL 0,0. */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (!c.loop.sealed)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop.cycle == 7 && c.pc == 0x1020);
+    assert(cdj_c674x_interrupt(&c, 1u << 7));
+    c.r[1][1] = 0;
+    unsigned terminating_drain_steps = 0;
+    while (c.loop_active) {
+        assert(cdj_c674x_interrupt(&c, 0));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(++terminating_drain_steps < 10);
+    }
+    assert(terminating_drain_steps == 4 && c.pc == 0x1020);
+    assert(cdj_c674x_interrupt(&c, 0));
+    assert(c.pc == 0x10e0 && c.control[6] == 0x1020 &&
+           !(c.control[27] & (1u << 14)));
 
     /* Execute TI's copy-loop schedule with the real instruction core. The
      * replayed load, move and store share the same pre-cycle register state. */

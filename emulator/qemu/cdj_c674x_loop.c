@@ -70,8 +70,14 @@ bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *loop, uint32_t tags[8], unsigne
     for (unsigned origin = 0; origin < loop->length; ++origin) {
         if (origin > loop->cycle) continue;
         uint64_t age = loop->cycle - origin;
+        /* Predicate loops are normally unbounded.  Interrupt detection turns
+         * their current launch count into a finite epilog schedule, just as
+         * it does for SPLOOP/SPLOOPD (SPRUFE8B 7.13.1). */
+        bool interrupt_epilog = loop->predicate_loop && loop->sealed &&
+                                loop->end_cycle != UINT64_MAX;
         if (age % loop->ii ||
-            (!loop->predicate_loop && age / loop->ii >= loop->iterations))
+            ((!loop->predicate_loop || interrupt_epilog) &&
+             age / loop->ii >= loop->iterations))
             continue;
         for (unsigned j = 0; j < loop->count[origin]; ++j) {
             uint32_t tag = loop->tags[origin][j];

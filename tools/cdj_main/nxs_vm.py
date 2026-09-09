@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
-                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0'}
+                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0'}
 SHARED_RAM_SIZE = 0x20000
 
 
@@ -97,7 +97,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
               [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
                ROOT / 'emulator/qemu/cdj_dsp_checkpoint.h',
                ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
-    manifest = dict(schema=8, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA and SYSCFG priority, '
+    manifest = dict(schema=9, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA, SYSCFG priority and WM8740 control, '
                                      'L2 and shared RAM plus sparse zero-default SDRAM pages'),
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
         dsp_audio_mode=('coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
@@ -116,13 +116,21 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
         source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
         approximations=[
             'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
-            'checkpoint schema 8 is ABI-bound and rejects structure-size or endianness changes',
+            'checkpoint schema 9 is ABI-bound and rejects structure-size or endianness changes',
             '128 KiB C6747 shared RAM is captured losslessly',
             'sparse SDRAM pages are lossless because omitted pages restore as zero',
             'SDRAM command timing, arbitration and retention are not modeled',
             'PSC transition ticks and PLL divider GO latency remain deterministic approximations',
             'physical HPI pins, FIFO/HRDY timing and DSP interrupt delivery are not modeled',
             *(['functional run-ahead adds two SPLOOPD epilog cycles; not cycle-validation evidence']
+              if functional_dsp_timing else []),
+            *(['functional run-ahead collapses each evidence-backed SPI1/WM8740 transfer to its committing write; not SPI timing evidence']
+              if functional_dsp_timing else []),
+            *(['interrupt-return SPMASK pipe-up is reconstructed from the stable program image; retained-buffer timing is not modeled']
+              if functional_dsp_timing else []),
+            *(['an ISR SPLOOP may replace retained loop validation state; a later SPLX return is reconstructed from the current program image and self-modifying loop bodies are unsupported']
+              if functional_dsp_timing else []),
+            *(['interrupt entry retires already-issued results with minimum empty cycles; exact interrupt pipeline latency is not modeled']
               if functional_dsp_timing else []),
             *(['functional McASP scheduling advances one slot every 1024 executed DSP packets; '
                'not serializer-clock, sample-rate, or audio-output evidence']

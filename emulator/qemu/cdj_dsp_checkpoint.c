@@ -8,7 +8,7 @@
 #include <string.h>
 
 #define CHECKPOINT_ENDIAN 0x01020304u
-#define CHECKPOINT_MAGIC "CDJDSP8\0"
+#define CHECKPOINT_MAGIC "CDJDSP9\0"
 #define CHECKPOINT_SCHEMA1_MAGIC "CDJDSP1\0"
 #define CHECKPOINT_SCHEMA2_MAGIC "CDJDSP2\0"
 #define CHECKPOINT_SCHEMA3_MAGIC "CDJDSP3\0"
@@ -16,6 +16,7 @@
 #define CHECKPOINT_SCHEMA5_MAGIC "CDJDSP5\0"
 #define CHECKPOINT_SCHEMA6_MAGIC "CDJDSP6\0"
 #define CHECKPOINT_SCHEMA7_MAGIC "CDJDSP7\0"
+#define CHECKPOINT_SCHEMA8_MAGIC "CDJDSP8\0"
 #define CHECKPOINT_COMPONENTS 9u
 
 typedef struct {
@@ -58,12 +59,18 @@ static void component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
                sizeof(CdjC6747Spi) * CDJ_C6747_SPI_COUNT +
                sizeof(CdjC6747Cache) + sizeof(CdjC6747McaspControl) +
                sizeof(CdjC6747Edma) + sizeof(CdjC6747SyscfgPriority) +
-               sizeof(CdjC6747IntcDelivery);
+               sizeof(CdjC6747IntcDelivery) + sizeof(CdjWm8740);
+}
+
+static void schema8_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
+{
+    component_sizes(sizes);
+    sizes[8] -= sizeof(CdjWm8740);
 }
 
 static void schema6_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
 {
-    component_sizes(sizes);
+    schema8_component_sizes(sizes);
     sizes[8] -= sizeof(CdjC6747McaspControl);
     sizes[8] -= sizeof(CdjC6747Edma);
     sizes[8] -= sizeof(CdjC6747SyscfgPriority);
@@ -136,6 +143,7 @@ static bool state_valid(const CdjDspCheckpointState *state)
     for (unsigned i = 0; i < CDJ_C6747_SPI_COUNT; ++i) {
         const CdjC6747Spi *spi = &state->spis[i];
         spis_valid = spis_valid && spi->receive_empty <= 1 &&
+                     spi->receive_buffer_full <= 1 &&
                      !(spi->gcr0 & ~1u) && !(spi->gcr1 & ~0x01010103u) &&
                      (spi->gcr1 & 3u) != 1 && (spi->gcr1 & 3u) != 2 &&
                      !(spi->interrupt_enable & ~0x0101035fu) &&
@@ -161,6 +169,7 @@ static bool state_valid(const CdjDspCheckpointState *state)
     for (unsigned i = 0; i < 256; ++i)
         cache_valid = cache_valid && !(state->cache.mar[i] & ~1u);
     return timers_valid && spis_valid && cache_valid &&
+           cdj_wm8740_valid(&state->wm8740) &&
            cdj_c6747_mcasp_control_valid(&state->mcasp_control) &&
            cdj_c6747_edma_valid(&state->edma) &&
            cdj_c6747_syscfg_priority_valid(&state->syscfg_priority) &&
@@ -286,13 +295,15 @@ bool cdj_dsp_checkpoint_read(const char *path,
         return false;
     }
     CheckpointHeader header = {0};
-    uint32_t expected[CHECKPOINT_COMPONENTS], schema6_expected[CHECKPOINT_COMPONENTS];
+    uint32_t expected[CHECKPOINT_COMPONENTS], schema8_expected[CHECKPOINT_COMPONENTS];
+    uint32_t schema6_expected[CHECKPOINT_COMPONENTS];
     uint32_t schema7_expected[CHECKPOINT_COMPONENTS];
     uint32_t schema5_expected[CHECKPOINT_COMPONENTS];
     uint32_t schema4_expected[CHECKPOINT_COMPONENTS];
     uint32_t schema3_expected[CHECKPOINT_COMPONENTS];
     uint32_t legacy_expected[CHECKPOINT_COMPONENTS];
     component_sizes(expected);
+    schema8_component_sizes(schema8_expected);
     schema7_component_sizes(schema7_expected);
     schema6_component_sizes(schema6_expected);
     schema5_component_sizes(schema5_expected);
@@ -321,6 +332,9 @@ bool cdj_dsp_checkpoint_read(const char *path,
     bool schema7 = header_read &&
                    memcmp(header.magic, CHECKPOINT_SCHEMA7_MAGIC,
                           sizeof(header.magic)) == 0 && header.schema == 7;
+    bool schema8 = header_read &&
+                   memcmp(header.magic, CHECKPOINT_SCHEMA8_MAGIC,
+                          sizeof(header.magic)) == 0 && header.schema == 8;
     bool current = header_read &&
                    memcmp(header.magic, CHECKPOINT_MAGIC,
                           sizeof(header.magic)) == 0 &&
@@ -341,6 +355,8 @@ bool cdj_dsp_checkpoint_read(const char *path,
     size_t schema7_state_size = (offsetof(CdjDspCheckpointState, mcasp_control) +
                                  SCHEMA7_MCASP_CONTROL_SIZE + alignment - 1) /
                                 alignment * alignment;
+    size_t schema8_state_size = (offsetof(CdjDspCheckpointState, wm8740) +
+                                 alignment - 1) / alignment * alignment;
     bool legacy = (schema1 || schema2) &&
                   header.state_size == legacy_state_size &&
                   memcmp(header.component_size, legacy_expected,
@@ -360,8 +376,11 @@ bool cdj_dsp_checkpoint_read(const char *path,
     bool old_schema7 = schema7 && header.state_size == schema7_state_size &&
                        memcmp(header.component_size, schema7_expected,
                               sizeof(schema7_expected)) == 0;
+    bool old_schema8 = schema8 && header.state_size == schema8_state_size &&
+                       memcmp(header.component_size, schema8_expected,
+                              sizeof(schema8_expected)) == 0;
     bool old = legacy || old_schema3 || old_schema4 || old_schema5 ||
-               old_schema6 || old_schema7;
+               old_schema6 || old_schema7 || old_schema8;
     bool ok = (old || current) &&
               header.endian == CHECKPOINT_ENDIAN &&
               header.header_size == sizeof(header) &&
@@ -412,7 +431,7 @@ bool cdj_dsp_checkpoint_read(const char *path,
         cdj_c6747_spis_reset(state->spis);
     if (ok && (legacy || old_schema3 || old_schema4 || old_schema5))
         cdj_c6747_cache_reset(&state->cache);
-    if (ok && old && !old_schema7) {
+    if (ok && old && !old_schema7 && !old_schema8) {
         cdj_c6747_mcasp_control_reset(&state->mcasp_control);
         cdj_c6747_edma_reset(&state->edma);
         cdj_c6747_syscfg_priority_reset(&state->syscfg_priority);
@@ -428,6 +447,12 @@ bool cdj_dsp_checkpoint_read(const char *path,
         cdj_c6747_syscfg_priority_reset(&state->syscfg_priority);
         cdj_c6747_intc_delivery_reset(&state->intc_delivery);
     }
+    if (ok && old_schema8)
+        for (unsigned i = 0; i < CDJ_C6747_SPI_COUNT; ++i) {
+            state->spis[i].receive_buffer_full = false;
+            state->spis[i].receive_buffer_data = 0;
+        }
+    if (ok && old) cdj_wm8740_reset(&state->wm8740);
     ok = ok && state_valid(state);
     fclose(file);
     free(bitmap);

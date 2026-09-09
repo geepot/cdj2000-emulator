@@ -57,6 +57,7 @@ typedef struct {
     CdjC6747IntcDelivery intc_delivery;
     CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
     CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
+    CdjWm8740 wm8740;
     CdjC6747Cache cache;
     CdjC6747Edma edma;
     CdjC6747SyscfgPriority syscfg_priority;
@@ -132,6 +133,7 @@ static void capture_checkpoint(NxsHpi *s, const char *reason)
     state.intc_delivery = s->intc_delivery;
     memcpy(state.timers, s->timers, sizeof(state.timers));
     memcpy(state.spis, s->spis, sizeof(state.spis));
+    state.wm8740 = s->wm8740;
     state.cache = s->cache;
     state.edma = s->edma;
     state.syscfg_priority = s->syscfg_priority;
@@ -169,6 +171,7 @@ void cdj_nxs_hpi_reset_line(bool released)
         cdj_c6747_intc_delivery_reset(&s->intc_delivery);
         cdj_c6747_timers_reset(s->timers);
         cdj_c6747_spis_reset(s->spis);
+        cdj_wm8740_reset(&s->wm8740);
         cdj_c6747_cache_reset(&s->cache);
         cdj_c6747_edma_reset(&s->edma);
         cdj_c6747_mcasp_reset(&s->mcasp);
@@ -535,6 +538,14 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                                 address, (uint32_t)value);
         return true;
     }
+    if (cdj_c6747_spis_write_wm8740(
+            s->spis, &s->wm8740, address, value, size,
+            cdj_c674x_loop_functional_timing(), commit)) {
+        if (commit)
+            info_report("nxs-spi: WM8740 write word=%#x transfers=%" PRIu64,
+                        (uint32_t)value & 0xffff, s->wm8740.transfers);
+        return true;
+    }
     if (cdj_c6747_spis_write(s->spis, address, value, size, commit)) {
         if (commit) info_report("nxs-spi: write address=%#x value=%#x",
                                 address, (uint32_t)value);
@@ -811,6 +822,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c6747_intc_delivery_reset(&s->intc_delivery);
     cdj_c6747_timers_reset(s->timers);
     cdj_c6747_spis_reset(s->spis);
+    cdj_wm8740_reset(&s->wm8740);
     cdj_c6747_cache_reset(&s->cache);
     cdj_c6747_edma_reset(&s->edma);
     cdj_c6747_pll_reset(&s->pll);

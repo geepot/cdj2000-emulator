@@ -11,6 +11,11 @@
 #define SPI_DAT1_WRITE_MASK 0x1701ffffu
 #define SPI_FORMAT_WRITE_MASK 0x3ff7ff1fu
 #define SPI_RX_STATUS_MASK 0x5f000000u
+#define SPI_RX_OVERRUN_STATUS (UINT32_C(1) << 30)
+#define SPI_TX_FLAG (UINT32_C(1) << 9)
+#define SPI_RX_FLAG (UINT32_C(1) << 8)
+#define SPI_OVERRUN_FLAG (UINT32_C(1) << 6)
+#define SPI_WM8740_FUNCTION_PINS 0x00000601u
 
 static CdjC6747Spi *decode(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
                            uint32_t address, uint32_t *offset)
@@ -48,6 +53,48 @@ void cdj_c6747_spis_reset(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT])
     for (unsigned i = 0; i < CDJ_C6747_SPI_COUNT; ++i) reset_one(&spis[i]);
 }
 
+void cdj_wm8740_reset(CdjWm8740 *dac)
+{
+    if (!dac) return;
+    memset(dac, 0, sizeof(*dac));
+    dac->program[0] = dac->program[1] = 0xff;
+    dac->active_attenuation[0] = dac->active_attenuation[1] = 0xff;
+}
+
+bool cdj_wm8740_valid(const CdjWm8740 *dac)
+{
+    if (!dac || dac->program[0] > 0x1ff || dac->program[1] > 0x1ff ||
+        dac->program[2] > 0x1ff || (dac->program[3] & ~0x1dfu) ||
+        (dac->program[4] & ~0x70u) || dac->register4_unlocked > 1)
+        return false;
+    return true;
+}
+
+static bool wm8740_write(CdjWm8740 *dac, uint16_t word, bool commit)
+{
+    unsigned address = word >> 9 & 7;
+    uint16_t data = word & 0x1ff;
+    if (!dac || (address > 3 && address != 6)) return false;
+    if (!commit) return true;
+    dac->last_word = word;
+    ++dac->transfers;
+    if (address <= 1) {
+        dac->program[address] = data;
+        if (data & 0x100) {
+            dac->active_attenuation[0] = dac->program[0] & 0xff;
+            dac->active_attenuation[1] = dac->program[1] & 0xff;
+        }
+    } else if (address == 2) {
+        dac->program[2] = data;
+        if ((data & 0x1e0) == 0x1e0) dac->register4_unlocked = true;
+    } else if (address == 3) {
+        dac->program[3] = data & 0x1df;
+    } else if (dac->register4_unlocked) {
+        dac->program[4] = data & 0x70;
+    }
+    return true;
+}
+
 void cdj_c6747_spi_set_pins(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
                             unsigned index, uint32_t valid, uint32_t value)
 {
@@ -65,6 +112,19 @@ static bool read_pins(const CdjC6747Spi *s, uint32_t *value)
     return true;
 }
 
+static void consume_receive(CdjC6747Spi *s)
+{
+    if (s->receive_buffer_full) {
+        s->receive_data = s->receive_buffer_data;
+        s->receive_buffer_full = false;
+        s->receive_empty = false;
+        s->flags |= SPI_RX_FLAG;
+    } else {
+        s->receive_empty = true;
+        s->flags &= ~SPI_RX_FLAG;
+    }
+}
+
 static uint32_t interrupt_vector(CdjC6747Spi *s)
 {
     uint32_t pending = s->flags & s->interrupt_enable & s->interrupt_level;
@@ -75,7 +135,7 @@ static uint32_t interrupt_vector(CdjC6747Spi *s)
     }
     if (pending & (1u << 8)) {
         s->flags &= ~(1u << 8);
-        s->receive_empty = true;
+        consume_receive(s);
         return 0x12u << 1;
     }
     if (pending & (1u << 9)) return 0x14u << 1;
@@ -106,9 +166,10 @@ bool cdj_c6747_spis_read(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
         *value = (s->receive_empty ? UINT32_C(0x80000000) : 0) |
                  (s->receive_status & SPI_RX_STATUS_MASK) |
                  (s->receive_data & 0xffff);
-        s->receive_empty = true;
-        s->receive_status = 0;
-        s->flags &= ~(1u << 8);
+        consume_receive(s);
+        /* RXOVR is sticky across SPIBUF reads (SPRUH91D 27.3.14); the other
+         * per-character status and RXINT clear with the consumed word. */
+        s->receive_status &= SPI_RX_OVERRUN_STATUS;
         break;
     case 0x44: *value = s->receive_data & 0xffff; break;
     case 0x48: *value = s->delay; break;
@@ -123,6 +184,57 @@ bool cdj_c6747_spis_read(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
     return true;
 }
 
+bool cdj_c6747_spis_write_wm8740(
+    CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjWm8740 *dac,
+    uint32_t address, uint64_t value, unsigned size,
+    bool functional_timing, bool commit)
+{
+    uint32_t offset;
+    CdjC6747Spi *s = decode(spis, address, &offset);
+    if (!s || s != &spis[1] || (offset != 0x38 && offset != 0x3c) ||
+        size != 4 || value > UINT32_MAX || !functional_timing)
+        return false;
+    uint32_t word = value;
+    if (!(s->gcr1 & (1u << 24)) || (s->gcr1 & 3) != 3 ||
+        (s->gcr1 & (1u << 8)) ||
+        (s->pin_function & SPI_WM8740_FUNCTION_PINS) !=
+            SPI_WM8740_FUNCTION_PINS)
+        return false;
+    uint32_t control = offset == 0x3c ? word : s->dat1;
+    unsigned format_index = control >> 24 & 3;
+    uint32_t format = s->format[format_index];
+    if ((control & ((1u << 28) | (1u << 16))) ||
+        (format & 0x1f) != 16 ||
+        (format & ((1u << 22) | (1u << 21) | (1u << 20))) ||
+        !wm8740_write(dac, word, false))
+        return false;
+    if (!commit) return true;
+
+    if (offset == 0x38) s->dat0 = word & 0xffff;
+    else s->dat1 = word & SPI_DAT1_WRITE_MASK;
+    s->flags &= ~SPI_TX_FLAG;
+    /* Functional breadth mode collapses the documented shift and chip-select
+     * delays to this commit.  TXBUF is empty again, while the completed word
+     * fills SPIBUF and raises the architectural TX/RX flags.  P5/SOMI is NC
+     * on the board and has an internal pull-up in SPRS377F, hence 0xffff. */
+    s->flags |= SPI_TX_FLAG;
+    if (s->receive_empty) {
+        s->flags |= SPI_RX_FLAG;
+        s->receive_data = 0xffff;
+        s->receive_status &= SPI_RX_OVERRUN_STATUS;
+        s->receive_empty = false;
+    } else if (!s->receive_buffer_full) {
+        s->receive_buffer_data = 0xffff;
+        s->receive_buffer_full = true;
+    } else {
+        /* SPRUH91D 27.3.14: SPIBUF is not overwritten; the newly completed
+         * character is lost only after both SPIBUF and RXBUF are full. */
+        s->flags |= SPI_OVERRUN_FLAG;
+        s->receive_status |= SPI_RX_OVERRUN_STATUS;
+    }
+    return wm8740_write(dac, word, true);
+}
+
 static void disable(CdjC6747Spi *s)
 {
     s->dat0 = 0;
@@ -131,6 +243,8 @@ static void disable(CdjC6747Spi *s)
     s->receive_data = 0;
     s->receive_status = 0;
     s->receive_empty = true;
+    s->receive_buffer_full = false;
+    s->receive_buffer_data = 0;
 }
 
 bool cdj_c6747_spis_write(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
@@ -164,7 +278,7 @@ bool cdj_c6747_spis_write(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
     case 0x10:
         if (commit) {
             s->flags &= ~(word & SPI_FLAG_W1C_MASK);
-            if (word & (1u << 8)) s->receive_empty = true;
+            if (word & (1u << 8)) consume_receive(s);
         }
         break;
     case 0x14:

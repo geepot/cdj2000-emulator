@@ -7,7 +7,7 @@
  * Tags identify decoded instructions; the CPU owns their contents. SPLOOP's
  * own packet is outside this timeline. The caller handles SPMASK through the
  * candidate filter. SPLOOPD's initial four-cycle count delay and SPLOOPW's
- * predicate history are caller-owned; reload and interrupts are not
+ * predicate history are caller-owned; retained-buffer reload is not
  * implemented. The caller supplies each program-memory packet at its original
  * cycle while loading; NOP cycles have no tags but still advance time. */
 typedef struct {
@@ -38,7 +38,8 @@ bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *, uint32_t tags[8], unsigned *c
                                  bool *post_fetch, bool *drained,
                                  bool (*allow)(void *, uint32_t), void *opaque);
 /* At a legal stage boundary, stop launching iterations and convert the
- * existing schedule into its interrupt epilog. The caller is responsible for
- * the architectural eligibility checks and for vectoring after drain. */
+ * existing SPLOOP/SPLOOPD/SPLOOPW schedule into its interrupt epilog. The
+ * caller is responsible for the architectural eligibility checks and for
+ * vectoring after drain. */
 bool cdj_c674x_loop_interrupt_drain(CdjC674xLoop *);
 #endif

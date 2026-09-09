@@ -33,6 +33,7 @@ static CdjC6747Intc intc;
 static CdjC6747IntcDelivery intc_delivery;
 static CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
 static CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
+static CdjWm8740 wm8740;
 static CdjC6747Cache cache;
 static CdjC6747Edma edma;
 static CdjC6747SyscfgPriority syscfg_priority;
@@ -251,6 +252,7 @@ static void restore_devices(const CdjDspCheckpointState *state)
     intc_delivery = state->intc_delivery;
     memcpy(timers, state->timers, sizeof(timers));
     memcpy(spis, state->spis, sizeof(spis));
+    wm8740 = state->wm8740;
     cache = state->cache;
     edma = state->edma;
     syscfg_priority = state->syscfg_priority;
@@ -272,6 +274,7 @@ static void capture_devices(CdjDspCheckpointState *state, const char *reason)
     state->intc_delivery = intc_delivery;
     memcpy(state->timers, timers, sizeof(state->timers));
     memcpy(state->spis, spis, sizeof(state->spis));
+    state->wm8740 = wm8740;
     state->cache = cache;
     state->edma = edma;
     state->syscfg_priority = syscfg_priority;
@@ -576,6 +579,9 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
     if (!ok) ok = cdj_c6747_intc_write_delivery(
         &intc, &intc_delivery, a, v, size, commit);
     if (!ok) ok = cdj_c6747_timers_write(timers, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_spis_write_wm8740(
+        spis, &wm8740, a, v, size,
+        cdj_c674x_loop_functional_timing(), commit);
     if (!ok) ok = cdj_c6747_spis_write(spis, a, v, size, commit);
     if (!ok) ok = cdj_c6747_cache_write(&cache, a, v, size, commit);
     if (!ok) ok = edma_mcasp_transaction(true, a, v, size, commit);
@@ -867,7 +873,8 @@ int main(int argc, char **argv)
                        !memcmp(magic, "CDJDSP5\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP6\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP7\0", sizeof(magic)) ||
-                       !memcmp(magic, "CDJDSP8\0", sizeof(magic)));
+                       !memcmp(magic, "CDJDSP8\0", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP9\0", sizeof(magic)));
     rewind(f);
     bool valid = false;
     if (!checkpoint)
@@ -906,6 +913,7 @@ int main(int argc, char **argv)
         cdj_c6747_intc_delivery_reset(&intc_delivery);
         cdj_c6747_timers_reset(timers);
         cdj_c6747_spis_reset(spis);
+        cdj_wm8740_reset(&wm8740);
         cdj_c6747_pll_reset(&pll);
         cdj_c6747_cache_reset(&cache);
         cdj_c6747_edma_reset(&edma);
@@ -975,13 +983,21 @@ int main(int argc, char **argv)
         for (unsigned i = 0; i < 32; ++i) printf("%s%" PRIu32, i ? "," : "", cpu.r[bank][i]);
         printf("]");
     }
-    printf("],\"pending_stores\":%u,\"pending_loads\":%u,\"syscfg_unlocked\":%s,\"pll_legacy_bit4_used\":%s,"
+    printf("],\"control\":{\"csr\":%u,\"ifr\":%u,\"ier\":%u,\"irp\":%u,"
+           "\"ilc\":%u,\"rilc\":%u,\"tsr\":%u,\"itsr\":%u,"
+           "\"loop_context\":%" PRIu64 "},\"pending_stores\":%u,"
+           "\"pending_loads\":%u,\"syscfg_unlocked\":%s,\"pll_legacy_bit4_used\":%s,"
            "\"pll_oscin_cycles\":%" PRIu64 ",\"pll_reset_age\":%u,\"pll_lock_wait_remaining\":%u,"
            "\"pll_early_enable\":%s,\"cfgchip\":[%u,%u,%u,%u],"
            "\"amute_clear_pulses\":%u,\"hpi\":{\"reset\":%s,\"hwob\":%s,"
            "\"dspint\":%s,\"hint\":%s},\"emifb\":{\"sdcfg\":%u,"
            "\"sdrfc\":%u,\"sdtim1\":%u,\"sdtim2\":%u,"
-           "\"init_sequences\":%u}}\n",
+           "\"init_sequences\":%u},\"wm8740\":{\"transfers\":%" PRIu64 ","
+           "\"last_word\":%u,\"program\":[%u,%u,%u,%u,%u],"
+           "\"active_attenuation\":[%u,%u],\"register4_unlocked\":%s}}\n",
+           cpu.control[1], cpu.control[2], cpu.control[4], cpu.control[6],
+           cpu.control[13], cpu.control[14], cpu.control[26], cpu.control[27],
+           cpu.control_ready[31],
            cpu.store_count, cpu.load_count, syscfg.unlocked ? "true" : "false",
            pll.legacy_bit4_used ? "true" : "false", pll.oscin_cycles,
            pll.reset_age, pll.lock_wait_remaining, pll.early_enable ? "true" : "false",
@@ -990,7 +1006,11 @@ int main(int argc, char **argv)
            hpi.hpirst ? "true" : "false", hpi.hwob ? "true" : "false",
            hpi.dspint ? "true" : "false", hpi.hint ? "true" : "false",
            emifb.sdcfg, emifb.sdrfc, emifb.sdtim1, emifb.sdtim2,
-           emifb.init_sequences);
+           emifb.init_sequences, wm8740.transfers, wm8740.last_word,
+           wm8740.program[0], wm8740.program[1], wm8740.program[2],
+           wm8740.program[3], wm8740.program[4], wm8740.active_attenuation[0],
+           wm8740.active_attenuation[1],
+           wm8740.register4_unlocked ? "true" : "false");
     if (argc >= 8) {
         char error[160] = {0};
         capture_devices(&checkpoint_state, reason);

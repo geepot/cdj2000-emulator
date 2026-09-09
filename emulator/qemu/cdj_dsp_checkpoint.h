@@ -21,7 +21,7 @@
 #include "cdj_c6747_cache.h"
 #include "cdj_c6747_edma.h"
 
-#define CDJ_DSP_CHECKPOINT_SCHEMA 8u
+#define CDJ_DSP_CHECKPOINT_SCHEMA 9u
 #define CDJ_DSP_L2_SIZE 0x40000u
 #define CDJ_DSP_SHARED_RAM_SIZE 0x20000u
 #define CDJ_DSP_SDRAM_SIZE 0x02000000u
@@ -43,7 +43,8 @@
  * Timer64P instances. Schema 5 appends both SPI instances. Schema 6 appends
  * cache-control state. Schema 7 appended the first McASP control/configuration
  * model. Schema 8 appends McASP transmit-buffer, EDMA3 channel-controller and
- * SYSCFG master-priority state;
+ * SYSCFG master-priority state. Schema 9 appends the board's write-only
+ * WM8740 DAC control state;
  * older inputs initialize any absent peripheral state. */
 typedef struct {
     uint32_t hpi_address, boot_phase;
@@ -68,6 +69,7 @@ typedef struct {
     CdjC6747Edma edma;
     CdjC6747SyscfgPriority syscfg_priority;
     CdjC6747IntcDelivery intc_delivery;
+    CdjWm8740 wm8740;
 } CdjDspCheckpointState;
 
 void cdj_dsp_checkpoint_prepare(CdjDspCheckpointState *state,

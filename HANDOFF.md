@@ -8,6 +8,82 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+### Latest integrated DSP batch (schema 9)
+
+This section supersedes the schema-8 checkpoint below.  The C674x core now
+drains interruptible SPLOOP/SPLOOPW schedules, preserves the selected request,
+vectors only after the software-pipeline epilog, and returns through the real
+`B IRP`/SPLX path.  SPLOOPW uses its delayed predicate during normal execution
+and keeps termination false for the first three cycles after interrupt return,
+as required by SPRUFE8B 7.10.3 and 7.13.  A predicate that terminates during
+interrupt drain vectors with the post-loop PC instead of incorrectly
+restarting the loop.  Focused tests cover both outcomes.
+
+Returned loops containing SPMASK follow the documented program/buffer
+selection reversal: SPMASKed program-memory operations become NOPs and exact
+retained unmasked operations execute.  Strict mode still fails closed because
+the interpreter does not model exact retained-buffer pipe-up timing.  Breadth
+mode retains loop tag/length/II metadata in the checkpointed loop context and
+reconstructs the schedule from exact PC/word/header matches in the stable
+program image.  A real ISR at `0x1180249a` contains its own compact SPLOOP, so
+breadth mode permits it to replace retained validation metadata and rebuilds
+the interrupted loop from current program bytes on the later SPLX return.
+Self-modifying loop bodies are unsupported and this is explicitly labeled as
+an approximation.
+
+SPI1 now has a functional-only, board-specific WM8740 control endpoint.  It
+accepts only the observed 16-bit, MSB-first, CS0 configuration and valid DAC
+register writes; SPI1 SOMI returns `0xffff` because the board leaves it
+disconnected and the C6747 pin has an internal pull-up.  Unsupported SPI
+configurations still fail closed.  `SPIBUF` correctly preserves sticky RXOVR.
+Checkpoint schema 9 adds lossless WM8740 programmed/active attenuation,
+unlock, last-word and transfer-count state.  The recorded schema-8 migration
+`runs/dsp-schema8-to-9-migration-2` passes exact trace, state and memory repeat
+gates.
+
+The next connected blocker was an older B0 delayed result colliding with the
+first ISR `MVKH B0`.  SPRUFE8B Figure 5-4/5.4.4 requires older non-annulled
+execute stages to finish before the handler.  Breadth mode now inserts the
+minimum empty cycles needed to retire already-issued loads/stores before ISR
+fetch.  Exact interrupt-entry latency is not claimed; strict mode retains its
+fail-closed collision behavior pending a full pipeline timing model.
+
+The deterministic batch first advanced 1,000,000 packets beyond the old
+27.1-million checkpoint, then another 5,000,000 packets after the interrupt
+entry fix.  `runs/dsp-post-interrupt-pipedown-5m-replay-2` ends by its step
+limit at 33,100,114 packets / 76,600,256 cycles with zero unsupported faults;
+its trace SHA-256 is
+`5121630448324766fed2c412853a65b212d66bb85f6feb1bfcfe4b71260066d1`
+and its exact repeat/state/memory gate passes.
+
+Fresh connected evidence is
+`runs/nxs-dsp-wm8740-sploopw-functional-3`.  MAIN, Blackfin and C674x execute
+together for the 15-second budget and record 96 schema-9 checkpoints, 105,288
+ordered events and 69 DSP stops.  The final stop is a phase budget, not a
+fault, at 56,099,500 packets / 116,888,772 cycles.  Its event transcript
+SHA-256 is
+`e5c8aa47c4920464f48fbcba99c8ce93b4f27453cb56d1a8eeb8d7c400c9a5cc`.
+The complete independent replay `runs/dsp-wm8740-connected-replay-3` verifies
+all 69 connected stops twice, exact final state/memory, coverage and the
+59,988-record transmit capture byte-for-byte.  Replay trace SHA-256 is
+`7fe32d6bda3f0dce5c285c9b116f299e328cf8ae842a5ac0690159c1417537a8`;
+coverage SHA-256 is
+`f5809e49118533611c3c125b7493fa33506f02519ea1886222163511c217de39`.
+Coverage contains 4,469 confirmed source packets, 5,396 confirmed instruction
+addresses, 4,585 distinct encodings, 4,843 dynamic edges, 33 probable targets
+and zero unsupported faults.
+
+The capture contains 29,994 words from each active McASP serializer, all zero,
+with SHA-256
+`f84639275492f868d73c8bff2009bcbaaaa7a76b911ff133dd36b230489a17b4`.
+The WM8740 receives eight genuine control transfers and ends with program
+registers `[511, 511, 8, 25, 0]`, active attenuation `[255, 255]`, and last
+word `0x619`.  This proves deterministic firmware-driven control and transport,
+not full DSP parity, full boot, nonzero audio, PCM correctness, or working
+host audio.  Functional SPI completion, returned-loop reconstruction,
+minimum interrupt pipe-down and packet-driven McASP slots remain explicitly
+ineligible for cycle-accuracy claims.
+
 ### Latest integrated DSP batch (schema 8)
 
 This section supersedes the older chronological status below.  The current

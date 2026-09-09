@@ -1659,3 +1659,80 @@ parallel-operation suppression. Returned SPMASK reversal, SPLOOPW return, full
 retained-buffer state, and interrupt-time loop drain still fail closed or remain
 unimplemented. Do not relax the strict resource check or describe the
 functional run as full DSP parity, full boot, or working audio.
+
+## Schema-9 SPI1, SPLOOPW and interrupt-return batch
+
+The historical schema-8 limitations immediately above are superseded by this
+section.  Rebuild QEMU and run the focused/full validation before collecting
+new evidence:
+
+```sh
+sh scripts/build-qemu-sh4.sh build/qemu
+cc -std=c11 -Wall -Wextra -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  -Iemulator/qemu tests/cstub/c674x.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c \
+  -o /tmp/cdj-c674x-san
+/tmp/cdj-c674x-san
+.venv/bin/python -m pytest -q
+```
+
+Schema 9 adds the board-specific WM8740 state to the checkpoint.  Exercise the
+one-step schema-8 migration with a fresh output directory:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-tx-capture-replay-3/final.cdjdsp \
+  runs/NEW_SCHEMA8_TO_9 --steps 1 \
+  --functional-dsp-timing --functional-dsp-audio --verify-repeat
+```
+
+`runs/dsp-schema8-to-9-migration-2` records the current passing migration gate.
+The new functional timing behavior is deliberately bounded: SPI1 accepts only
+the observed WM8740 configuration, interrupt-return SPMASK rebuild requires
+exact stable program bytes, ISR-local loops may replace retained validation
+metadata, and interrupt entry drains already-issued effects with a minimum
+empty interval.  The generated manifests label every approximation; strict
+mode remains fail closed where exact timing is absent.
+
+For a bounded continuation from the post-SPLOOPW checkpoint:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-wm8740-sploopw-nested-replay-1/final.cdjdsp \
+  runs/NEW_POST_INTERRUPT_REPLAY --steps 5000000 \
+  --functional-dsp-timing --functional-dsp-audio --verify-repeat
+```
+
+The recorded `runs/dsp-post-interrupt-pipedown-5m-replay-2` gate passes exact
+repeat state/memory and ends by its five-million-step limit at 33,100,114
+packets / 76,600,256 cycles with no fault.  Trace SHA-256 is
+`5121630448324766fed2c412853a65b212d66bb85f6feb1bfcfe4b71260066d1`.
+
+Collect and independently replay a complete connected transcript:
+
+```sh
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_SCHEMA9_CONNECTED --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4 \
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_SCHEMA9_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_SCHEMA9_CONNECTED_REPLAY --steps 100000000 \
+  --events runs/NEW_SCHEMA9_CONNECTED/dsp-events.jsonl \
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx \
+  --verify-repeat
+```
+
+Recorded evidence is `runs/nxs-dsp-wm8740-sploopw-functional-3` plus
+`runs/dsp-wm8740-connected-replay-3`.  It verifies all 69 connected stops and
+ends by phase budget at 56,099,500 packets / 116,888,772 cycles.  The replay
+passes exact trace, coverage, state/memory and transmit-capture repeat checks.
+Trace SHA-256 is
+`7fe32d6bda3f0dce5c285c9b116f299e328cf8ae842a5ac0690159c1417537a8`;
+coverage SHA-256 is
+`f5809e49118533611c3c125b7493fa33506f02519ea1886222163511c217de39`;
+the 59,988-record transmit SHA-256 is
+`f84639275492f868d73c8bff2009bcbaaaa7a76b911ff133dd36b230489a17b4`.
+All captured serializer words remain zero.  These are functional breadth and
+reproducibility results, not cycle accuracy, full boot, or working audio.

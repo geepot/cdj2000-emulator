@@ -6,8 +6,10 @@
 int main(void)
 {
     CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
+    CdjWm8740 dac;
     uint32_t value;
     cdj_c6747_spis_reset(spis);
+    cdj_wm8740_reset(&dac);
 
     assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI0_BASE, &value) && value == 0);
     assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value) &&
@@ -30,6 +32,8 @@ int main(void)
     assert(cdj_c6747_spis_write(spis, CDJ_C6747_SPI1_BASE + 0x50,
                                 0xe00fffff, 4, true));
     assert(spis[1].format[0] == 0x2007ff1f);
+    assert(cdj_c6747_spis_write(spis, CDJ_C6747_SPI1_BASE + 0x50,
+                                0x00021810, 4, true));
     assert(cdj_c6747_spis_write(spis, CDJ_C6747_SPI1_BASE + 0x48,
                                 0x02020408, 4, true));
     assert(cdj_c6747_spis_write(spis, CDJ_C6747_SPI1_BASE + 0x08,
@@ -43,6 +47,81 @@ int main(void)
     assert(!cdj_c6747_spis_write(spis, CDJ_C6747_SPI1_BASE + 0x3c,
                                  0x1234, 4, false));
     assert(spis[1].dat1 == 0);
+
+    /* Breadth mode attaches the schematic-confirmed write-only WM8740 to
+     * SPI1. Check phase stays atomic, while commit completes one 16-bit word
+     * and exposes controller status. The NC SOMI pad has an internal pull-up,
+     * so this is a sampled 0xffff bus value rather than a DAC response. */
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x1ff, 4, true, false));
+    assert(spis[1].dat1 == 0 && spis[1].receive_empty && !spis[1].flags &&
+           dac.transfers == 0 && dac.program[0] == 0xff);
+    assert(!cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x1ff, 4, false, true));
+    /* CSHOLD has no per-word chip-select release for the DAC to latch. Keep
+     * that sequence fail-closed until continuous-selection timing exists. */
+    assert(!cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c,
+        (1u << 28) | 0x1ff, 4, true, true));
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x1ff, 4, true, true));
+    assert(spis[1].dat1 == 0x1ff && spis[1].flags == 0x300 &&
+           !spis[1].receive_empty && spis[1].receive_data == 0xffff &&
+           dac.transfers == 1 && dac.last_word == 0x1ff &&
+           dac.program[0] == 0x1ff && dac.active_attenuation[0] == 0xff &&
+           dac.active_attenuation[1] == 0xff && cdj_wm8740_valid(&dac));
+
+    /* Acceptance cannot depend on mutable receive fullness: multiple DSP
+     * stores may all preflight before their E3 commits. The second completion
+     * occupies RXBUF; only a third unread completion reports overrun and the
+     * existing SPIBUF/RXBUF words remain intact. */
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x3ff, 4, true, false));
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x400, 4, true, false));
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x3ff, 4, true, true));
+    assert(spis[1].receive_buffer_full && spis[1].flags == 0x300 &&
+           dac.transfers == 2);
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x400, 4, true, true));
+    assert(spis[1].receive_buffer_full && spis[1].flags == 0x340 &&
+           spis[1].receive_status == 0x40000000 && dac.transfers == 3);
+    assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value) &&
+           value == 0x4000ffff && !spis[1].receive_empty &&
+           !spis[1].receive_buffer_full && spis[1].flags == 0x340);
+    assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value) &&
+           value == 0x4000ffff && spis[1].receive_empty &&
+           spis[1].flags == 0x240);
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x3ff, 4, true, true));
+    assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value));
+    assert(dac.transfers == 4 && dac.program[1] == 0x1ff &&
+           dac.active_attenuation[0] == 0xff &&
+           dac.active_attenuation[1] == 0xff);
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x400, 4, true, true));
+    assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value));
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x618, 4, true, true));
+    assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value));
+    assert(dac.program[2] == 0 && dac.program[3] == 0x18);
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0xc70, 4, true, true));
+    assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value));
+    assert(dac.program[4] == 0 && !dac.register4_unlocked);
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0x5e0, 4, true, true));
+    assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI1_BASE + 0x40, &value));
+    assert(cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI1_BASE + 0x3c, 0xc70, 4, true, true));
+    assert(dac.register4_unlocked && dac.program[4] == 0x70 &&
+           cdj_wm8740_valid(&dac));
+
+    cdj_c6747_spis_reset(spis);
+    cdj_wm8740_reset(&dac);
+    assert(!cdj_c6747_spis_write_wm8740(
+        spis, &dac, CDJ_C6747_SPI0_BASE + 0x3c, 0x1ff, 4, true, true));
 
     /* GPIO writes affect only pins selected as GPIO outputs. Pin reads stay
      * unavailable until every external/input value has evidence. */
@@ -86,7 +165,8 @@ int main(void)
            value == 0x5678 && !spis[0].receive_empty);
     assert(cdj_c6747_spis_read(spis, CDJ_C6747_SPI0_BASE + 0x40, &value) &&
            value == 0x5f005678 && spis[0].receive_empty &&
-           spis[0].receive_status == 0);
+           spis[0].receive_status == 0x40000000 &&
+           (spis[0].flags & 0x100) == 0);
 
     assert(!cdj_c6747_spis_write(spis, CDJ_C6747_SPI0_BASE + 0x04, 1, 4, true));
     assert(!cdj_c6747_spis_write(spis, CDJ_C6747_SPI0_BASE + 0x40, 0, 4, true));

@@ -8,6 +8,16 @@
 #define CDJ_C674X_LOOP_SETUP_PC UINT64_C(0xffffffff)
 #define CDJ_C674X_LOOP_INTERRUPT_SHIFT 32u
 #define CDJ_C674X_LOOP_INTERRUPT_MASK (UINT64_C(15) << CDJ_C674X_LOOP_INTERRUPT_SHIFT)
+#define CDJ_C674X_LOOP_RETAINED_TAG_SHIFT 36u
+#define CDJ_C674X_LOOP_RETAINED_TAG_MASK (UINT64_C(127) << CDJ_C674X_LOOP_RETAINED_TAG_SHIFT)
+#define CDJ_C674X_LOOP_RETAINED_LENGTH_SHIFT 43u
+#define CDJ_C674X_LOOP_RETAINED_LENGTH_MASK (UINT64_C(63) << CDJ_C674X_LOOP_RETAINED_LENGTH_SHIFT)
+#define CDJ_C674X_LOOP_RETAINED_II_SHIFT 49u
+#define CDJ_C674X_LOOP_RETAINED_II_MASK (UINT64_C(31) << CDJ_C674X_LOOP_RETAINED_II_SHIFT)
+#define CDJ_C674X_LOOP_RETAINED_VALID (UINT64_C(1) << 54)
+#define CDJ_C674X_LOOP_RETAINED_MASK \
+    (CDJ_C674X_LOOP_RETAINED_TAG_MASK | CDJ_C674X_LOOP_RETAINED_LENGTH_MASK | \
+     CDJ_C674X_LOOP_RETAINED_II_MASK | CDJ_C674X_LOOP_RETAINED_VALID)
 #define CDJ_C674X_LOOP_CONTEXT_VALID (UINT64_C(1) << 56)
 #define CDJ_C674X_LOOP_HAS_SPMASK (UINT64_C(1) << 57)
 #define CDJ_C674X_LOOP_INTERRUPT_ARMED (UINT64_C(1) << 62)
@@ -47,10 +57,61 @@ static unsigned loop_selected_interrupt(const CdjC674x *cpu)
            CDJ_C674X_LOOP_INTERRUPT_SHIFT;
 }
 
-static void loop_set_setup(CdjC674x *cpu, uint32_t setup_pc)
+static bool loop_retained_valid(const CdjC674x *cpu)
 {
+    return cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+           CDJ_C674X_LOOP_RETAINED_VALID;
+}
+
+static unsigned loop_retained_tags(const CdjC674x *cpu)
+{
+    return (cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+            CDJ_C674X_LOOP_RETAINED_TAG_MASK) >>
+           CDJ_C674X_LOOP_RETAINED_TAG_SHIFT;
+}
+
+static unsigned loop_retained_length(const CdjC674x *cpu)
+{
+    return (cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+            CDJ_C674X_LOOP_RETAINED_LENGTH_MASK) >>
+           CDJ_C674X_LOOP_RETAINED_LENGTH_SHIFT;
+}
+
+static unsigned loop_retained_ii(const CdjC674x *cpu)
+{
+    return (cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+            CDJ_C674X_LOOP_RETAINED_II_MASK) >>
+           CDJ_C674X_LOOP_RETAINED_II_SHIFT;
+}
+
+static void loop_clear_retained(CdjC674x *cpu)
+{
+    cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &=
+        ~CDJ_C674X_LOOP_RETAINED_MASK;
+}
+
+static bool loop_capture_retained(CdjC674x *cpu)
+{
+    if (cpu->loop_tags > 112 || cpu->loop.length > 48 ||
+        !cpu->loop.ii || cpu->loop.ii > 16)
+        return false;
+    loop_clear_retained(cpu);
+    cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] |=
+        CDJ_C674X_LOOP_RETAINED_VALID |
+        (uint64_t)cpu->loop_tags << CDJ_C674X_LOOP_RETAINED_TAG_SHIFT |
+        (uint64_t)cpu->loop.length << CDJ_C674X_LOOP_RETAINED_LENGTH_SHIFT |
+        (uint64_t)cpu->loop.ii << CDJ_C674X_LOOP_RETAINED_II_SHIFT;
+    return true;
+}
+
+static void loop_set_setup(CdjC674x *cpu, uint32_t setup_pc,
+                           bool preserve_retained)
+{
+    uint64_t retained = preserve_retained ?
+        cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+        CDJ_C674X_LOOP_RETAINED_MASK : 0;
     cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] =
-        CDJ_C674X_LOOP_CONTEXT_VALID | setup_pc;
+        CDJ_C674X_LOOP_CONTEXT_VALID | retained | setup_pc;
 }
 
 static void loop_set_interrupt_phase(CdjC674x *cpu, unsigned interrupt,
@@ -67,6 +128,20 @@ static void loop_set_interrupt_phase(CdjC674x *cpu, unsigned interrupt,
 static void loop_clear_interrupt_phase(CdjC674x *cpu)
 {
     loop_set_interrupt_phase(cpu, 0, 0);
+}
+
+static bool functional_interrupt_pipe_down(CdjC674x *cpu)
+{
+    if (!cdj_c674x_loop_functional_timing()) return true;
+    uint64_t latest = cpu->cycles;
+    for (unsigned i = 0; i < cpu->load_count; ++i)
+        if (cpu->loads[i].due > latest) latest = cpu->loads[i].due;
+    for (unsigned i = 0; i < cpu->store_count; ++i)
+        if (cpu->stores[i].due > latest) latest = cpu->stores[i].due;
+    uint64_t drain = latest - cpu->cycles;
+    if (drain > UINT32_MAX) return false;
+    if (cpu->idle_cycles < drain) cpu->idle_cycles = drain;
+    return true;
 }
 
 static int32_t sx(uint32_t value, unsigned bits)
@@ -620,6 +695,44 @@ static bool loop_allow(void *opaque, uint32_t tag)
     return !(unit & context->mask);
 }
 
+static bool loop_retained_tag(const CdjC674x *cpu,
+                              const CdjC674xInstruction *insn,
+                              uint32_t *tag)
+{
+    unsigned matches = 0, found = 0, limit = loop_retained_tags(cpu);
+    if (!loop_retained_valid(cpu) || limit > 112) return false;
+    for (unsigned i = 0; i < limit; ++i) {
+        const CdjC674xInstruction *old = &cpu->loop_instructions[i];
+        if (old->pc == insn->pc && old->word == insn->word &&
+            old->compact == insn->compact && old->header == insn->header) {
+            found = i;
+            ++matches;
+        }
+    }
+    if (matches != 1) return false;
+    *tag = found;
+    return true;
+}
+
+static bool loop_retained_schedule_complete(const CdjC674x *cpu)
+{
+    bool seen[112] = {0};
+    unsigned limit = loop_retained_tags(cpu);
+    if (!loop_retained_valid(cpu) || limit > 112 ||
+        cpu->loop.length != loop_retained_length(cpu) ||
+        cpu->loop.ii != loop_retained_ii(cpu))
+        return false;
+    for (unsigned origin = 0; origin < cpu->loop.length; ++origin)
+        for (unsigned i = 0; i < cpu->loop.count[origin]; ++i) {
+            uint32_t tag = cpu->loop.tags[origin][i];
+            if (tag >= limit || seen[tag]) return false;
+            seen[tag] = true;
+        }
+    for (unsigned i = 0; i < limit; ++i)
+        if (!seen[i]) return false;
+    return true;
+}
+
 /* Side-effect-free RAM reads; nonaligned words may span two bus words. */
 static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
                         unsigned size, uint64_t *value)
@@ -704,16 +817,17 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
         bool enough_ilc = cpu->loop.predicate_loop ||
                           cpu->control[13] >= loading_stages;
         if (!boundary || opening || terminating || !enough_ilc) return true;
-        if (cpu->loop.predicate_loop)
-            return stop(cpu, cpu->pc, 0,
-                        "SPLOOPW interrupt drain not implemented");
         uint64_t context = cpu->control_ready[CDJ_C674X_LOOP_CONTEXT];
         if (!(context & CDJ_C674X_LOOP_CONTEXT_VALID))
             return stop(cpu, cpu->pc, 0,
                         "SPLOOP interrupt setup address unavailable");
-        if (context & CDJ_C674X_LOOP_HAS_SPMASK)
+        if ((context & CDJ_C674X_LOOP_HAS_SPMASK) &&
+            !cdj_c674x_loop_functional_timing())
             return stop(cpu, cpu->pc, 0,
                         "SPLOOP interrupt SPMASK resume not implemented");
+        if (!loop_capture_retained(cpu))
+            return stop(cpu, cpu->pc, 0,
+                        "SPLOOP retained buffer state invalid");
         unsigned interrupt = 4;
         while (!(eligible & (1u << interrupt))) ++interrupt;
         /* Detection is on this stage boundary; draining begins on the next
@@ -733,6 +847,7 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
         /* Section 7.13.6: if loop code disables the request while draining,
          * finish the epilog and continue after SPKERNEL without vectoring. */
         loop_clear_interrupt_phase(cpu);
+        loop_clear_retained(cpu);
         interrupted_loop = false;
         if (!eligible) return true;
     }
@@ -764,6 +879,13 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
     cpu->control[26] = (saved_tsr & ((1u << 4) | (1u << 2))) |
                        (1u << 15) | (1u << 9);
     cpu->pc = (cpu->control[5] & 0xfffffc00u) + interrupt * 32u;
+    /* Figure 5-4 keeps older, non-annulled E-stages ahead of the forced ISR
+     * branch. Breadth mode collapses the unspecified entry pipeline to the
+     * minimum empty cycles that retire every already-issued result. Strict
+     * mode retains its fail-closed collision behavior pending exact timing. */
+    if (!functional_interrupt_pipe_down(cpu))
+        return stop(cpu, cpu->pc, 0,
+                    "interrupt pipe-down interval overflow");
     return true;
 }
 
@@ -2203,7 +2325,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         if (has_mask)
             out.control_ready[CDJ_C674X_LOOP_CONTEXT] |=
                 CDJ_C674X_LOOP_HAS_SPMASK;
-        if ((out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) && has_mask)
+        bool returning =
+            (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) != 0;
+        if (returning && has_mask &&
+            !cdj_c674x_loop_functional_timing())
             return stop(cpu, source.instructions[0].pc,
                         source.instructions[0].word,
                         "SPLOOP interrupt-return SPMASK not implemented");
@@ -2249,6 +2374,19 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 if (n > 1) out.loop_wait = n - 1;
                 continue;
             }
+            bool spmasked = false;
+            if (has_mask && masking.mask) {
+                unsigned unit = instruction_unit(&insn);
+                if (!unit) return stop(cpu, insn.pc, w, "SPMASK unit not implemented");
+                spmasked = (unit & masking.mask) != 0;
+                /* Section 7.13.2 reverses SPMASK while the interrupted loop
+                 * pipes up: the program-memory operation is a NOP, and
+                 * matching loop-buffer operations execute normally.
+                 * Functional timing reconstructs that pipe-up from the
+                 * unchanged program image instead of claiming retained
+                 * buffer timing. Strict mode stopped above. */
+                if (spmasked && returning) continue;
+            }
             /* SPRUFE8B 3.10 and 7.7.3.3: PROT expands the program stream
              * with four empty loading cycles. Buffered instructions continue
              * issuing during those cycles, just as for explicit NOP 4.
@@ -2264,25 +2402,42 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                                   (w & 0xffe) == 0x362 || (w & 0x1ffc) == 0x120)) ||
                 compact_branch(&insn))
                 return stop(cpu, insn.pc, w, "loop body control instruction not implemented");
-            if (has_mask && masking.mask) {
-                unsigned unit = instruction_unit(&insn);
-                if (!unit) return stop(cpu, insn.pc, w, "SPMASK unit not implemented");
-                if (unit & masking.mask) {
-                    direct.instructions[direct.count++] = insn;
-                    continue;
-                }
+            if (spmasked) {
+                direct.instructions[direct.count++] = insn;
+                continue;
             }
             /* Section 7.18: MVC may execute from memory when masked but
              * cannot enter the loop buffer. */
             if ((!insn.compact && (w & 0xffe) == 0x3a2) ||
                 (insn.compact && (w & 0xfc7f) == 0xd86f))
                 return stop(cpu, insn.pc, w, "unmasked loop MVC not permitted");
-            if (out.loop_tags == 112) return stop(cpu, insn.pc, w, "loop instruction capacity exceeded");
-            tags[count++] = out.loop_tags;
-            out.loop_instructions[out.loop_tags++] = insn;
+            if (returning && loop_retained_valid(&out)) {
+                uint32_t tag;
+                if (!loop_retained_tag(&out, &insn, &tag))
+                    return stop(cpu, insn.pc, w,
+                                "SPLOOP retained instruction mismatch");
+                tags[count++] = tag;
+            } else {
+                if (out.loop_tags == 112)
+                    return stop(cpu, insn.pc, w,
+                                "loop instruction capacity exceeded");
+                tags[count++] = out.loop_tags;
+                out.loop_instructions[out.loop_tags++] = insn;
+            }
         }
         if (!cdj_c674x_loop_load(&out.loop, tags, count, finish, delay))
             return stop(cpu, cpu->pc, 0, "invalid loop buffer load");
+        if (finish && returning) {
+            if (loop_retained_valid(&out) &&
+                !loop_retained_schedule_complete(&out))
+                return stop(cpu, cpu->pc, 0,
+                            "SPLOOP retained schedule mismatch");
+            /* An ISR-local SPLOOP may have replaced the retained metadata in
+             * functional mode. Its return reconstructs from stable program
+             * memory, but still finishes the one-time pipe-up phase here. */
+            out.loop_pred_history &= ~CDJ_C674X_LOOP_RETURNING;
+            loop_clear_retained(&out);
+        }
         combined.next_pc = source.next_pc;
     } else if (loading) {
         --out.loop_wait;
@@ -2308,6 +2463,8 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         --out.idle_cycles;
     }
     uint32_t tags[8]; unsigned count; bool scheduler_post, drained;
+    if (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING)
+        masking.mask = 0;
     if (!cdj_c674x_loop_issue_filtered(&out.loop, tags, &count, &scheduler_post,
                                      &drained, loop_allow, &masking))
         return stop(cpu, cpu->pc, 0, "loop issue capacity exceeded");
@@ -2356,6 +2513,8 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
          * loop setup address. */
         if (interrupt_draining)
             loop_clear_interrupt_phase(&out);
+        if (interrupt_draining)
+            loop_clear_retained(&out);
     }
     if (drained && scheduler_post &&
         (!interrupt_draining || (!out.load_count && !out.store_count)))
@@ -2406,9 +2565,14 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         bool returning = (cpu->control[26] & CDJ_C674X_TSR_SPLX) != 0;
         bool delayed_loop = (full_sploopd || compact_sploopd) && !returning;
         unsigned pred = first.compact ? 0 : w >> 29;
-        if (returning && while_loop)
+        if (!returning && loop_retained_valid(cpu) &&
+            !cdj_c674x_loop_functional_timing())
             return stop(cpu, cpu->pc, w,
-                        "SPLOOPW interrupt return not implemented");
+                        "nested SPLOOP would overwrite retained buffer");
+        if (returning && !loop_retained_valid(cpu) &&
+            !cdj_c674x_loop_functional_timing())
+            return stop(cpu, cpu->pc, w,
+                        "SPLOOP interrupt-return buffer unavailable");
         if (while_loop ? (!pred || pred == 7) : (!first.compact && (w >> 28) != 0))
             return stop(cpu, cpu->pc, w, "unsupported loop predicate");
         if (!while_loop && !delayed_loop &&
@@ -2421,7 +2585,11 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                                     : ((w >> 23) & 31) + 1;
         if (!cdj_c674x_loop_init(&out.loop, ii, cpu->control[13]))
             return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
-        loop_set_setup(&out, first.pc);
+        if (returning && loop_retained_valid(cpu) &&
+            ii != loop_retained_ii(cpu))
+            return stop(cpu, cpu->pc, w,
+                        "SPLOOP interrupt-return interval mismatch");
+        loop_set_setup(&out, first.pc, returning);
         out.loop.predicate_loop = while_loop;
         out.loop.delayed_count = delayed_loop;
         out.loop_pred_history = returning ? CDJ_C674X_LOOP_RETURNING : 0;
@@ -2430,7 +2598,8 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             static const unsigned regs[] = {0,0,1,2,1,2,0};
             out.loop_pred_bank = banks[pred]; out.loop_pred_reg = regs[pred];
             out.loop_pred_invert = (w >> 28) & 1;
-            out.loop_pred_history = 7;
+            out.loop_pred_history =
+                (returning ? CDJ_C674X_LOOP_RETURNING : 0) | 7;
         }
         /* Loop setup cannot share a packet with multicycle operations. */
         for (unsigned j = 1; j < packet.count; ++j) {
@@ -2467,7 +2636,9 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             out.loop_active = false;
             if (!returning) out.control[26] &= ~CDJ_C674X_TSR_SPLX;
         }
-        out.loop_wait = out.loop_tags = out.loop_packets = 0;
+        out.loop_wait = out.loop_packets = 0;
+        out.loop_tags = loop_retained_valid(&out) ?
+            loop_retained_tags(&out) : 0;
         if (!while_loop && !delayed_loop && out.control[13]) --out.control[13];
         *cpu = out;
         return true;
