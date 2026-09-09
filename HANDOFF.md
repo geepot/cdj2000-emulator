@@ -8,6 +8,23 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Independent GUI capture audit (`/tmp/cdj-panel-capture-trace-2`): MAIN log
+records 83 sends (14 status, 67 240-byte command-9 payloads, two 48-byte
+command-0x10 payloads). SPORT dump records 29,946 status deliveries, 1,602
+240-byte deliveries and 4,007 48-byte deliveries. Only one unique payload of
+each length exists. Strict framing audit consumes all 2,777,800 bytes as
+35,555 SPRX records, with no resynchronization, truncation or trailing bytes.
+Dump SHA-256: `85f62fad71bb5001f9d90643cbdc0dbbd7d02f3034077bc29e4e762bde0fd97c`;
+MAIN log SHA-256: `6738077450aced5921d28708e2bc2f0e8b5e8f4a5bd718afd6a49f56fdc45469`.
+Reproduce the request-window report with:
+`python -m tools.cdj_main.link_exchanges /tmp/cdj-panel-capture-trace-2/main.log --dump /tmp/cdj-panel-capture-trace-2/link.bin`.
+There are 219 request-bit frames and 183 adjacent request pairs with identical
+first six logged words; full-frame identity cannot be inferred from this log.
+All 167 frames after the final MAIN send at guest time 38.4486 are plain status
+polls. Payload recycling is proven; its causal role in pool exhaustion is still
+under investigation. The dump has no timestamps, so do not imply exact alignment
+between recycled deliveries and request events.
+
 SPORT audit for the UI task: live simulator source is
 `build/gdb-17.2/sim/bfin/dv-bfin_ppi.c` (SPORT resides in this file), mirrored
 by patch 02. `bfin_sport_link_take` repeats a cached 64-byte status when no
