@@ -50,22 +50,22 @@ from PIL import Image, ImageDraw, ImageFilter, ImageTk
 # design language), and from the reference photo where it does not: the
 # CDJ-2000's SOURCE column is blue for LINK and amber for the rest, and the
 # browse row is amber on near-black.
-CHASSIS = (26, 26, 30)
-CHASSIS_EDGE = (12, 12, 15)
-PLATE = (36, 36, 42)
-BTN = (48, 48, 55)
-BTN_EDGE = (86, 86, 96)
-BTN_TEXT = (196, 196, 206)
-DIM_TEXT = (120, 120, 132)
-AMBER = (220, 200, 0)
-AMBER_LIT = (255, 240, 44)
-BLUE = (0, 102, 255)
-BLUE_LIT = (120, 180, 255)
-WHITE = (222, 222, 222)
-CUE_ORANGE = (255, 150, 0)
-PLAY_GREEN = (0, 200, 100)
-RED = (238, 69, 85)
-LCD_SURROUND = (8, 8, 10)
+CHASSIS = (18, 20, 24)
+CHASSIS_EDGE = (8, 9, 12)
+PLATE = (35, 38, 44)
+BTN = (43, 47, 54)
+BTN_EDGE = (92, 98, 110)
+BTN_TEXT = (210, 214, 224)
+DIM_TEXT = (137, 143, 156)
+AMBER = (226, 190, 42)
+AMBER_LIT = (255, 224, 84)
+BLUE = (48, 133, 255)
+BLUE_LIT = (124, 185, 255)
+WHITE = (230, 234, 242)
+CUE_ORANGE = (255, 153, 38)
+PLAY_GREEN = (33, 201, 111)
+RED = (244, 86, 101)
+LCD_SURROUND = (5, 7, 10)
 
 # ----------------------------------------------------------------- geometry --
 #
@@ -75,7 +75,7 @@ LCD_SURROUND = (8, 8, 10)
 # reason -- one coordinate system, scaled once at the edge.
 PANEL_W = 672
 PANEL_H = 486
-RACK_H = 26                     # caption strip; the rack itself is Tk widgets
+RACK_H = 0                      # diagnostics live in the Inspector
 
 LCD_X, LCD_Y = 86, 56
 LCD_W, LCD_H = 480, 234
@@ -112,7 +112,7 @@ PLACEMENTS: dict[str, Place] = {
     # records (view_ui.WINDOW_LONG_HOLD_MS).  The suffix keeps it out of the
     # bit count (coverage strips it, as it does field6-touch) and lets
     # view_ui resolve it to the long-press control.
-    "20.3-hold": Place(574, 18, 100, 30, "UTILITY", AMBER, font=11),
+    "20.3-hold": Place(586, 18, 76, 30, "UTILITY", AMBER, font=10),
     # ---- the SOURCE column, left of the panel ----
     "19.0": Place(8, 62, 70, 26, "LINK", BLUE, font=10),
     "19.1": Place(8, 96, 70, 26, "USB", AMBER, font=10),
@@ -160,6 +160,35 @@ PLACEMENTS: dict[str, Place] = {
 PLACEMENTS["16.1"] = Place(288, 396, 108, 52, "CUE", CUE_ORANGE, font=13)
 PLACEMENTS["16.0"] = Place(404, 396, 108, 52, "PLAY/PAUSE", PLAY_GREEN, font=11)
 
+# A centered platter with transport to its left: a deck, not a button matrix.
+# Input IDs stay unchanged; this is presentation only.
+PLACEMENTS.update({
+    "15.5": Place(242, 302, 178, 178, "JOG", WHITE, shape="wheel"),
+    "16.1": Place(28, 348, 60, 60, "CUE", CUE_ORANGE, shape="round", font=13),
+    "16.0": Place(28, 418, 60, 60, "PLAY / II", PLAY_GREEN, shape="round", font=9),
+    "18.1": Place(108, 350, 56, 24, "|<< PREV", DIM_TEXT, font=7),
+    "18.2": Place(172, 350, 56, 24, "NEXT >>|", DIM_TEXT, font=7),
+    "18.3": Place(108, 384, 56, 24, "<<", DIM_TEXT),
+    "18.4": Place(172, 384, 56, 24, ">>", DIM_TEXT),
+    "18.6": Place(108, 426, 120, 24, "JOG MODE", DIM_TEXT),
+    "15.1": Place(108, 456, 56, 22, "REV", DIM_TEXT),
+    "15.0": Place(172, 456, 56, 22, "LOCK", DIM_TEXT),
+    "16.5": Place(24, 306, 46, 28, "CUE A", AMBER, font=7),
+    "16.6": Place(76, 306, 46, 28, "CUE B", AMBER, font=7),
+    "16.7": Place(128, 306, 46, 28, "CUE C", AMBER, font=7),
+    "18.0": Place(180, 306, 48, 28, "REC", RED, font=8),
+    "16.4": Place(444, 306, 56, 28, "LOOP IN", AMBER, font=7),
+    "16.3": Place(508, 306, 56, 28, "LOOP OUT", AMBER, font=7),
+    "16.2": Place(444, 344, 56, 28, "RELOOP", AMBER, font=7),
+    "17.1": Place(508, 344, 56, 28, "4-BEAT", AMBER, font=7),
+})
+
+
+def fit_scale(width: int, height: int, maximum: float = 3.0) -> float:
+    """Fit the entire deck, with a little breathing room, into the viewport."""
+    return max(0.1, min(maximum, (width - 24) / PANEL_W,
+                        (height - 24) / (PANEL_H + RACK_H)))
+
 # The SELECT encoder is the same physical control as 17.0 -- the knob turns and
 # pushes -- so it is drawn once and carries both.
 ENCODER_FIELD_PLACE = "17.0"
@@ -178,12 +207,17 @@ def _font(size: int):
     started two emulators.
     """
     from PIL import ImageFont
-    for name in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "seguisb.ttf"):
+    for name in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "seguisb.ttf",
+                 "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
         try:
             return ImageFont.truetype(name, size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow 9 still supports the project's minimum version.
+        return ImageFont.load_default()
 
 
 class Renderer:
@@ -217,16 +251,38 @@ class Renderer:
         # as a flat fill.  Cheap: one line per row of the deck.
         for y in range(PANEL_H * s):
             t = y / max(1, PANEL_H * s - 1)
-            draw.line([(0, y), (size[0], y)],
-                      fill=lerp(PLATE, CHASSIS, t * 0.85))
+            # A narrow highlight at the top and a darker foot make the panel
+            # feel like a shallow piece of hardware instead of a grey bitmap.
+            tone = lerp(PLATE, CHASSIS, min(1.0, t * 0.92))
+            if y < 2 * s:
+                tone = lerp(tone, (86, 90, 100), 0.28)
+            draw.line([(0, y), (size[0], y)], fill=tone)
         draw.rectangle([0, PANEL_H * s, size[0], size[1]], fill=CHASSIS_EDGE)
+
+        # Recessed working zones keep the dense lower panel legible while
+        # staying quiet enough that the firmware LCD remains the focal point.
+        zones = [
+            (5, 52, 78, 288),       # source column
+            (16, 298, 234, 482),    # hot cues / transport
+            (436, 298, 572, 382),   # loop
+            (578, 298, 668, 390),   # tempo controls
+        ]
+        for x1, y1, x2, y2 in zones:
+            box = [x1 * s, y1 * s, x2 * s, y2 * s]
+            draw.rounded_rectangle(box, radius=5 * s,
+                                   fill=lerp(CHASSIS, PLATE, 0.18),
+                                   outline=(48, 52, 60),
+                                   width=max(1, s // 2))
 
         # The LCD's bezel: the panel is inset in the real deck, so a dark
         # surround with a light top edge.
         bezel = [(LCD_X - 6) * s, (LCD_Y - 6) * s,
                  (LCD_X + LCD_W + 6) * s, (LCD_Y + LCD_H + 6) * s]
-        draw.rounded_rectangle(bezel, radius=3 * s, fill=LCD_SURROUND,
-                               outline=(60, 60, 68), width=max(1, s // 2))
+        draw.rounded_rectangle(bezel, radius=5 * s, fill=LCD_SURROUND,
+                               outline=(72, 78, 90), width=max(1, s))
+        draw.line([(LCD_X * s, (LCD_Y - 3) * s),
+                   ((LCD_X + LCD_W) * s, (LCD_Y - 3) * s)],
+                  fill=(103, 110, 123), width=max(1, s // 2))
 
         # The jog well, so the wheel does not float on the plate.
         jog = PLACEMENTS["15.5"]
@@ -237,15 +293,37 @@ class Renderer:
                      fill=(18, 18, 22), outline=(58, 58, 66),
                      width=max(1, s // 2))
 
-        draw.text((10 * s, (PANEL_H + 7) * s),
-                  "below: the inputs MAIN's name table does not name. They are "
-                  "placed nowhere on the deck — where a control sits is not "
-                  "evidence of what it is.",
-                  font=self.font(7), fill=(112, 112, 124))
+        # Engraved labels are presentation, not mappings: they name only the
+        # already-measured groups whose controls are placed below.
+        engravings = [
+            ((10, 53), "SOURCE"),
+            ((28, 299), "PERFORMANCE"),
+            ((446, 299), "LOOP"),
+            ((586, 299), "TEMPO"),
+        ]
+        for (x, y), text in engravings:
+            draw.text((x * s, y * s), text, font=self.font(6),
+                      fill=(105, 111, 124))
+
+        draw.text((588 * s, 283 * s), "CDJ–2000", font=self.font(10),
+                  fill=(207, 211, 220))
+
+        # Four restrained fasteners finish the instrument-panel silhouette.
+        for x, y in ((8, 8), (664, 8), (8, 478), (664, 478)):
+            rr = 3 * s
+            draw.ellipse([x * s - rr, y * s - rr,
+                          x * s + rr, y * s + rr],
+                         fill=(24, 26, 31), outline=(65, 69, 78),
+                         width=max(1, s // 2))
+            draw.line([(x * s - 1.5 * s, y * s),
+                       (x * s + 1.5 * s, y * s)], fill=(91, 96, 107),
+                      width=max(1, s // 2))
+
         return image
 
     # -- one key, unlit and lit -------------------------------------------
-    def key(self, place: Place, lit: bool) -> Image.Image:
+    def key(self, place: Place, lit: bool,
+            hovered: bool = False) -> Image.Image:
         """A single key with its own glow, on transparent background.
 
         Returned oversized by `pad` on each side so the bloom has somewhere to
@@ -257,11 +335,11 @@ class Renderer:
         image = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
 
         if place.shape == "knob":
-            self._knob(image, place, lit, pad)
+            self._knob(image, place, lit, pad, hovered)
         elif place.shape == "wheel":
-            self._wheel(image, place, lit, pad)
+            self._wheel(image, place, lit, pad, hovered)
         else:
-            self._rect(image, place, lit, pad)
+            self._rect(image, place, lit, pad, hovered)
         return image
 
     def _bloom(self, image: Image.Image, shape: Image.Image,
@@ -278,10 +356,12 @@ class Renderer:
         image.alpha_composite(glow)
 
     def _rect(self, image: Image.Image, place: Place, lit: bool,
-              pad: int) -> None:
+              pad: int, hovered: bool = False) -> None:
         s = self.scale
         box = [pad, pad, pad + place.w * s, pad + place.h * s]
         radius = max(2, int(place.h * s * 0.15))
+        if place.shape == "round":
+            radius = min(place.w, place.h) * s // 2
         accent = place.accent
 
         if lit:
@@ -293,11 +373,18 @@ class Renderer:
                 box, radius=radius, fill=(*accent, 210))
             self._bloom(image, glow_layer, accent, 0.85)
         else:
-            fill = BTN
-            edge = lerp(accent, BTN_EDGE, 0.55)
-            text = lerp(accent, BTN_TEXT, 0.45)
+            fill = lerp(BTN, (64, 69, 79), 0.38 if hovered else 0.0)
+            edge = lerp(accent, (156, 164, 180) if hovered else BTN_EDGE,
+                        0.42 if hovered else 0.55)
+            text = lerp(accent, (235, 238, 245) if hovered else BTN_TEXT,
+                        0.62 if hovered else 0.45)
 
         draw = ImageDraw.Draw(image)
+        # A small cast shadow and top highlight give the keys a physical
+        # resting state without resorting to a loud skeuomorphic texture.
+        shadow = [box[0] + s, box[1] + 2 * s,
+                  box[2] + s, box[3] + 2 * s]
+        draw.rounded_rectangle(shadow, radius=radius, fill=(8, 9, 12, 190))
         draw.rounded_rectangle(box, radius=radius, fill=fill)
         # The double border cdj3k-emu draws on every key: a light outer and a
         # dark inner line is what gives a flat fill an edge.
@@ -306,12 +393,23 @@ class Renderer:
         draw.rounded_rectangle([box[0] + s, box[1] + s, box[2] - s, box[3] - s],
                                radius=max(1, radius - s), outline=(18, 18, 22),
                                width=max(1, s // 2))
+        draw.line([(box[0] + radius, box[1] + s),
+                   (box[2] - radius, box[1] + s)],
+                  fill=lerp(fill, (255, 255, 255), 0.22),
+                  width=max(1, s // 2))
+        # The illuminated rail is visible even at rest and blooms with the
+        # rest of the control after a click.
+        rail = lerp(accent, BTN, 0.56 if not hovered else 0.36)
+        if place.shape != "round":
+            draw.rounded_rectangle([box[0] + 5 * s, box[1] + 3 * s,
+                                    box[2] - 5 * s, box[1] + 4 * s],
+                                   radius=max(1, s), fill=rail)
         font = self.font(place.font)
         draw.text(((box[0] + box[2]) / 2, (box[1] + box[3]) / 2), place.label,
                   font=font, fill=text, anchor="mm")
 
     def _knob(self, image: Image.Image, place: Place, lit: bool,
-              pad: int) -> None:
+              pad: int, hovered: bool = False) -> None:
         s = self.scale
         r = place.w * s / 2
         cx = cy = pad + r
@@ -326,7 +424,8 @@ class Renderer:
             draw.ellipse([cx - step, cy - step, cx + step, cy + step],
                          fill=lerp((70, 70, 80), (34, 34, 40), t))
         draw.ellipse([cx - r, cy - r, cx + r, cy + r],
-                     outline=(120, 120, 132), width=max(1, s // 2))
+                     outline=(174, 181, 196) if hovered else (120, 120, 132),
+                     width=max(1, s))
         # The detent ticks, so a turn is visible rather than inferred.
         for index in range(24):
             angle = index * math.pi / 12
@@ -341,7 +440,7 @@ class Renderer:
                   fill=(210, 210, 225) if lit else (150, 150, 165), anchor="mm")
 
     def _wheel(self, image: Image.Image, place: Place, lit: bool,
-               pad: int) -> None:
+               pad: int, hovered: bool = False) -> None:
         s = self.scale
         r = place.w * s / 2
         cx = cy = pad + r
@@ -351,8 +450,17 @@ class Renderer:
             draw.ellipse([cx - step, cy - step, cx + step, cy + step],
                          fill=lerp((58, 58, 66), (30, 30, 36), t))
         draw.ellipse([cx - r, cy - r, cx + r, cy + r],
-                     outline=(110, 110, 124) if lit else (74, 74, 84),
+                     outline=((174, 181, 196) if hovered else
+                              ((110, 110, 124) if lit else (74, 74, 84))),
                      width=max(1, s))
+        for index in range(48):
+            angle = index * math.pi / 24
+            inner, outer = r * 0.88, r * 0.97
+            draw.line([cx + inner * math.cos(angle),
+                       cy + inner * math.sin(angle),
+                       cx + outer * math.cos(angle),
+                       cy + outer * math.sin(angle)],
+                      fill=(88, 92, 104), width=max(1, s // 2))
         # The jog LCD in the middle is a real, separate display on this deck
         # (memory cdj-jog-display-keep-separate); it is drawn as a recess and
         # left empty rather than filled with invented content.
@@ -399,61 +507,215 @@ class Faceplate(tk.Canvas):
     def __init__(self, parent: tk.Misc, scale: int,
                  resolve: Callable[[str], object | None],
                  click: Callable[[object], None],
-                 rotate: Callable[[int, int], None]) -> None:
+                 rotate: Callable[[int, int], None],
+                 long_press: Callable[[object], None] | None = None,
+                 hold: Callable[[object], None] | None = None) -> None:
         self.scale = scale
-        self.renderer = Renderer(scale)
+        self.renderer = Renderer(2)
+        self.assets: dict[object, Image.Image] = {}
         self.resolve = resolve
         self.on_click = click
         self.on_rotate = rotate
+        self.on_long_press = long_press or click
+        self.on_hold = hold or click
+        self.last_frame = Image.new("RGB", (LCD_W, LCD_H))
+        self.latched: set[str] = set()
         super().__init__(parent, width=PANEL_W * scale,
                          height=(PANEL_H + RACK_H) * scale,
                          highlightthickness=0, borderwidth=0,
-                         background="#%02x%02x%02x" % CHASSIS)
+                         background="#%02x%02x%02x" % CHASSIS,
+                         takefocus=True)
 
-        self.chassis_photo = ImageTk.PhotoImage(self.renderer.chassis())
+        self.chassis_photo = self._photo("chassis", self.renderer.chassis)
         self.create_image(0, 0, image=self.chassis_photo, anchor="nw")
 
         self.key_photo: dict[str, tuple[ImageTk.PhotoImage,
+                                        ImageTk.PhotoImage,
                                         ImageTk.PhotoImage]] = {}
         self.key_item: dict[str, int] = {}
         self.lit_until: dict[str, str] = {}
         for name in placed_ids():
             self._build_key(name)
 
+        self.focused_name = placed_ids()[0]
+        self.hovered_name: str | None = None
+        self.bind("<FocusIn>", lambda _event: self._show_resting(
+            self.focused_name))
+        self.bind("<FocusOut>", lambda _event: self._show_resting(
+            self.focused_name, focused=False))
+        self.bind("<Left>", lambda _event: self._move_focus(-1, 0))
+        self.bind("<Right>", lambda _event: self._move_focus(1, 0))
+        self.bind("<Up>", lambda _event: self._move_focus(0, -1))
+        self.bind("<Down>", lambda _event: self._move_focus(0, 1))
+        self.bind("<Return>", lambda _event: self._pressed(self.focused_name))
+        self.bind("<space>", lambda _event: self._pressed(self.focused_name))
+
         # The LCD.  One Tk image for the life of the window; `set_frame` pastes
         # into it.  Building a fresh PhotoImage per frame costs 8.0 ms against
         # 5.2 ms for a paste, and -- worse -- churns a 1.8 MB Tk image 30 times
         # a second, which is what the old window did.
-        blank = Image.new("RGB", (LCD_W * scale, LCD_H * scale), (0, 0, 0))
+        blank = Image.new("RGB", (round(LCD_W * scale), round(LCD_H * scale)), (0, 0, 0))
         self.lcd_photo = ImageTk.PhotoImage(blank)
         self.create_image(LCD_X * scale, LCD_Y * scale, image=self.lcd_photo,
                           anchor="nw")
 
         self._drag_angle: float | None = None
+        self._drag_started = False
+        self.active_pointer: str | None = None
+        self.bind("<Button-1>", self._pointer_down)
+        self.bind("<B1-Motion>", self._pointer_drag)
+        self.bind("<ButtonRelease-1>", self._pointer_up)
+        self.bind("<Button-3>", self._pointer_hold)
+        self.bind("<Button-2>", self._pointer_hold)
+
+    def _photo(self, key, build) -> ImageTk.PhotoImage:
+        if key not in self.assets:
+            self.assets[key] = build()
+        source = self.assets[key]
+        size = (max(1, round(source.width * self.scale / 2)),
+                max(1, round(source.height * self.scale / 2)))
+        return ImageTk.PhotoImage(source.resize(size, Image.Resampling.LANCZOS))
+
+    def set_scale(self, scale: float) -> None:
+        if abs(scale - self.scale) < 0.01:
+            return
+        for timer in self.lit_until.values():
+            self.after_cancel(timer)
+        self.lit_until.clear()
+        self.scale = scale
+        self.delete("all")
+        self.configure(width=round(PANEL_W * scale), height=round(PANEL_H * scale))
+        self.chassis_photo = self._photo("chassis", self.renderer.chassis)
+        self.create_image(0, 0, image=self.chassis_photo, anchor="nw")
+        for name in placed_ids():
+            self._build_key(name)
+        self.lcd_photo = ImageTk.PhotoImage(self.last_frame.resize(
+            (round(LCD_W * scale), round(LCD_H * scale)), Image.Resampling.NEAREST))
+        self.create_image(LCD_X * scale, LCD_Y * scale, image=self.lcd_photo, anchor="nw")
+        for name in self.latched:
+            self._show_resting(name)
+
+    def set_latched(self, name: str, down: bool) -> None:
+        if down:
+            self.latched.add(name)
+        else:
+            self.latched.discard(name)
+        self._show_resting(name)
 
     # ------------------------------------------------------------- keys --
     def _build_key(self, name: str) -> None:
         place = PLACEMENTS[name]
         scale, pad = self.scale, 10 * self.scale
-        unlit = ImageTk.PhotoImage(self.renderer.key(place, lit=False))
-        lit = ImageTk.PhotoImage(self.renderer.key(place, lit=True))
-        self.key_photo[name] = (unlit, lit)
+        unlit = self._photo((name, 0), lambda: self.renderer.key(place, lit=False))
+        hover = self._photo((name, 1), lambda: self.renderer.key(place, lit=False, hovered=True))
+        lit = self._photo((name, 2), lambda: self.renderer.key(place, lit=True))
+        self.key_photo[name] = (unlit, hover, lit)
         item = self.create_image(place.x * scale - pad, place.y * scale - pad,
                                  image=unlit, anchor="nw")
         self.key_item[name] = item
-        self.tag_bind(item, "<Button-1>",
-                      lambda _event, key=name: self._pressed(key))
+        self.tag_bind(item, "<Enter>",
+                      lambda _event, key=name: self._hover(key, True))
+        self.tag_bind(item, "<Leave>",
+                      lambda _event, key=name: self._hover(key, False))
         if place.shape == "knob":
-            self.tag_bind(item, "<B1-Motion>",
-                          lambda event, key=name: self._knob_drag(event, key))
-            self.tag_bind(item, "<ButtonRelease-1>",
-                          lambda _event: setattr(self, "_drag_angle", None))
             # Tk refuses <MouseWheel> on a canvas *item* -- only key, button,
             # motion, enter/leave and virtual events are legal there -- so the
             # wheel is taken on the widget and filtered by position below.
             self.bind("<MouseWheel>", self._knob_wheel)
+            self.bind("<Button-4>", lambda e: self._knob_wheel(e, 1))
+            self.bind("<Button-5>", lambda e: self._knob_wheel(e, -1))
+
+    def hit_control(self, x: float, y: float) -> str | None:
+        """Hit the physical key, never the transparent padding used for glow."""
+        x, y = x / self.scale, y / self.scale
+        for name, p in PLACEMENTS.items():
+            if p.x <= x <= p.x + p.w and p.y <= y <= p.y + p.h:
+                if p.shape in ("wheel", "knob", "round"):
+                    if ((x-p.x-p.w/2)/(p.w/2))**2 + ((y-p.y-p.h/2)/(p.h/2))**2 > 1:
+                        continue
+                return name
+        return None
+
+    def _pointer_down(self, event) -> None:
+        name = self.hit_control(event.x, event.y)
+        self.active_pointer = None
+        if name is None:
+            return
+        if event.state & 4:
+            self._modified_press(name, self.on_hold)
+        elif event.state & 1:
+            self._modified_press(name, self.on_long_press)
+        elif PLACEMENTS[name].shape == "knob":
+            self.active_pointer = name
+            self._knob_down(event)
+        else:
+            self._pressed(name)
+
+    def _pointer_hold(self, event) -> None:
+        name = self.hit_control(event.x, event.y)
+        if name is not None:
+            self._modified_press(name, self.on_hold)
+
+    def _pointer_drag(self, event) -> None:
+        if self.active_pointer is not None:
+            self._knob_drag(event, self.active_pointer)
+
+    def _pointer_up(self, event) -> None:
+        if self.active_pointer is not None:
+            self._knob_up(self.active_pointer)
+        self.active_pointer = None
+
+    def _modified_press(self, name, callback):
+        control = self.resolve(name)
+        if control is not None:
+            callback(control)
+        return "break"
+
+    def _hover(self, name: str, entered: bool) -> None:
+        """Give canvas controls the affordance normal Tk buttons get free."""
+        self.configure(cursor="hand2" if entered else "")
+        self.hovered_name = name if entered else None
+        self._show_resting(name)
+
+    def _show_resting(self, name: str, focused: bool = True) -> None:
+        """Show hover/focus affordance unless the control is flashing."""
+        if name in self.lit_until:
+            return
+        active = (self.hovered_name == name or
+                  (focused and self.focus_get() is self and
+                   self.focused_name == name))
+        self.itemconfigure(self.key_item[name],
+                           image=self.key_photo[name][2 if name in self.latched else (1 if active else 0)])
+
+    def _move_focus(self, dx: int, dy: int) -> str:
+        """Move keyboard focus to the closest control in that direction."""
+        old = self.focused_name
+        origin = PLACEMENTS[old]
+        ox, oy = origin.x + origin.w / 2, origin.y + origin.h / 2
+        candidates: list[tuple[float, str]] = []
+        for name in placed_ids():
+            if name == old:
+                continue
+            place = PLACEMENTS[name]
+            x, y = place.x + place.w / 2, place.y + place.h / 2
+            forward = (x - ox) * dx + (y - oy) * dy
+            if forward <= 0:
+                continue
+            cross = abs((x - ox) * dy - (y - oy) * dx)
+            # Prefer the intended axis strongly, then the nearest control.
+            candidates.append((forward + cross * 3.0, name))
+        if candidates:
+            self.focused_name = min(candidates)[1]
+            self._show_resting(old, focused=False)
+            self._show_resting(self.focused_name)
+        return "break"
 
     def _pressed(self, name: str) -> None:
+        old = self.focused_name
+        self.focus_set()
+        self.focused_name = name
+        if old != name:
+            self._show_resting(old, focused=False)
         control = self.resolve(name)
         if control is not None:
             self.on_click(control)
@@ -470,15 +732,29 @@ class Faceplate(tk.Canvas):
         item = self.key_item.get(name)
         if item is None:
             return
-        self.itemconfigure(item, image=self.key_photo[name][1])
+        self.itemconfigure(item, image=self.key_photo[name][2])
         pending = self.lit_until.get(name)
         if pending:
             self.after_cancel(pending)
         self.lit_until[name] = self.after(
             milliseconds,
-            lambda: self.itemconfigure(item, image=self.key_photo[name][0]))
+            lambda: self._unflash(name))
+
+    def _unflash(self, name: str) -> None:
+        self.lit_until.pop(name, None)
+        self._show_resting(name)
 
     # ------------------------------------------------------------ knob --
+    def _knob_down(self, event: tk.Event) -> None:
+        self.focus_set()
+        self._drag_angle = self._knob_angle(event)
+        self._drag_started = False
+
+    def _knob_up(self, name: str) -> None:
+        if self._drag_angle is not None and not self._drag_started:
+            self._pressed(name)
+        self._drag_angle = None
+
     def _knob_angle(self, event: tk.Event) -> float:
         place = PLACEMENTS[ENCODER_FIELD_PLACE]
         cx = (place.x + place.w / 2) * self.scale
@@ -497,11 +773,12 @@ class Faceplate(tk.Canvas):
             delta += 2 * math.pi
         detents = int(delta / (math.pi / 12))       # 24 detents per turn
         if detents:
+            self._drag_started = True
             self._drag_angle = angle
             self.on_rotate(ENCODER_FIELD, detents)
             self.flash(name, 90)
 
-    def _knob_wheel(self, event: tk.Event) -> None:
+    def _knob_wheel(self, event: tk.Event, direction: int | None = None) -> None:
         """Wheel over the knob turns it; wheel anywhere else is not for us.
 
         The filter matters: the wheel reaches the whole canvas, and a scroll
@@ -513,14 +790,17 @@ class Faceplate(tk.Canvas):
         cy = (place.y + place.h / 2) * self.scale
         if math.hypot(x - cx, y - cy) > place.w / 2 * self.scale:
             return
-        self.on_rotate(ENCODER_FIELD, 1 if event.delta > 0 else -1)
+        if direction is None and not event.delta:
+            return
+        self.on_rotate(ENCODER_FIELD, direction or (1 if event.delta > 0 else -1))
         self.flash(ENCODER_FIELD_PLACE, 90)
 
     # ------------------------------------------------------------- LCD --
     def set_frame(self, frame: Image.Image) -> None:
         """Put a 480x234 panel frame on the deck, scaled by whole pixels."""
+        self.last_frame = frame.copy()
         if self.scale != 1:
-            frame = frame.resize((frame.width * self.scale,
-                                  frame.height * self.scale),
+            frame = frame.resize((round(frame.width * self.scale),
+                                  round(frame.height * self.scale)),
                                  Image.Resampling.NEAREST)
         self.lcd_photo.paste(frame)

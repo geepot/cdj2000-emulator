@@ -450,8 +450,11 @@ class UiViewer:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.root = tk.Tk()
-        self.root.title("CDJ-2000 GUI firmware lab")
+        self.root.title(f"{args.device_name} · Emulator")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.configure(background="#121418")
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
 
         self.photo: ImageTk.PhotoImage | None = None
         self.last_mtime_ns = -1
@@ -487,13 +490,75 @@ class UiViewer:
         self.analog_value: dict[int, tk.StringVar] = {}
         self.analog_position: dict[int, tk.DoubleVar] = {}
         self.analog_touch: dict[int, tk.BooleanVar] = {}
+        self.status_light: tk.Canvas | None = None
 
+        self.configure_theme()
         self.build_layout()
+        self.status.trace_add("write", self.status_changed)
+        self.status_changed()
         self.show_boot_panel()
         self.start_simulator()
         self.root.after(self.args.refresh_ms, self.refresh)
 
     # ------------------------------------------------------------- layout --
+    def configure_theme(self) -> None:
+        """A compact dark instrument theme shared by both window skins."""
+        style = ttk.Style(self.root)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        style.configure("TFrame", background="#181b20")
+        style.configure("TLabel", background="#181b20", foreground="#cdd2db",
+                        font=("TkDefaultFont", 10))
+        style.configure("Muted.TLabel", foreground="#858d9b")
+        style.configure("Title.TLabel", foreground="#f1f3f7",
+                        font=("TkDefaultFont", 15, "bold"))
+        style.configure("Eyebrow.TLabel", foreground="#6faaf2",
+                        font=("TkDefaultFont", 8, "bold"))
+        style.configure("Badge.TLabel", background="#202a36",
+                        foreground="#9dc7fa", padding=(8, 4),
+                        font=("TkDefaultFont", 8, "bold"))
+        style.configure("TLabelframe", background="#181b20",
+                        bordercolor="#363c46", relief="solid", borderwidth=1)
+        style.configure("TLabelframe.Label", background="#181b20",
+                        foreground="#9ca5b4", font=("TkDefaultFont", 9, "bold"))
+        style.configure("TButton", background="#2b3038", foreground="#e5e8ee",
+                        bordercolor="#505864", lightcolor="#59616e",
+                        darkcolor="#16191d", padding=(8, 6),
+                        font=("TkDefaultFont", 9, "bold"))
+        style.map("TButton",
+                  background=[("pressed", "#1f5b9e"),
+                              ("active", "#39414c")],
+                  bordercolor=[("focus", "#74b7ff"),
+                               ("active", "#788393")],
+                  foreground=[("disabled", "#6c737e")])
+        style.configure("Quiet.TButton", background="#20242a",
+                        foreground="#b7bec9", padding=(7, 5))
+        style.configure("Unbound.TButton", foreground="#f19a9f",
+                        background="#332428")
+        style.map("Unbound.TButton", foreground=[("active", "#ffc2c5")],
+                  background=[("active", "#493035")])
+        style.configure("TEntry", fieldbackground="#0e1013", foreground="#eef1f5",
+                        insertcolor="#eef1f5", bordercolor="#4a525e",
+                        padding=(5, 4))
+        style.configure("TCheckbutton", background="#181b20",
+                        foreground="#c5cad3")
+        style.map("TCheckbutton", background=[("active", "#181b20")])
+        style.configure("Horizontal.TScale", background="#181b20",
+                        troughcolor="#0d0f12", bordercolor="#343a43")
+
+    def status_changed(self, *_args) -> None:
+        """Keep the footer's status light meaningful without parsing state."""
+        if self.status_light is None:
+            return
+        message = self.status.get().lower()
+        if "exited" in message or "error" in message or "lost" in message:
+            color = "#f05f6c"
+        elif "boot" in message or "starting" in message or "waiting" in message:
+            color = "#e8bb43"
+        else:
+            color = "#3fd083"
+        self.status_light.itemconfigure("light", fill=color, outline=color)
+
     def build_layout(self) -> None:
         if self.args.skin == "device":
             self.build_deck()
@@ -509,35 +574,130 @@ class UiViewer:
         last verdict beside them is the right window for attributing a bit, and
         the wrong one for finding out whether the machine works.
         """
-        self.root.configure(background="#%02x%02x%02x" % faceplate.CHASSIS)
-        outer = tk.Frame(self.root, background="#%02x%02x%02x" % faceplate.CHASSIS)
+        self.root.configure(background="#121418")
+        outer = tk.Frame(self.root, background="#121418")
         outer.grid(row=0, column=0, sticky="nsew")
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
+        self.root.geometry("%dx%d" % (
+            min(1180, self.root.winfo_screenwidth() - 80),
+            min(940, self.root.winfo_screenheight() - 100)))
+        self.root.minsize(700, 610)
+
+        header = ttk.Frame(outer, padding=(14, 10, 14, 9))
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(1, weight=1)
+        title = ttk.Frame(header)
+        title.grid(row=0, column=0, sticky="w")
+        ttk.Label(title, text="PLAYER / 01",
+                  style="Eyebrow.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(title, text=self.args.device_name,
+                  style="Title.TLabel").grid(row=1, column=0, sticky="w")
+        badges = ttk.Frame(header)
+        badges.grid(row=0, column=2, rowspan=2, sticky="e")
+        self.zoom_note = tk.StringVar(value="FIT")
+        ttk.Label(badges, textvariable=self.zoom_note, style="Badge.TLabel").grid(
+            row=0, column=0, padx=(0, 10))
+        ttk.Button(badges, text="Inspector", command=self.show_inspector).grid(
+            row=0, column=1, padx=4)
+        ttk.Button(badges, text="Controls ?", command=self.show_help).grid(
+            row=0, column=2, padx=4)
+        ttk.Button(badges, text="Full screen", command=self.toggle_fullscreen).grid(
+            row=0, column=3, padx=4)
 
         built = controls()
         self.by_id = {control.input_id: control for control in built
                       if control.input_id}
+        self.viewport = tk.Frame(outer, background="#0b0d10")
+        self.viewport.grid(row=1, column=0, sticky="nsew")
         self.deck = faceplate.Faceplate(
-            outer, self.args.scale,
+            self.viewport, 1,
             resolve=self.by_id.get,
             click=self.click,
             rotate=lambda field, delta: self.rotate(
-                panel_control.ANALOG_CONTROLS[field], delta))
-        self.deck.grid(row=0, column=0, sticky="nw")
+                panel_control.ANALOG_CONTROLS[field], delta),
+            long_press=self.long_press, hold=self.toggle_hold)
+        self.deck.place(relx=0.5, rely=0.5, anchor="center")
+        self.resize_timer = None
+        self.viewport.bind("<Configure>", self.queue_resize)
+        self.root.bind("<Escape>", lambda _e: self.root.attributes("-fullscreen", False))
         # The picture lives on the canvas now; `image_label` stays as the
         # attribute the boot panel and refresh write through so both skins
         # travel the same code path.
         self.image_label = None
 
-        rack = ttk.Frame(outer, padding=(10, 4))
-        rack.grid(row=1, column=0, sticky="ew")
+        self.inspector = tk.Toplevel(self.root)
+        self.inspector.title("CDJ-2000 · Input inspector")
+        self.inspector.withdraw()
+        self.inspector.protocol("WM_DELETE_WINDOW", self.inspector.withdraw)
+        self.inspector.geometry("%dx520" % min(1100, self.root.winfo_screenwidth() - 80))
+        self.inspector.columnconfigure(0, weight=1)
+        self.inspector.rowconfigure(0, weight=1)
+        scroll = tk.Canvas(self.inspector, background="#181b20", highlightthickness=0)
+        scroll.grid(row=0, column=0, sticky="nsew")
+        for orient, row, col, sticky in [("vertical", 0, 1, "ns"), ("horizontal", 1, 0, "ew")]:
+            bar = ttk.Scrollbar(self.inspector, orient=orient,
+                                command=scroll.yview if orient == "vertical" else scroll.xview)
+            bar.grid(row=row, column=col, sticky=sticky)
+            scroll.configure(**{("yscrollcommand" if orient == "vertical" else "xscrollcommand"): bar.set})
+        rack = ttk.Frame(scroll, padding=(16, 12))
+        scroll.create_window(0, 0, window=rack, anchor="nw")
+        rack.bind("<Configure>", lambda _e: scroll.configure(scrollregion=scroll.bbox("all")))
         self.build_rack(rack, built)
 
-        ttk.Label(outer, textvariable=self.status).grid(row=2, column=0,
-                                                        sticky="w", padx=10)
-        ttk.Label(outer, textvariable=self.control_note,
-                  foreground="#a06020").grid(row=3, column=0, sticky="w",
-                                             padx=10, pady=(0, 6))
+        footer = ttk.Frame(outer, padding=(14, 8, 14, 12))
+        footer.grid(row=2, column=0, sticky="ew")
+        footer.columnconfigure(1, weight=1)
+        self.status_light = tk.Canvas(footer, width=14, height=14,
+                                      highlightthickness=0,
+                                      background="#181b20")
+        self.status_light.create_oval(3, 3, 11, 11, fill="#e8bb43",
+                                      outline="#e8bb43", tags="light")
+        self.status_light.grid(row=0, column=0, sticky="n", pady=(2, 0),
+                               padx=(0, 7))
+        ttk.Label(footer, textvariable=self.status, wraplength=400).grid(row=0, column=1,
+                                                         sticky="w")
+        ttk.Label(footer, text="FIRMWARE LCD · 480 × 234", style="Muted.TLabel").grid(
+            row=0, column=2, sticky="e", padx=(12, 0))
+        ttk.Separator(footer).grid(row=1, column=0, columnspan=3, sticky="ew",
+                                   pady=7)
+        ttk.Label(footer, textvariable=self.control_note, style="Muted.TLabel",
+                  wraplength=650,
+                  justify="left").grid(row=2, column=0, columnspan=3,
+                                       sticky="w")
         self.announce_channel(built)
+
+    def queue_resize(self, _event=None) -> None:
+        if self.resize_timer is not None:
+            self.root.after_cancel(self.resize_timer)
+        self.resize_timer = self.root.after(90, self.fit_deck)
+
+    def fit_deck(self) -> None:
+        self.resize_timer = None
+        scale = faceplate.fit_scale(self.viewport.winfo_width(), self.viewport.winfo_height())
+        self.deck.set_scale(scale)
+        self.zoom_note.set("FIT · %d%%" % round(scale * 100))
+
+    def show_inspector(self) -> None:
+        self.inspector.deiconify()
+        self.inspector.lift()
+
+    def toggle_fullscreen(self) -> None:
+        self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
+
+    def show_help(self) -> None:
+        from tkinter import messagebox
+        messagebox.showinfo("Deck controls", "Click a key to press it.\n"
+            "Shift-click: long press. Ctrl-click or right-click: latch / release.\n"
+            "Browse knob: drag or scroll to turn; click to push.\n"
+            "Keyboard: Tab to the deck, arrow keys to navigate, Enter / Space to press.\n"
+            "Escape leaves full screen.\n\n"
+            "Inspector contains every unassigned input and the channel controls.\n"
+            "Lights show host input feedback, not measured hardware LEDs.\n"
+            "The jog center is not an emulated jog display. Jog rotation and tempo "
+            "are not yet mapped to verified hardware controls.\n\n"
+            "Firmware responses can take several seconds; repeated presses are guarded.",
+            parent=self.root)
 
     def build_rack(self, parent: tk.Misc, built: list[Control]) -> None:
         """Every input the deck does not draw, and the channel's own verbs.
@@ -553,9 +713,7 @@ class UiViewer:
 
         bits = [name for name in leftover if "." in name]
         if bits:
-            box = ttk.LabelFrame(parent, padding=4, text=(
-                "payload bits MAIN's SERVICE MODE table does not name — "
-                "decoded by 0x28e1ae, but nothing says what they are"))
+            box = ttk.LabelFrame(parent, padding=7, text="Unassigned digital inputs")
             box.grid(row=0, column=0, sticky="w", padx=(0, 10))
             for column, name in enumerate(bits):
                 ttk.Button(box, text=name, width=6,
@@ -564,19 +722,18 @@ class UiViewer:
 
         fields = [name for name in leftover if name.startswith("field")]
         if fields:
-            box = ttk.LabelFrame(parent, padding=4, text=(
-                "analogue fields with no attributed control — a fader drawn "
-                "on the deck for one of these would be inventing it"))
-            box.grid(row=0, column=1, sticky="w")
+            box = ttk.LabelFrame(parent, padding=7, text="Unassigned analogue inputs · hardware mapping unverified")
+            box.grid(row=1, column=0, sticky="w", pady=12)
             wanted = {int(name[5:]) for name in fields}
             self.build_analog(box, only=wanted)
 
-        box = ttk.LabelFrame(parent, padding=4, text="channel")
-        box.grid(row=0, column=2, sticky="nw", padx=(10, 0))
+        box = ttk.LabelFrame(parent, padding=7, text="CONTROL CHANNEL")
+        box.grid(row=2, column=0, sticky="nw")
         for column, control in enumerate(channel_controls()):
-            ttk.Button(box, text=control.label, width=11,
+            ttk.Button(box, text=control.label.upper(), width=11,
+                       style="Quiet.TButton",
                        command=lambda c=control: self.send(c, c.lines[0])
-                       ).grid(row=column, column=0, pady=1)
+                       ).grid(row=0, column=column, padx=4)
 
     def announce_channel(self, built: list[Control]) -> None:
         channel_note = ("control channel on 127.0.0.1:%d"
@@ -590,11 +747,6 @@ class UiViewer:
         """Front-panel geometry: buttons around the picture, never on it."""
         outer = ttk.Frame(self.root, padding=10)
         outer.grid(row=0, column=0, sticky="nsew")
-
-        # An unbound key has to *look* different as well as answer differently,
-        # or the only way to find out is to click it.
-        style = ttk.Style(self.root)
-        style.configure("Unbound.TButton", foreground="#8a3a3a")
 
         built = controls()
         by_group: dict[str, list[Control]] = {}
@@ -838,6 +990,12 @@ class UiViewer:
             return None
         self.control_note.set("%s: %s -> %s"
                               % (control.label, line.strip(), reply))
+        if line.strip() == "clear" and not reply.startswith("err"):
+            self.held.clear()
+            self.in_flight.clear()
+            if self.deck is not None:
+                for name in list(self.deck.latched):
+                    self.deck.set_latched(name, False)
         return reply
 
     def click(self, control: Control) -> None:
@@ -890,7 +1048,8 @@ class UiViewer:
         if control.input_id is None:
             self.click(control)
             return
-        byte, mask = panel_control.button_mask(control.input_id)
+        bit_id = control.input_id.split("-")[0]
+        byte, mask = panel_control.button_mask(bit_id)
         key = (byte, mask)
         down = key not in self.held
         if self.send(control, panel_control.encode_hold(byte, mask, down)):
@@ -898,6 +1057,10 @@ class UiViewer:
                 self.held[key] = control
             else:
                 self.held.pop(key, None)
+            if self.deck is not None:
+                self.deck.set_latched(bit_id, down)
+                if bit_id == "20.3":
+                    self.deck.set_latched("20.3-hold", down)
             self.control_note.set("%s %s (held: %s)"
                                   % (control.label, "held down" if down
                                      else "released",
@@ -995,6 +1158,9 @@ class UiViewer:
         self.show_panel(frame)
 
     def start_simulator(self) -> None:
+        if self.args.attach:
+            self.status.set("Attached viewer · waiting for a firmware frame")
+            return
         output = self.args.output.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
         output.unlink(missing_ok=True)
@@ -1077,7 +1243,7 @@ class UiViewer:
         the status line says so instead of leaving "it feels slow" to be blamed
         on the emulator again.
         """
-        if self.process is None:
+        if self.process is None and not self.args.attach:
             return
         # Schedule first, so a slow pass shortens the next gap instead of
         # adding to it.  The old code re-armed only after the work and after
@@ -1085,7 +1251,7 @@ class UiViewer:
         # under exactly the load that matters.
         self.root.after(self.args.refresh_ms, self.refresh)
 
-        return_code = self.process.poll()
+        return_code = self.process.poll() if self.process is not None else None
         if return_code is not None:
             self.status.set(f"Simulator exited with code {return_code}; "
                             f"see {self.args.log}")
@@ -1122,7 +1288,8 @@ class UiViewer:
             self.rate_since = now
         self.status.set(
             f"{self.fps:4.1f} fps — {source_size[0]}×{source_size[1]} captured, "
-            f"shown as {PANEL_WIDTH}×{PANEL_HEIGHT} at {self.args.scale}x "
+            f"shown as {PANEL_WIDTH}×{PANEL_HEIGHT} at "
+            f"{self.deck.scale if self.deck is not None else self.args.scale:.2f}x "
             f"(polling every {self.args.refresh_ms} ms)")
 
     def close(self) -> None:
@@ -1167,7 +1334,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="lines to capture; the PPI emits 255 and the frame "
                              "is cropped to 234, because capturing 234 wraps at "
                              "the wrong point")
-    parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument("--scale", type=int, default=2,
+                        help="integer LCD scale in lab view; device view fits the window")
+    parser.add_argument("--attach", action="store_true",
+                        help="watch --output without starting or stopping a simulator")
+    parser.add_argument("--device-name", default="CDJ-2000",
+                        help="device label in the window header")
     parser.add_argument("--skin", choices=("device", "lab"), default="device",
                         help="'device' draws the CDJ-2000 front panel around "
                              "the picture; 'lab' is the bit-level window, "
@@ -1199,7 +1371,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     if args.coverage:
         return args
-    for name in ("simulator", "elf", "board", "packet"):
+    for name in (() if args.attach else ("simulator", "elf", "board", "packet")):
         path = getattr(args, name)
         if not path.exists():
             parser.error(f"{name} does not exist: {path}")

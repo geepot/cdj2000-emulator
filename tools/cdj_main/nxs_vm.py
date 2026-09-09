@@ -135,6 +135,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('run', type=Path, help='new run directory, relative to repository')
     parser.add_argument('--seconds', type=float, default=60)
+    parser.add_argument('--ui', action='store_true',
+                        help='open the interactive deck; closing it stops this run')
     parser.add_argument('--port', type=int, default=5980)
     parser.add_argument('--qemu', type=Path, default=ROOT / 'build/qemu/build/qemu-system-sh4')
     parser.add_argument('--functional-dsp-timing', action='store_true',
@@ -184,6 +186,7 @@ def main():
         dsp='NXS UHPI plus partial C674x interpreter; incomplete ISA, ROM handoff abstraction', profile='experimental NXS'), indent=2) + '\n')
     processes = []
     result = {}
+    viewer = None
     with (run / 'main-stderr.log').open('w') as mainlog, (run / 'gui.log').open('w') as guilog:
         try:
             main_process = subprocess.Popen(main_command, cwd=ROOT, env=main_env, stdin=subprocess.DEVNULL, stdout=mainlog, stderr=mainlog)
@@ -192,12 +195,24 @@ def main():
             if main_process.poll() is not None: raise RuntimeError('MAIN exited; see main-stderr.log')
             gui = subprocess.Popen(gui_command, cwd=ROOT, env=gui_env, stdin=subprocess.DEVNULL, stdout=guilog, stderr=guilog)
             processes.append(gui)
+            if args.ui:
+                viewer = subprocess.Popen([sys.executable, '-m', 'tools.cdj_gui.view_ui',
+                    '--attach', '--device-name', 'CDJ-2000NXS',
+                    '--output', str(run / 'screen.ppm'),
+                    '--control-port', str(args.port + 4)], cwd=ROOT)
+                processes.append(viewer)
             print(f'MAIN {main_process.pid}, GUI {gui.pid}; logs: {run}', flush=True)
             deadline = time.monotonic() + args.seconds + 5
             while gui.poll() is None and time.monotonic() < deadline:
                 if main_process.poll() is not None: raise RuntimeError('MAIN exited during run')
+                if viewer is not None and viewer.poll() is not None:
+                    if viewer.returncode != 0: raise RuntimeError('Deck viewer exited with an error')
+                    break
                 time.sleep(.1)
-            result = dict(gui_exit=gui.poll(), timed_out=gui.poll() is None, frame_exists=(run / 'screen.ppm').exists())
+            closed = viewer is not None and viewer.poll() == 0
+            result = dict(gui_exit=gui.poll(), viewer_closed=closed,
+                          timed_out=gui.poll() is None and not closed,
+                          frame_exists=(run / 'screen.ppm').exists())
             print(json.dumps(result), flush=True)
         finally:
             for process in reversed(processes):
@@ -208,7 +223,7 @@ def main():
             finalize_dsp_artifacts(run, firmware, args.functional_dsp_timing,
                                    args.functional_dsp_audio, args.capture_dsp_tx)
             (run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
-    return 0 if result.get('gui_exit') == 0 and result.get('frame_exists') else 1
+    return 0 if result.get('viewer_closed') or (result.get('gui_exit') == 0 and result.get('frame_exists')) else 1
 
 
 if __name__ == '__main__':

@@ -14,6 +14,35 @@ MAIN boots on QEMU, the GUI board boots on the Blackfin simulator, the two are
 linked, and the GUI's framebuffer appears in a window with the player's controls
 drawn around it.
 
+The default device view fits the deck to the window, with the firmware LCD
+kept separate from the controls. Resize freely, or use **Full screen** and
+Escape. **Inspector** opens the unassigned digital/analogue inputs and control
+channel tools; **Controls ?** explains the gestures. Shift-click is a long
+press, Ctrl/right-click latches a key, and the browse knob accepts drag and
+scroll without also sending a push. Arrow keys navigate the focused deck;
+Enter or Space presses the focused control. Lights represent host input
+feedback, not decoded hardware LEDs. The existing `--skin lab` viewer remains
+available for bit-level work; `--scale` controls that view's integer zoom.
+
+For the experimental NXS profile, use a new run directory:
+
+```sh
+python -m tools.cdj_main.nxs_vm runs/nxs-deck --ui --seconds 3600
+```
+
+The launcher owns both emulators; the deck attaches to their framebuffer and
+input port. Closing the deck stops that run. This does not remove the NXS
+profile's remaining E-8709 communication failure or add jog rotation/audio.
+To view an existing run without starting or stopping its emulators:
+
+```sh
+python -m tools.cdj_gui.view_ui --attach --device-name CDJ-2000NXS \
+  --output runs/nxs-deck/screen.ppm --control-port 5984
+```
+
+An attached viewer can also display a saved frame; a static image alone is
+not evidence that either emulator is running.
+
 **It takes half a minute to become interesting.** Measured with
 `boot_vm --poll-every 5 --frames`: black until about 15 s, the Pioneer logo at
 about 20 s, the rekordbox logo at 25 s, and the player screen showing `NO DISC`
