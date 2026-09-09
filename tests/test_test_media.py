@@ -9,6 +9,22 @@ import pytest
 from tools.cdj_main import test_media
 
 
+@pytest.mark.parametrize('extra', [
+    ['--sd-insert-seconds', '10'],
+    ['--sd', 'unused.img', '--sd-insert-seconds', '-1'],
+    ['--sd', 'unused.img', '--sd-insert-seconds', '86401'],
+])
+def test_invalid_insert_schedule_fails_before_launch(monkeypatch, extra):
+    from tools.cdj_main import nxs_vm
+    monkeypatch.setattr(nxs_vm.sys, 'argv', ['nxs_vm', 'unused-run', *extra])
+    def unexpected_launch(*args, **kwargs):
+        pytest.fail('invalid arguments must not launch an emulator')
+    monkeypatch.setattr(nxs_vm.subprocess, 'Popen', unexpected_launch)
+    with pytest.raises(SystemExit) as error:
+        nxs_vm.main()
+    assert error.value.code == 2
+
+
 def test_generated_wav_is_stereo_pcm_and_low_level(tmp_path):
     track = tmp_path / 'test.wav'
     test_media.write_track(track)

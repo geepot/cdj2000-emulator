@@ -360,6 +360,8 @@ def main():
                         help='raw FAT32 USB image; writes go to a temporary overlay')
     parser.add_argument('--trace-media', action='store_true',
                         help='log SD/USB host activity for media diagnosis (changes host timing)')
+    parser.add_argument('--sd-insert-seconds', type=int,
+                        help='SD insertion time after reset in virtual seconds (0 keeps slot empty)')
     parser.add_argument('--port', type=int, default=5980)
     parser.add_argument('--qemu', type=Path, default=ROOT / 'build/qemu/build/qemu-system-sh4')
     parser.add_argument('--functional-dsp-timing', action='store_true',
@@ -371,6 +373,9 @@ def main():
     parser.add_argument('--deferred-dsp-scheduling', action='store_true',
                         help='opt into diagnostic 4096-step deferred DSP scheduling (not timing evidence)')
     args = parser.parse_args()
+    if args.sd_insert_seconds is not None and (not args.sd or
+                                             not 0 <= args.sd_insert_seconds <= 86400):
+        parser.error('--sd-insert-seconds requires --sd and a value from 0 to 86400')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if args.seconds <= 0 or not 1024 <= args.port <= 65531:
@@ -416,6 +421,8 @@ def main():
     gui_env.update(overrides)
     main_env = {k:v for k,v in os.environ.items() if not k.startswith('CDJ_')}
     main_env['CDJ_INPUT_PORT'] = str(args.port + 4)
+    if args.sd_insert_seconds is not None:
+        main_env['CDJ_SD_INSERT'] = str(args.sd_insert_seconds)
     if args.trace_media:
         main_env['CDJ_SDHI_TRACE'] = '1'
         main_env['CDJ_USBH_TRACE'] = '1'

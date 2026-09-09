@@ -271,6 +271,8 @@ def test_nxs_window_attaches_and_closing_it_stops_owned_boards(tmp_path, monkeyp
         media_path = tmp_path / 'track.img'
         media_path.write_bytes(bytes(512))
         argv.extend(['--' + media, str(media_path)])
+        if media == 'sd':
+            argv.extend(['--sd-insert-seconds', '110'])
     if trace_media:
         argv.append('--trace-media')
     monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
@@ -292,6 +294,7 @@ def test_nxs_window_attaches_and_closing_it_stops_owned_boards(tmp_path, monkeyp
     assert '--control-port' in launched[2][0]
     for name in ('CDJ_SDHI_TRACE', 'CDJ_USBH_TRACE'):
         assert environments[0].get(name) == ('1' if trace_media else None)
+    assert environments[0].get('CDJ_SD_INSERT') == ('110' if media == 'sd' else None)
     if media:
         drive = launched[0][0][launched[0][0].index('-drive') + 1]
         assert 'snapshot=on' in drive

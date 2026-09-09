@@ -110,6 +110,10 @@ establish firmware track loading or audible playback, which remain unverified.
 Add `--trace-media` to record SD-controller and USB-host register activity in
 `main-stderr.log`. This diagnostic adds host overhead and can change timing;
 it does not enable the legacy fake media-state RAM write.
+For insertion diagnostics, `--sd-insert-seconds 110` schedules the existing
+card-presence transition 110 virtual seconds after reset; `0` keeps the slot
+empty. This requires `--sd`. The default remains the controller's 20 seconds.
+Virtual seconds are not a promise about wall-clock boot time.
 
 ### Original CDJ-2000 setup
 
