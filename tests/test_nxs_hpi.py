@@ -1,7 +1,9 @@
 """Test the actual QEMU NXS host port and DMA without proprietary firmware."""
 import os
+import json
 from pathlib import Path
 import socket
+import struct
 import subprocess
 import tempfile
 import time
@@ -17,10 +19,16 @@ def test_host_addressing_and_fixed_port_dma():
     with tempfile.TemporaryDirectory(prefix='cdj-hpi-', dir='/tmp') as directory:
         root = Path(directory)
         rom = root / 'reset.bin'
-        rom.write_bytes(bytes(16))  # CPU stays stopped; no proprietary input.
+        # Minimal SH-4 program: VBR=04000000, privileged SR with IMASK=0,
+        # then loop. It runs only for the final interrupt-delivery assertion.
+        rom.write_bytes(struct.pack('<8H2I', 0xd003, 0x402e, 0xd003, 0x400e,
+                                    0xaffe, 0x0009, 0x0009, 0x0009,
+                                    0x04000000, 0x40000000))
         endpoint = root / 'qtest.sock'
+        qmp_endpoint = root / 'qmp.sock'
         process = subprocess.Popen([str(qemu), '-M', 'cdj2000nxs-main', '-S', '-display', 'none',
-            '-nodefaults', '-bios', str(rom), '-qtest', f'unix:{endpoint},server=on,wait=off'],
+            '-nodefaults', '-bios', str(rom), '-qtest', f'unix:{endpoint},server=on,wait=off',
+            '-qmp', f'unix:{qmp_endpoint},server=on,wait=off'],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             deadline = time.monotonic() + 10
@@ -106,6 +114,38 @@ def test_host_addressing_and_fixed_port_dma():
             write(pcm + 8, 2)
             write(pcm + 12, 0x40001411)
             assert read(pcm + 8) == 0
+            assert not (read(status) & 8)
+            # Prove delivery to the guest, not just a diagnostic pending bit.
+            # ISR: record INTEVT, clear CHCR.IE (as NXS MAIN does), RTE.
+            handler = struct.pack('<16H3I',
+                0xd107, 0x6212, 0xd007, 0x2022, 0xd107, 0x6212,
+                0xe3fb, 0x2239, 0x2122, 0x002b, 0x0009,
+                0x0009, 0x0009, 0x0009, 0x0009, 0x0009,
+                0xff000028, 0x04002000, 0xff60805c)
+            command(f'write 0x04000600 {len(handler)} 0x{handler.hex()}')
+            write(pcm, 0x04001000)
+            write(pcm + 8, 2)
+            write(pcm + 12, 0x40001415)
+            with socket.socket(socket.AF_UNIX) as qmp:
+                qmp.settimeout(5)
+                qmp.connect(str(qmp_endpoint))
+                with qmp.makefile('rwb', buffering=0) as qm:
+                    assert 'QMP' in json.loads(qm.readline())
+                    def execute(name):
+                        qm.write((json.dumps({'execute': name}) + '\n').encode())
+                        while True:
+                            reply = json.loads(qm.readline())
+                            if 'event' not in reply:
+                                assert 'return' in reply, reply
+                                return
+                    execute('qmp_capabilities')
+                    execute('cont')
+                    deadline = time.monotonic() + 3
+                    while read(0x04002000) == 0 and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    execute('stop')
+            assert read(0x04002000) == 0x6a0
+            assert not (read(pcm + 12) & 4)
             assert not (read(status) & 8)
             stream.close(); sock.close()
         finally:

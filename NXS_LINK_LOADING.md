@@ -71,6 +71,9 @@ the existing DSP-DMA interrupt routing with this NXS path and reports
 DMINT3 in INT2STAT. A polling transfer with IE clear stays non-interrupting.
 The actual-QEMU regression fails on the old build at the missing DMINT3
 assertion and passes after the fix; HPI and address-mode tests: 13 passed.
+An additional firmware-free SH-4 ISR test runs the CPU, observes INTEVT
+6a0 in guest RAM, clears CHCR.IE, and verifies the interrupt deasserts.
+Thus the check covers actual CPU interrupt delivery, not only INT2STAT.
 Cold firmware retesting is still required; this is not audio-load success.
 
 The link-dump decoder now distinguishes command-0 status from nonzero
