@@ -275,6 +275,26 @@ int main(void)
     assert(s.bytes_transferred == 24 && s.transfer_requests == 2);
     assert(s.param[0][7] == 0);
 
+    /* Native LPCM QDMA geometry: 588 four-byte arrays spread across
+     * eight-byte destination slots, triggered by writing CCNT. */
+    cdj_c6747_edma_reset(&s); memset(&memory, 0, sizeof(memory));
+    for (unsigned i = 0; i < 2352; ++i) memory.memory[i] = i * 17u + 3u;
+    param(&s, &bus, 64, 0x8204, 0x1000, 0x024c0004, 0x2000,
+          0x00080004, 0xffff, 0, 1);
+    assert(wr(&s, &bus, EDMA + 0x200, 64 * 32 + 7 * 4));
+    assert(wr(&s, &bus, EDMA + 0x108c, 1));
+    before = s; memory_before = memory;
+    assert(cdj_c6747_edma_write(&s, PARAM(64) + 28, 1, 4, false, &bus));
+    assert(!memcmp(&s, &before, sizeof(s)));
+    assert(!memcmp(&memory, &memory_before, sizeof(memory)));
+    assert(wr(&s, &bus, PARAM(64) + 28, 1));
+    for (unsigned i = 0; i < 588; ++i) {
+        assert(!memcmp(memory.memory + 0x1000 + i * 8,
+                       memory.memory + i * 4, 4));
+        assert(memory.memory[0x1004 + i * 8] == 0);
+    }
+    assert(s.bytes_transferred == 2352 && s.transfer_requests == 1);
+
     /* Constant-address modes
      * is rejected before bus or architectural state can change. */
     for (uint32_t unsupported = 1; unsupported <= 2; unsupported <<= 1) {
