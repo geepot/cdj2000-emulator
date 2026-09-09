@@ -11,12 +11,13 @@
 #include "cdj_c6747_gpio.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_i2c.h"
+#include "cdj_c6747_intc.h"
 #include "cdj_c6747_mcasp.h"
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_psc.h"
 #include "cdj_c6747_syscfg.h"
 
-#define CDJ_DSP_CHECKPOINT_SCHEMA 2u
+#define CDJ_DSP_CHECKPOINT_SCHEMA 3u
 #define CDJ_DSP_L2_SIZE 0x40000u
 #define CDJ_DSP_SHARED_RAM_SIZE 0x20000u
 #define CDJ_DSP_SDRAM_SIZE 0x02000000u
@@ -31,8 +32,9 @@
  * mismatch. This preserves all pipeline/loop fields without pretending the
  * format is portable across incompatible builds. Source and firmware SHA-256
  * provenance is supplied by the Python run manifest. Schema 2 adds the fixed
- * 128 KiB C6747 shared-RAM image between L2 and sparse EMIFB SDRAM. Schema-1
- * inputs remain readable with shared RAM explicitly restored as zero. */
+ * 128 KiB C6747 shared-RAM image between L2 and sparse EMIFB SDRAM. Schema 3
+ * appends INTC state. Schema-1/2 inputs remain readable; missing shared RAM or
+ * interrupt-controller state is reset explicitly. */
 typedef struct {
     uint32_t hpi_address, boot_phase;
     uint64_t words, event_sequence, checkpoint_sequence;
@@ -48,6 +50,7 @@ typedef struct {
     CdjC6747Pll pll;
     CdjC6747Hpi hpi;
     CdjC6747Emifb emifb;
+    CdjC6747Intc intc;
 } CdjDspCheckpointState;
 
 void cdj_dsp_checkpoint_prepare(CdjDspCheckpointState *state,

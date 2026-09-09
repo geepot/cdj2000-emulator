@@ -18,7 +18,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
-CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0'}
+CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0'}
 SHARED_RAM_SIZE = 0x20000
 
 
@@ -87,7 +87,8 @@ def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
               [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
                ROOT / 'emulator/qemu/cdj_dsp_checkpoint.h',
                ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
-    manifest = dict(schema=2, format='ABI-bound native state, L2 and shared RAM plus sparse zero-default SDRAM pages',
+    manifest = dict(schema=3, format=('ABI-bound native state including C6747 INTC, '
+                                     'L2 and shared RAM plus sparse zero-default SDRAM pages'),
         byte_order=sys.byteorder, complete=bool(checkpoints and events.is_file()),
         checkpoints=checkpoints, latest=checkpoints[-1]['file'] if checkpoints else None,
         event_transcript=dict(file=events.name, sha256=sha256(events) if events.is_file() else None,
@@ -99,7 +100,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
         source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
         approximations=[
             'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
-            'checkpoint schema 2 is ABI-bound and rejects structure-size or endianness changes',
+            'checkpoint schema 3 is ABI-bound and rejects structure-size or endianness changes',
             '128 KiB C6747 shared RAM is captured losslessly',
             'sparse SDRAM pages are lossless because omitted pages restore as zero',
             'SDRAM command timing, arbitration and retention are not modeled',

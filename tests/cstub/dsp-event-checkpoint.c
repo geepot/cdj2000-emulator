@@ -16,6 +16,7 @@ int main(int argc, char **argv)
     state.checkpoint_sequence = 1;
     state.reset_released = state.dsp_started = 1;
     state.cpu.pc = 0x11800020;
+    cdj_c6747_intc_reset(&state.intc);
     /* There is no compact header in this fetch packet. This unsupported
      * full-width word gives event-injection tests a deterministic fault. */
     l2[0x20] = 0xfe;

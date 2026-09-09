@@ -2,14 +2,15 @@
 #include "cdj_dsp_checkpoint.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define CHECKPOINT_ENDIAN 0x01020304u
-#define CHECKPOINT_MAGIC "CDJDSP2\0"
-#define CHECKPOINT_LEGACY_MAGIC "CDJDSP1\0"
-#define CHECKPOINT_LEGACY_SCHEMA 1u
+#define CHECKPOINT_MAGIC "CDJDSP3\0"
+#define CHECKPOINT_SCHEMA1_MAGIC "CDJDSP1\0"
+#define CHECKPOINT_SCHEMA2_MAGIC "CDJDSP2\0"
 #define CHECKPOINT_COMPONENTS 9u
 
 typedef struct {
@@ -45,6 +46,14 @@ static void component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
     sizes[5] = sizeof(CdjC6747I2c);
     sizes[6] = sizeof(CdjC6747Pll);
     sizes[7] = sizeof(CdjC6747Hpi);
+    /* Preserve the fixed nine-component header used by schemas 1/2. The
+     * final component now describes the complete peripheral-state tail. */
+    sizes[8] = sizeof(CdjC6747Emifb) + sizeof(CdjC6747Intc);
+}
+
+static void legacy_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
+{
+    component_sizes(sizes);
     sizes[8] = sizeof(CdjC6747Emifb);
 }
 
@@ -69,6 +78,12 @@ static bool state_valid(const CdjDspCheckpointState *state)
            state->cpu.cycle_opaque == NULL && state->cpu.fault == NULL &&
            state->cpu.branch_count <= 5 && state->cpu.store_count <= 24 &&
            state->cpu.load_count <= 40 && state->cpu.loop.length <= 48 &&
+           !(state->intc.event_flag[0] & 0xf) &&
+           (state->intc.event_mask[0] & 0xf) == 0xf &&
+           (state->intc.exception_mask[0] & 0xf) == 0xf &&
+           !(state->intc.interrupt_mux[0] & 0x80808080u) &&
+           !(state->intc.interrupt_mux[1] & 0x80808080u) &&
+           !(state->intc.interrupt_mux[2] & 0x80808080u) &&
            state->stop_reason[sizeof(state->stop_reason) - 1] == '\0' &&
            state->fault[sizeof(state->fault) - 1] == '\0';
 }
@@ -177,45 +192,58 @@ bool cdj_dsp_checkpoint_read(const char *path,
             snprintf(error, error_size, "cannot open checkpoint: %s", strerror(errno));
         return false;
     }
-    CheckpointHeader header;
-    uint32_t expected[CHECKPOINT_COMPONENTS];
+    CheckpointHeader header = {0};
+    uint32_t expected[CHECKPOINT_COMPONENTS], legacy_expected[CHECKPOINT_COMPONENTS];
     component_sizes(expected);
+    legacy_component_sizes(legacy_expected);
     bool header_read = fread(&header, 1, sizeof(header), file) == sizeof(header);
-    bool legacy = header_read &&
-                  memcmp(header.magic, CHECKPOINT_LEGACY_MAGIC,
-                         sizeof(header.magic)) == 0 &&
-                  header.schema == CHECKPOINT_LEGACY_SCHEMA;
+    bool schema1 = header_read &&
+                   memcmp(header.magic, CHECKPOINT_SCHEMA1_MAGIC,
+                          sizeof(header.magic)) == 0 && header.schema == 1;
+    bool schema2 = header_read &&
+                   memcmp(header.magic, CHECKPOINT_SCHEMA2_MAGIC,
+                          sizeof(header.magic)) == 0 && header.schema == 2;
     bool current = header_read &&
                    memcmp(header.magic, CHECKPOINT_MAGIC,
                           sizeof(header.magic)) == 0 &&
                    header.schema == CDJ_DSP_CHECKPOINT_SCHEMA;
-    bool ok = (legacy || current) &&
+    /* Appending INTC reused four bytes of the schema-2 structure's trailing
+     * alignment padding, so round the prefix back to the old ABI size. */
+    size_t alignment = _Alignof(CdjDspCheckpointState);
+    size_t old_state_size = (offsetof(CdjDspCheckpointState, intc) +
+                             alignment - 1) / alignment * alignment;
+    bool old = (schema1 || schema2) && header.state_size == old_state_size &&
+               memcmp(header.component_size, legacy_expected,
+                      sizeof(legacy_expected)) == 0;
+    bool ok = (old || current) &&
               header.endian == CHECKPOINT_ENDIAN &&
               header.header_size == sizeof(header) &&
-              header.state_size == sizeof(*state) &&
-              memcmp(header.component_size, expected, sizeof(expected)) == 0 &&
+              (old || (header.state_size == sizeof(*state) &&
+                       memcmp(header.component_size, expected,
+                              sizeof(expected)) == 0)) &&
               header.l2_size == l2_size && header.sdram_size == sdram_size &&
               header.page_size == CDJ_DSP_CHECKPOINT_PAGE_SIZE &&
               header.page_count == sdram_size / header.page_size;
     const size_t bitmap_size = ok ? (header.page_count + 7u) / 8u : 0;
-    uint64_t expected_payload = sizeof(*state) + l2_size +
-        (legacy ? 0 : shared_ram_size) + bitmap_size +
+    uint64_t expected_payload = header.state_size + l2_size +
+        (schema1 ? 0 : shared_ram_size) + bitmap_size +
         (uint64_t)header.present_pages * CDJ_DSP_CHECKPOINT_PAGE_SIZE;
     ok = ok && header.present_pages <= header.page_count &&
          header.payload_size == expected_payload;
     uint8_t *bitmap = ok ? malloc(bitmap_size) : NULL;
-    ok = ok && bitmap && fread(state, 1, sizeof(*state), file) == sizeof(*state) &&
+    memset(state, 0, sizeof(*state));
+    ok = ok && bitmap && fread(state, 1, header.state_size, file) == header.state_size &&
          fread(l2, 1, l2_size, file) == l2_size;
-    if (ok && legacy) memset(shared_ram, 0, shared_ram_size);
+    if (ok && schema1) memset(shared_ram, 0, shared_ram_size);
     else if (ok) ok = fread(shared_ram, 1, shared_ram_size, file) == shared_ram_size;
     ok = ok && fread(bitmap, 1, bitmap_size, file) == bitmap_size;
     if (ok) memset(sdram, 0, sdram_size);
     uint32_t present = 0;
     uint64_t hash = UINT64_C(14695981039346656037);
     if (ok) {
-        hash = checksum(hash, state, sizeof(*state));
+        hash = checksum(hash, state, header.state_size);
         hash = checksum(hash, l2, l2_size);
-        if (!legacy) hash = checksum(hash, shared_ram, shared_ram_size);
+        if (!schema1) hash = checksum(hash, shared_ram, shared_ram_size);
         hash = checksum(hash, bitmap, bitmap_size);
     }
     for (uint32_t page = 0; ok && page < header.page_count; ++page) {
@@ -227,7 +255,12 @@ bool cdj_dsp_checkpoint_read(const char *path,
         }
     }
     ok = ok && present == header.present_pages && hash == header.payload_checksum &&
-         fgetc(file) == EOF && !ferror(file) && state_valid(state);
+         fgetc(file) == EOF && !ferror(file);
+    /* Validate the legacy payload exactly as captured before initializing the
+     * appended schema-3 state. This also avoids relying on old tail padding
+     * having happened to contain zero bytes. */
+    if (ok && old) cdj_c6747_intc_reset(&state->intc);
+    ok = ok && state_valid(state);
     fclose(file);
     free(bitmap);
     if (!ok) fail(error, error_size, "incompatible, corrupt, or incomplete checkpoint");

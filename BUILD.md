@@ -1123,8 +1123,9 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 /tmp/cdj-c674x-batch-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
-  emulator/qemu/cdj_dsp_checkpoint.c -o /tmp/cdj-checkpoint-v2-san
-/tmp/cdj-checkpoint-v2-san /tmp/cdj-checkpoint-v2-san.cdjdsp
+  emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  -o /tmp/cdj-checkpoint-v3-san
+/tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
 .venv/bin/python -m pytest -q
 ```
 
@@ -1202,7 +1203,8 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 /tmp/cdj-c674x-coverage-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
-  emulator/qemu/cdj_dsp_checkpoint.c -o /tmp/cdj-checkpoint-coverage-san
+  emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  -o /tmp/cdj-checkpoint-coverage-san
 /tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c \
@@ -1210,7 +1212,8 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   emulator/qemu/cdj_c6747_psc.c emulator/qemu/cdj_c6747_mcasp.c \
   emulator/qemu/cdj_c6747_gpio.c emulator/qemu/cdj_c6747_i2c.c \
   emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c6747_hpi.c \
-  emulator/qemu/cdj_c6747_emifb.c emulator/qemu/cdj_dsp_checkpoint.c \
+  emulator/qemu/cdj_c6747_emifb.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_dsp_checkpoint.c \
   -o /tmp/cdj-replay-coverage-san
 /tmp/cdj-replay-coverage-san \
   runs/nxs-sploopd-shared-connected-3/dsp-checkpoints/00000000000000000001.cdjdsp \
@@ -1239,3 +1242,53 @@ The suite reports 184 passed / 43 skipped and all three sanitizer checks pass.
 The high visit counts include stable wait/service loops; they are not full-boot
 or audio evidence. Interrupt delivery and DMA/EDMA are the next DSP subsystem
 boundary.
+
+### C6747 interrupt-controller and schema-3 gate
+
+SPRUFK5A chapter 7 backs the C6747 megamodule INTC model: four event banks,
+event set/clear and masks, derived event/exception combiner views, and INTMUX1-3.
+UHPI DSPINT latches device event 34. Event-to-CPU recognition/vectoring,
+acknowledgement, exception/drop state, AEG, and same-cycle external-event
+arbitration remain unimplemented and fail closed at their integration boundary.
+Schema-3 checkpoints append this INTC state; schema-1/2 checkpoints remain
+readable and initialize the absent controller to documented reset values after
+the legacy payload checksum has been verified.
+
+Reproduce the focused tests and sanitizer harnesses:
+
+```sh
+.venv/bin/python -m pytest -q \
+  tests/test_c674x.py tests/test_dsp_inventory.py \
+  tests/test_dsp_coverage.py tests/test_dsp_event_replay.py \
+  tests/test_dsp_checkpoint_replay.py
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/c6747-intc.c \
+  emulator/qemu/cdj_c6747_intc.c -o /tmp/cdj-c6747-intc-san
+/tmp/cdj-c6747-intc-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/dsp-checkpoint.c \
+  emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  -o /tmp/cdj-checkpoint-v3-san
+/tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
+```
+
+Rebuild and validate connected execution plus deterministic repeat:
+
+```sh
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_INTC_CONNECTED --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_INTC_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_INTC_REPLAY --steps 100000000 \
+  --events runs/NEW_INTC_CONNECTED/dsp-events.jsonl --verify-repeat
+```
+
+Recorded evidence is `runs/nxs-intc-connected-1` and
+`runs/dsp-intc-connected-replay-1`. The connected run has 65 schema-3
+checkpoints, 110,208 events and 39 DSP stops, ending at the unchanged
+25,364,865-packet / 60,779,972-cycle SPLOOPD resource conflict. Repeat gates
+trace, coverage, state, L2, shared RAM, SDRAM and the appended INTC state. The
+suite reports 186 passed / 43 skipped. A non-validating run-ahead reaches
+Timer64P0 TGCR at `0x01c20024`; Timer64P0/1 are the next peripheral family.

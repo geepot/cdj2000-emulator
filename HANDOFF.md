@@ -83,16 +83,44 @@ python -m tools.cdj_dsp.replay \
   --events runs/nxs-prot-connected-2/dsp-events.jsonl --verify-repeat
 ```
 
+The C6747 megamodule interrupt-controller register family is now implemented
+from SPRUFK5A chapter 7. It covers four banks of EVTFLAG, EVTSET, EVTCLR,
+EVTMASK, MEVTFLAG, EXPMASK and MEXPFLAG plus INTMUX1-3, including reset values,
+events 0-3's fixed masks, derived masked views, 7-bit selector fields, and
+fail-closed access direction/width checks. The recorded UHPI DSPINT rising edge
+now latches documented C6747 system event 34. CPU interrupt recognition,
+acknowledgement/vectoring, exception/drop state, AEG, and same-cycle incoming
+event versus EVTCLR arbitration are still absent and must not be inferred from
+the register model.
+
+Checkpoint schema 3 appends INTC state while preserving schema-1/2 migration.
+Legacy payloads are checksummed before the missing state is reset, including
+their native trailing padding. The current ABI is 8,080 state bytes with final
+component size 88; schema-2 migration replay produces checkpoint SHA-256
+`21764b341723214c2072504543b0a0f4fb804c2d5932b4f977d6dad1ee5073ea`.
+Focused tests report 23 passed; the complete suite reports 186 passed / 43
+optional skips; INTC, checkpoint, and replay ASan/UBSan harnesses pass.
+
+The rebuilt connected run `runs/nxs-intc-connected-1` writes 65 schema-3
+checkpoints and 110,208 ordered events, and reproduces the unmodified scheduler's
+exact 25,364,865-packet / 60,779,972-cycle conflict. GUI exit zero and a frame
+are not boot evidence. `runs/dsp-intc-connected-replay-1 --verify-repeat` gates
+all 39 connected stops plus byte-identical state and memory; trace SHA-256 is
+`e87f6d32b6cadc3760cd733776071dbf7b41a8f73ba8e0216b9dc2cf87c1eab3`,
+coverage SHA-256 is
+`3d40ec0fd84c512be54c10474e45496e938688591cefcdc462db67495007ee51`,
+and final checkpoint SHA-256 is
+`d4126e3436399b5785a1ba7944032a7df0610a9525af5e995ddf02b40e05cdfd`.
+
 One explicitly non-validating run-ahead temporarily added the still-unproven
 two-cycle SPLOOPD drain adjustment and relaxed only the captured terminal-stop
-comparison. Those edits were removed immediately after the run. With the MVC
-batch in place, genuine execution reached 25,364,931 packets / 60,780,038 cycles
-and stopped on a mapped-instruction `STW A3,*A4[0]` at PC `0xc004f37a`, compact
-word `0x0034`, targeting `0x01800040` (C674x INTC `EVTCLR0`). This is useful
-downstream inventory only, not validation of the loop timing, control sequence,
-or packet count. SPRUFK5A confirms that `0x01800040` through `0x0180004c` are
-the four event-clear command registers; the next coherent peripheral boundary
-is the C674x megamodule interrupt controller.
+comparison. Both edits were removed immediately. With the INTC batch, genuine
+firmware clears EVTCLR0-3, programs EVTMASK0-3 and INTMUX3, then reaches
+25,364,958 packets / 60,780,074 cycles and PC `0xc004ef88`. GNU libopcodes
+decodes word `0x020c0264` as `LDW .D1T1 *+A3(0),A4 || NOP 5`, with A3
+`0x01c20024`; SPRS377F section 6.22 identifies this as Timer64P0 TGCR. This is
+downstream inventory only, not validation of SPLOOPD timing, INTC execution, or
+the exploratory packet count. The next coherent peripheral batch is Timer64P0/1.
 
 ### Previous stable-wait checkpoint
 

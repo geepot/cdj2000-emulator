@@ -21,10 +21,11 @@ SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
     ROOT / 'emulator/qemu' / name for name in
     ('cdj_c674x.c', 'cdj_c674x_loop.c', 'cdj_c6747_syscfg.c', 'cdj_c6747_psc.c',
      'cdj_c6747_mcasp.c', 'cdj_c6747_gpio.c', 'cdj_c6747_i2c.c', 'cdj_c6747_pll.c',
-     'cdj_c6747_hpi.c', 'cdj_c6747_emifb.c', 'cdj_dsp_checkpoint.c')]]
+     'cdj_c6747_hpi.c', 'cdj_c6747_emifb.c', 'cdj_c6747_intc.c',
+     'cdj_dsp_checkpoint.c')]]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
-CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0'}
+CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0'}
 SHARED_RAM_SIZE = 0x20000
 DEFAULT_FORMATS = ROOT / 'build/gdb-17.2/include/opcode/tic6x-insn-formats.h'
 ANALYSIS_SOURCES = [ROOT / 'tools/cdj_dsp/coverage.py',
@@ -177,7 +178,7 @@ def main():
         parser.error('C compiler required (install Xcode command line tools)')
     # Snapshot input so hashing and execution always describe the same bytes.
     data = data if selected_checkpoint is not None else args.dump.read_bytes()
-    checkpoint = data.startswith((b'CDJDSP1\0', b'CDJDSP2\0'))
+    checkpoint = data.startswith((b'CDJDSP1\0', b'CDJDSP2\0', b'CDJDSP3\0'))
     capture_manifest = None
     input_checkpoint = None
     checkpoint_origin = None
@@ -254,7 +255,7 @@ def main():
                                          external_event_assumption,
                                          ('schema-1 input did not capture shared RAM; restored zero before its first observed use'
                                           if checkpoint and input_checkpoint['schema'] == 1 else
-                                          '128 KiB shared RAM captured losslessly in schema-2 checkpoints'),
+                                          '128 KiB shared RAM captured losslessly in schema-2/3 checkpoints'),
                                          'EMIFB register readback and 32 MiB storage modeled; SDRAM command timing and arbitration omitted',
                                          f'MAIN-to-DSP GPIO boot phase fixed at {args.boot_phase}; other external GPIO inputs default low',
                                          'oscillator counter complete at handoff, not PLL lock',

@@ -20,7 +20,7 @@ SHARED_RAM_BASE = 0x80000000
 SHARED_RAM_SIZE = 0x20000
 SDRAM_BASE = 0xc0000000
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
-CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0'}
+CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0'}
 
 
 def _fnv1a(data):
@@ -32,7 +32,8 @@ def _fnv1a(data):
 
 def read_input(data):
     """Return address-keyed memory images from raw L2 or a supported checkpoint."""
-    if len(data) == 0x40000 and not data.startswith((b'CDJDSP1\0', b'CDJDSP2\0')):
+    if len(data) == 0x40000 and not data.startswith(
+            (b'CDJDSP1\0', b'CDJDSP2\0', b'CDJDSP3\0')):
         return {BASE: data}, dict(kind='raw_l2', schema=None)
     if len(data) < CHECKPOINT_HEADER.size:
         raise ValueError('input must be 256 KiB of L2 or a complete checkpoint')
@@ -309,7 +310,8 @@ def build_report(data, ranges, formats, trace):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('dump', type=Path, help='256 KiB L2 dump or schema-1 checkpoint')
+    parser.add_argument('dump', type=Path,
+                        help='256 KiB L2 dump or supported DSP checkpoint')
     parser.add_argument('output', type=Path, help='new JSON report')
     parser.add_argument('--formats', type=Path, required=True,
                         help='GNU include/opcode/tic6x-insn-formats.h')

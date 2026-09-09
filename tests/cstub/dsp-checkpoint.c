@@ -78,6 +78,8 @@ int main(int argc, char **argv)
     before.pll.oscin_cycles = 98765;
     before.hpi.hint = true;
     before.emifb.sdcfg = 0x12345678;
+    cdj_c6747_intc_reset(&before.intc);
+    assert(cdj_c6747_intc_event(&before.intc, 34));
     l2[0] = 0x68;
     l2[sizeof(l2) - 1] = 0xa5;
     shared_ram[0] = 0x56;
@@ -109,6 +111,8 @@ int main(int argc, char **argv)
            after.cpu.loads[2].value == UINT64_C(0xfffffa9ba111462c));
     assert(after.cpu.loop_active && after.cpu.loop.tags[2][7] == 91);
     assert(after.cpu.loop_instructions[91].word == 0xfeedbeef);
+    assert(after.intc.event_flag[1] == 4 &&
+           after.intc.exception_mask[0] == UINT32_MAX);
 
     FILE *file = fopen(argv[1], "r+b");
     assert(file && fputc('X', file) != EOF && fclose(file) == 0);
