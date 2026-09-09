@@ -155,6 +155,44 @@ so a mask is only usable against the run it was made for.
 
 ## Diagnostics
 
+### NXS panel CPU error caused by DMA address modes
+
+The NXS `E-7022: PANEL CPU ERROR` reproduced on 2026-09-09 was a MAIN
+memory-initialization bug, not a missing panel identity byte. Startup uses
+DMA with a fixed source word and an incrementing destination (`CHCR=0x4431`)
+to clear RAM. The former generic DMA path incremented both addresses, reading
+past the zero word and filling parts of RAM with unrelated data.
+
+The UDP port table at `0x04687508` consequently contained `0xffff` ports.
+Pro DJ Link endpoint creation returned `-41`; its receiver task then spun on
+`-18` receive errors. That runnable priority-4 task starved the equally
+prioritized panel receive task even though the panel interrupt had copied a
+valid frame and woken it.
+
+After respecting DMA source/destination modes, a stock NXS MAIN/GUI boot
+with the unchanged zero panel payload produced a valid endpoint (`31` at
+`0x04d10874`), zero UDP receive errors (`0x04d10e60`), and initialized panel
+state (`1` at `0x051e2184`). The display no longer showed E-7022; it showed
+the separate `E-8709: COMMUNICATION ERROR`. This is not a claim that the
+experimental NXS profile has a fully working boot or DSP.
+Another boot with no `CDJ_PANEL_FRAME` override confirmed the same state.
+A live `analog 2 4660` command then appeared as `12 34` in both the received
+frame (`0x04d1209c + 4`) and the validated payload (`0x051e218c + 4`).
+
+Rebuild QEMU after updating the board source. The firmware-free regression
+tests exercise the real board registers with the CPU stopped:
+
+```sh
+sh scripts/build-qemu-sh4.sh build/qemu
+python -m pytest -q tests/test_main_dmac.py
+```
+
+The tests cover fixed, incrementing and decrementing addresses, 4- and
+16-byte transfers, final register values, and copies crossing the DMA chunk
+boundary. Set `CDJ_QEMU` if the binary lives outside `build/qemu/build/`.
+
+### Existing tracing tools
+
 ```sh
 python -m tools.cdj_main.monitor "1,2,GU"      # MAIN's own service monitor
 python -m tools.cdj_main.caution --live        # decode the caution store

@@ -879,6 +879,10 @@ static void cdj_dmac_run(CdjDmacState *dmac, unsigned index)
     hwaddr destination = cdj_dma_phys(channel->dar);
     uint8_t buffer[DMA_CHUNK];
     uint64_t remaining;
+    unsigned unit = (channel->chcr & CHCR_TS_WIDE)
+        ? DMA_BURST : DMA_BURST_LONG;
+    unsigned source_mode = (channel->chcr >> 12) & 3;
+    unsigned destination_mode = (channel->chcr >> 14) & 3;
 
     if (cdj_nxs_hpi_port(source) || cdj_nxs_hpi_port(destination)) {
         /* UHPI data access is one 32-bit bus cycle; the DSP address advances
@@ -968,20 +972,36 @@ static void cdj_dmac_run(CdjDmacState *dmac, unsigned index)
         return;
     }
 
-    remaining = (uint64_t)channel->tcr
-        * ((channel->chcr & CHCR_TS_WIDE) ? DMA_BURST : DMA_BURST_LONG);
+    remaining = (uint64_t)channel->tcr * unit;
     if (channel->role == CDJ_DMA_DSP) {
         cdj_dsp_transfer_start();
     }
     while (remaining) {
         size_t chunk = remaining < DMA_CHUNK ? remaining : DMA_CHUNK;
 
+        /* SM/DM: 0 = fixed, 1 = increment, 2 = decrement.  In particular,
+         * NXS startup's 0x4431 transfer clears BSS from a fixed zero word.
+         * Treating that as memcpy reads past the zero and corrupts the UDP
+         * table; lnkfrm then busy-loops and starves PnlCom_RcvTASK (E-7022).
+         * Keep the bulk path for incrementing copies, but execute other
+         * address modes one transfer unit at a time. */
+        if (source_mode != 1 || destination_mode != 1) {
+            chunk = unit;
+        }
         address_space_read(&address_space_memory, source,
                            MEMTXATTRS_UNSPECIFIED, buffer, chunk);
         address_space_write(&address_space_memory, destination,
                             MEMTXATTRS_UNSPECIFIED, buffer, chunk);
-        source += chunk;
-        destination += chunk;
+        if (source_mode == 1) {
+            source += chunk;
+        } else if (source_mode == 2) {
+            source -= chunk;
+        }
+        if (destination_mode == 1) {
+            destination += chunk;
+        } else if (destination_mode == 2) {
+            destination -= chunk;
+        }
         remaining -= chunk;
     }
     if (channel->role == CDJ_DMA_DSP) {
