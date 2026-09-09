@@ -31,6 +31,34 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned subset = 0; subset < 2; ++subset)
+    for (unsigned op = 0; op < 3; ++op)
+    for (unsigned n = 0; n < 32; ++n) {
+        unsigned reg = 4 + subset * 16;
+        uint32_t source = 0x96a55aa5u;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][reg] = source;
+        memory[0] = ((n & 7) << 13) | ((n >> 3) << 11) |
+                    (4u << 7) | (op << 5) | 2 | side;
+        memory[7] = 0xe0200000 | (subset << 19);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        uint32_t expected = op == 0 ? (source >> (31-n)) & 1 :
+                            op == 1 ? source | (1u << n) : source & ~(1u << n);
+        assert(c.r[side][op ? reg : 0] == expected);
+        if (!op) assert(c.r[side][reg] == source);
+    }
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned subset = 0; subset < 2; ++subset)
+    for (unsigned op = 0; op < 4; ++op) {
+        const uint32_t expected[] = {0xffff80a5, 0xffffffa5, 0x80a5, 0xa5};
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][4 + subset*16] = 0x123480a5;
+        memory[0] = (5u << 13) | (op << 11) | (4u << 7) | 0x62 | side;
+        memory[7] = 0xe0200000 | (subset << 19);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][5 + subset*16] == expected[op]);
+    }
     /* Full .S bit-field family: all 1024 parameter pairs, both banks,
      * immediate/register operands and both register cross paths. Expected
      * results use a bit-by-bit oracle rather than the implementation masks. */

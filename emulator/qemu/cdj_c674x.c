@@ -285,6 +285,22 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 unsigned imm = (w >> 13) & 7;
                 int32_t offset = (w & 0x800) ? (int32_t)imm - 8 : (imm ? (int32_t)imm : 8);
                 value = cpu->r[cross][((w >> 7) & 7) + rs] + (uint32_t)offset;
+            } else if ((w & 0x041e) == 2) { /* Figures F-27/F-28 */
+                unsigned op = (w >> 5) & 3;
+                unsigned src = ((w >> 7) & 7) + rs;
+                uint32_t source = cpu->r[side][src];
+                if (op == 3) {
+                    unsigned kind = (w >> 11) & 3;
+                    unsigned bits = (kind & 1) ? 8 : 16;
+                    dst = ((w >> 13) & 7) + rs;
+                    value = source & ((1u << bits) - 1);
+                    if (!(kind & 2)) value = sx(value, bits);
+                } else {
+                    unsigned n = ((w >> 13) & 7) | (((w >> 11) & 3) << 3);
+                    dst = op ? src : 0; /* EXTU always writes A0/B0, even RS=1. */
+                    value = op == 0 ? (source >> (31 - n)) & 1 :
+                            op == 1 ? source | (1u << n) : source & ~(1u << n);
+                }
             } else if ((w & 0x001e) == 0x0012) { /* Figure F-24, unsigned MVK.S */
                 dst = ((w >> 7) & 7) + rs;
                 value = ((w >> 13) & 7) | (((w >> 11) & 3) << 3) |

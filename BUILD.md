@@ -598,3 +598,33 @@ Suite: 166 passed / 43 skipped. CPU and McASP C harnesses pass Clang
 the stop at `0x11802d5c`, word `0x02140264`, LDW from GPIO DIR45 at
 `0x01e26060` (SPRUH91D Table 20-1). All three McASP ports receive firmware
 configuration writes. This proves neither physical audio operation nor full boot.
+
+### GPIO and compact bit-field batch
+
+`cdj_c6747_gpio.c` supplies DIR/OUT_DATA/SET_DATA/CLR_DATA, rising/falling
+trigger masks and BINTEN configuration to both DSP execution paths. Eight
+16-bit banks are present (C6747 datasheet Table 6-8); generic-manual bank 8
+is absent. Reset DIR is all ones, other supported latches zero. Aliases share
+readback and implement write-one set/clear, with no effect during validation.
+See SPRUH91D sections 20.3.2-11 and register map Table 20-2 (the earlier GPIO
+checkpoint's Table 20-1 citation identifies bit mapping, not register offsets).
+
+Physical input reads, INTSTAT, edge detection, pinmux and DSP/EDMA interrupt
+delivery remain unsupported. BINTEN/trigger readback is configuration only.
+The model retains output-latch writes with DIR=input, interpreting the manual's
+"writes do not affect pins" as a drive restriction, not a latch-write mask;
+that interpretation needs hardware confirmation. Reserved BINTEN bits stop.
+
+Compact Sc5 CLR/SET/EXTU and S2ext signed/unsigned byte/halfword extracts
+follow SPRUFE8B Figures F-27/F-28. Tests cover all 32 Sc5 constants, both banks
+and register subsets, and all S2ext variants. EXTU Sc5 writes A0/B0 even with
+the high operand subset. These extend the preceding full-width family.
+
+Suite: 167 passed / 43 skipped. CPU and GPIO sanitizer harnesses pass.
+Replays `runs/dsp-gpio-fields-1` and `runs/dsp-gpio-fields-repeat` are identical:
+1,064 packets / 1,238 cycles, stopping at PC `0x11802d90`, compact `0x105d`,
+loading I2C0 ICMDR at `0x01c22024` (SPRUH91D 22.3.9). Use the preceding
+replay/build/connected commands with fresh output paths to reproduce.
+Rebuilt connected run `runs/nxs-gpio-fields-connected` matches this stop,
+records GPIO DIR45=`0xffffbfff`, and exits GUI 0 with a frame after 15 seconds.
+This is not a completed firmware boot or working audio.

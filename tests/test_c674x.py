@@ -5,6 +5,15 @@ import subprocess
 import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
+def test_c6747_gpio_registers(tmp_path):
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'gpio-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-gpio.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_gpio.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=5)
+
 def test_c6747_mcasp_pin_registers(tmp_path):
     cc = shutil.which('cc')
     if not cc: pytest.skip('requires C compiler')

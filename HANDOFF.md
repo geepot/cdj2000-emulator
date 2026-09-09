@@ -8,6 +8,32 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+GPIO configuration and compact bit-field batch: all eight C6747 GPIO banks
+have DIR, OUT_DATA, SET/CLR_DATA, rising/falling trigger configuration and
+BINTEN storage shared by replay and connected execution. DIR resets to all
+ones (inputs), unlike McASP. Input reads and interrupt status/delivery remain
+unsupported; no external pin or event state is fabricated. Output latches
+retain writes while configured as inputs: an explicit, unmeasured interpretation
+of the manual's distinction between output-register state and pin drive.
+
+Compact Sc5 CLR/SET/EXTU and S2ext signed/unsigned byte/halfword extracts
+follow TI Figures F-27/F-28. Sc5 EXTU always writes low A0/B0, regardless of
+RS. Tests cover all Sc5 constants, banks/subsets and all S2ext variants.
+
+Replays `runs/dsp-gpio-fields-1` and `runs/dsp-gpio-fields-repeat` match:
+1,064 packets / 1,238 cycles, PC `0x11802d90`, compact word `0x105d`.
+The unmapped load is I2C0 ICMDR at B4=`0x01c22024` (SPRS377F Table 6-88;
+SPRUH91D 22.3.9). Trace SHA-256:
+`0227158054c66c770fdd905ca5d5ca54f3960f5ad876395efa1938fe8dac99bf`.
+Suite: 167 passed / 43 skipped; CPU and GPIO address/undefined sanitizers pass.
+Rebuilt connected run `runs/nxs-gpio-fields-connected` matches the stop and
+records DIR45=`0xffffbfff`. The 15-second GUI run exits 0 with a frame.
+Next: I2C controller state and attached-device inventory, preserving failures
+for unmodeled transfers rather than manufacturing ACK or success.
+Full boot and audio remain incomplete.
+
+### Previous McASP and full-width bit-field checkpoint
+
 McASP pin-register and full-width bit-field batch: PFUNC, PDIR, PDOUT and
 write aliases PDSET/PDCLR now share a model between replay and connected DSP
 execution. C6747 has 16/12/4 serializers (SPRS377F Table 6-43). Input pin
@@ -150,7 +176,7 @@ include data and cannot be interpreted as instruction coverage percentages.
 The first inventory-driven batch implemented full/compact SPMASK with
 functional-unit classification and loop load/replay suppression, plus nearby
 predicated MVK. Later batches advanced through PSC and McASP pin configuration;
-the current blocker is GPIO DIR45, as recorded at the top of this handoff.
+the current blocker is I2C0 ICMDR, as recorded at the top of this handoff.
 The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
 instructions and did not implement buffered suppression. Do not resurrect that
 special case. Implement the family, validate synthetic schedules and replay,
@@ -160,7 +186,7 @@ an exact supported-opcode coverage report remain to be built.
 
 ## Validation and tools
 
-Latest full fork suite: 166 passed, 43 skipped. The CPU standalone harness
+Latest full fork suite: 167 passed, 43 skipped. The CPU standalone harness
 passes AddressSanitizer/UndefinedBehaviorSanitizer. The extra skip relative to
 the old machine is the optional Blackfin assembler/linker regression. Tests run with:
 
