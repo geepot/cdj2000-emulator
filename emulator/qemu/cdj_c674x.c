@@ -115,6 +115,45 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
         if (insn->compact) {
+            unsigned rs = (insn->header & 0x80000) ? 16 : 0;
+            bool simple = true;
+            side = w & 1;
+            cross = side ^ ((w >> 12) & 1);
+            if ((w & 0x047e) == 0x0426) { /* Figure D-8, MVK.L */
+                dst = ((w >> 7) & 7) + rs;
+                value = sx(((w >> 13) & 7) | (((w >> 11) & 3) << 3), 5);
+            } else if ((w & 0x147e) == 0x0026) { /* Figure D-9, CMPEQ immediate */
+                dst = (w >> 11) & 1;
+                value = ((w >> 13) & 7) == cpu->r[side][((w >> 7) & 7) + rs];
+            } else if ((w & 0x040e) == 0x0408) { /* Figure D-7, L2c */
+                dst = (w >> 4) & 1;
+                uint32_t left = cpu->r[side][((w >> 13) & 7) + rs];
+                uint32_t right = cpu->r[cross][((w >> 7) & 7) + rs];
+                unsigned op = ((w >> 9) & 4) | ((w >> 5) & 3);
+                switch (op) {
+                case 0: value = left & right; break;
+                case 1: value = left | right; break;
+                case 2: value = left ^ right; break;
+                case 3: value = left == right; break;
+                case 4: value = (int32_t)left < (int32_t)right; break;
+                case 5: value = (int32_t)left > (int32_t)right; break;
+                case 6: value = left < right; break;
+                default: value = left > right; break;
+                }
+            } else simple = false;
+            if (simple) {
+                if (written[side][dst]) return stop(cpu, pc, w, "parallel register write conflict");
+                out.r[side][dst] = value; written[side][dst] = true;
+                continue;
+            }
+            if ((w & 0x187f) == 0x006f) { /* Figure F-32, register BNOP */
+                unsigned n = w >> 13;
+                if (n && elapsed > 1) return stop(cpu, pc, w, "multiple multicycle instructions");
+                if (n + 1 > elapsed) elapsed = n + 1;
+                if (!queue_branch(&out, cpu->cycles + 6, cpu->r[1][(w >> 7) & 15]))
+                    return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
+                continue;
+            }
             /* Figure F-31: compact MVC to ILC. SPLOOP observes a four-cycle
              * availability latency (section 7.4.3), tracked separately. */
             if ((w & 0xfc7f) == 0xd86f) {
@@ -184,7 +223,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             /* SPRUFE8B Figure D-4: compact .L ADD/SUB. */
             if ((w & 0x040e) != 0 || (insn->header & (1u << 14)))
                 return stop(cpu, pc, w, "compact instruction not implemented");
-            unsigned rs = (insn->header & (1u << 19)) ? 16 : 0;
+            rs = (insn->header & (1u << 19)) ? 16 : 0;
             side = w & 1;
             dst = ((w >> 4) & 7) + rs;
             a = ((w >> 13) & 7) + rs;
@@ -468,7 +507,7 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                   (w & 0x0f830ffe) == 0x00800362 || (w & 0x7c) == 0x10 ||
                   (w & 0x0f83effe) == 0x362)) ||
                 (insn.header & (1u << 20)) ||
-                (insn.compact && (insn.header & 0x8000)))
+                (insn.compact && ((insn.header & 0x8000) || (w & 0x187f) == 0x006f)))
                 return stop(cpu, insn.pc, w, "loop body control or protected instruction not implemented");
             if (out.loop_tags == 112) return stop(cpu, insn.pc, w, "loop instruction capacity exceeded");
             tags[count++] = out.loop_tags;

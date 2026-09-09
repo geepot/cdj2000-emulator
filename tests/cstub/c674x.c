@@ -593,5 +593,39 @@ int main(void)
     assert(!c.loop_active && c.pc == 0x1040 && c.cycles == 6 && c.r[0][4] == 7);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][5] == 9);
+    /* Compact MVK uses a split signed immediate and the selected subset. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0xfe27; memory[7] = 0xe0200000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][4] == 0xffffffff);
+    cdj_c674x_reset(&c, 0x1000); memory[7] |= 1u << 19;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][20] == 0xffffffff && c.r[1][4] == 0);
+
+    /* All L2c operations: high-subset operands, low predicate destination. */
+    const uint32_t l2c_results[] = {0, 0x80000001, 0x80000001, 0, 1, 0, 0, 1};
+    for (unsigned op = 0; op < 8; ++op) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[0][17] = 0x80000000; c.r[1][18] = 1;
+        memory[0] = (1u << 13) | (1u << 12) | ((op & 4) << 9) |
+                    (2u << 7) | ((op & 3) << 5) | 0x418;
+        memory[7] = 0xe0280000;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[0][1] == l2c_results[op] && c.r[0][17] == 0x80000000);
+    }
+    /* Immediate comparison also writes a low predicate register with RS=1. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][18] = 7;
+    memory[0] = (7u << 13) | (1u << 11) | (2u << 7) | 0x27;
+    memory[7] = 0xe0280000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][1] == 1);
+
+    /* Compact register BNOP ignores RS and captures its B0-B15 target. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][5] = 0x1040; c.r[1][21] = 0x1080;
+    memory[0] = (5u << 13) | 0x2ef; memory[7] = 0xe0280000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1040 && c.cycles == 6);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

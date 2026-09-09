@@ -274,7 +274,10 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
 control-register MVC (including ILC/RILC setup), register/relative branches, ADDKPC, ADD/SUB (.L/.S), OR (.L), MVK (.D), CMPEQ/CMPGT, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
 packets use the header layout and halfword p bits; compact .L ADD/SUB
-support the low/high register set and cross path. Compact register moves
+support the low/high register set and cross path. Compact MVK, immediate
+CMPEQ and all L2c logic/comparison forms are decoded; predicate destinations
+remain in the low register set even when operands use the high subset.
+Compact register BNOP uses B0-B15 regardless of RS. Compact register moves
 implement both directions between a full register index and the selected
 subset, including cross-bank operands. Compact BNOP supports signed
 7-bit and unsigned 8-bit halfword displacements, optional A0/B0 predicates,
@@ -312,17 +315,23 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-branches` uploads
-13,781 words and executes 525 packets / 617 cycles. It completes multiple
-copy loops, handles branches around short loops, returns to startup, and stops
-at compact opcode `0xfe27` at `0x118048b0`. `B15=0x11805af8`,
-`B14=0x11806900` and `B3=0x11801dec`. This agrees with standalone replay
-of the uploaded L2 image. The older prototype's listing omits register-extension
-bits, sometimes the cross path on moves, and the extended load/store selector;
-it must not be treated as an execution oracle.
-Remaining compact instructions, loop/control-register behavior, extended memory
-operations, integer and floating-point instructions, interrupts and peripherals
-are still required for DSP boot and audio. No DSP-ready result is fabricated.
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-compact` uploads
+13,781 words and executes 533 packets / 625 cycles. It reaches a new startup
+routine at `0x11803020`, then stops at `0x11803024` on opcode `0x1ffef292`,
+currently classified as a reserved predicate. `B15=0x11805af0`,
+`B14=0x11806900` and `B3=0x11801dec`. Standalone uploaded-L2 replay
+agrees with this DSP stop. This connected run also recorded a Blackfin GUI
+double fault at `0x00d290a6` after illegal instructions at `0x00d0cf42`;
+it is not a clean integration pass and requires separate investigation.
+The immediate repeat in `runs/nxs-c674x-compact-repeat` reached the same
+DSP stop and completed 15 seconds with GUI exit 0; the Blackfin fault did
+not reproduce in that repeat and remains an intermittent issue.
+The older prototype's listing omits register-extension bits, sometimes the
+cross path on moves, and the extended load/store selector; it must not be
+treated as an execution oracle. Remaining compact instructions,
+loop/control-register behavior, extended memory operations, integer and
+floating-point instructions, interrupts and peripherals are still required for
+DSP boot and audio. No DSP-ready result is fabricated.
 
 `tests/test_c674x.py` compiles an independent, synthetic instruction harness.
 It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
