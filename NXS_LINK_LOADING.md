@@ -80,3 +80,13 @@ The link-dump decoder now distinguishes command-0 status from nonzero
 payload commands instead of classifying by length alone. Regression tests
 cover a 64-byte list, its real delivered count/announcement, and a 64-byte
 player-state payload alongside an NXS 8800-prefixed status record (5 passed).
+
+The strict cold run `nxs-native-load-dma-fix-1` now passes the first PCM
+DMA completion and reaches DSP BDEC at c003200c (c0007021). Implemented
+SPRUFE8B pp159-160 semantics: predicated signed-nonnegative counter,
+E1 decrement, word-scaled fetch-relative target, five delay slots, and
+ADDKPC/duplicate-BDEC packet restrictions. Core tests: 17 passed.
+Exact fault-checkpoint replay `nxs-bdec-replay-1` advances 301 packets
+and 507 cycles identically on two runs before rejecting the EDMA PaRAM
+write at 01c0481c from c004dbe8. This is further real DSP progress, not
+completed track loading or playback. No firmware bytes were patched.

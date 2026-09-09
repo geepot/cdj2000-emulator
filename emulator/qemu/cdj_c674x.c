@@ -1033,7 +1033,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                        CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     unsigned elapsed = 1, memory_count = 0;
-    bool nonaligned_memory = false;
+    bool nonaligned_memory = false, bdec_issued = false;
     CdjC674x out = *cpu;
     bool written[2][32] = {{false}}, controls[32] = {false};
     if (cpu->fault) return false;
@@ -2282,6 +2282,28 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             if (enabled) {
                 if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)(sx((w >> 7) & 0x1fffff, 21) * 4)))
                     return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
+            }
+        } else if ((w & 0x1ffc) == 0x1020) {
+            /* BDEC, SPRUFE8B pp159-160: signed nonnegative counter,
+             * word-scaled fetch-relative target, and five delay slots.
+             * Both operands are read before any parallel packet writes. */
+            for (unsigned j = 0; j < packet->count; ++j) {
+                const CdjC674xInstruction *other = &packet->instructions[j];
+                if (!other->compact && (other->word & 0x1ffe) == 0x162)
+                    return stop(cpu, pc, w, "BDEC parallel with ADDKPC");
+            }
+            reg_write = false;
+            if (enabled) {
+                if (bdec_issued)
+                    return stop(cpu, pc, w, "multiple BDEC instructions");
+                bdec_issued = true;
+                if (!(cpu->r[side][dst] & 0x80000000u)) {
+                    if (!queue_branch(&out, cpu->cycles + 6,
+                            (pc & ~31u) + (uint32_t)(sx((w >> 13) & 1023, 10) * 4)))
+                        return stop(cpu, pc, w, "parallel taken branches or branch queue overflow");
+                    value = cpu->r[side][dst] - 1u;
+                    reg_write = true;
+                }
             }
         } else if ((w & 0x1ffc) == 0x120) {
             /* SPRUFE8B BNOP displacement, pp165-167: NOPs are unconditional.

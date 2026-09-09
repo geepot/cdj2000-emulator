@@ -1410,6 +1410,54 @@ int main(void)
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(!c.branch_due && c.pc == 0x102c);
 
+    /* BDEC: signed counter, independent predicate, fetch-relative word
+     * displacement (also in header packets), and five delay slots. */
+    const uint32_t counters[] = {0, 1, 0x7fffffff, 0x80000000, 0xffffffff};
+    const int bdec_displacements[] = {-512, -1, 0, 3, 511};
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned ci = 0; ci < 5; ++ci)
+    for (unsigned di = 0; di < 5; ++di)
+    for (unsigned pred = 0; pred < 3; ++pred)
+    for (unsigned header = 0; header < 2; ++header) {
+        cdj_c674x_reset(&c, 0x1028);
+        c.r[side][10] = counters[ci];
+        CdjC674xPacket bp = {.count = 1, .next_pc = 0x102c};
+        bp.instructions[0] = (CdjC674xInstruction){
+            .pc = 0x1028, .header = header ? 0xe0000000 : 0,
+            .word = 0x1020 | (side << 1) | (10u << 23) |
+                    (((uint32_t)bdec_displacements[di] & 1023) << 13) |
+                    (pred ? (6u << 29) : 0) | (pred == 2 ? 1u << 28 : 0)
+        };
+        bool taken = pred != 1 && ci < 3;
+        assert(cdj_c674x_execute(&c, &bp, read_word, NULL, NULL));
+        assert(c.r[side][10] == counters[ci] - (taken ? 1u : 0u));
+        assert(c.branch_due == (taken ? 6u : 0u));
+        if (taken) {
+            assert(c.branch_target == 0x1020u + (uint32_t)(bdec_displacements[di] * 4));
+            memset(memory, 0, sizeof(memory));
+            for (unsigned delay = 0; delay < 5; ++delay) {
+                assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+                if (delay < 4) assert(c.pc == 0x1030u + delay * 4);
+            }
+            assert(c.pc == 0x1020u + (uint32_t)(bdec_displacements[di] * 4));
+        }
+    }
+    /* The actual failing firmware instruction reads A0 before decrement. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x100c); c.r[0][0] = 3;
+    memory[3] = 0xc0007020;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][0] == 2 && c.branch_target == 0x100c);
+    /* Forbidden ADDKPC pairing is rejected atomically in either order. */
+    for (unsigned order = 0; order < 2; ++order) {
+        cdj_c674x_reset(&c, 0x1000); c.r[0][10] = 7;
+        CdjC674xPacket bp = {.count = 2, .next_pc = 0x1008};
+        bp.instructions[order] = (CdjC674xInstruction){.pc = 0x1000, .word = 0x05001020};
+        bp.instructions[1-order] = (CdjC674xInstruction){.pc = 0x1004, .word = 0x00800162};
+        assert(!cdj_c674x_execute(&c, &bp, read_word, NULL, NULL));
+        assert(c.r[0][10] == 7 && c.r[1][1] == 0 && !c.cycles && !c.branch_due);
+    }
+
     /* Compact moves in both directions between full and subset registers.
      * Parallel source reads see the old value, including across register files. */
     memset(memory, 0, sizeof(memory));
