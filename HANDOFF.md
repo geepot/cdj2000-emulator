@@ -8,6 +8,19 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Primary interrupt reference audit: Blackfin Programming Reference rev2.2,
+printed 4-41 (physical PDF 175), explicitly distinguishes an already-serviced
+system IVG from a new ILAT latch. Printed 4-56 and 4-64 (physical 190/198)
+also require uncleared/shared sources to remain serviceable and describe SIC
+level detection, CEC edge detection and the IPEND acknowledgement handshake.
+All three relevant pages were visually checked. Do not implement a blanket
+ignore-active-interrupt rule or a naive level-only CEC; preserve RAISE and
+self-nesting semantics. The GUI task's fresh-mmr trace now observes an empty
+second shared ISR immediately after DMA acknowledgement, followed by a
+240-byte receive cancelled about 200us after arming, with all words remaining.
+It is testing the narrow store-IMASK-before-forward correction first. This is
+not yet a successful connected boot or a complete SIC/CEC model.
+
 Independent boot-blocker audit for the GUI task: BF531 selects the
 `bfin_sic_537_io_write_buffer` path (SIC model switch 531..533), not the 52x
 path. Its IMASK case forwards interrupts before storing the new mask, so a
