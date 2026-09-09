@@ -96,3 +96,22 @@ Separately, static NXS panel analysis and RAM snapshots identify the SD lid
 gate: neutral raw byte 17 bit 2 is decoded as lid open and leaves `04cf222c=1`.
 The closed-contact state needs a connected `down 17 04` test before changing
 the launch defaults or declaring an SD fix. No guest RAM fields were forced.
+
+## Connected SD lid gate verification
+
+The later `runs/nxs-sd-closed-lid-1` supersedes the unverified-contact caveat
+above. It uses the same image/binary for 180 seconds, with normal panel input
+`down 17 04` acknowledged early in startup and held as a physical lid contact.
+The stopped snapshot records `04cf222c=0` (lid-open gate clear),
+`049832ec=1` (card detected), `04cf2180=2`, and decoded input `051e21d0=0`.
+
+Unlike the open-lid runs, MAIN then issues CMD0, CMD8, CMD55/ACMD41, CMD2,
+CMD3, CMD9, CMD10, CMD7, CMD16, CMD13, and further configuration/status
+transactions. This verifies that closing the emulated contact removes the
+identified detection blocker. It is not yet sector-read, filesystem-mount,
+track-load or audio validation. The input contact remains held until teardown;
+it models a closed lid, not an ordinary pressed button.
+
+The current UI's SD OPEN label/momentary treatment and a neutral open-lid
+launch state need a coherent persistent-lid implementation. Do not implement
+that by forcing the firmware's readiness or mount-status RAM.
