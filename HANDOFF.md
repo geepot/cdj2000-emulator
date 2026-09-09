@@ -8,6 +8,17 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Independent boot-blocker audit for the GUI task: BF531 selects the
+`bfin_sic_537_io_write_buffer` path (SIC model switch 531..533), not the 52x
+path. Its IMASK case forwards interrupts before storing the new mask, so a
+masking write evaluates the old enabled bits. The shared forward helper emits
+level 1 for every currently pending source, and CEC's port callback always
+calls `_cec_raise` without inspecting level. These source facts motivate the
+GUI task's trace of a stale shared-DMA interrupt after acknowledgement; they
+do not yet prove the connected failure or justify suppressing interrupts.
+Ensure any regression test exercises the actual 537/BF531 path. No interrupt
+semantics changed in this audit.
+
 Read-only handshake checker `python -m tools.cdj_dsp.boot_handshake EVENTS`
 now distinguishes observed DSP readiness from packet-count progress. Against
 `nxs-e7010-strict-baseline-1`, it reports 3,000 readiness reads and no ordered
