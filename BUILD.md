@@ -657,3 +657,33 @@ incomplete. No I2C ACK or clock-ready response was fabricated.
 Rebuilt connected run `runs/nxs-i2c-long-connected` matches the same stop and
 records the I2C0 GPIO/idle configuration. GUI exits 0 with a frame after the
 15-second bound. QEMU's binary timestamp was checked against changed sources.
+
+### Automated replay equivalence gates
+
+Use one compilation for two fresh-process runs, with an optional saved baseline:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-i2c-long-connected/dsp-l2.bin runs/NEW_GATE --verify-repeat --expect-trace runs/dsp-i2c-long-1/trace.jsonl
+```
+
+`trace.jsonl` and `repeat.jsonl` are retained alongside `gate.json`, which
+records SHA-256 hashes, individual comparison outcomes and the aggregate result.
+Either mismatch exits 1, without changing the baseline. Omit `--expect-trace`
+when intentionally advancing firmware execution; keep `--verify-repeat` as
+the deterministic gate. Exact equality includes writes and final state, not
+just packet counts or the stopping PC. It is equivalence evidence, not an
+architectural oracle, full boot test or proof of audio. Matching fault traces
+can pass. The original no-gate diagnostic exit behavior remains unchanged.
+
+The compiler reads snapshotted source/header bytes and those same bytes supply
+manifest hashes, preventing a concurrent worktree edit from mislabeling the
+compiled input. Two executions share only the binary and immutable input dump;
+each starts a fresh process. This is not a partial CPU-state resume checkpoint.
+
+`runs/dsp-pll-baseline-gate` passes repeat and baseline checks with trace hash
+`5b7056642605e60cb33cf2761e01ab1a8a3df304ffc481c20a1a4dc135fd7fc8`.
+Tests verify matching faults, baseline mismatch exit 1, artifact retention,
+missing-baseline rejection and the existing breakpoint/step-limit distinctions.
+No new connected run is needed for this tool-only change; the last connected
+firmware evidence remains `runs/nxs-i2c-long-connected`.
+Full suite after the gate change: 169 passed / 43 skipped.

@@ -8,6 +8,25 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Replay gates are now built in: `--verify-repeat` compiles once and compares two
+fresh-process traces; `--expect-trace PATH` additionally requires exact equality
+with an explicit baseline. `gate.json` records hashes and outcomes. A mismatch
+exits 1 without replacing the baseline. A passing gate establishes equivalence,
+not correctness or boot. Compilation uses snapshotted source/header bytes so
+the manifest hashes describe the compiled inputs even if the worktree changes.
+`runs/dsp-pll-baseline-gate` passes both checks against the previous connected
+checkpoint's replay trace. Firmware/core behavior is unchanged by this tool batch.
+Full suite after this tooling change: 169 passed / 43 skipped.
+
+PLL preparation: SPRUH91D Figure 7-4 gives PLLCTL POR value `0xf2`, including
+reserved-one bits 7:6 and 4; do not model its reset as zero. Section 7.2.2
+requires four OSCIN cycles for bypass selection, divider GO transitions, and
+device-specific PLL lock delay. PLLSTAT.STABLE is oscillator-counter completion,
+not a PLL lock flag (7.4.17). PLL_MASTER_LOCK defaults unlocked (7.3); its
+future SYSCFG integration must preserve lock protection. Power-on state is
+not necessarily the unavailable boot-ROM handoff state. These findings inform
+the next implementation; no PLL registers have been mapped by this batch.
+
 I2C GPIO-mode and long-offset memory batch: ICMDR and pin configuration/output
 latches are shared between replay and connected execution for both I2C ports.
 Firmware selects GPIO pins, then enables an idle slave controller with STT=0.
@@ -216,7 +235,7 @@ an exact supported-opcode coverage report remain to be built.
 
 ## Validation and tools
 
-Latest full fork suite: 168 passed, 43 skipped. The CPU standalone harness
+Latest full fork suite: 169 passed, 43 skipped. The CPU standalone harness
 passes AddressSanitizer/UndefinedBehaviorSanitizer. The extra skip relative to
 the old machine is the optional Blackfin assembler/linker regression. Tests run with:
 
@@ -240,6 +259,8 @@ All output directories must be new. Replay compiles the current sources into a
 temporary executable; JSONL captures PCs/cycles, writes, final registers and
 pending memory counts. Manifest hashes identify input and source versions.
 Replay exit zero means a report was written, not successful firmware boot.
+With equivalence gates enabled, zero additionally means those comparisons
+passed; a deterministic unsupported-instruction/peripheral stop may still pass.
 
 `emulator/qemu/cdj_c674x.c` is the partial instruction/pipeline core;
 `cdj_c674x_loop.c` the loop scheduler; `cdj_c6747_syscfg.c` protected register

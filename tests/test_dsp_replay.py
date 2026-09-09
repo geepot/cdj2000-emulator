@@ -49,3 +49,37 @@ def test_replay_rejects_invalid_input_without_artifacts(tmp_path):
     result = run(dump, output)
     assert result.returncode != 0 and '256 KiB' in result.stderr
     assert not output.exists()
+
+
+def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
+    data = bytearray(0x40000)
+    struct.pack_into('<I', data, 0, 0x11800020)
+    struct.pack_into('<I', data, 0x20, 0xffffffff)
+    dump = tmp_path / 'dump.bin'
+    dump.write_bytes(data)
+    first = tmp_path / 'first'
+    result = run(dump, first, '--verify-repeat')
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['reason'] == 'fault'
+    gate = json.loads((first / 'gate.json').read_text())
+    assert gate['passed'] and gate['repeat_matches']
+    assert gate['trace_sha256'] == gate['repeat_sha256']
+    assert 'not architectural correctness or boot' in gate['scope']
+    baseline = first / 'trace.jsonl'
+    second = tmp_path / 'second'
+    result = run(dump, second, '--verify-repeat', '--expect-trace', str(baseline))
+    assert result.returncode == 0, result.stderr
+    assert json.loads((second / 'gate.json').read_text())['expected_matches']
+    # Same deterministic fault, different diagnostic trace: gate must fail,
+    # preserving artifacts rather than quietly updating the baseline.
+    changed = tmp_path / 'changed.jsonl'
+    changed.write_bytes(baseline.read_bytes() + b'\n')
+    third = tmp_path / 'third'
+    result = run(dump, third, '--verify-repeat', '--expect-trace', str(changed))
+    assert result.returncode == 1
+    gate = json.loads((third / 'gate.json').read_text())
+    assert gate['repeat_matches'] and not gate['expected_matches'] and not gate['passed']
+    assert json.loads(result.stdout)['reason'] == 'fault'
+    missing = tmp_path / 'missing'
+    result = run(dump, missing, '--expect-trace', str(tmp_path / 'absent'))
+    assert result.returncode != 0 and not missing.exists()
