@@ -11,12 +11,14 @@
 #include "cdj_c6747_mcasp.h"
 #include "cdj_c6747_gpio.h"
 #include "cdj_c6747_i2c.h"
+#include "cdj_c6747_pll.h"
 static uint8_t ram[0x40000];
 static CdjC6747Syscfg syscfg;
 static CdjC6747Psc psc;
 static CdjC6747Mcasp mcasp;
 static CdjC6747Gpio gpio;
 static CdjC6747I2c i2c;
+static CdjC6747Pll pll;
 static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }
 static bool read_bus(void *unused, uint32_t a, uint32_t *v)
@@ -27,6 +29,7 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
     if (cdj_c6747_mcasp_read(&mcasp, a, v)) return true;
     if (cdj_c6747_gpio_read(&gpio, a, v)) return true;
     if (cdj_c6747_i2c_read(&i2c, a, v)) return true;
+    if (cdj_c6747_pll_read(&pll, a, v)) return true;
     a = global(a);
     if ((a & 3) || a < 0x11800000 || a > 0x1183fffc) return false;
     a -= 0x11800000;
@@ -41,6 +44,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
     if (!ok) ok = cdj_c6747_mcasp_write(&mcasp, a, v, size, commit);
     if (!ok) ok = cdj_c6747_gpio_write(&gpio, a, v, size, commit);
     if (!ok) ok = cdj_c6747_i2c_write(&i2c, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_pll_write(&pll, a, v, size, commit);
     uint32_t physical = global(a);
     if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
         physical >= 0x11800000 && physical <= 0x11840000 - size) {
@@ -73,6 +77,7 @@ int main(int argc, char **argv)
     cdj_c6747_mcasp_reset(&mcasp);
     cdj_c6747_gpio_reset(&gpio);
     cdj_c6747_i2c_reset(&i2c);
+    cdj_c6747_pll_reset(&pll);
     uint32_t entry;
     read_bus(NULL, 0x11800000, &entry);
     cdj_c674x_reset(&c, entry);

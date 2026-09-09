@@ -14,6 +14,7 @@
 #include "cdj_c6747_mcasp.h"
 #include "cdj_c6747_gpio.h"
 #include "cdj_c6747_i2c.h"
+#include "cdj_c6747_pll.h"
 
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
@@ -32,6 +33,7 @@ typedef struct {
     CdjC6747Mcasp mcasp;
     CdjC6747Gpio gpio;
     CdjC6747I2c i2c;
+    CdjC6747Pll pll;
     void (*hint)(void *, bool);
     void *opaque;
 } NxsHpi;
@@ -56,6 +58,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     if (cdj_c6747_mcasp_read(&s->mcasp, address, value)) return true;
     if (cdj_c6747_gpio_read(&s->gpio, address, value)) return true;
     if (cdj_c6747_i2c_read(&s->i2c, address, value)) return true;
+    if (cdj_c6747_pll_read(&s->pll, address, value)) return true;
     if (address >= 0x00800000 && address < 0x00840000) address += 0x11000000;
     if ((address & 3) || address < L2_BASE || address > L2_BASE + L2_SIZE - 4) return false;
     *value = ldl_le_p(s->l2 + address - L2_BASE);
@@ -66,6 +69,10 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     NxsHpi *s = opaque;
+    if (cdj_c6747_pll_write(&s->pll, address, value, size, commit)) {
+        if (commit) info_report("nxs-pll: write address=%#x value=%#x", address, (uint32_t)value);
+        return true;
+    }
     if (cdj_c6747_i2c_write(&s->i2c, address, value, size, commit)) {
         if (commit) info_report("nxs-i2c: write address=%#x value=%#x", address, (uint32_t)value);
         return true;
@@ -178,6 +185,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c6747_mcasp_reset(&s->mcasp);
     cdj_c6747_gpio_reset(&s->gpio);
     cdj_c6747_i2c_reset(&s->i2c);
+    cdj_c6747_pll_reset(&s->pll);
     s->hint = hint;
     s->opaque = opaque;
     memory_region_init_io(&s->registers, NULL, &hpi_ops, s, "nxs.uhpi", 0x100000);

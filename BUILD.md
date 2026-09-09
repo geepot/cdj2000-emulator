@@ -687,3 +687,31 @@ missing-baseline rejection and the existing breakpoint/step-limit distinctions.
 No new connected run is needed for this tool-only change; the last connected
 firmware evidence remains `runs/nxs-i2c-long-connected`.
 Full suite after the gate change: 169 passed / 43 skipped.
+
+### PLL reset-held configuration and reserved-bit conflict
+
+`cdj_c6747_pll.c` stores 13 configuration registers per SPRUH91D 7.4.3-15.
+PLLCTL starts at POR `0xf2`; divider defaults are explicitly tested. Using
+POR defaults at the missing-ROM handoff is an approximation, not measured
+handoff state. Read-only reserved-one bits 7:6 remain one. Reserved bit 4 must
+be written one per Table 7-5. PLLEN and PLLRST release stop until clock
+transition semantics exist. GO/status/clock outputs remain unmapped. Programmed
+divider latches do not imply active clock ratios. PLL_MASTER_LOCK starts
+unlocked; attempts to set it through unimplemented SYSCFG registers still stop.
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-i2c-long-connected/dsp-l2.bin runs/NEW_PLL --verify-repeat
+```
+
+`runs/dsp-pll-config-1` passes repeat equivalence at 1,117 packets / 1,351
+cycles, PC `0x11802e14`, compact `0x1144`. Firmware writes PLLCTL=`0x1c0`,
+clearing bit 4. The model rejects that write under the current TI manual.
+Investigate older device documentation/vendor initialization code and the
+instruction sequence; do not silently mask or accept the discrepancy.
+The current reference is [TI SPRUH91D, Table 7-5](https://www.ti.com/lit/ug/spruh91d/spruh91d.pdf).
+Tests cover reset values, validation without mutation, configuration readback,
+reserved fields, unsupported clock release and unmapped GO/status. The PLL
+address/undefined sanitizer harness passes. Full boot and audio are incomplete.
+Full suite: 170 passed / 43 skipped. Rebuilt connected run
+`runs/nxs-pll-config-connected` agrees at 1,117 packets / 1,351 cycles and
+the same stop; its bounded GUI exits 0 with a frame. QEMU timestamp checked.

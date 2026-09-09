@@ -8,6 +8,28 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+PLL reset-held configuration batch adds PLLCTL, OCSEL, PLLM, PREDIV,
+POSTDIV, OSCDIV and PLLDIV1-7 to both DSP execution paths. Power-on defaults
+are an explicit substitute for unknown boot-ROM handoff state. No clock
+outputs, lock indication, GO completion, PLLRST release or PLLEN activation
+are supplied. Config values are latches, not active clock ratios.
+
+`runs/dsp-pll-config-1 --verify-repeat` passes exact repeat equivalence:
+1,117 packets / 1,351 cycles, PC `0x11802e14`, compact store `0x1144`.
+Firmware attempts PLLCTL=`0x1c0`, clearing reserved bit 4 after writing `0x1d0`.
+SPRUH91D Table 7-5 says bit 4 must retain default one, so this request stops.
+This is an unresolved manual/firmware conflict, not evidence firmware is wrong.
+Next investigate older TI C6747 PLL/system guides and vendor initialization
+code, and revalidate the exact instruction sequence before relaxing this guard.
+Clock transitions and initial handoff state remain independent open issues.
+Trace SHA-256: `12e7edca378df4a2687f3a5f42c686556cee4c4c3c6708194ec3faf6075fcc24`.
+PLL sanitizer harness passes. Full boot/audio remain incomplete.
+Full suite: 170 passed / 43 skipped. Rebuilt connected run
+`runs/nxs-pll-config-connected` matches 1,117/1,351 and the same stop. Its
+15-second GUI run exits 0 with a frame, not a completed boot.
+
+### Prior replay tooling and I2C checkpoint
+
 Replay gates are now built in: `--verify-repeat` compiles once and compares two
 fresh-process traces; `--expect-trace PATH` additionally requires exact equality
 with an explicit baseline. `gate.json` records hashes and outcomes. A mismatch
@@ -225,7 +247,7 @@ include data and cannot be interpreted as instruction coverage percentages.
 The first inventory-driven batch implemented full/compact SPMASK with
 functional-unit classification and loop load/replay suppression, plus nearby
 predicated MVK. Later batches advanced through PSC and McASP pin configuration;
-the current blocker is PLLCTL, as recorded at the top of this handoff.
+the current blocker is the PLLCTL reserved-bit write, as recorded at the top.
 The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
 instructions and did not implement buffered suppression. Do not resurrect that
 special case. Implement the family, validate synthetic schedules and replay,
@@ -235,7 +257,7 @@ an exact supported-opcode coverage report remain to be built.
 
 ## Validation and tools
 
-Latest full fork suite: 169 passed, 43 skipped. The CPU standalone harness
+Latest full fork suite: 170 passed, 43 skipped. The CPU standalone harness
 passes AddressSanitizer/UndefinedBehaviorSanitizer. The extra skip relative to
 the old machine is the optional Blackfin assembler/linker regression. Tests run with:
 
