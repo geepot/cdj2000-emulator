@@ -1,5 +1,13 @@
 # Building
 
+Connected replay limits are diagnostic, not firmware events. If a step,
+packet or cycle ceiling prevents reaching the next recorded boundary, replay
+exits nonzero with `outcome=event_budget_exhausted` in `failure.json` and its
+manifest. The optional gate fails, and no final checkpoint is written because
+pending HPI/cooperative scheduling state is not serialized. Resume from a
+prior captured connected checkpoint, not this partial trace. A valid boundary
+at the exact limit can still verify; contradictory state remains a mismatch.
+
 Standalone SH7764 IIC empty-bus controller regression:
 
 ```sh

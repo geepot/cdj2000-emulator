@@ -94,6 +94,28 @@ def checkpoint_info(data: bytes) -> dict:
                 sdram_sha256=sdram_hash.hexdigest(), present_pages=present_pages)
 
 
+def event_budget_diagnostic(path: Path) -> dict:
+    """Read the C runner's explicit non-resumable event-budget outcome."""
+    diagnostics = []
+    with path.open() as trace:
+        for line in trace:
+            event = json.loads(line)
+            if event.get('event') == 'event_budget_exhausted':
+                diagnostics.append(event)
+    if len(diagnostics) != 1:
+        raise ValueError('event-budget exit lacks exactly one diagnostic record')
+    diagnostic = diagnostics[0]
+    if (diagnostic.get('reason') not in {'step_limit', 'packet_limit', 'cycle_limit'} or
+            not isinstance(diagnostic.get('next_sequence'), int) or
+            diagnostic['next_sequence'] <= 0 or
+            not isinstance(diagnostic.get('next_type'), str) or
+            not diagnostic['next_type'] or
+            any(not isinstance(diagnostic.get(field), int)
+                for field in ('pc', 'packets', 'cycles'))):
+        raise ValueError('event-budget diagnostic is malformed')
+    return diagnostic
+
+
 def checkpoint_provenance(path: Path, data: bytes, info: dict) -> dict:
     """Validate a connected or exact-repeat checkpoint's local provenance."""
     manifest_path = path.parent / 'manifest.json'
@@ -381,7 +403,56 @@ def main():
         else:
             replay_env.pop('CDJ_NXS_DSP_TX_CAPTURE', None)
         with (args.output / 'trace.jsonl').open('w') as trace:
-            subprocess.run(command, stdout=trace, check=True, env=replay_env)
+            result = subprocess.run(command, stdout=trace, env=replay_env)
+        if result.returncode == 3:
+            try:
+                diagnostic = event_budget_diagnostic(args.output / 'trace.jsonl')
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                parser.error(f'invalid event-budget diagnostic: {error}')
+            failure = dict(
+                schema=1,
+                outcome='event_budget_exhausted',
+                diagnostic=diagnostic,
+                limits=manifest['limits'],
+                resumable_checkpoint=None,
+                limitation=('execution stopped between connected transcript boundaries; '
+                            'pending HPI/cooperative scheduler state is not serialized, so no '
+                            'output checkpoint was written'),
+            )
+            failure_bytes = (json.dumps(failure, indent=2) + '\n').encode()
+            (args.output / 'failure.json').write_bytes(failure_bytes)
+            manifest.update(
+                complete=True,
+                outcome='event_budget_exhausted',
+                architectural_validation_eligible=False,
+                validation_incomplete=True,
+                output_checkpoint=None,
+                coverage=None,
+                stop=None,
+                budget_exhaustion=diagnostic,
+                failure_artifact={
+                    'file': 'failure.json',
+                    'sha256': hashlib.sha256(failure_bytes).hexdigest(),
+                },
+            )
+            (args.output / 'manifest.json').write_text(
+                json.dumps(manifest, indent=2) + '\n')
+            if args.verify_repeat or expected is not None:
+                gate = dict(
+                    scope='bounded event replay did not reach a connected boundary',
+                    passed=False,
+                    outcome='event_budget_exhausted',
+                    limits=manifest['limits'],
+                    diagnostic=diagnostic,
+                    repeat_not_run=True,
+                )
+                (args.output / 'gate.json').write_text(json.dumps(gate, indent=2) + '\n')
+            print(json.dumps(diagnostic, separators=(',', ':')))
+            print('Replay event budget exhausted before a connected boundary; '
+                  'no resumable checkpoint was written', file=sys.stderr)
+            raise SystemExit(1)
+        if result.returncode:
+            raise subprocess.CalledProcessError(result.returncode, command)
         if args.verify_repeat:
             repeat_command = command.copy()
             repeat_command[7] = str(args.output / 'repeat-final.cdjdsp')

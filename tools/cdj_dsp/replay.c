@@ -751,11 +751,31 @@ static const char *run_budget(ReplayLimits *limits, uint32_t breakpoint)
     return reason;
 }
 
-static bool replay_external_events(const char *path, ReplayLimits *limits,
-                                   uint32_t breakpoint, const char **reason)
+typedef enum {
+    EVENT_REPLAY_ERROR,
+    EVENT_REPLAY_COMPLETE,
+    EVENT_REPLAY_BUDGET_EXHAUSTED,
+} EventReplayResult;
+
+static EventReplayResult event_budget_exhausted(
+    const RecordedEvent *event, const ReplayLimits *limits)
+{
+    const char *limited = limit_reached(limits);
+    printf("{\"event\":\"event_budget_exhausted\",\"reason\":\"%s\","
+           "\"next_sequence\":%" PRIu64 ",\"next_type\":\"%s\","
+           "\"pc\":%" PRIu32 ",\"packets\":%" PRIu64
+           ",\"cycles\":%" PRIu64 "}\n",
+           limited ? limited : "unknown_limit", event->sequence, event->type,
+           cpu.pc, cpu.packets, cpu.cycles);
+    return EVENT_REPLAY_BUDGET_EXHAUSTED;
+}
+
+static EventReplayResult replay_external_events(
+    const char *path, ReplayLimits *limits,
+    uint32_t breakpoint, const char **reason)
 {
     FILE *file = fopen(path, "r");
-    if (!file) { perror("event transcript"); return false; }
+    if (!file) { perror("event transcript"); return EVENT_REPLAY_ERROR; }
     char line[768];
     uint64_t expected = 0;
     bool stop_pending = false, fault_matched = false;
@@ -768,14 +788,27 @@ static bool replay_external_events(const char *path, ReplayLimits *limits,
     }
     while (fgets(line, sizeof(line), file)) {
         if (!strchr(line, '\n') && !feof(file)) {
-            fputs("event transcript line too long\n", stderr); fclose(file); return false;
+            fputs("event transcript line too long\n", stderr);
+            fclose(file);
+            return EVENT_REPLAY_ERROR;
         }
         RecordedEvent event;
         if (!parse_event(line, &event) || event.sequence != ++expected) {
             fputs("invalid or non-contiguous event transcript\n", stderr);
-            fclose(file); return false;
+            fclose(file);
+            return EVENT_REPLAY_ERROR;
         }
         if (event.sequence <= checkpoint_state.event_sequence) continue;
+        /* Limits are host-requested diagnostic boundaries, not connected
+         * firmware events.  Do not apply the next host event after reaching
+         * one.  An immediately following DSP stop may still prove that the
+         * limit happened to coincide with a genuine recorded boundary. */
+        if (limit_reached(limits) && !cpu.fault &&
+            (strcmp(event.type, "dsp_stop") || !stop_pending)) {
+            EventReplayResult result = event_budget_exhausted(&event, limits);
+            fclose(file);
+            return result;
+        }
         bool trigger = false;
         if (!strcmp(event.type, "boot_phase")) {
             if (event.offset || event.address || event.size || event.value > 7)
@@ -853,26 +886,44 @@ static bool replay_external_events(const char *path, ReplayLimits *limits,
                    !strcmp(event.type, "rom_hpi_ready") ||
                    !strcmp(event.type, "reset_assert")) {
             fputs("event requires a checkpoint from after DSP start/reset handoff\n", stderr);
-            fclose(file); return false;
+            fclose(file);
+            return EVENT_REPLAY_ERROR;
         } else goto mismatch;
         if (event.boot_phase != checkpoint_state.boot_phase ||
             event.hint != hpi.hint || event.dspint != hpi.dspint) goto mismatch;
         if (trigger) {
-            if (stop_pending || cpu.fault || limit_reached(limits)) goto mismatch;
+            if (stop_pending || cpu.fault) goto mismatch;
+            if (limit_reached(limits)) {
+                EventReplayResult result = event_budget_exhausted(&event, limits);
+                fclose(file);
+                return result;
+            }
             *reason = run_budget(limits, breakpoint);
             stop_pending = true;
         }
         continue;
 mismatch:
+        /* A requested limit explains a recorded stop whose counters are still
+         * in the future.  If the counters already match, a bad PC, word, HPI
+         * state, or queued DSP HPIC write remains a genuine divergence. */
+        if (limit_reached(limits) && stop_pending && !cpu.fault &&
+            (!strcmp(event.type, "dsp_stop") &&
+             event.packets >= cpu.packets && event.cycles >= cpu.cycles &&
+             (event.packets > cpu.packets || event.cycles > cpu.cycles))) {
+            EventReplayResult result = event_budget_exhausted(&event, limits);
+            fclose(file);
+            return result;
+        }
         fprintf(stderr, "event replay mismatch at sequence %" PRIu64 " (%s)\n",
                 event.sequence, event.type);
-        fclose(file); return false;
+        fclose(file);
+        return EVENT_REPLAY_ERROR;
     }
     bool ok = !ferror(file) && verified_stops && !stop_pending && !hpic_count &&
               !hpic_overflow && (fault_matched || !cpu.fault);
     fclose(file);
     if (!ok) fputs("event transcript ended before a deterministic DSP boundary\n", stderr);
-    return ok;
+    return ok ? EVENT_REPLAY_COMPLETE : EVENT_REPLAY_ERROR;
 }
 int main(int argc, char **argv)
 {
@@ -994,8 +1045,16 @@ int main(int argc, char **argv)
     };
     const char *reason = "step_limit";
     if (argc == 9) {
-        if (!checkpoint || !replay_external_events(argv[8], &limits, breakpoint, &reason))
+        if (!checkpoint) return 2;
+        EventReplayResult result = replay_external_events(
+            argv[8], &limits, breakpoint, &reason);
+        if (result == EVENT_REPLAY_ERROR)
             return 2;
+        if (result == EVENT_REPLAY_BUDGET_EXHAUSTED) {
+            coverage_emit();
+            int tx_status = tx_capture ? fclose(tx_capture) : 0;
+            return ferror(stdout) || tx_capture_failed || tx_status ? 2 : 3;
+        }
     } else {
         for (;;) {
             const char *limited = limit_reached(&limits);

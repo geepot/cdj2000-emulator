@@ -8,6 +8,14 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Replay event-budget handling is corrected: step/packet/cycle ceilings emit
+`event_budget_exhausted`, a failed diagnostic gate and no unsafe checkpoint.
+Exact valid recorded stops at the limit still verify and save state; same-count
+bad PC and backward counters remain genuine mismatches. Focused replay suites:
+18 passed. Real one-step `runs/dsp-event-budget-diagnostic-1` reports exhaustion
+at event 115240 without a final checkpoint. This is an incomplete validation
+result, never a successful connected replay.
+
 Standalone SH7764 IIC frontend now has tested idle-line readback, transactional
 unsupported-mode rejection, W0C status, separate RX/TX and explicit empty-bus
 address-NACK/STOP events. All 128 write addresses NACK; there is no identity
@@ -17,6 +25,14 @@ artifact of zero-read MMIO. Manual section 16.3.9 gives SCL=Pck/132 at 0x0e;
 at the board's modeled 54MHz this is approximately 409kHz and nine periods
 take 22us. Actual NXS IIC Pck, START/filter latency and STOP timing remain
 unverified; do not silently inherit timer acceleration or claim cycle accuracy.
+Further primary-source audit narrows Pck: service schematic p91 straps mode3,
+and SH7764 Table 10.2 specifies Pck=2*EXTAL. The service schematic labels X2
+26.975MHz (DSS1185-A), while its block diagram/parts list give 26.965MHz
+(DSS1185). Thus documented Pck candidates are 53.950/53.930MHz, not exactly
+54MHz. Preserve that source discrepancy until fitted hardware is checked.
+No local authoritative IC14 register specification or physical bus capture
+was found; firmware identity expectations alone are not independent device
+evidence. A non-secret identity-register capture is the next useful input.
 
 Strict tail replay `runs/dsp-spi-gap-tail-replay-1`, starting at long-run
 checkpoint 364 with its transcript and a 10-million-step cap, verifies the
