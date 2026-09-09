@@ -45,6 +45,7 @@ static unsigned instruction_unit(const CdjC674xInstruction *insn)
     uint32_t w = insn->word;
     unsigned side = insn->compact ? w & 1 : (w >> 1) & 1;
     if (!insn->compact) {
+        if ((w & 0x0c) == 12) return 32u; /* Long offsets always use .D2. */
         if ((w & 0x1c) == 0x18) return 1u << side;
         if ((w & 0x0c) == 4 || (w & 0x0c) == 12 ||
             (w & 0x7c) == 0x40 || (w & 0xc3c) == 0x830) return 16u << side;
@@ -85,6 +86,10 @@ static bool protected_load(const CdjC674xInstruction *i)
     if (!(i->header & (1u << 20))) return false;
     uint32_t w = i->word;
     if (i->compact) return (w & 6) == 4 && (w & 8);
+    if ((w & 0x0c) == 12) {
+        unsigned op = (w >> 4) & 7;
+        return op != 3 && op != 5 && op != 7;
+    }
     if ((w & 0x10c) != 4 && (w & 0x17c) != 0x134 &&
         (w & 0x17c) != 0x154 && (w & 0x17c) != 0x124 &&
         (w & 0x17c) != 0x174 && (w & 0x17c) != 0x164 &&
@@ -429,12 +434,13 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             static const unsigned index[] = {0,0,1,2,1,2,0};
             enabled = (cpu->r[bank[creg]][index[creg]] != 0) ^ z;
         }
-        if ((w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154 ||
+        bool long_offset = (w & 0x0c) == 12;
+        if (long_offset || (w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154 ||
                    (w & 0x17c) == 0x124 || (w & 0x17c) == 0x174 ||
                    (w & 0x17c) == 0x164 || (w & 0x17c) == 0x144) {
             /* Scalar memory: address E1, RAM access E3, load destination E5. */
             unsigned op = (w >> 4) & 7;
-            bool extended = (w & 0x100) != 0;
+            bool extended = !long_offset && (w & 0x100) != 0;
             bool pair = extended && (op == 2 || op == 4 || op == 6 || op == 7);
             bool nonaligned = extended && op != 4 && op != 6;
             unsigned size = pair ? 8 : nonaligned ? 4 : op >= 6 ? 4 : (op == 0 || op == 4 || op == 5) ? 2 : 1;
@@ -447,6 +453,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 return stop(cpu, pc, insn->word, "invalid doubleword register pair");
             }
             unsigned bank = (w >> 7) & 1, mode = (w >> 9) & 15;
+            if (long_offset) {
+                /* Figure C-5 / 3.9.3: unsigned scaled 15-bit displacement,
+                 * fixed B14/B15 base, no base update, data bank from s. */
+                b = 14 + bank; bank = 1; mode = 1;
+            }
             reg_write = false;
             if (!(mode & 8) && (mode & 2))
                 return stop(cpu, pc, insn->word, "reserved memory addressing mode");
@@ -455,7 +466,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 nonaligned_memory |= nonaligned;
                 if (b >= 4 && b <= 7 && cpu->control[0])
                     return stop(cpu, pc, insn->word, "circular memory addressing not implemented");
-                uint32_t offset = ((mode & 4) ? cpu->r[bank][a] : a) * scale;
+                uint32_t offset = (long_offset ? (w >> 8) & 32767 :
+                                   (mode & 4) ? cpu->r[bank][a] : a) * scale;
                 uint32_t base = cpu->r[bank][b];
                 uint32_t updated = (mode & 1) ? base + offset : base - offset;
                 uint32_t address = ((mode & 10) == 10) ? base : updated;

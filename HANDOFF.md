@@ -8,6 +8,36 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+I2C GPIO-mode and long-offset memory batch: ICMDR and pin configuration/output
+latches are shared between replay and connected execution for both I2C ports.
+Firmware selects GPIO pins, then enables an idle slave controller with STT=0.
+TI 22.3.16 specifies internal SCL/SDA=1 in GPIO mode; this does not establish
+external pin values. Reset release is supported only in that idle GPIO mode.
+Transfers, status, physical input, ACK/NACK and interrupt delivery remain
+unsupported. PDSET/PDCLR reads are indeterminate per TI and explicitly stop.
+
+All eight full-width long-offset scalar load/store forms now use unsigned
+scaled 15-bit displacements from B14/B15 with no base update. They retain the
+E1/E3/E5 memory pipeline. Tests cover both data banks, both bases, boundary
+offsets, signed loads and neighboring-byte preservation. Static inventory
+`runs/i2c-next-inventory.json` finds 96 candidates across seven formats in
+`0x11803080:0x11803200`, dominated by long-offset memory; this is discovery,
+not validated executable-code coverage.
+
+Replays `runs/dsp-i2c-long-1` and `runs/dsp-i2c-long-repeat` match at 1,088
+packets / 1,289 cycles, PC `0x11802dc8`, compact word `0x114d`, loading
+PLLCTL at B6=`0x01c11100` (C6747 datasheet PLL register map).
+Trace SHA-256: `5b7056642605e60cb33cf2761e01ab1a8a3df304ffc481c20a1a4dc135fd7fc8`.
+Suite: 168 passed / 43 skipped; CPU and I2C sanitizer harnesses pass.
+Rebuilt connected run `runs/nxs-i2c-long-connected` matches this stop and
+records ICMDR=0, ICPFUNC=1, ICPDIR=0, ICMDR=0x20. GUI exits 0 with a frame
+at the 15-second bound; that is not proof of full boot.
+Next: PLL reset/clock configuration and transition semantics. Never invent
+clock lock/readiness; the existing PSC step timing remains an approximation.
+Full boot and audio are incomplete.
+
+### Previous GPIO and compact bit-field checkpoint
+
 GPIO configuration and compact bit-field batch: all eight C6747 GPIO banks
 have DIR, OUT_DATA, SET/CLR_DATA, rising/falling trigger configuration and
 BINTEN storage shared by replay and connected execution. DIR resets to all
@@ -176,7 +206,7 @@ include data and cannot be interpreted as instruction coverage percentages.
 The first inventory-driven batch implemented full/compact SPMASK with
 functional-unit classification and loop load/replay suppression, plus nearby
 predicated MVK. Later batches advanced through PSC and McASP pin configuration;
-the current blocker is I2C0 ICMDR, as recorded at the top of this handoff.
+the current blocker is PLLCTL, as recorded at the top of this handoff.
 The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
 instructions and did not implement buffered suppression. Do not resurrect that
 special case. Implement the family, validate synthetic schedules and replay,
@@ -186,7 +216,7 @@ an exact supported-opcode coverage report remain to be built.
 
 ## Validation and tools
 
-Latest full fork suite: 167 passed, 43 skipped. The CPU standalone harness
+Latest full fork suite: 168 passed, 43 skipped. The CPU standalone harness
 passes AddressSanitizer/UndefinedBehaviorSanitizer. The extra skip relative to
 the old machine is the optional Blackfin assembler/linker regression. Tests run with:
 

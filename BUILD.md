@@ -628,3 +628,32 @@ replay/build/connected commands with fresh output paths to reproduce.
 Rebuilt connected run `runs/nxs-gpio-fields-connected` matches this stop,
 records GPIO DIR45=`0xffffbfff`, and exits GUI 0 with a frame after 15 seconds.
 This is not a completed firmware boot or working audio.
+
+### I2C GPIO-mode and long-offset memory batch
+
+`cdj_c6747_i2c.c` implements reset-held ICMDR and ICPFUNC/ICPDIR/ICPDOUT
+plus write-only PDSET/PDCLR aliases, following SPRUH91D 22.3.9 and 22.3.16-21.
+It additionally permits IRS=1 in idle GPIO mode (PFUNC=1, slave STT=0,
+optional FREE). TI specifies constant-one internal SCL/SDA in GPIO mode.
+All transfer modes, status/data reads, external input and interrupt behavior
+remain unsupported. Changing pin function requires IRS=0. Reserved writes
+stop; PDSET/PDCLR reads stop because TI labels readback indeterminate.
+The firmware actually configures this GPIO/idle sequence; it does not perform
+an I2C transfer in the newly covered path. Research notes suggest no DSP I2C
+slaves, but that has not been independently reverified from the schematic here.
+
+Full-width long-offset LDB/LDBU/LDH/LDHU/LDW/STB/STH/STW use Figure C-5
+and section 3.9.3 of SPRUFE8B: B14/B15 base, unsigned scaled 15-bit offset,
+no pointer update, .D2 execution with either data register bank. Tests cover
+all eight forms, both data banks/bases, offsets 0/1/31/256/32767, wraparound
+address calculation, signed loads, E3/E5 delay and narrow-store preservation.
+
+Suite: 168 passed / 43 skipped. CPU and I2C address/undefined sanitizers pass.
+Replays `runs/dsp-i2c-long-1` and `runs/dsp-i2c-long-repeat` are identical:
+1,088 packets / 1,289 cycles, PC `0x11802dc8`, compact `0x114d`, loading
+PLLCTL at `0x01c11100`. Use the earlier commands with fresh output paths.
+PLL clock/reset timing is the next peripheral batch; full boot/audio remain
+incomplete. No I2C ACK or clock-ready response was fabricated.
+Rebuilt connected run `runs/nxs-i2c-long-connected` matches the same stop and
+records the I2C0 GPIO/idle configuration. GUI exits 0 with a frame after the
+15-second bound. QEMU's binary timestamp was checked against changed sources.

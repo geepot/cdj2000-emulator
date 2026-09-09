@@ -31,6 +31,34 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* Long-offset scalar loads/stores: all eight opcodes, both data banks,
+     * both fixed B bases and displacement boundaries. Reuse real E3/E5 bus. */
+    const unsigned long_offsets[] = {0, 1, 31, 256, 32767};
+    for (unsigned op = 0; op < 8; ++op)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned y = 0; y < 2; ++y)
+    for (unsigned n = 0; n < 5; ++n) {
+        unsigned size = op >= 6 ? 4 : (op == 0 || op == 4 || op == 5) ? 2 : 1;
+        bool store = op == 3 || op == 5 || op == 7;
+        uint32_t base = 0x1080u - long_offsets[n] * size;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[1][14+y] = base; c.r[side][3] = 0xaabbccdd;
+        memory[32] = 0x92348081;
+        memory[0] = (3u << 23) | (long_offsets[n] << 8) |
+                    (y << 7) | (op << 4) | 12 | (side << 1);
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(memory[32] == 0x92348081 && c.r[side][3] == 0xaabbccdd);
+        for (unsigned step = 0; step < 4; ++step)
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        if (store) {
+            uint32_t expected = size == 1 ? 0x923480dd : size == 2 ? 0x9234ccdd : 0xaabbccdd;
+            assert(memory[32] == expected);
+        } else {
+            const uint32_t results[] = {0x8081,0x81,0xffffff81,0,0xffff8081,0,0x92348081,0};
+            assert(c.r[side][3] == results[op]);
+        }
+        assert(c.r[1][14+y] == base);
+    }
     for (unsigned side = 0; side < 2; ++side)
     for (unsigned subset = 0; subset < 2; ++subset)
     for (unsigned op = 0; op < 3; ++op)
