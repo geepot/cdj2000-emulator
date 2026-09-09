@@ -873,6 +873,24 @@ static void cdj_dmac_panel_done(void *opaque)
     }
 }
 
+static void cdj_dmac_dsp_irq(CdjDmacState *dmac, unsigned index)
+{
+    /* Both legacy shared-window and NXS UHPI transfers use the SH DMAC's
+     * completion interrupt. The PCM ISR clears IE, leaving TE for rearm. */
+    if (!(dmac->channel[index].chcr & CHCR_IE)) {
+        return;
+    }
+    if (index == DMA5_CHANNEL) {
+        if (dmac->dma5_irq && !dmac->dma5_pending) {
+            dmac->dma5_pending = true;
+            qemu_set_irq(dmac->dma5_irq, 1);
+        }
+    } else if (dmac->dsp_dma_irq && !dmac->dsp_dma_pending) {
+        dmac->dsp_dma_pending = true;
+        qemu_set_irq(dmac->dsp_dma_irq, 1);
+    }
+}
+
 static void cdj_dmac_run(CdjDmacState *dmac, unsigned index)
 {
     CdjDmacChannel *channel = &dmac->channel[index];
@@ -895,6 +913,7 @@ static void cdj_dmac_run(CdjDmacState *dmac, unsigned index)
             error_report("nxs-hpi: unsupported DMA CHCR=%#x TCR=%#x", channel->chcr, channel->tcr);
             return;
         }
+        channel->role = CDJ_DMA_DSP;
         for (uint32_t word = 0; word < channel->tcr; ++word) {
             address_space_read(&address_space_memory, source, MEMTXATTRS_UNSPECIFIED, buffer, 4);
             address_space_write(&address_space_memory, destination, MEMTXATTRS_UNSPECIFIED, buffer, 4);
@@ -902,6 +921,7 @@ static void cdj_dmac_run(CdjDmacState *dmac, unsigned index)
             destination += dm ? 4 : 0;
         }
         cdj_dmac_complete(channel, source, destination);
+        cdj_dmac_dsp_irq(dmac, index);
         return;
     }
     channel->role = cdj_dmac_role(channel);
@@ -1021,17 +1041,11 @@ static void cdj_dmac_run(CdjDmacState *dmac, unsigned index)
          * (see DMA5_IRQ).  A channel-5 completion delivered on 0x7a0 storms the
          * boot handler and leaves the sender asleep for ever.
          */
-        if (index == DMA5_CHANNEL) {
-            if (dmac->dma5_irq && !dmac->dma5_pending) {
-                dmac->dma5_pending = true;
-                qemu_set_irq(dmac->dma5_irq, 1);
-            }
-        } else if (dmac->dsp_dma_irq && !dmac->dsp_dma_pending) {
-            dmac->dsp_dma_pending = true;
-            qemu_set_irq(dmac->dsp_dma_irq, 1);
-        }
     }
     cdj_dmac_complete(channel, source, destination);
+    if (channel->role == CDJ_DMA_DSP) {
+        cdj_dmac_dsp_irq(dmac, index);
+    }
 }
 
 /* DMAOR occupies the block a seventh channel would have used. */
@@ -1222,7 +1236,8 @@ static uint64_t cdj_intc2_dma_read(void *opaque, hwaddr offset, unsigned size)
     /* Bit n is DMINTn, i.e. board index n + 2: the application's receive on
      * index 3 is bit 1 (INTC2_DMA_RX), its transmit on index 4 bit 2. */
     return (dmac->panel_rx_pending ? 1u << (dmac->panel_rx_index - 2) : 0)
-         | (dmac->panel_tx_pending ? 1u << (dmac->panel_tx_index - 2) : 0);
+         | (dmac->panel_tx_pending ? 1u << (dmac->panel_tx_index - 2) : 0)
+         | (dmac->dma5_pending ? 1u << (DMA5_CHANNEL - 2) : 0);
 }
 
 static void cdj_intc2_dma_write(void *opaque, hwaddr offset, uint64_t value,

@@ -70,7 +70,7 @@ def test_host_addressing_and_fixed_port_dma():
             write(fixed, 0xa5c33c5a)
             assert read(fixed) == 0xa5c33c5a
             assert read(address) == 0x80000020
-            # Real SH DMAC channel 5, incrementing RAM source / fixed HPID.
+            # Boot DMA register block, incrementing RAM source / fixed HPID.
             write(0x04001000, 0x11223344)
             write(0x04001004, 0x55667788)
             write(address, 0x11802000)
@@ -86,6 +86,27 @@ def test_host_addressing_and_fixed_port_dma():
             write(address, 0x11802000)
             assert read(auto) == 0x11223344
             assert read(auto) == 0x55667788
+            # NXS PCM uses DMINT3: board register index 5, not boot index 8.
+            # Completion must assert its own request, then the firmware ISR
+            # acknowledges by clearing IE while leaving TE set.
+            pcm, status = 0x1f608050, 0xffd4004c
+            for acknowledge in (0x40001412, 0x40001414):
+                write(address, 0x11802400)
+                write(pcm, 0x04001000)
+                write(pcm + 4, auto)
+                write(pcm + 8, 2)
+                write(pcm + 12, 0x40001415)
+                assert read(pcm + 8) == 0
+                assert read(pcm + 12) == 0x40001416
+                assert read(status) & 8, 'HPI DMA completed without DMINT3'
+                write(pcm + 12, acknowledge)
+                assert not (read(status) & 8)
+            # Polling transfers with IE clear must not request an interrupt.
+            write(pcm, 0x04001000)
+            write(pcm + 8, 2)
+            write(pcm + 12, 0x40001411)
+            assert read(pcm + 8) == 0
+            assert not (read(status) & 8)
             stream.close(); sock.close()
         finally:
             process.terminate()

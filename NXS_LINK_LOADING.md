@@ -50,3 +50,25 @@ key 0x10, drains the first event queue (60753c), and enters the general
 window-event queue at 7e911c as event 5. The second queue also drains.
 Neither queue is permanently full in this case. The remaining investigation
 is the browser-window handler and its outgoing load request.
+
+## Native load request and missing PCM DMA interrupt
+
+`gui-reconnect-5` demonstrates that short encoder clicks work. The browser
+starts a 500 ms hold timer on key 0x10; multi-second diagnostic holds are
+not equivalent to a short selection click. Brief 100 ms physical contacts
+(some can fall between MAIN samples) produce genuine requests at MAIN
+times 2003.6300 (type 1/cursor 3 ENTER) and 2010.6006 (type 7/cursor 1 LOAD).
+No proxy requests or firmware memory patches are involved. The GUI reaches
+track 01 / NOW LOADING. The stopped snapshot `after-native-load-request.bin`
+contains the fixture's RIFF header at 0456a7f0 and 047bf39c. HPI event
+386445 writes real LPCM class 2 to DSP address 11838100.
+
+The first PCM buffer then stalls: DMAC block ff608050 has TCR=0 and
+CHCR=40001416 (TE and IE set). The NXS-specific fixed-HPID path returned
+after `cdj_dmac_complete` without asserting any interrupt. NXS firmware
+041f781e clears IE and signals the waiting sender. The board now shares
+the existing DSP-DMA interrupt routing with this NXS path and reports
+DMINT3 in INT2STAT. A polling transfer with IE clear stays non-interrupting.
+The actual-QEMU regression fails on the old build at the missing DMINT3
+assertion and passes after the fix; HPI and address-mode tests: 13 passed.
+Cold firmware retesting is still required; this is not audio-load success.
