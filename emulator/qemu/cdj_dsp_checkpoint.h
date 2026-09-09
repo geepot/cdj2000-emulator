@@ -18,12 +18,15 @@
 #include "cdj_c6747_syscfg.h"
 #include "cdj_c6747_timer.h"
 #include "cdj_c6747_spi.h"
+#include "cdj_c6747_cache.h"
+#include "cdj_c6747_edma.h"
 
-#define CDJ_DSP_CHECKPOINT_SCHEMA 5u
+#define CDJ_DSP_CHECKPOINT_SCHEMA 8u
 #define CDJ_DSP_L2_SIZE 0x40000u
 #define CDJ_DSP_SHARED_RAM_SIZE 0x20000u
 #define CDJ_DSP_SDRAM_SIZE 0x02000000u
 #define CDJ_DSP_COOPERATIVE_BUDGET 1000000u
+#define CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL 1024u
 #define CDJ_DSP_CHECKPOINT_PAGE_SIZE 4096u
 #define CDJ_DSP_CHECKPOINT_REASON_SIZE 64u
 #define CDJ_DSP_CHECKPOINT_FAULT_SIZE 96u
@@ -37,8 +40,11 @@
  * 128 KiB C6747 shared-RAM image between L2 and sparse EMIFB SDRAM. Schema 3
  * appends INTC state. Schema-1/2 inputs remain readable; missing shared RAM or
  * interrupt-controller state is reset explicitly. Schema 4 appends both
- * Timer64P instances. Schema 5 appends both SPI instances; older inputs
- * initialize any absent peripheral state. */
+ * Timer64P instances. Schema 5 appends both SPI instances. Schema 6 appends
+ * cache-control state. Schema 7 appended the first McASP control/configuration
+ * model. Schema 8 appends McASP transmit-buffer, EDMA3 channel-controller and
+ * SYSCFG master-priority state;
+ * older inputs initialize any absent peripheral state. */
 typedef struct {
     uint32_t hpi_address, boot_phase;
     uint64_t words, event_sequence, checkpoint_sequence;
@@ -57,6 +63,11 @@ typedef struct {
     CdjC6747Intc intc;
     CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
     CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
+    CdjC6747Cache cache;
+    CdjC6747McaspControl mcasp_control;
+    CdjC6747Edma edma;
+    CdjC6747SyscfgPriority syscfg_priority;
+    CdjC6747IntcDelivery intc_delivery;
 } CdjDspCheckpointState;
 
 void cdj_dsp_checkpoint_prepare(CdjDspCheckpointState *state,

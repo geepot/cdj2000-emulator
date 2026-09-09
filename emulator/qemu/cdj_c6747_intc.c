@@ -10,6 +10,24 @@ static bool banked(uint32_t address, uint32_t base, unsigned *bank)
     return true;
 }
 
+static bool combined_active(const CdjC6747Intc *s, unsigned bank)
+{
+    return (s->event_flag[bank] & ~s->event_mask[bank]) != 0;
+}
+
+static void request_selected_event(const CdjC6747Intc *s,
+                                   CdjC6747IntcDelivery *delivery,
+                                   unsigned event)
+{
+    if (!delivery) return;
+    for (unsigned interrupt = 4; interrupt < 16; ++interrupt) {
+        unsigned selector = interrupt - 4;
+        unsigned selected = (s->interrupt_mux[selector / 4] >>
+                             ((selector % 4) * 8)) & 0x7f;
+        if (selected == event) delivery->cpu_request |= 1u << interrupt;
+    }
+}
+
 void cdj_c6747_intc_reset(CdjC6747Intc *s)
 {
     memset(s, 0, sizeof(*s));
@@ -28,6 +46,36 @@ bool cdj_c6747_intc_event(CdjC6747Intc *s, unsigned event)
     if (event < 4 || event >= 128) return false;
     s->event_flag[event / 32] |= 1u << (event % 32);
     return true;
+}
+
+void cdj_c6747_intc_delivery_reset(CdjC6747IntcDelivery *delivery)
+{
+    *delivery = (CdjC6747IntcDelivery){0};
+}
+
+bool cdj_c6747_intc_deliver_event(CdjC6747Intc *s,
+                                  CdjC6747IntcDelivery *delivery,
+                                  unsigned event)
+{
+    if (event < 4 || event >= 128) return false;
+    unsigned bank = event / 32;
+    bool combined_was_active = combined_active(s, bank);
+    cdj_c6747_intc_event(s, event);
+
+    /* SPRUFK5A 7.2.2 and 7.4.2: original events 4..127 reach the
+     * interrupt selector directly and do not depend on EVTMASK or clearing
+     * EVTFLAG. The latter remains a sticky status bit. */
+    request_selected_event(s, delivery, event);
+    if (!combined_was_active && combined_active(s, bank))
+        request_selected_event(s, delivery, bank);
+    return true;
+}
+
+uint32_t cdj_c6747_intc_cpu_pending(CdjC6747IntcDelivery *delivery)
+{
+    uint32_t pending = delivery->cpu_request;
+    delivery->cpu_request = 0;
+    return pending;
 }
 
 bool cdj_c6747_intc_read(const CdjC6747Intc *s, uint32_t address,
@@ -52,20 +100,33 @@ bool cdj_c6747_intc_read(const CdjC6747Intc *s, uint32_t address,
     return true;
 }
 
-bool cdj_c6747_intc_write(CdjC6747Intc *s, uint32_t address,
-                          uint64_t value, unsigned size, bool commit)
+bool cdj_c6747_intc_write_delivery(CdjC6747Intc *s,
+                                   CdjC6747IntcDelivery *delivery,
+                                   uint32_t address, uint64_t value,
+                                   unsigned size, bool commit)
 {
     unsigned bank;
     if (size != 4 || value > UINT32_MAX) return false;
     if (banked(address, CDJ_C6747_INTC_EVTSET0, &bank)) {
         if (commit) {
-            s->event_flag[bank] |= (uint32_t)value;
-            if (!bank) s->event_flag[0] &= ~0xfu;
+            uint32_t events = (uint32_t)value & (!bank ? ~0xfu : UINT32_MAX);
+            bool combined_was_active = combined_active(s, bank);
+            s->event_flag[bank] |= events;
+            for (unsigned bit = 0; bit < 32; ++bit)
+                if (events & (1u << bit))
+                    request_selected_event(s, delivery, bank * 32 + bit);
+            if (!combined_was_active && combined_active(s, bank))
+                request_selected_event(s, delivery, bank);
         }
     } else if (banked(address, CDJ_C6747_INTC_EVTCLR0, &bank)) {
         if (commit) s->event_flag[bank] &= ~(uint32_t)value;
     } else if (banked(address, CDJ_C6747_INTC_EVTMASK0, &bank)) {
-        if (commit) s->event_mask[bank] = (uint32_t)value | (!bank ? 0xfu : 0u);
+        if (commit) {
+            bool combined_was_active = combined_active(s, bank);
+            s->event_mask[bank] = (uint32_t)value | (!bank ? 0xfu : 0u);
+            if (!combined_was_active && combined_active(s, bank))
+                request_selected_event(s, delivery, bank);
+        }
     } else if (banked(address, CDJ_C6747_INTC_EXPMASK0, &bank)) {
         if (commit)
             s->exception_mask[bank] = (uint32_t)value | (!bank ? 0xfu : 0u);
@@ -77,4 +138,11 @@ bool cdj_c6747_intc_write(CdjC6747Intc *s, uint32_t address,
                 (uint32_t)value & 0x7f7f7f7fu;
     } else return false;
     return true;
+}
+
+bool cdj_c6747_intc_write(CdjC6747Intc *s, uint32_t address,
+                          uint64_t value, unsigned size, bool commit)
+{
+    return cdj_c6747_intc_write_delivery(s, NULL, address, value, size,
+                                         commit);
 }

@@ -90,6 +90,25 @@ int main(int argc, char **argv)
     before.spis[1].pin_function = 0xe01;
     before.spis[1].format[0] = 0x00021810;
     before.spis[1].delay = 0x02020408;
+    cdj_c6747_cache_reset(&before.cache);
+    before.cache.l2cfg = 3;
+    before.cache.l1pcc = 0x10000;
+    before.cache.mar[192] = 1;
+    cdj_c6747_mcasp_control_reset(&before.mcasp_control);
+    before.mcasp_control.gblctl[1] = 0x1f00;
+    before.mcasp_control.xfmt[1] = 0xf2;
+    before.mcasp_control.srctl[1][3] = 1;
+    before.mcasp_control.xrdy[1] = 1u << 3;
+    cdj_c6747_edma_reset(&before.edma);
+    before.edma.drae[1] = 0x28;
+    before.edma.param[3][0] = 0x00103200;
+    before.edma.param[3][5] = 0x00024400;
+    before.edma.irq_notifications = 1u << 2;
+    cdj_c6747_syscfg_priority_reset(&before.syscfg_priority);
+    before.syscfg_priority.mstpri[0] = 0x44442122;
+    before.syscfg_priority.mstpri[1] = 0x44442000;
+    cdj_c6747_intc_delivery_reset(&before.intc_delivery);
+    before.intc_delivery.cpu_request = 1u << 8;
     l2[0] = 0x68;
     l2[sizeof(l2) - 1] = 0xa5;
     shared_ram[0] = 0x56;
@@ -130,6 +149,20 @@ int main(int argc, char **argv)
            after.spis[1].pin_function == 0xe01 &&
            after.spis[1].format[0] == 0x00021810 &&
            after.spis[1].delay == 0x02020408);
+    assert(after.cache.l2cfg == 3 && after.cache.l1pcc == 0x10000 &&
+           after.cache.mar[192] == 1);
+    assert(after.mcasp_control.gblctl[1] == 0x1f00 &&
+           after.mcasp_control.xfmt[1] == 0xf2 &&
+           after.mcasp_control.srctl[1][3] == 1 &&
+           after.mcasp_control.xrdy[1] == (1u << 3));
+    assert(after.edma.drae[1] == 0x28 &&
+           after.edma.param[3][0] == 0x00103200 &&
+           after.edma.param[3][5] == 0x00024400 &&
+           after.edma.irq_notifications == (1u << 2));
+    assert(after.syscfg_priority.mstpri[0] == 0x44442122 &&
+           after.syscfg_priority.mstpri[1] == 0x44442000 &&
+           after.syscfg_priority.mstpri[2] == 0x54604404);
+    assert(after.intc_delivery.cpu_request == (1u << 8));
 
     FILE *file = fopen(argv[1], "r+b");
     assert(file && fputc('X', file) != EOF && fclose(file) == 0);

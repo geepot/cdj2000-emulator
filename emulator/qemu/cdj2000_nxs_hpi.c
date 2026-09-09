@@ -18,6 +18,8 @@
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_timer.h"
 #include "cdj_c6747_spi.h"
+#include "cdj_c6747_cache.h"
+#include "cdj_c6747_edma.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
 #include "cdj_dsp_checkpoint.h"
@@ -40,6 +42,7 @@ typedef struct {
     uint32_t address;
     CdjC6747Hpi hpi;
     bool reset_released, dsp_started, dsp_halted, dsp_running;
+    bool functional_audio;
     unsigned boot_phase;
     uint64_t words;
     uint64_t event_sequence, checkpoint_sequence;
@@ -47,11 +50,16 @@ typedef struct {
     CdjC6747Syscfg syscfg;
     CdjC6747Psc psc;
     CdjC6747Mcasp mcasp;
+    CdjC6747McaspControl mcasp_control;
     CdjC6747Gpio gpio;
     CdjC6747I2c i2c;
     CdjC6747Intc intc;
+    CdjC6747IntcDelivery intc_delivery;
     CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
     CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
+    CdjC6747Cache cache;
+    CdjC6747Edma edma;
+    CdjC6747SyscfgPriority syscfg_priority;
     CdjC6747Pll pll;
     CdjC6747Emifb emifb;
     uint8_t *shared_ram;
@@ -110,14 +118,19 @@ static void capture_checkpoint(NxsHpi *s, const char *reason)
     state.syscfg = s->syscfg;
     state.psc = s->psc;
     state.mcasp = s->mcasp;
+    state.mcasp_control = s->mcasp_control;
     state.gpio = s->gpio;
     state.i2c = s->i2c;
     state.pll = s->pll;
     state.hpi = s->hpi;
     state.emifb = s->emifb;
     state.intc = s->intc;
+    state.intc_delivery = s->intc_delivery;
     memcpy(state.timers, s->timers, sizeof(state.timers));
     memcpy(state.spis, s->spis, sizeof(state.spis));
+    state.cache = s->cache;
+    state.edma = s->edma;
+    state.syscfg_priority = s->syscfg_priority;
     cdj_dsp_checkpoint_prepare(&state, reason);
     g_autofree char *name = g_strdup_printf("%020" PRIu64 ".cdjdsp",
                                              state.checkpoint_sequence);
@@ -149,8 +162,13 @@ void cdj_nxs_hpi_reset_line(bool released)
          * peripheral reset domains remain explicit models. */
         cdj_c6747_hpi_reset(&s->hpi);
         cdj_c6747_intc_reset(&s->intc);
+        cdj_c6747_intc_delivery_reset(&s->intc_delivery);
         cdj_c6747_timers_reset(s->timers);
         cdj_c6747_spis_reset(s->spis);
+        cdj_c6747_cache_reset(&s->cache);
+        cdj_c6747_edma_reset(&s->edma);
+        cdj_c6747_mcasp_reset(&s->mcasp);
+        cdj_c6747_mcasp_control_reset(&s->mcasp_control);
         s->dsp_started = s->dsp_halted = s->dsp_running = false;
         if (s->hint) s->hint(s->opaque, true);
         record_event(s, "reset_assert", 0, 0, 0, 0);
@@ -214,13 +232,18 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
 {
     NxsHpi *s = opaque;
     if (cdj_c6747_syscfg_read(&s->syscfg, address, value)) return true;
+    if (cdj_c6747_syscfg_priority_read(&s->syscfg_priority, address, value))
+        return true;
     if (cdj_c6747_psc_read(&s->psc, address, value)) return true;
     if (cdj_c6747_mcasp_read(&s->mcasp, address, value)) return true;
+    if (cdj_c6747_mcasp_control_read(&s->mcasp_control, address, value)) return true;
     if (cdj_c6747_gpio_read(&s->gpio, address, value)) return true;
     if (cdj_c6747_i2c_read(&s->i2c, address, value)) return true;
     if (cdj_c6747_intc_read(&s->intc, address, value)) return true;
     if (cdj_c6747_timers_read(s->timers, address, value)) return true;
     if (cdj_c6747_spis_read(s->spis, address, value)) return true;
+    if (cdj_c6747_cache_read(&s->cache, address, value)) return true;
+    if (cdj_c6747_edma_read(&s->edma, address, value)) return true;
     if (cdj_c6747_pll_read(&s->pll, address, value)) return true;
     if (cdj_c6747_emifb_read(&s->emifb, address, value)) return true;
     if ((s->syscfg.cfgchip[1] & 0x8000) &&
@@ -239,6 +262,205 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     if ((address & 3) || address < L2_BASE || address > L2_BASE + L2_SIZE - 4) return false;
     *value = ldl_le_p(s->l2 + address - L2_BASE);
     return true;
+}
+
+static uint8_t *dsp_memory_span(NxsHpi *s, uint32_t address, size_t size)
+{
+    uint64_t end = (uint64_t)address + size;
+    if (!size || end > UINT64_C(0x100000000)) return NULL;
+    if (address >= L2_BASE && end <= (uint64_t)L2_BASE + L2_SIZE)
+        return s->l2 + address - L2_BASE;
+    if (address >= 0x00800000u &&
+        end <= UINT64_C(0x00800000) + L2_SIZE)
+        return s->l2 + address - 0x00800000u;
+    if (address >= SHARED_RAM_BASE &&
+        end <= (uint64_t)SHARED_RAM_BASE + SHARED_RAM_SIZE)
+        return s->shared_ram + address - SHARED_RAM_BASE;
+    if (cdj_c6747_emifb_sdram_enabled(&s->emifb) &&
+        address >= SDRAM_BASE && end <= (uint64_t)SDRAM_BASE + SDRAM_SIZE)
+        return s->sdram + address - SDRAM_BASE;
+    return NULL;
+}
+
+typedef struct {
+    uint8_t *target;
+    uint8_t *bytes;
+    size_t size;
+} EdmaStagedWrite;
+
+typedef struct {
+    NxsHpi *owner;
+    CdjC6747McaspControl *mcasp;
+    EdmaStagedWrite *writes;
+    size_t write_count, write_capacity;
+} EdmaBusContext;
+
+static bool edma_stage_write(EdmaBusContext *context, uint8_t *target,
+                             const uint8_t *bytes, size_t size)
+{
+    if (context->write_count == context->write_capacity) {
+        size_t capacity = context->write_capacity ?
+                          context->write_capacity * 2u : 8u;
+        if (capacity < context->write_capacity) return false;
+        EdmaStagedWrite *writes = g_try_renew(
+            EdmaStagedWrite, context->writes, capacity);
+        if (!writes) return false;
+        context->writes = writes;
+        context->write_capacity = capacity;
+    }
+    uint8_t *copy = g_try_malloc(size);
+    if (!copy) return false;
+    memcpy(copy, bytes, size);
+    context->writes[context->write_count++] =
+        (EdmaStagedWrite){target, copy, size};
+    return true;
+}
+
+static void edma_free_staged_writes(EdmaBusContext *context)
+{
+    for (size_t i = 0; i < context->write_count; ++i)
+        g_free(context->writes[i].bytes);
+    g_free(context->writes);
+}
+
+static bool edma_read_bytes(void *opaque, uint32_t address, uint8_t *bytes,
+                            size_t size)
+{
+    EdmaBusContext *context = opaque;
+    uint8_t *source = dsp_memory_span(context->owner, address, size);
+    if (!source) return false;
+    memcpy(bytes, source, size);
+    uintptr_t read_start = (uintptr_t)source;
+    uintptr_t read_end = read_start + size;
+    for (size_t i = 0; i < context->write_count; ++i) {
+        EdmaStagedWrite *write = &context->writes[i];
+        uintptr_t write_start = (uintptr_t)write->target;
+        uintptr_t write_end = write_start + write->size;
+        if (write_start < read_end && read_start < write_end) {
+            uintptr_t start = write_start > read_start ? write_start : read_start;
+            uintptr_t end = write_end < read_end ? write_end : read_end;
+            memcpy(bytes + start - read_start,
+                   write->bytes + start - write_start, end - start);
+        }
+    }
+    return true;
+}
+
+static bool edma_write_bytes(void *opaque, uint32_t address,
+                             const uint8_t *bytes, size_t size, bool commit)
+{
+    EdmaBusContext *context = opaque;
+    uint8_t *target = dsp_memory_span(context->owner, address, size);
+    if (target) {
+        return !commit || edma_stage_write(context, target, bytes, size);
+    }
+    if (size == 4) {
+        uint32_t value = ldl_le_p(bytes);
+        return cdj_c6747_mcasp_control_write(context->mcasp, address,
+                                             value, 4, commit);
+    }
+    return false;
+}
+
+static bool service_mcasp_axevt(CdjC6747Edma *edma,
+                                CdjC6747McaspControl *mcasp,
+                                EdmaBusContext *context)
+{
+    const CdjC6747EdmaBus bus = {edma_read_bytes, edma_write_bytes, context};
+    for (unsigned instance = 1; instance <= 2; ++instance) {
+        unsigned channel = instance == 1 ? 3 : 5;
+        for (unsigned serializer = 0;
+             serializer < 16 &&
+             cdj_c6747_mcasp_axevt_ready(mcasp, instance);
+             ++serializer) {
+            uint64_t before = mcasp->xbuf_writes[instance];
+            if (!cdj_c6747_edma_event(edma, channel, &bus)) return false;
+            /* A disabled EDMA channel latches ER without servicing XBUF.
+             * Stop until EESR is programmed rather than spinning. */
+            if (mcasp->xbuf_writes[instance] == before) break;
+        }
+    }
+    return true;
+}
+
+static void deliver_edma_notifications(NxsHpi *s)
+{
+    /* C6747 system event 8 is the EDMA3CC region-1 completion pulse. */
+    if (cdj_c6747_edma_take_irq_notification(&s->edma, 1))
+        cdj_c6747_intc_deliver_event(&s->intc, &s->intc_delivery, 8);
+}
+
+static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
+                                   uint32_t address, uint64_t value,
+                                   unsigned size, bool commit)
+{
+    CdjC6747Edma trial_edma = s->edma;
+    CdjC6747McaspControl trial_mcasp = s->mcasp_control;
+    EdmaBusContext trial_context = {.owner = s, .mcasp = &trial_mcasp};
+    const CdjC6747EdmaBus trial_bus = {
+        edma_read_bytes, edma_write_bytes, &trial_context,
+    };
+    bool ok = edma_access ?
+        cdj_c6747_edma_write(&trial_edma, address, value, size, true,
+                             &trial_bus) :
+        cdj_c6747_mcasp_control_write(&trial_mcasp, address, value, size, true);
+    if (ok) ok = service_mcasp_axevt(&trial_edma, &trial_mcasp,
+                                     &trial_context);
+    if (ok && commit) {
+        for (size_t i = 0; i < trial_context.write_count; ++i) {
+            EdmaStagedWrite *write = &trial_context.writes[i];
+            memcpy(write->target, write->bytes, write->size);
+        }
+        s->edma = trial_edma;
+        s->mcasp_control = trial_mcasp;
+        deliver_edma_notifications(s);
+    }
+    edma_free_staged_writes(&trial_context);
+    return ok;
+}
+
+static bool advance_functional_mcasp_slots(NxsHpi *s)
+{
+    CdjC6747Edma trial_edma = s->edma;
+    CdjC6747McaspControl trial_mcasp = s->mcasp_control;
+    EdmaBusContext trial_context = {.owner = s, .mcasp = &trial_mcasp};
+    bool advanced = false, ok = true;
+
+    for (unsigned instance = 1; instance <= 2; ++instance) {
+        if ((trial_mcasp.gblctl[instance] & 0x1f00u) != 0x1f00u)
+            continue;
+        bool axevt;
+        if (!cdj_c6747_mcasp_tx_slot(&trial_mcasp, instance, &axevt)) {
+            ok = false;
+            break;
+        }
+        advanced = true;
+    }
+    if (ok && advanced)
+        ok = service_mcasp_axevt(&trial_edma, &trial_mcasp, &trial_context);
+    if (ok && advanced) {
+        for (size_t i = 0; i < trial_context.write_count; ++i) {
+            EdmaStagedWrite *write = &trial_context.writes[i];
+            memcpy(write->target, write->bytes, write->size);
+        }
+        s->edma = trial_edma;
+        s->mcasp_control = trial_mcasp;
+        deliver_edma_notifications(s);
+    }
+    edma_free_staged_writes(&trial_context);
+    return ok;
+}
+
+static bool functional_audio_tick(NxsHpi *s)
+{
+    if (!s->functional_audio ||
+        s->cpu.packets % CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL)
+        return true;
+    if (advance_functional_mcasp_slots(s)) return true;
+    s->cpu.fault = "unsupported functional McASP transmit slot";
+    s->cpu.fault_pc = s->cpu.pc;
+    s->cpu.fault_word = 0;
+    return false;
 }
 
 static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
@@ -260,7 +482,8 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         if (commit) info_report("nxs-i2c: write address=%#x value=%#x", address, (uint32_t)value);
         return true;
     }
-    if (cdj_c6747_intc_write(&s->intc, address, value, size, commit)) {
+    if (cdj_c6747_intc_write_delivery(&s->intc, &s->intc_delivery,
+                                      address, value, size, commit)) {
         if (commit) info_report("nxs-intc: write address=%#x value=%#x",
                                 address, (uint32_t)value);
         return true;
@@ -275,12 +498,28 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                                 address, (uint32_t)value);
         return true;
     }
+    if (cdj_c6747_cache_write(&s->cache, address, value, size, commit)) {
+        if (commit) info_report("nxs-cache: write address=%#x value=%#x",
+                                address, (uint32_t)value);
+        return true;
+    }
+    if (edma_mcasp_transaction(s, true, address, value, size, commit)) {
+        if (commit) info_report("nxs-edma: write address=%#x value=%#x",
+                                address, (uint32_t)value);
+        return true;
+    }
     if (cdj_c6747_gpio_write(&s->gpio, address, value, size, commit)) {
         if (commit) info_report("nxs-gpio: write address=%#x value=%#x", address, (uint32_t)value);
         return true;
     }
     if (cdj_c6747_mcasp_write(&s->mcasp, address, value, size, commit)) {
         if (commit) info_report("nxs-mcasp: write address=%#x value=%#x", address, (uint32_t)value);
+        return true;
+    }
+    if (edma_mcasp_transaction(s, false, address, value, size, commit)) {
+        if (commit)
+            info_report("nxs-mcasp-control: write address=%#x value=%#x",
+                        address, (uint32_t)value);
         return true;
     }
     if (cdj_c6747_psc_write(&s->psc, address, value, size, commit)) {
@@ -290,6 +529,13 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
     if (cdj_c6747_syscfg_write(&s->syscfg, address, value, size, commit)) {
         if (commit) info_report("nxs-syscfg: write address=%#x value=%#x unlocked=%d",
                                 address, (uint32_t)value, s->syscfg.unlocked);
+        return true;
+    }
+    if (cdj_c6747_syscfg_priority_write(&s->syscfg_priority, &s->syscfg,
+                                        address, value, size, commit)) {
+        if (commit)
+            info_report("nxs-syscfg: master priority address=%#x value=%#x",
+                        address, (uint32_t)value);
         return true;
     }
     if (cdj_c6747_emifb_write(&s->emifb, address, value, size, commit)) {
@@ -368,12 +614,24 @@ static void run_dsp(NxsHpi *s)
     const char *reason = "phase budget exhausted";
     unsigned steps = 0;
     for (; steps < CDJ_DSP_COOPERATIVE_BUDGET; ++steps) {
+        deliver_edma_notifications(s);
+        if (!cdj_c674x_interrupt(
+                &s->cpu, cdj_c6747_intc_cpu_pending(&s->intc_delivery))) {
+            reason = s->cpu.fault ? s->cpu.fault : "CPU interrupt stopped";
+            s->dsp_halted = true;
+            break;
+        }
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
             s->dsp_halted = true;
             break;
         }
         cdj_c6747_psc_tick(&s->psc);
+        if (!functional_audio_tick(s)) {
+            reason = s->cpu.fault;
+            s->dsp_halted = true;
+            break;
+        }
         if (s->hpi.hint) { reason = "HINT host-event yield"; break; }
     }
     s->dsp_running = false;
@@ -430,11 +688,12 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
     if (offset == 0) {
         bool old_hint = s->hpi.hint, old_dspint = s->hpi.dspint;
         cdj_c6747_hpi_host_write(&s->hpi, value);
-        if (!old_dspint && s->hpi.dspint)
-            cdj_c6747_intc_event(&s->intc, 34);
+        bool dspint_rising = !old_dspint && s->hpi.dspint;
+        if (dspint_rising)
+            cdj_c6747_intc_deliver_event(&s->intc, &s->intc_delivery, 34);
         record_event(s, "hpi_host_control_write", offset, address, value, size);
         if (old_hint != s->hpi.hint && s->hint) s->hint(s->opaque, !s->hpi.hint);
-        if (!old_dspint && s->hpi.dspint && !s->dsp_started) {
+        if (dspint_rising && !s->dsp_started) {
             info_report("nxs-hpi: DSPINT after %" PRIu64 " written words; starting partial C674x interpreter", s->words);
             const char *path = getenv("CDJ_NXS_HPI_DUMP");
             if (path && *path) {
@@ -449,8 +708,8 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
             start_dsp(s);
         } else if (old_hint && !s->hpi.hint) {
             run_dsp(s);
-        } else if (!old_dspint && s->hpi.dspint && s->dsp_started) {
-            error_report("nxs-hpi: later DSPINT pending; C674x interrupt delivery not implemented");
+        } else if (dspint_rising && s->dsp_started) {
+            run_dsp(s);
         }
         return;
     }
@@ -480,15 +739,29 @@ static const MemoryRegionOps hpi_ops = {
 void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *opaque)
 {
     NxsHpi *s = g_new0(NxsHpi, 1);
+    const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
+    const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     nxs_hpi = s;
+    cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
+    s->functional_audio = audio && !strcmp(audio, "1");
+    if (cdj_c674x_loop_functional_timing())
+        warn_report("nxs-c674x: functional SPLOOPD timing enabled; run is not cycle-validation evidence");
+    if (s->functional_audio)
+        warn_report("nxs-c674x: functional McASP slots every %u packets enabled; run is not audio-timing evidence",
+                    CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL);
     cdj_c6747_syscfg_reset(&s->syscfg);
+    cdj_c6747_syscfg_priority_reset(&s->syscfg_priority);
     cdj_c6747_psc_reset(&s->psc);
     cdj_c6747_mcasp_reset(&s->mcasp);
+    cdj_c6747_mcasp_control_reset(&s->mcasp_control);
     cdj_c6747_gpio_reset(&s->gpio);
     cdj_c6747_i2c_reset(&s->i2c);
     cdj_c6747_intc_reset(&s->intc);
+    cdj_c6747_intc_delivery_reset(&s->intc_delivery);
     cdj_c6747_timers_reset(s->timers);
     cdj_c6747_spis_reset(s->spis);
+    cdj_c6747_cache_reset(&s->cache);
+    cdj_c6747_edma_reset(&s->edma);
     cdj_c6747_pll_reset(&s->pll);
     cdj_c6747_hpi_reset(&s->hpi);
     cdj_c6747_emifb_reset(&s->emifb);

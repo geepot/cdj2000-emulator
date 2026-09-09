@@ -76,5 +76,10 @@ bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
 bool cdj_c674x_execute(CdjC674x *, const CdjC674xPacket *, CdjC674xRead,
                       CdjC674xWrite, void *);
 void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry);
+/* Present already-selected CPU interrupt requests at an execute-packet
+ * boundary. Bits 4..15 correspond to INT4..INT15; all other bits are
+ * rejected. Requests latch in IFR even while masked. A recognized interrupt
+ * redirects the next fetch to its IST entry without advancing CPU time. */
+bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending);
 bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque);
 #endif

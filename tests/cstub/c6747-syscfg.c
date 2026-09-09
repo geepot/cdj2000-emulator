@@ -18,8 +18,20 @@ static bool read_bus(void *p, uint32_t a, uint32_t *v)
 int main(void)
 {
     CdjC6747Syscfg s;
+    CdjC6747SyscfgPriority priority;
     uint32_t v;
     cdj_c6747_syscfg_reset(&s);
+    cdj_c6747_syscfg_priority_reset(&priority);
+    const uint32_t priority_reset[] = {0x44442222, 0x44440000, 0x54604404};
+    for (unsigned i = 0; i < 3; ++i) {
+        assert(cdj_c6747_syscfg_priority_read(
+                   &priority, 0x01c14110 + i * 4, &v) &&
+               v == priority_reset[i]);
+        assert(cdj_c6747_syscfg_priority_write(
+                   &priority, &s, 0x01c14110 + i * 4,
+                   priority_reset[i], 4, true));
+    }
+    assert(cdj_c6747_syscfg_priority_valid(&priority));
     cdj_c6747_pll_reset(&pll);
     assert(!s.unlocked);
     const uint32_t cfg_defaults[] = {0, 0, 0xef00, 0xff00, 0};
@@ -48,6 +60,21 @@ int main(void)
     assert(!s.unlocked); /* Checking a pending store has no effects. */
     assert(write_bus(&s, CDJ_C6747_KICK1, 0x95a4f1e0, 4, true));
     assert(s.unlocked);
+    /* Recovered firmware raises DSP MDMA to priority 1 and EDMA3TC0 to
+     * priority 2 using read/modify/write on MSTPRI0/1. */
+    assert(cdj_c6747_syscfg_priority_write(
+               &priority, &s, 0x01c14110, 0x44442122, 4, false));
+    assert(priority.mstpri[0] == priority_reset[0]);
+    assert(cdj_c6747_syscfg_priority_write(
+               &priority, &s, 0x01c14110, 0x44442122, 4, true));
+    assert(cdj_c6747_syscfg_priority_write(
+               &priority, &s, 0x01c14114, 0x44442000, 4, true));
+    assert(priority.mstpri[0] == 0x44442122 &&
+           priority.mstpri[1] == 0x44442000);
+    assert(!cdj_c6747_syscfg_priority_write(
+               &priority, &s, 0x01c14110, 0, 4, true));
+    assert(!cdj_c6747_syscfg_priority_write(
+               &priority, &s, 0x01c14118, 0x10, 4, true));
     assert(write_bus(&s, CDJ_C6747_CFGCHIP0, 0x1a, 4, false));
     assert(!cdj_c6747_syscfg_pll_locked(&s));
     assert(write_bus(&s, CDJ_C6747_CFGCHIP0, 0x1a, 4, true));

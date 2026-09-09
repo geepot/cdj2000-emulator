@@ -41,8 +41,15 @@ static uint32_t control_read(const CdjC674x *cpu, unsigned id)
     }
     case 6: case 7:                 /* IRP, NRP */
     case 13: case 14:               /* ILC, RILC */
+        return cpu->control[id];
+    case 27:                        /* ITSR */
+        return (cpu->control[id] & 0x0000c6deu) |
+               ((cpu->control[1] >> 1) & 1u);
     case 18: case 19: case 20:      /* FADCR, FAUCR, FMCR */
         return cpu->control[id];
+    case 26:                        /* TSR */
+        return (cpu->control[id] & 0x0000c6deu) |
+               (cpu->control[1] & 1u);
     default:
         return 0;
     }
@@ -51,13 +58,14 @@ static uint32_t control_read(const CdjC674x *cpu, unsigned id)
 static bool control_read_supported(unsigned id)
 {
     return id == 1 || id == 2 || id == 4 || id == 5 || id == 6 || id == 7 ||
-           id == 13 || id == 14 || (id >= 18 && id <= 20);
+           id == 13 || id == 14 || id == 26 || id == 27 ||
+           (id >= 18 && id <= 20);
 }
 
 static bool control_write_supported(unsigned id)
 {
     return (id >= 1 && id <= 7) || id == 13 || id == 14 ||
-           (id >= 18 && id <= 20);
+           id == 26 || id == 27 || (id >= 18 && id <= 20);
 }
 
 static uint64_t arithmetic_shift_right64(uint64_t value, unsigned count)
@@ -393,6 +401,67 @@ static unsigned nop_cycles(const CdjC674xInstruction *insn)
     return 0;
 }
 
+typedef enum {
+    CDJ_C674X_INTERRUPT_GATE_NONE,
+    CDJ_C674X_INTERRUPT_GATE_DISABLE,
+    CDJ_C674X_INTERRUPT_GATE_RESTORE,
+} CdjC674xInterruptGate;
+
+/* DINT/RINT are unconditional no-unit instructions. Their high nibble is
+ * not a normal predicate field (SPRUFE8B DINT/RINT entries). GNU's no-unit
+ * formats expose an s bit for table uniformity, but both require s=0; only
+ * the parallel bit is variable. */
+static CdjC674xInterruptGate interrupt_gate_decode(
+    const CdjC674xInstruction *insn)
+{
+    if (insn->compact) return CDJ_C674X_INTERRUPT_GATE_NONE;
+    switch (insn->word & ~1u) {
+    case 0x10004000u: return CDJ_C674X_INTERRUPT_GATE_DISABLE;
+    case 0x10006000u: return CDJ_C674X_INTERRUPT_GATE_RESTORE;
+    default: return CDJ_C674X_INTERRUPT_GATE_NONE;
+    }
+}
+
+/* SPRUFE8B 3.8.11.3/6 list the operations which may not share an execute
+ * packet with DINT or RINT. Keep this format check separate from execution:
+ * several members intentionally remain unsupported, but must still reject
+ * the whole packet atomically rather than being hidden by decode order. */
+static bool interrupt_gate_parallel_conflict(
+    CdjC674xInterruptGate gate, const CdjC674xInstruction *insn)
+{
+    CdjC674xInterruptGate other = interrupt_gate_decode(insn);
+    if (other != CDJ_C674X_INTERRUPT_GATE_NONE) return other != gate;
+
+    uint32_t w = insn->word;
+    if (nop_cycles(insn) > 1) return true; /* Includes full-width IDLE. */
+    if (insn->compact) {
+        return (w & 0xbc7eu) == 0x0c66u || /* SPLOOP(D), reload form. */
+               (w & 0x3c7eu) == 0x1c66u || /* SPKERNEL. */
+               (w & 0x3c7eu) == 0x2c66u || /* SPMASK. */
+               (w & 0x3c7eu) == 0x3c66u;   /* SPMASKR. */
+    }
+    if ((w & ~1u) == 0x10000000u || /* SWE. */
+        (w & ~1u) == 0x10002000u || /* SWENR. */
+        (w & ~1u) == 0x00036000u)   /* SPKERNELR. */
+        return true;
+    if ((w & 0xf03ffffeu) == 0x00034000u) return true; /* SPKERNEL. */
+    if ((w & 0x007ffffcu) == 0x00038000u || /* SPLOOP. */
+        (w & 0x007ffffcu) == 0x0003a000u || /* SPLOOPD. */
+        (w & 0x007ffffeu) == 0x0003e000u)   /* SPLOOPW. */
+        return true;
+    if ((w & 0xfc03fffeu) == 0x00030000u || /* SPMASK. */
+        (w & 0xfc03fffeu) == 0x00032000u)   /* SPMASKR. */
+        return true;
+    if ((w & 0x0ffffffeu) == 0x001800e2u || /* B IRP. */
+        (w & 0x0ffffffeu) == 0x001c00e2u)   /* B NRP. */
+        return true;
+    if ((w & 0xffeu) == 0x3a2u && ((w >> 13) & 31) == 0) {
+        unsigned control = (w >> 23) & 31;
+        if (control == 1 || control == 26) return true; /* MVC reg,CSR/TSR. */
+    }
+    return false;
+}
+
 /* SPMASK unit bits are L1,L2,S1,S2,D1,D2,M1,M2. GNU's opcode table
  * corrects the full-width opcode in SPRUFE8B; compact is Figure H-8. */
 static bool spmask_decode(const CdjC674xInstruction *insn, unsigned *mask)
@@ -520,6 +589,58 @@ static bool stop(CdjC674x *cpu, uint32_t pc, uint32_t word, const char *why)
     cpu->fault_pc = pc;
     cpu->fault_word = word;
     return false;
+}
+
+bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
+{
+    const uint32_t maskable = 0x0000fff0u;
+    if (cpu->fault) return false;
+    if (pending & ~maskable)
+        return stop(cpu, cpu->pc, 0, "invalid CPU interrupt request mask");
+
+    /* This interface starts after system-event selection/INTMUX. The caller
+     * presents CPU INT4..15 requests, not raw C6747 events. SPRUFE8B 5.4.1
+     * makes IFR sticky until ICR or acceptance clears a bit. */
+    cpu->control[2] = (cpu->control[2] | pending) & maskable;
+    uint32_t eligible = cpu->control[2] & cpu->control[4] & maskable;
+    if (!(cpu->control[1] & 1u) || !(cpu->control[4] & 2u) || !eligible)
+        return true;
+
+    /* Section 5.4.2 forbids recognition in a branch's five delay packets.
+     * The interpreter represents taken branches explicitly, so defer while
+     * one is live. False conditional branches do not yet have pipeline state.
+     */
+    if (cpu->branch_due || cpu->branch_count) return true;
+    if (cpu->loop_active)
+        return stop(cpu, cpu->pc, 0,
+                    "maskable interrupt during SPLOOP not implemented");
+    if (cpu->control[26] & (1u << 9))
+        return stop(cpu, cpu->pc, 0,
+                    "nested maskable interrupt not implemented");
+
+    /* INT4 has highest maskable priority (Table 5-1). The interpreter has no
+     * speculative fetch pipeline, so the current PC is exactly the first
+     * execute packet annulled by the interrupt and therefore the IRP value.
+     * Existing delayed E2..E5 effects belong to older, non-annulled packets
+     * and remain queued to mature while the handler executes (5.4.4). */
+    unsigned interrupt = 4;
+    while (!(eligible & (1u << interrupt))) ++interrupt;
+    uint32_t saved_tsr = (cpu->control[26] & 0x0000c6deu) |
+                         (cpu->control[1] & 1u);
+    saved_tsr &= ~((1u << 15) | (1u << 14));
+    cpu->control[27] = saved_tsr;
+    cpu->control[6] = cpu->pc;
+    cpu->control[2] &= ~(1u << interrupt);
+
+    /* Table 5-3: save TSR in ITSR, enter supervisor interrupt context, retain
+     * GEE/DBGM, clear GIE/SGIE/XEN/CXM/EXC/SPLX, and assert INT/IB. PGIE and
+     * ITSR.GIE are the same physical bit. */
+    cpu->control[1] = (cpu->control[1] & ~3u) |
+                      ((saved_tsr & 1u) << 1);
+    cpu->control[26] = (saved_tsr & ((1u << 4) | (1u << 2))) |
+                       (1u << 15) | (1u << 9);
+    cpu->pc = (cpu->control[5] & 0xfffffc00u) + interrupt * 32u;
+    return true;
 }
 
 /* One taken branch may enter E1 each cycle; all six pipeline positions can
@@ -719,6 +840,32 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 uint32_t left = cpu->r[side][((w >> 13) & 7) + rs];
                 uint32_t right = cpu->r[cross][((w >> 7) & 7) + rs];
                 value = subtract ? left - right : left + right;
+            } else if ((w & 0x047e) == 0x042e) {
+                /* SPRUFE8B Figure F-30, Sx5: compact ADDK adds its
+                 * unsigned five-bit constant to the destination in place.
+                 * The three-bit destination observes header RS. */
+                unsigned constant = ((w >> 13) & 7) |
+                                    (((w >> 11) & 3) << 3);
+                dst = ((w >> 7) & 7) + rs;
+                value = cpu->r[side][dst] + constant;
+            } else if ((w & 0x047e) == 0x0436) {
+                /* SPRUFE8B Figure C-18, Dx5: B15 plus a word-scaled
+                 * unsigned five-bit constant.  B15 is fixed and ignores
+                 * RS; the three-bit destination observes RS. */
+                unsigned constant = ((w >> 13) & 7) |
+                                    (((w >> 11) & 3) << 3);
+                dst = ((w >> 7) & 7) + rs;
+                value = cpu->r[1][15] + constant * 4;
+            } else if ((w & 0x1c7f) == 0x0c77) {
+                /* SPRUFE8B Figure C-19, Dx5p: the only architectural
+                 * side is D2 (s=1), and both operands are the fixed B15.
+                 * Rejecting s=0 below keeps the reserved encoding closed. */
+                unsigned constant = ((w >> 13) & 7) |
+                                    (((w >> 8) & 3) << 3);
+                side = 1;
+                dst = 15;
+                value = (w & 0x0080) ? cpu->r[1][15] - constant * 4
+                                     : cpu->r[1][15] + constant * 4;
             } else if ((w & 0x047e) == 0x0036) {
                 /* Figure C-17: compact .D in-place ADD/SUB. */
                 dst = ((w >> 13) & 7) + rs;
@@ -993,6 +1140,30 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             out.r[side][dst] = value; written[side][dst] = true;
             continue;
         }
+        CdjC674xInterruptGate interrupt_gate = interrupt_gate_decode(insn);
+        if (interrupt_gate != CDJ_C674X_INTERRUPT_GATE_NONE) {
+            for (unsigned j = 0; j < packet->count; ++j) {
+                if (j != i && interrupt_gate_parallel_conflict(
+                                  interrupt_gate, &packet->instructions[j]))
+                    return stop(cpu, pc, w,
+                                "DINT/RINT parallel instruction conflict");
+            }
+            /* DINT and RINT change interruptibility in their E1 cycle. The
+             * execute packet commits as one architectural operation here;
+             * no delayed-result entry is appropriate. CSR.PGIE is unchanged.
+             * TSR.GIE and CSR.GIE are one physical bit, while TSR.SGIE holds
+             * the saved state used by RINT. */
+            if (interrupt_gate == CDJ_C674X_INTERRUPT_GATE_DISABLE) {
+                out.control[26] = (out.control[26] & ~3u) |
+                                  ((cpu->control[1] & 1u) << 1);
+                out.control[1] &= ~1u;
+            } else {
+                uint32_t gie = (cpu->control[26] >> 1) & 1u;
+                out.control[26] = (out.control[26] & ~3u) | gie;
+                out.control[1] = (out.control[1] & ~1u) | gie;
+            }
+            continue;
+        }
         unsigned creg = w >> 29, z = (w >> 28) & 1;
         bool enabled = true, reg_write = true, control_write = false;
         if (creg == 7 || (!creg && z)) return stop(cpu, pc, insn->word, "reserved predicate");
@@ -1068,6 +1239,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                     out.r[bank][b] = updated; written[bank][b] = true;
                 }
             }
+        } else if ((w & 0x7c) == 0x50) {
+            /* ADDK .S1/.S2 is an in-place modular add of a signed
+             * sixteen-bit constant, with an E1 read and E1 write. */
+            value = cpu->r[side][dst] +
+                    (uint32_t)sx((w >> 7) & 0xffff, 16);
         } else if ((w & 0x7c) == 0x28) {
             value = sx((w >> 7) & 0xffff, 16);
         } else if ((w & 0x7c) == 0x68) {
@@ -1124,6 +1300,15 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             bool pair_source = op == 0x20 || op == 0x21 ||
                                op == 0x24 || op == 0x29;
             reg_write = false;
+            /* The immediate-long forms have no cross-path variant: their
+             * 40-bit src2 consumes the local .L long-data input.  Cross
+             * paths carry only one 32-bit operand (SPRUFE8B 2.3, ADD/SUB
+             * opcode maps).  Keep the otherwise format-shaped x=1 words
+             * fail-closed instead of silently reading the local pair. */
+            bool immediate_long = op == 0x20 || op == 0x24;
+            if (immediate_long && (w & (1u << 12)))
+                return stop(cpu, pc, insn->word,
+                            "cross-path long operand not supported");
             if ((dst & 1) || (pair_source && (b & 1)))
                 return stop(cpu, pc, insn->word,
                             "invalid long register pair");
@@ -1188,6 +1373,148 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 out.r[side][dst] = (uint32_t)result;
                 out.r[side][dst + 1] = (uint32_t)(result >> 32);
                 written[side][dst] = written[side][dst + 1] = true;
+            }
+        } else if (((w & 0x7c) == 0 &&
+                    (((w >> 7) & 31) == 0x10 ||
+                     ((w >> 7) & 31) == 0x14 ||
+                     ((w >> 7) & 31) == 0x16)) ||
+                   ((w & 0x83c) == 0x30 &&
+                    (((w >> 6) & 31) == 0x18 ||
+                     ((w >> 6) & 31) == 0x19))) {
+            /* The C674x 32x32 .M family samples both operands in E1 and
+             * writes in E4.  MPY32 has scalar (low 32 bits) and signed
+             * full-product forms; the SU/U/US variants always write the
+             * complete 64-bit product to an even/odd register pair. */
+            bool mpy_encoding = (w & 0x7c) == 0;
+            unsigned op = mpy_encoding ? (w >> 7) & 31 : (w >> 6) & 31;
+            bool pair = !mpy_encoding || op != 0x10;
+            reg_write = false;
+            if (pair && (dst & 1))
+                return stop(cpu, pc, insn->word,
+                            "invalid multiply result register pair");
+            if (enabled) {
+                uint32_t left = cpu->r[side][a];
+                uint32_t right = cpu->r[cross][b];
+                uint64_t result;
+                if (mpy_encoding && (op == 0x10 || op == 0x14)) {
+                    result = (uint64_t)((int64_t)(int32_t)left *
+                                        (int64_t)(int32_t)right);
+                } else if (mpy_encoding) {       /* MPY32SU */
+                    result = (uint64_t)((int64_t)(int32_t)left *
+                                        (int64_t)(uint64_t)right);
+                } else if (op == 0x18) {         /* MPY32U */
+                    result = (uint64_t)left * (uint64_t)right;
+                } else {                         /* MPY32US */
+                    result = (uint64_t)((int64_t)(uint64_t)left *
+                                        (int64_t)(int32_t)right);
+                }
+                uint64_t due = cpu->cycles + 4;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                unsigned count = pair ? 2 : 1;
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned old_count = queued_result_registers(&out.loads[j]);
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + count &&
+                        dst < out.loads[j].dst + old_count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due,
+                    .value = pair ? result : (uint32_t)result,
+                    .bank = side, .dst = dst, .size = pair ? 16 : 0
+                };
+            }
+        } else if ((w & 0x7c) == 0 &&
+                   (((w >> 7) & 31) == 0x19 || ((w >> 7) & 31) == 0x18 ||
+                    ((w >> 7) & 31) == 0x01 || ((w >> 7) & 31) == 0x09 ||
+                    ((w >> 7) & 31) == 0x0f || ((w >> 7) & 31) == 0x0b ||
+                    ((w >> 7) & 31) == 0x03 || ((w >> 7) & 31) == 0x07 ||
+                    ((w >> 7) & 31) == 0x0d || ((w >> 7) & 31) == 0x05 ||
+                    ((w >> 7) & 31) == 0x11 || ((w >> 7) & 31) == 0x17 ||
+                    ((w >> 7) & 31) == 0x13 || ((w >> 7) & 31) == 0x15 ||
+                    ((w >> 7) & 31) == 0x1b || ((w >> 7) & 31) == 0x1e ||
+                    ((w >> 7) & 31) == 0x1f || ((w >> 7) & 31) == 0x1d)) {
+            /* Complete non-saturating 16x16 .M scalar family: MPY/H/HL/LH,
+             * signed/unsigned permutations, and the two signed-constant
+             * forms. Operands are sampled E1 and the scalar result is E2. */
+            unsigned op = (w >> 7) & 31;
+            uint32_t left_word = cpu->r[side][a];
+            uint32_t right_word = cpu->r[cross][b];
+            uint32_t result;
+            switch (op) {
+            case 0x18:
+                result = (uint32_t)((int32_t)sx(a, 5) *
+                                    (int32_t)(int16_t)right_word); break;
+            case 0x1e:
+                result = (uint32_t)((int64_t)sx(a, 5) *
+                                    (uint16_t)right_word); break;
+            case 0x01:
+                result = (uint32_t)((int32_t)(int16_t)(left_word >> 16) *
+                                    (int32_t)(int16_t)(right_word >> 16)); break;
+            case 0x09:
+                result = (uint32_t)((int32_t)(int16_t)(left_word >> 16) *
+                                    (int32_t)(int16_t)right_word); break;
+            case 0x0f:
+                result = (uint32_t)((uint32_t)(uint16_t)(left_word >> 16) *
+                                    (uint16_t)right_word); break;
+            case 0x0b:
+                result = (uint32_t)((int64_t)(int16_t)(left_word >> 16) *
+                                    (uint16_t)right_word); break;
+            case 0x03:
+                result = (uint32_t)((int64_t)(int16_t)(left_word >> 16) *
+                                    (uint16_t)(right_word >> 16)); break;
+            case 0x07:
+                result = (uint32_t)((uint32_t)(uint16_t)(left_word >> 16) *
+                                    (uint16_t)(right_word >> 16)); break;
+            case 0x0d:
+                result = (uint32_t)((int64_t)(uint16_t)(left_word >> 16) *
+                                    (int16_t)right_word); break;
+            case 0x05:
+                result = (uint32_t)((int64_t)(uint16_t)(left_word >> 16) *
+                                    (int16_t)(right_word >> 16)); break;
+            case 0x11:
+                result = (uint32_t)((int32_t)(int16_t)left_word *
+                                    (int32_t)(int16_t)(right_word >> 16)); break;
+            case 0x17:
+                result = (uint32_t)((uint32_t)(uint16_t)left_word *
+                                    (uint16_t)(right_word >> 16)); break;
+            case 0x13:
+                result = (uint32_t)((int64_t)(int16_t)left_word *
+                                    (uint16_t)(right_word >> 16)); break;
+            case 0x15:
+                result = (uint32_t)((int64_t)(uint16_t)left_word *
+                                    (int16_t)(right_word >> 16)); break;
+            case 0x1b:
+                result = (uint32_t)((int64_t)(int16_t)left_word *
+                                    (uint16_t)right_word); break;
+            case 0x1f:
+                result = (uint32_t)((uint32_t)(uint16_t)left_word *
+                                    (uint16_t)right_word); break;
+            case 0x1d:
+                result = (uint32_t)((int64_t)(uint16_t)left_word *
+                                    (int16_t)right_word); break;
+            default:
+                result = (uint32_t)((int32_t)(int16_t)left_word *
+                                    (int32_t)(int16_t)right_word); break;
+            }
+            reg_write = false;
+            if (enabled) {
+                uint64_t due = cpu->cycles + 2;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned count = queued_result_registers(&out.loads[j]);
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due, .value = result, .bank = side, .dst = dst,
+                    .size = 0
+                };
             }
         } else if ((w & 0x83c) == 0x30 &&
                    (((w >> 6) & 31) == 0x0e ||
@@ -1506,6 +1833,24 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 return stop(cpu, pc, insn->word,
                             "control register write not implemented");
             control_write = true; reg_write = false; value = cpu->r[cross][b];
+        } else if ((w & 0x0ffffffeu) == 0x001800e2u) {
+            /* B IRP, SPRUFE8B pp.155-156 and 5.3.4.3. The return branch has
+             * five delay slots. ITSR is restored to TSR in E1; ITSR.GIE is
+             * the physical CSR.PGIE bit, and PGIE itself remains unchanged. */
+            reg_write = false;
+            if (enabled) {
+                if (controls[1] || controls[26] || controls[27])
+                    return stop(cpu, pc, insn->word,
+                                "B IRP parallel task-state write conflict");
+                if (!queue_branch(&out, cpu->cycles + 6, cpu->control[6]))
+                    return stop(cpu, pc, insn->word,
+                                "parallel taken branches or branch queue overflow");
+                uint32_t restored = (cpu->control[27] & 0x0000c6deu) |
+                                    ((cpu->control[1] >> 1) & 1u);
+                out.control[26] = restored;
+                out.control[1] = (out.control[1] & ~1u) | (restored & 1u);
+                controls[1] = controls[26] = controls[27] = true;
+            }
         } else if ((w & 0x7c) == 0x10) {
             reg_write = false;
             if (enabled) {
@@ -1574,6 +1919,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 out.control[1] = (out.control[1] & 0xffff0100u) |
                                  (out.control[1] & value & 0x200u) |
                                  (value & 3u);
+                /* CSR.GIE and TSR.GIE are the same physical bit. */
+                out.control[26] = (out.control[26] & ~1u) | (value & 1u);
+                /* CSR.PGIE and ITSR.GIE are also one physical bit. */
+                out.control[27] = (out.control[27] & ~1u) |
+                                  ((value >> 1) & 1u);
             } else if (dst == 4) {
                 /* Reset remains enabled. NMIE can be set by MVC but not
                  * manually cleared; maskable enables are ordinary RW bits. */
@@ -1582,6 +1932,16 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             } else if (dst == 5) {
                 /* HPEINT is derived on read; only the aligned IST base writes. */
                 out.control[5] = value & 0xfffffc00u;
+            } else if (dst == 27) {
+                out.control[27] = value & 0x0000c6dfu;
+                out.control[1] = (out.control[1] & ~2u) |
+                                 ((value & 1u) << 1);
+            } else if (dst == 26) {
+                /* Privilege and hardware-owned TSR fields need a later
+                 * execution-mode model. Preserve them while allowing the
+                 * GIE/SGIE pair used by interrupt-critical firmware. */
+                out.control[26] = (out.control[26] & ~3u) | (value & 3u);
+                out.control[1] = (out.control[1] & ~1u) | (value & 1u);
             } else {
                 out.control[dst] = value;
             }
@@ -1739,6 +2099,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 finish = true;
                 continue;
             }
+            if (finish && interrupt_gate_decode(&insn) !=
+                              CDJ_C674X_INTERRUPT_GATE_NONE)
+                return stop(cpu, insn.pc, w,
+                            "DINT/RINT cannot share SPKERNEL packet");
             unsigned n = nop_cycles(&insn);
             if (n) {
                 if (n > 9 || (n > 1 && (finish || out.loop_wait)))
@@ -1903,6 +2267,8 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 return stop(cpu, other.pc, v, "SPMASK cannot share loop setup packet");
             if (protected_load(&other) ||
                 (nop_cycles(&other) > 1) ||
+                interrupt_gate_decode(&other) !=
+                    CDJ_C674X_INTERRUPT_GATE_NONE ||
                 (!other.compact && ((v & 0xffe) == 0x362 || (v & 0x7c) == 0x10 ||
                                    (v & 0x1ffc) == 0x120)) ||
                 compact_branch(&other))

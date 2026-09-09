@@ -14,6 +14,24 @@ def test_c6747_spi_registers(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c6747_spi.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
+def test_c6747_cache_registers(tmp_path):
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'cache-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-cache.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_cache.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=5)
+
+def test_c6747_edma_registers_and_transfers(tmp_path):
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'edma-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-edma.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_edma.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=5)
+
 def test_c6747_timer64p_registers(tmp_path):
     cc = shutil.which('cc')
     if not cc: pytest.skip('requires C compiler')
@@ -58,9 +76,13 @@ def test_dsp_checkpoint_round_trip(tmp_path):
     subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/dsp-checkpoint.c'),
         str(ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_syscfg.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_intc.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_timer.c'),
-        str(ROOT / 'emulator/qemu/cdj_c6747_spi.c'), '-o', str(binary)], check=True)
+        str(ROOT / 'emulator/qemu/cdj_c6747_spi.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_cache.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_mcasp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_edma.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary), str(checkpoint)], check=True, timeout=5)
 
 def test_c6747_pll_cycle_clock(tmp_path):

@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
-                    4: b'CDJDSP4\0', 5: b'CDJDSP5\0'}
+                    4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
+                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0'}
 SHARED_RAM_SIZE = 0x20000
 
 
@@ -66,7 +67,8 @@ def checkpoint_metadata(path: Path) -> dict:
                 payload_checksum=f'{payload_checksum:016x}')
 
 
-def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
+def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: bool,
+                           functional_dsp_audio: bool) -> None:
     checkpoint_dir = run / 'dsp-checkpoints'
     checkpoints = [checkpoint_metadata(path) for path in sorted(checkpoint_dir.glob('*.cdjdsp'))]
     events = run / 'dsp-events.jsonl'
@@ -88,8 +90,11 @@ def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
               [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
                ROOT / 'emulator/qemu/cdj_dsp_checkpoint.h',
                ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
-    manifest = dict(schema=5, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI, '
+    manifest = dict(schema=8, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA and SYSCFG priority, '
                                      'L2 and shared RAM plus sparse zero-default SDRAM pages'),
+        dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
+        dsp_audio_mode=('coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
+        architectural_validation_eligible=not (functional_dsp_timing or functional_dsp_audio),
         byte_order=sys.byteorder, complete=bool(checkpoints and events.is_file()),
         checkpoints=checkpoints, latest=checkpoints[-1]['file'] if checkpoints else None,
         event_transcript=dict(file=events.name, sha256=sha256(events) if events.is_file() else None,
@@ -101,12 +106,17 @@ def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
         source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
         approximations=[
             'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
-            'checkpoint schema 5 is ABI-bound and rejects structure-size or endianness changes',
+            'checkpoint schema 8 is ABI-bound and rejects structure-size or endianness changes',
             '128 KiB C6747 shared RAM is captured losslessly',
             'sparse SDRAM pages are lossless because omitted pages restore as zero',
             'SDRAM command timing, arbitration and retention are not modeled',
             'PSC transition ticks and PLL divider GO latency remain deterministic approximations',
-            'physical HPI pins, FIFO/HRDY timing and DSP interrupt delivery are not modeled'])
+            'physical HPI pins, FIFO/HRDY timing and DSP interrupt delivery are not modeled',
+            *(['functional run-ahead adds two SPLOOPD epilog cycles; not cycle-validation evidence']
+              if functional_dsp_timing else []),
+            *(['functional McASP scheduling advances one slot every 1024 executed DSP packets; '
+               'not serializer-clock, sample-rate, or audio-output evidence']
+              if functional_dsp_audio else [])])
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     (checkpoint_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
@@ -117,6 +127,10 @@ def main():
     parser.add_argument('--seconds', type=float, default=60)
     parser.add_argument('--port', type=int, default=5980)
     parser.add_argument('--qemu', type=Path, default=ROOT / 'build/qemu/build/qemu-system-sh4')
+    parser.add_argument('--functional-dsp-timing', action='store_true',
+                        help='run past the unresolved SPLOOPD epilog with a labeled two-cycle approximation')
+    parser.add_argument('--functional-dsp-audio', action='store_true',
+                        help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
     args = parser.parse_args()
     if args.seconds <= 0 or not 1024 <= args.port <= 65531:
         parser.error('positive duration and port 1024..65531 required')
@@ -144,6 +158,10 @@ def main():
     main_env['CDJ_NXS_HPI_DUMP'] = str(run / 'dsp-l2.bin')
     main_env['CDJ_NXS_DSP_EVENTS'] = str(run / 'dsp-events.jsonl')
     main_env['CDJ_NXS_DSP_CHECKPOINT_DIR'] = str(run / 'dsp-checkpoints')
+    if args.functional_dsp_timing:
+        main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
+    if args.functional_dsp_audio:
+        main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
     main_env['CDJ_REQ_STATUS_FRESH'] = '0'
     (run / 'run.json').write_text(json.dumps(dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
@@ -171,7 +189,8 @@ def main():
                     process.terminate()
                     try: process.wait(timeout=5)
                     except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
-            finalize_dsp_artifacts(run, firmware)
+            finalize_dsp_artifacts(run, firmware, args.functional_dsp_timing,
+                                   args.functional_dsp_audio)
             (run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     return 0 if result.get('gui_exit') == 0 and result.get('frame_exists') else 1
 

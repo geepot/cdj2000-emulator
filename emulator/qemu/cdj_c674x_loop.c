@@ -2,6 +2,18 @@
 #include <string.h>
 #include "cdj_c674x_loop.h"
 
+static bool functional_timing;
+
+void cdj_c674x_loop_set_functional_timing(bool enabled)
+{
+    functional_timing = enabled;
+}
+
+bool cdj_c674x_loop_functional_timing(void)
+{
+    return functional_timing;
+}
+
 bool cdj_c674x_loop_init(CdjC674xLoop *loop, unsigned ii, uint32_t iterations)
 {
     if (!ii || ii > 16) return false;
@@ -29,6 +41,11 @@ bool cdj_c674x_loop_load(CdjC674xLoop *loop, const uint32_t *tags,
         /* Post-loop fetching cannot precede the final loading boundary. */
         uint64_t loading_end = ((loop->length + loop->ii - 1) / loop->ii) * loop->ii;
         loop->post_cycle = (uint64_t)loop->iterations * loop->ii + delay;
+        /* Functional run-ahead only: the reached II=1 SPLOOPD epilog needs
+         * two additional cycles before direct fetch to avoid issuing a live
+         * buffered .L2 move beside the following .L2 MVK.  This is a bounded
+         * development approximation, not an architectural timing claim. */
+        if (functional_timing && loop->delayed_count) loop->post_cycle += 2;
         if (loop->post_cycle < loading_end) loop->post_cycle = loading_end;
         loop->end_cycle = loop->iterations ?
             (uint64_t)(loop->iterations - 1) * loop->ii + loop->length : loading_end;

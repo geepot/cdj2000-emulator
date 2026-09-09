@@ -2,6 +2,13 @@
 #include "cdj_c6747_syscfg.h"
 #define KEY0 0x83e70b13u
 #define KEY1 0x95a4f1e0u
+#define MSTPRI0 0x01c14110u
+static const uint32_t mstpri_reset[3] = {
+    0x44442222u, 0x44440000u, 0x54604404u
+};
+static const uint32_t mstpri_writable[3] = {
+    0x00007700u, 0x00007777u, 0x77707707u
+};
 static bool pinmux_address(uint32_t address)
 {
     return address >= CDJ_C6747_PINMUX0 && address <= CDJ_C6747_PINMUX0 + 19 * 4 &&
@@ -84,4 +91,43 @@ bool cdj_c6747_syscfg_write(CdjC6747Syscfg *s, uint32_t address,
 bool cdj_c6747_syscfg_pll_locked(const CdjC6747Syscfg *s)
 {
     return (s->cfgchip[0] & 16) != 0;
+}
+
+void cdj_c6747_syscfg_priority_reset(CdjC6747SyscfgPriority *s)
+{
+    for (unsigned i = 0; i < 3; ++i) s->mstpri[i] = mstpri_reset[i];
+}
+
+bool cdj_c6747_syscfg_priority_valid(const CdjC6747SyscfgPriority *s)
+{
+    for (unsigned i = 0; i < 3; ++i)
+        if ((s->mstpri[i] & ~mstpri_writable[i]) !=
+            (mstpri_reset[i] & ~mstpri_writable[i]))
+            return false;
+    return true;
+}
+
+bool cdj_c6747_syscfg_priority_read(const CdjC6747SyscfgPriority *s,
+                                   uint32_t address, uint32_t *value)
+{
+    if (address < MSTPRI0 || address > MSTPRI0 + 8 ||
+        ((address - MSTPRI0) & 3)) return false;
+    *value = s->mstpri[(address - MSTPRI0) / 4];
+    return true;
+}
+
+bool cdj_c6747_syscfg_priority_write(CdjC6747SyscfgPriority *s,
+                                    const CdjC6747Syscfg *syscfg,
+                                    uint32_t address, uint64_t value,
+                                    unsigned size, bool commit)
+{
+    if (size != 4 || value > UINT32_MAX || address < MSTPRI0 ||
+        address > MSTPRI0 + 8 || ((address - MSTPRI0) & 3)) return false;
+    unsigned index = (address - MSTPRI0) / 4;
+    uint32_t v = value;
+    if ((v & ~mstpri_writable[index]) !=
+        (mstpri_reset[index] & ~mstpri_writable[index])) return false;
+    /* MSTPRI registers share KICK protection with PINMUX/CFGCHIP. */
+    if (commit && syscfg->unlocked) s->mstpri[index] = v;
+    return true;
 }

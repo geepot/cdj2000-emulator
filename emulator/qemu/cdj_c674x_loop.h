@@ -17,6 +17,12 @@ typedef struct {
     uint64_t cycle, post_cycle, end_cycle;
     bool sealed, predicate_loop, delayed_count;
 } CdjC674xLoop;
+/* Process-wide development mode for the single emulated DSP.  Strict timing
+ * remains the default.  Functional mode delays SPLOOPD post-loop fetch by two
+ * cycles so later firmware hardware dependencies can be inventoried while the
+ * unresolved epilog timing is investigated separately. */
+void cdj_c674x_loop_set_functional_timing(bool enabled);
+bool cdj_c674x_loop_functional_timing(void);
 bool cdj_c674x_loop_init(CdjC674xLoop *, unsigned ii, uint32_t iterations);
 /* Add the current cycle's instructions; finish marks SPKERNEL. delay is the
  * decoded fstg*ii+fcyc. Control marker instructions are not included as tags. */

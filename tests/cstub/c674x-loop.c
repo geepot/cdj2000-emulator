@@ -30,6 +30,21 @@ int main(void)
     assert(cdj_c674x_loop_issue(&loop, out, &n, &post, &drained));
     assert(n == 0 && post && drained);
 
+    /* Functional run-ahead is opt-in and affects only delayed-count loops.
+     * It buys two epilog cycles without weakening the strict default. */
+    cdj_c674x_loop_set_functional_timing(true);
+    assert(cdj_c674x_loop_functional_timing());
+    assert(cdj_c674x_loop_init(&loop, 1, 8));
+    loop.delayed_count = true;
+    for (unsigned t = 0; t < 7; ++t) {
+        tag = t == 0 ? 1 : 0;
+        assert(cdj_c674x_loop_load(&loop, &tag, tag ? 1 : 0, t == 6, 0));
+        assert(cdj_c674x_loop_issue(&loop, out, &n, &post, &drained));
+    }
+    assert(loop.post_cycle == 10);
+    cdj_c674x_loop_set_functional_timing(false);
+    assert(!cdj_c674x_loop_functional_timing());
+
     /* II=2: post-loop instructions may overlap the draining stores. */
     assert(cdj_c674x_loop_init(&loop, 2, 3));
     for (unsigned t = 0; t <= 10; ++t) {
