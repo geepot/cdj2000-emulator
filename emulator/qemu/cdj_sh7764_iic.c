@@ -8,6 +8,11 @@ void cdj_sh7764_iic_reset(CdjSh7764Iic *s)
     *s = (CdjSh7764Iic){0};
 }
 
+uint32_t cdj_sh7764_iic_scl_period(const CdjSh7764Iic *s)
+{
+    return (1u + (s->clock & 3u)) * (20u + 8u * (s->clock >> 2));
+}
+
 bool cdj_sh7764_iic_read(const CdjSh7764Iic *s, uint32_t offset,
                          unsigned size, uint32_t *value)
 {

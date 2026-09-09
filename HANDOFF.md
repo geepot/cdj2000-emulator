@@ -8,6 +8,22 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+SPORT audit for the UI task: live simulator source is
+`build/gdb-17.2/sim/bfin/dv-bfin_ppi.c` (SPORT resides in this file), mirrored
+by patch 02. `bfin_sport_link_take` repeats a cached 64-byte status when no
+fresh record exists. `bfin_sport_link_repeat_announced` also defaults ON,
+allowing cached payloads whose length matches the last wire announcement to
+repeat without new MAIN transmission. The older comment saying payloads are
+always delivered once is stale. This is a candidate mechanism for duplicate
+requests/pool exhaustion, not a demonstrated cause of the current NXS stall.
+The UI task owns correlation and any transport correction; do not enable
+announcement/CRC rewriting as a substitute for genuine transport semantics.
+
+IIC divider helper now returns peripheral-clock cycles per SCL period from
+ICCCR, tested across all 256 settings and the firmware's 0x0e (132 cycles).
+It does not assume a board frequency or model START/STOP latency. Full suite
+after the prior replay/controller batch: 329 passed, 27 optional skips.
+
 Replay event-budget handling is corrected: step/packet/cycle ceilings emit
 `event_budget_exhausted`, a failed diagnostic gate and no unsafe checkpoint.
 Exact valid recorded stops at the limit still verify and save state; same-count

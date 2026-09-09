@@ -29,6 +29,14 @@ int main(void)
     assert(cdj_sh7764_iic_write(&s, 0x18, 1,
                                (read8(&s, 0x18) & 0xfc) | 2));
     assert(read8(&s, 0x18) == 0x0e);
+    assert(cdj_sh7764_iic_scl_period(&s) == 132);
+    for (unsigned cdf = 0; cdf < 4; ++cdf) {
+        for (unsigned scgd = 0; scgd < 64; ++scgd) {
+            assert(cdj_sh7764_iic_write(&s, 0x18, 1, scgd * 4 + cdf));
+            assert(cdj_sh7764_iic_scl_period(&s) ==
+                   (cdf + 1) * (20 + scgd * 8));
+        }
+    }
     for (unsigned address = 0; address < 128; address++) {
         cdj_sh7764_iic_reset(&s);
         assert(cdj_sh7764_iic_write(&s, 0x18, 1, 0xc));

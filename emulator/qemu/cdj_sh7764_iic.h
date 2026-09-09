@@ -17,6 +17,9 @@ typedef struct CdjSh7764Iic {
 } CdjSh7764Iic;
 
 void cdj_sh7764_iic_reset(CdjSh7764Iic *s);
+/* Peripheral-clock cycles per SCL period (manual 16.3.9). This is not
+ * START/STOP latency and does not select an unverified board frequency. */
+uint32_t cdj_sh7764_iic_scl_period(const CdjSh7764Iic *s);
 /* False means unsupported access: neither state nor output is changed. */
 bool cdj_sh7764_iic_read(const CdjSh7764Iic *s, uint32_t offset,
                          unsigned size, uint32_t *value);
