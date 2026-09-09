@@ -8,6 +8,23 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Independent strict post-SIC captures `runs/nxs-sic-mask-strict-90s-1` and `-2`
+both complete 90 seconds with default legacy DSP scheduling and no functional
+DSP switches. Both visibly open UTILITY after a ten-second MENU hold through
+panel port 6084. E-7206 AUTH CHIP ERROR remains visible; do not call this a
+clean full boot. Each records 335 budget boundaries and 13 HINT yields, no DSP
+fault, and ends at 335,099,500 packets / 617,662,029 cycles. Both transcripts
+are byte-identical, SHA-256
+`22e54a3cb1ba74152118cfec88dcf9c09d7ada6d26922ed83069c5ab1a5b2963`.
+Ready/clear/ack are 104211/104213/104215. All five input hashes match across
+runs and remain unchanged at exit. Final checkpoint is 375 in both runs.
+Frame observations are every five seconds, with explicit missing-at-launch
+entries. First run's MENU down/up Unix times are 1788959074.122219 /
+1788959084.176384; second 1788959227.6629639 / 1788959237.6756191.
+The normal player frame is observed around 30 seconds in run 1; use a longer
+repeat to unambiguously prove 60 seconds beyond that observation, and keep
+the unresolved auth error separate from the E-7010/DSP milestone.
+
 Primary interrupt reference audit: Blackfin Programming Reference rev2.2,
 printed 4-41 (physical PDF 175), explicitly distinguishes an already-serviced
 system IVG from a new ILAT latch. Printed 4-56 and 4-64 (physical 190/198)
