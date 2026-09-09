@@ -255,9 +255,29 @@ int main(void)
     assert(!cdj_c6747_edma_take_irq_notification(
         &s, CDJ_C6747_EDMA_REGIONS));
 
-    /* A-sync only: triggering configured AB-sync or constant-address modes
+    /* AB-sync: three strided arrays per event, two frames. C indices
+     * start at the first array, BCNT remains unchanged, BCNTRLD ignored. */
+    cdj_c6747_edma_reset(&s); memset(&memory, 0, sizeof(memory));
+    for (unsigned i = 0; i < 128; ++i) memory.memory[i] = i + 1;
+    param(&s, &bus, 0, 4, 0x1020, 0x00030004, 0x1100,
+          0x0008fff8, 0x0009ffff, 0x00200020, 2);
+    assert(wr(&s, &bus, EDMA + 0x1010, 1));
+    for (unsigned i = 0; i < 3; ++i)
+        assert(!memcmp(memory.memory + 0x100 + i * 8,
+                       memory.memory + 0x20 - i * 8, 4));
+    assert(s.param[0][1] == 0x1040 && s.param[0][3] == 0x1120);
+    assert(s.param[0][2] == 0x00030004 && s.param[0][7] == 1);
+    assert(s.bytes_transferred == 12 && s.transfer_requests == 1);
+    assert(wr(&s, &bus, EDMA + 0x1010, 1));
+    for (unsigned i = 0; i < 3; ++i)
+        assert(!memcmp(memory.memory + 0x120 + i * 8,
+                       memory.memory + 0x40 - i * 8, 4));
+    assert(s.bytes_transferred == 24 && s.transfer_requests == 2);
+    assert(s.param[0][7] == 0);
+
+    /* Constant-address modes
      * is rejected before bus or architectural state can change. */
-    for (uint32_t unsupported = 1; unsupported <= 4; unsupported <<= 1) {
+    for (uint32_t unsupported = 1; unsupported <= 2; unsupported <<= 1) {
         cdj_c6747_edma_reset(&s); memset(&memory, 0, sizeof(memory));
         param(&s, &bus, 0, unsupported, 0x1000, 0x00010001, 0x1100,
               0, 0xffff, 0, 1);

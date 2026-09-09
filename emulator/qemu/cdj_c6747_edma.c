@@ -53,7 +53,7 @@ static bool legal_qchmap(uint32_t value)
 
 static bool valid_param(const uint32_t p[8])
 {
-    if (!legal_opt(p[0]) || (p[0] & (OPT_SYNCDIM | OPT_DAM | OPT_SAM)) ||
+    if (!legal_opt(p[0]) || (p[0] & (OPT_DAM | OPT_SAM)) ||
         !(p[2] & 0xffffu) || !(p[2] >> 16) || !(p[7] & 0xffffu) ||
         (p[7] & 0xffff0000u))
         return false;
@@ -73,10 +73,19 @@ static bool transfer_bytes(const uint32_t p[8], const CdjC6747EdmaBus *bus,
     if (!bus || !bus->read || !bus->write || !valid_param(p)) return false;
     uint8_t *bytes = malloc(count);
     if (!bytes) return false;
-    bool ok = bus->read(bus->opaque, p[1], bytes, count) &&
-              bus->write(bus->opaque, p[3], bytes, count, false);
-    if (ok && commit)
-        ok = bus->write(bus->opaque, p[3], bytes, count, true);
+    /* SPRUH91D 16.2.2.2: AB synchronization transfers a whole frame
+     * per event. B indices separate arrays; C indices separate frames. */
+    unsigned arrays = (p[0] & OPT_SYNCDIM) ? p[2] >> 16 : 1;
+    uint32_t src = p[1], dst = p[3];
+    bool ok = true;
+    for (unsigned i = 0; i < arrays && ok; ++i) {
+        ok = bus->read(bus->opaque, src, bytes, count) &&
+             bus->write(bus->opaque, dst, bytes, count, false);
+        if (ok && commit)
+            ok = bus->write(bus->opaque, dst, bytes, count, true);
+        src += (int32_t)(int16_t)p[4];
+        dst += (int32_t)(int16_t)(p[4] >> 16);
+    }
     free(bytes);
     return ok;
 }
@@ -110,7 +119,8 @@ static bool complete_one(CdjC6747Edma *s, EventKind kind, unsigned channel,
     uint32_t opt = original[0];
     unsigned bcnt = original[2] >> 16;
     unsigned ccnt = original[7] & 0xffffu;
-    bool final = bcnt == 1 && ccnt == 1;
+    bool ab_sync = (opt & OPT_SYNCDIM) != 0;
+    bool final = (ab_sync || bcnt == 1) && ccnt == 1;
     unsigned tcc = (opt >> 12) & 0x3fu;
 
     if (kind == EVENT_DMA) {
@@ -125,7 +135,11 @@ static bool complete_one(CdjC6747Edma *s, EventKind kind, unsigned channel,
     if (!(opt & OPT_STATIC)) {
         if (!final) {
             int16_t src_index, dst_index;
-            if (bcnt > 1) {
+            if (ab_sync) {
+                src_index = (int16_t)(original[6] & 0xffffu);
+                dst_index = (int16_t)(original[6] >> 16);
+                s->param[set][7] = ccnt - 1u;
+            } else if (bcnt > 1) {
                 src_index = (int16_t)(original[4] & 0xffffu);
                 dst_index = (int16_t)(original[4] >> 16);
                 s->param[set][2] = (original[2] & 0xffffu) |
@@ -190,7 +204,8 @@ static bool complete_one(CdjC6747Edma *s, EventKind kind, unsigned channel,
         if (!enqueue(queue, EVENT_DMA, tcc)) return false;
     }
     ++s->transfer_requests;
-    s->bytes_transferred += original[2] & 0xffffu;
+    s->bytes_transferred += (uint64_t)(original[2] & 0xffffu) *
+                            (ab_sync ? bcnt : 1u);
     return true;
 }
 

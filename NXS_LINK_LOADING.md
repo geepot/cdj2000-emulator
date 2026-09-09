@@ -90,3 +90,13 @@ Exact fault-checkpoint replay `nxs-bdec-replay-1` advances 301 packets
 and 507 cycles identically on two runs before rejecting the EDMA PaRAM
 write at 01c0481c from c004dbe8. This is further real DSP progress, not
 completed track loading or playback. No firmware bytes were patched.
+
+That PaRAM trigger programs OPT=8204 (AB synchronization), ACNT=4,
+BCNT=588, source B index=4, destination B index=8, CCNT=1. The EDMA
+model previously rejected SYNCDIM. It now transfers BCNT arrays per AB
+event, retains BCNT, decrements CCNT per frame, applies C indices from
+the frame origin, and uses frame completion for interrupts/linking.
+Signed-stride two-frame regression and existing core/device tests pass
+(17 tests). `nxs-bdec-ab-replay-1` repeats one million additional DSP
+packets without fault, with identical final state and memory. The replay
+has no future MAIN input, so the connected cold run remains necessary.
