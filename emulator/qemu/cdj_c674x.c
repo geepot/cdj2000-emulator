@@ -416,7 +416,13 @@ static bool protected_load(const CdjC674xInstruction *i)
 {
     if (!(i->header & (1u << 20))) return false;
     uint32_t w = i->word;
-    if (i->compact) return (w & 6) == 4 && (w & 8);
+    if (i->compact) {
+        /* Figure C-21 Dpp uses bit 14 for load/store, unlike the other
+         * compact .D formats which use bit 3.  PROT applies to every LD in
+         * the fetch packet regardless of compact format (section 3.10.2.2). */
+        if ((w & 0x087f) == 0x0077) return (w & 0x4000) != 0;
+        return (w & 6) == 4 && (w & 8);
+    }
     if ((w & 0x0c) == 12) {
         unsigned op = (w >> 4) & 7;
         return op != 3 && op != 5 && op != 7;
@@ -553,6 +559,17 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 return stop(cpu, pc, insn->word, "multiple multicycle instructions");
             if (nop > elapsed) elapsed = nop;
             continue;
+        }
+        /* Compact-header PROT inserts four cycles after every load in the
+         * fetch packet, including Dpp/Dstk forms handled by early exits
+         * below and 32-bit loads in a mixed packet.  Establish the packet's
+         * multicycle duration before format-specific lowering so all load
+         * families receive identical timing. */
+        if (protected_load(insn)) {
+            if (elapsed > 1)
+                return stop(cpu, pc, insn->word,
+                            "multiple multicycle instructions");
+            elapsed = 5;
         }
         /* Figures C-8 through C-15: lower the compact .D memory families to
          * the existing E1/E3/E5 scalar pipeline.  Pointer registers are
@@ -1004,11 +1021,6 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                     if (written[bank][b]) return stop(cpu, pc, insn->word, "parallel register write conflict");
                     out.r[bank][b] = updated; written[bank][b] = true;
                 }
-            }
-            /* PROT inserts four NOPs, including for a false predicate. */
-            if (!is_store && (insn->header & (1u << 20))) {
-                if (elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-                elapsed = 5;
             }
         } else if ((w & 0x7c) == 0x28) {
             value = sx((w >> 7) & 0xffff, 16);

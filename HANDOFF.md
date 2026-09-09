@@ -8,6 +8,44 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Compact protected loads now receive PROT timing before format-specific
+lowering.  The stage-two return sequence at `0xc001dcda` uses compact Dpp
+`LDW *++B15(8),B3` (`0x71f7`) under a PROT header; the old early return skipped
+the four added NOP cycles, so the following `BNOP B3,5` sampled stale B3,
+repeated the pop, and corrupted the stack.  Dpp and Dstk exact-encoding tests
+now require the E5 load result to be published after five total cycles.
+`python -m pytest -q tests/test_c674x.py` passes 12 tests and the standalone
+C674x address/undefined sanitizer harness passes.
+
+Rebuilt connected run `runs/nxs-prot-connected-2` advances beyond the old
+25,099,500-packet point and fails closed at a later software-loop resource
+conflict: 25,364,865 packets / 60,779,972 cycles, PC `0xc004f306`, compact
+`0x2627`, B15=`0x11805ae8`, B3=`0xc004cc48`, B5=`0x118001f4`.  The bounded GUI
+run exits zero and publishes a frame; neither fact establishes boot.  Exact
+replay from checkpoint 64 reproduces the same state, counts, and fault:
+
+```sh
+python -m tools.cdj_dsp.replay \
+  runs/nxs-prot-connected-2/dsp-checkpoints/00000000000000000064.cdjdsp \
+  /tmp/dsp-prot-connected-replay-1 --steps 1000000 \
+  --events runs/nxs-prot-connected-2/dsp-events.jsonl --verify-repeat
+```
+
+GNU libopcodes and the firmware bytes decode the new boundary as an II=1,
+seven-cycle `SPLOOPD` copy loop with compact `SPKERNEL 3,0`: protected LDW,
+four empty cycles, `MV .L2X A3,B4`, and `STW .D2T2 B4,*B5++`.  The current
+scheduler enables the post-loop `MVK .L2 1,B4` while the buffered L2 move is
+still live, correctly rejecting the combined packet under SPRUFE8B 7.15.
+SPRUFE8B 7.6 and 7.9 confirm the general drain and fetch-delay formulas, but
+do not yet resolve why this genuine sequence selects a three-cycle delay.
+Do not add cycles or relax the resource-conflict check without independent
+architectural evidence.  Tail replay coverage contains 773 confirmed source
+packets, 1,098 confirmed instruction addresses, 988 encodings, 811 dynamic
+edges, three probable addresses, and no unsupported-opcode fault.  Full boot,
+interrupts, peripherals, and audio remain incomplete.
+
+### Previous stable-wait checkpoint
+
 The confirmed connected/replay DSP path no longer stops on an unsupported
 instruction. It reaches PC `0x11804904`, word `0x0001a120`, an unconditional
 self-branch. This is a stable non-ISA boundary after DSP initialization, not

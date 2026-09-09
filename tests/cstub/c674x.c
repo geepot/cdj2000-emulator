@@ -1181,6 +1181,25 @@ int main(void)
     assert(c.r[0][2] == 0x2468ace0 && c.r[0][3] == 0xfdb97531 &&
            !c.load_count);
 
+    /* PROT covers every load in a compact fetch packet.  In particular,
+     * the stage-two firmware uses this exact Dpp encoding to restore B3;
+     * the four added cycles must publish B3 before the following branch can
+     * sample it.  Dstk takes the same protected-load path despite returning
+     * early from its format-specific decoder. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][15] = 0x10e8; memory[60] = 0x12345678;
+    memory[0] = 0x71f7; memory[7] = 0xe0300000;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 5 && c.r[1][15] == 0x10f0 &&
+           c.r[1][3] == 0x12345678 && !c.load_count);
+
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][15] = 0x10e8; memory[59] = 0x89abcdef;
+    memory[0] = 0xbc4d; memory[7] = 0xe0300000;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 5 && c.r[1][15] == 0x10e8 &&
+           c.r[1][4] == 0x89abcdef && !c.load_count);
+
     /* Dstk uses B15 plus an unsigned scaled five-bit constant without base
      * update. Cover captured STW *+B15[1],B4 and the matching RS load. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
