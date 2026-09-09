@@ -381,3 +381,10 @@ length matching and repeated-payload gating. It requires that build and a C
 compiler. The first 90-second NXS test with this flag showed E-8709 and never
 consumed the announced 240-byte payload; it did not reach the later database
 request phase. Do not enable this flag in normal launches on that evidence.
+
+## 06: opt-in DMA register timeline
+
+`BFIN_DMA_MMR_TRACE=1` logs CONFIG and IRQ_STATUS accesses with the guest PC,
+simulator time, and pre-write channel state. It does not change DMA behavior.
+This distinguishes payload cancellation from a five-second communication
+timeout; logging can perturb scheduling, so compare untraced controls too.

@@ -1,0 +1,43 @@
+--- a/sim/bfin/dv-bfin_dma.c
++++ b/sim/bfin/dv-bfin_dma.c
+@@ -94,5 +94,29 @@
+ #define mmr_name(off) mmr_names[(off) / 4]
+ 
++/* Opt-in diagnostic: identify firmware arms, cancellation and IRQ service
++   without modifying channel state. Values describe the pre-write state. */
++static void
++bfin_dma_mmr_trace (struct hw *me, struct bfin_dma *dma, bu32 off,
++                    const char *operation, bu32 value)
++{
++  static int enabled = -1;
++  SIM_CPU *cpu;
++  extern double bfin_sim_seconds (void);
++
++  if (enabled < 0)
++    enabled = getenv ("BFIN_DMA_MMR_TRACE") != NULL;
++  if (!enabled || (off != mmr_offset(config)
++                   && off != mmr_offset(irq_status)))
++    return;
++  cpu = STATE_CPU (hw_system (me), 0);
++  fprintf (stderr,
++           "DMA mmr t=%.9f pc=%#x dev=%s %s %s=%#x "
++           "config=%#x irq=%#x start=%#x x=%u current=%u\n",
++           bfin_sim_seconds (), PCREG, hw_path (me), operation,
++           mmr_name (off), value, dma->config, dma->irq_status,
++           dma->start_addr, dma->x_count, dma->curr_x_count);
++}
++
+ static bool
+ bfin_dma_enabled (struct bfin_dma *dma)
+ {
+@@ -534,3 +558,4 @@
+   HW_TRACE_WRITE ();
++  bfin_dma_mmr_trace (me, dma, mmr_off, "write", value);
+ 
+   /* XXX: All registers are RO when DMA is enabled (except IRQ_STATUS).
+@@ -651,3 +676,5 @@
+   HW_TRACE_READ ();
++  bfin_dma_mmr_trace (me, dma, mmr_off, "read",
++                      nr_bytes == 4 ? *value32p : *value16p);
+ 
+   /* Hardware lets you read all MMRs as 16 or 32 bits, even reserved.  */
