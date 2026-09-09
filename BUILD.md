@@ -53,10 +53,17 @@ Standalone SH7764 IIC empty-bus controller regression:
 .venv/bin/python -m pytest -q tests/test_sh7764_iic.py
 ```
 
-This controller is not yet wired into MAIN. Its explicit protocol-event API
-models idle readback, address NACK and automatic STOP, not elapsed clocks.
-No authentication chip is attached or synthesized. Strict integration needs
-reference-backed scheduling and documented remaining timing limitations.
+The NXS board now connects this controller to a bounded identity-only endpoint.
+Run `tests/test_mfi_identity.py` alongside the controller tests. Apple HomeKitADK
+documents 2.0C device/firmware versions in registers 0/1; these are independently
+specified constants, not inferred success responses. All other identity/device
+operations remain unsupported. No certificates, signing or authentication
+success are synthesized. The QEMU adapter aggregates nine SCL periods per byte
+and one per STOP using 53.950MHz Pck; START/STOP and pin-level timing remain
+approximations, and the board's 53.930MHz alternative documentation is unresolved.
+Two corrected 120-second cold runs now reach normal player/UTILITY without
+E-7010 or E-7206 and respond to controls; see CLEAN_BOOT_EVIDENCE.md. This
+establishes clean startup, not storage/audio functionality or full fidelity.
 
 Strict timed SPI/schema-10 focused regression:
 

@@ -424,6 +424,10 @@ def main():
     run_manifest = dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
         dsp='NXS UHPI plus partial C674x interpreter; incomplete ISA, ROM handoff abstraction', profile='experimental NXS',
+        iic_model=dict(endpoint='Apple 2.0C identity registers 0/1 only; no cryptographic authentication',
+                       timing='event-level nine-SCL-period bytes and one-period STOP; Pck 53.950MHz',
+                       limitations='START/STOP and pin timing approximate; 53.930MHz board reference discrepancy; '
+                                   'no IRQ, arbitration, double buffering, repeated START or certificates'),
         input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
         dsp_scheduler_mode=dsp_scheduler_mode,
         qemu_sync_profile=dict(enabled=args.qemu_sync_profile,

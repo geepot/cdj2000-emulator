@@ -8,6 +8,33 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Clean startup now reproduced in `runs/nxs-iic-identity-connected-3` and `-4`:
+120 seconds each, identical five input hashes unchanged at exit, normal player
+and MENU/UTILITY with no E-7010 or E-7206 banner. Run 4 responds to a late
+encoder detent (selection PLAY MODE -> EJECT/LOAD LOCK). Genuine IIC reads
+registers 0/1 as Apple-documented 5/1, plus genuine DSP ready/clear/ack.
+No firmware patches, fabricated certificates/authentication, or exploratory
+DSP switches. Full suite 408 passed / 27 optional skips. See
+`CLEAN_BOOT_EVIDENCE.md` for commands, hashes, timing and limitations.
+Storage/media loading, audio, broad controls and full timing remain unverified.
+The failure investigation immediately below is historical and superseded by
+TX shift staging plus already-due-timer synchronization, not suppressed checks.
+
+New clean-boot work (after the completed DSP milestone): Apple HomeKitADK
+`HAP/HAPMFiHWAuth+Types.h` independently documents 2.0C registers 0/1 as
+device version 5 and firmware version 1. The earlier claim that no independent
+identity evidence was found is superseded. `cdj_mfi_identity` implements only
+these exact one-byte reads; no certificates, signing, self-test or unknown
+responses are synthesized. NXS IIC integration is in progress, not clean boot.
+`runs/nxs-iic-identity-trace-2` fails closed after address ACK and register-byte
+transmission: firmware wait-helper 3 polls MDE then retries ICMAR after timeout.
+The apparent sleep(0) only restores SR, not a scheduler yield. Two corrections
+are being validated: publish already-due virtual timer events before MMIO, and
+model TX MDE at shift-register load rather than byte completion, with MDT later.
+Do not relax the active-address guard to hide this failure. Trace-2 exits 1;
+its old GUI error frame is not a new successful boot. QEMU IIC timing remains
+event-level with documented START/STOP/clock limitations in BUILD.md.
+
 The requested E-7010 DSP startup milestone is verified by the repeated strict
 120-second cold runs below. See `DSP_BOOT_MILESTONE_AUDIT.md` for commands,
 source/binary/firmware hashes, frame timing, handshake and replay evidence.

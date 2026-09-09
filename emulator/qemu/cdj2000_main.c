@@ -53,6 +53,7 @@
 #include "cdj2000_ata.h"
 #include "cdj2000_dsp.h"
 #include "cdj2000_nxs_hpi.h"
+#include "cdj_nxs_iic.h"
 
 static bool cdj_nxs_profile;
 #include "cdj2000_input.h"
@@ -4587,6 +4588,9 @@ static void cdj2000_main_init(MachineState *machine)
     }
 
     cdj_periph_init(system);
+    if (cdj_nxs_profile) {
+        cdj_nxs_iic_init(system);
+    }
     cdj_bus_trace_init(system);
     cdj_watch_init(system);
     cdj_intc_timer_init(system, cpu);
