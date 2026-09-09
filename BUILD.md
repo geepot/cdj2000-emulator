@@ -1662,6 +1662,13 @@ functional run as full DSP parity, full boot, or working audio.
 
 ## Schema-9 SPI1, SPLOOPW and interrupt-return batch
 
+Explicit mode transitions inherit the input checkpoint's exploratory status.
+Even with strict execution selected, the manifest, gate and coverage remain
+ineligible for architectural validation if the checkpoint has exploratory
+ancestry. Approximation descriptions propagate across repeated resumes.
+Automatic strict selection excludes these checkpoints. Use a strict-origin
+checkpoint for strict evidence; repeat equivalence alone cannot establish it.
+
 For automatic checkpoint selection, pass a run directory as the first replay
 argument. Candidates are ordered by modification time, then path. Selection
 validates checkpoint checksum/provenance and matches the requested DSP timing,

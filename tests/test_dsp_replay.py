@@ -73,6 +73,34 @@ def test_replay_determinism_breakpoints_and_limits(tmp_path):
         assert not (tmp_path / reason / 'failure.json').exists()
 
 
+def test_explicit_strict_resume_preserves_exploratory_ancestry(tmp_path):
+    data = bytearray(0x40000)
+    struct.pack_into('<I', data, 0, 0x00800020)
+    dump = tmp_path / 'nop.bin'
+    dump.write_bytes(data)
+    first = tmp_path / 'exploratory'
+    result = run(dump, first, '--steps', '1', '--functional-dsp-timing',
+                 '--verify-repeat')
+    assert result.returncode == 0, result.stderr
+    for name in ('strict_resume', 'strict_again'):
+        output = tmp_path / name
+        result = run(first / 'final.cdjdsp', output, '--steps', '1', '--verify-repeat')
+        assert result.returncode == 0, result.stderr
+        manifest = json.loads((output / 'manifest.json').read_text())
+        gate = json.loads((output / 'gate.json').read_text())
+        assert manifest['dsp_timing_mode'] == 'strict'
+        assert manifest['inherited_exploratory_state']
+        assert not manifest['architectural_validation_eligible']
+        assert not gate['architectural_validation_eligible']
+        assert not gate['coverage_validation_eligible']
+        assert gate['passed']
+        assert any('SPLOOPD' in item for item in manifest['approximations'])
+        first = output
+    result = run(first, tmp_path / 'automatic_strict', '--steps', '1')
+    assert result.returncode != 0
+    assert 'inherits exploratory state' in result.stderr
+
+
 def test_replay_rejects_invalid_input_without_artifacts(tmp_path):
     dump = tmp_path / 'short.bin'
     dump.write_bytes(b'bad')

@@ -129,6 +129,14 @@ def checkpoint_provenance(path: Path, data: bytes, info: dict) -> dict:
     raise ValueError('checkpoint is absent from a complete connected manifest or replay provenance')
 
 
+def exploratory_ancestry(manifest):
+    """Execution mode changes cannot undo approximate state already captured."""
+    return bool(manifest and (
+        manifest.get('architectural_validation_eligible') is False or
+        manifest.get('dsp_timing_mode', 'strict') != 'strict' or
+        manifest.get('dsp_audio_mode', 'stopped-clock') != 'stopped-clock'))
+
+
 def newest_checkpoint(directory: Path, *, timing_mode=None, audio_mode=None,
                       event_hash=None):
     """Return newest structurally valid, provenance-bearing checkpoint below a directory."""
@@ -142,6 +150,9 @@ def newest_checkpoint(directory: Path, *, timing_mode=None, audio_mode=None,
             info = checkpoint_info(data)
             provenance = checkpoint_provenance(path, data, info)
             manifest = provenance['capture_manifest']
+            if (timing_mode == 'strict' and audio_mode == 'stopped-clock' and
+                    exploratory_ancestry(manifest)):
+                raise ValueError('checkpoint inherits exploratory state')
             for field, requested, default in (
                     ('dsp_timing_mode', timing_mode, 'strict'),
                     ('dsp_audio_mode', audio_mode, 'stopped-clock')):
@@ -294,6 +305,16 @@ def main():
             *(['coarse packet-driven McASP slots; not audio-rate or cycle-accurate']
                if args.functional_dsp_audio else []),
         ]
+        inherited_exploratory = exploratory_ancestry(capture_manifest)
+        inherited_approximations = (capture_manifest.get('approximations', [])
+                                   if inherited_exploratory else [])
+        if inherited_exploratory:
+            approximations = list(dict.fromkeys([
+                *inherited_approximations, *approximations,
+                'input checkpoint inherits exploratory state; switching execution modes does not validate prior state',
+            ]))
+        validation_eligible = not (inherited_exploratory or
+                                  args.functional_dsp_timing or args.functional_dsp_audio)
         limits = dict(steps=args.steps, packets=args.packets, cycles=args.cycles,
                       packet_cycle_origin='input checkpoint counters',
                       boundary_semantics='checked between successful core steps; multicycle steps may cross a cycle ceiling')
@@ -302,8 +323,8 @@ def main():
                         limits=limits, approximations=approximations,
                         dsp_timing_mode=('functional-runahead' if args.functional_dsp_timing else 'strict'),
                         dsp_audio_mode=('coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
-                        architectural_validation_eligible=not (
-                            args.functional_dsp_timing or args.functional_dsp_audio),
+                        architectural_validation_eligible=validation_eligible,
+                        inherited_exploratory_state=inherited_exploratory,
                         break_pc=args.break_pc, boot_phase=args.boot_phase,
                         input_kind=checkpoint_origin if checkpoint else 'legacy_l2_dump',
                         input_checkpoint=input_checkpoint,
@@ -379,6 +400,9 @@ def main():
             coverage = build_coverage(checkpoint_bytes, trace_bytes, format_data)
         except (ValueError, json.JSONDecodeError) as error:
             parser.error(f'coverage generation failed: {error}')
+        coverage['architectural_validation_eligible'] = validation_eligible
+        coverage['validation_eligible'] &= validation_eligible
+        coverage['approximations'] = approximations
         coverage['sha256'] = {
             'checkpoint': hashlib.sha256(checkpoint_bytes).hexdigest(),
             'trace': hashlib.sha256(trace_bytes).hexdigest(),
@@ -469,8 +493,7 @@ def main():
     if args.verify_repeat or expected is not None:
         actual = (args.output / 'trace.jsonl').read_bytes()
         gate = dict(scope='trace equivalence only; not architectural correctness or boot',
-                    architectural_validation_eligible=not (
-                        args.functional_dsp_timing or args.functional_dsp_audio),
+                    architectural_validation_eligible=validation_eligible,
                     limits=manifest['limits'],
                     approximations=manifest['approximations'],
                     progress=manifest['progress'],

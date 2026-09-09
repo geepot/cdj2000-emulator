@@ -8,6 +8,14 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Replay now preserves exploratory ancestry across explicit checkpoint resumes.
+Switching back to strict execution cannot make previously approximate state
+eligible for architectural validation. Inherited approximation descriptions
+and ineligibility propagate through manifest, repeat gate and coverage; strict
+automatic selection rejects these descendants. Repeat equivalence remains a
+separate reproducibility result. Tests exercise two consecutive strict resumes
+from an exploratory checkpoint to prevent loss of ancestry after one hop.
+
 Directory-based replay selection now filters candidates by requested timing
 and audio modes and event-transcript hash, in addition to checksum/provenance.
 This prevents a newer exploratory checkpoint from displacing the strict
