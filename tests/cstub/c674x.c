@@ -627,5 +627,27 @@ int main(void)
     memory[0] = (5u << 13) | 0x2ef; memory[7] = 0xe0280000;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.pc == 0x1040 && c.cycles == 6);
+    /* CALLP writes the next execute-packet address and takes six cycles.
+     * A parallel operation observes the old link register. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][3] = 0x2222;
+    memory[0] = 0x10000813; /* CALLP .S2 1040,B3 || */
+    memory[1] = (4u << 23) | (3u << 18) | 0x1058;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1040 && c.r[1][3] == 0x1008 && c.r[0][4] == 0x2222 && c.cycles == 6);
+
+    /* Compact CALLP retains halfword target and return addresses. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = (17u << 6) | 0x1a; memory[7] = 0xe0208000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1022 && c.r[0][3] == 0x1002 && c.cycles == 6);
+
+    /* CALLP cannot be issued behind another pending branch. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][1] = 0x1040;
+    memory[0] = (1u << 18) | 0x362; memory[1] = 0x10000812;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 1 && c.r[1][3] == 0 && c.branch_target == 0x1040);
     puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
 }

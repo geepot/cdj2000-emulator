@@ -114,6 +114,29 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         unsigned side = (w >> 1) & 1, dst = (w >> 23) & 31;
         unsigned a = (w >> 13) & 31, b = (w >> 18) & 31;
         unsigned cross = side ^ ((w >> 12) & 1);
+        bool callp = (!insn->compact && (w & 0xf000007c) == 0x10000010) ||
+                     (insn->compact && (insn->header & 0x8000) && (w & 0x3e) == 0x1a);
+        if (callp) {
+            side = insn->compact ? w & 1 : (w >> 1) & 1;
+            int32_t offset = insn->compact ? sx(w >> 6, 10) * 2
+                                          : sx((w >> 7) & 0x1fffff, 21) * 4;
+            if (out.branch_due || elapsed > 1)
+                return stop(cpu, pc, w, "CALLP with pending branch or multicycle instruction");
+            for (unsigned j = 0; j < packet->count; ++j) {
+                if (j == i) continue;
+                CdjC674xInstruction other = packet->instructions[j];
+                if ((!other.compact && ((other.word & 0x7c) == 0x10 ||
+                     (other.word & 0x1ffe) == 0x162 || (other.word & 0xffe) == 0x362)) ||
+                    (other.compact && ((other.header & 0x8000) || (other.word & 0x187f) == 0x6f)))
+                    return stop(cpu, pc, w, "CALLP with parallel control instruction");
+            }
+            if (written[side][3]) return stop(cpu, pc, w, "parallel register write conflict");
+            out.r[side][3] = packet->next_pc; written[side][3] = true;
+            if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)offset))
+                return stop(cpu, pc, w, "CALLP branch queue conflict");
+            elapsed = 6;
+            continue;
+        }
         if (insn->compact) {
             unsigned rs = (insn->header & 0x80000) ? 16 : 0;
             bool simple = true;

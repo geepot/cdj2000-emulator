@@ -272,7 +272,7 @@ using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 
 `cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
-control-register MVC (including ILC/RILC setup), register/relative branches, ADDKPC, ADD/SUB (.L/.S), OR (.L), MVK (.D), CMPEQ/CMPGT, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
+control-register MVC (including ILC/RILC setup), register/relative branches and full/compact CALLP, ADDKPC, ADD/SUB (.L/.S), OR (.L), MVK (.D), CMPEQ/CMPGT, scalar loads/stores, LDNW/STNW, LDDW/STDW and LDNDW/STNDW, SHL/SHR/SHRU (.S, 32-bit) and NOP. Mixed fetch
 packets use the header layout and halfword p bits; compact .L ADD/SUB
 support the low/high register set and cross path. Compact MVK, immediate
 CMPEQ and all L2c logic/comparison forms are decoded; predicate destinations
@@ -315,23 +315,23 @@ the unavailable boot ROM is not executed.** Initial core state is deterministic
 zero initialization, not a measured ROM register snapshot. The implemented
 startup path initializes the registers it uses.
 
-The connected stock MAIN/Blackfin run in `runs/nxs-c674x-compact` uploads
-13,781 words and executes 533 packets / 625 cycles. It reaches a new startup
-routine at `0x11803020`, then stops at `0x11803024` on opcode `0x1ffef292`,
-currently classified as a reserved predicate. `B15=0x11805af0`,
-`B14=0x11806900` and `B3=0x11801dec`. Standalone uploaded-L2 replay
-agrees with this DSP stop. This connected run also recorded a Blackfin GUI
-double fault at `0x00d290a6` after illegal instructions at `0x00d0cf42`;
-it is not a clean integration pass and requires separate investigation.
-The immediate repeat in `runs/nxs-c674x-compact-repeat` reached the same
-DSP stop and completed 15 seconds with GUI exit 0; the Blackfin fault did
-not reproduce in that repeat and remains an intermittent issue.
-The older prototype's listing omits register-extension bits, sometimes the
-cross path on moves, and the extended load/store selector; it must not be
-treated as an execution oracle. Remaining compact instructions,
-loop/control-register behavior, extended memory operations, integer and
-floating-point instructions, interrupts and peripherals are still required for
-DSP boot and audio. No DSP-ready result is fabricated.
+The connected stock MAIN/Blackfin run in `runs/nxs-c674x-callp` uploads
+13,781 words and executes 540 packets / 642 cycles. CALLP now enters the
+hardware initialization routine, which stops on `STW` at `0x11801e30`.
+Standalone replay identifies its address/value as `0x01c14038 = 0x83e70b13`:
+the SYSCFG KICK0R unlock documented in the independent DSP identification
+notes. This peripheral is not mapped; the write has not been performed.
+`B15=0x11805ae8`, `B14=0x11806900` and `B3=0x118027c0` agree between
+connected and standalone execution. CALLP saves the next execute-packet
+address and inserts five NOPs; parallel operand reads still see the old link.
+
+An earlier run (`runs/nxs-c674x-compact`) recorded a Blackfin GUI double fault
+at `0x00d290a6` after illegal instructions at `0x00d0cf42`. Its immediate
+repeat completed 15 seconds with GUI exit 0. This intermittent issue remains
+open. The older prototype's listing omits register-extension bits, some cross
+paths and extended memory selectors; it must not be an execution oracle.
+DSP peripherals, remaining ISA/control behavior, interrupts and audio are
+still incomplete. No DSP-ready result is fabricated.
 
 `tests/test_c674x.py` compiles an independent, synthetic instruction harness.
 It checks sign extension, pre-packet reads, predicates, branch/NOP timing,
@@ -369,7 +369,8 @@ The independent schedule test matches all 14 cycles of TI SPRUFE8B Table 7-1.
 CPU tests additionally decode the complete copy program through normal
 `cdj_c674x_step`, verify eight copied words and pointer updates, and verify
 zero iterations perform no memory operations. Tests cover ILC readiness,
-composite faults, false-predicate BNOP timing, six simultaneous in-flight
+composite faults, CALLP return addresses and pending-branch restrictions,
+false-predicate BNOP timing, six simultaneous in-flight
 branches, captured targets, and branch cancellation of SPLOOP. The connected NXS run
 above verifies the firmware's loop and return path. Sanitizers and the
 160-test host suite pass (42 platform/dependency tests skipped).
