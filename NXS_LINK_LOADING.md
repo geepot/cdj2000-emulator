@@ -114,3 +114,28 @@ Capture provenance caveat: that run's QEMU hashes were recorded unchanged
 at exit; its late-finalized source hashes include the subsequent MVD edit.
 The captured executable contains BDEC/AB fixes, not MVD; use the run.json
 executable hash and the recorded fault, not late source hashes, for identity.
+
+## Verified native SD track load (2026-09-09)
+
+`runs/nxs-native-load-mvd-1` successfully loads the unmodified fixture
+`TESTTONE.WAV` through the genuine SD filesystem, panel, GUI, MAIN and
+DSP path. Strict DSP timing, stopped McASP clock, legacy scheduling,
+fresh-only link delivery; diagnostic QEMU lock profiling enabled.
+No firmware RAM patches, synthetic LOAD requests or ready-state forcing.
+
+- Genuine ENTER: MAIN t=671.1408, words `0000 0001 0003 0007 0001 0000`.
+- Genuine LOAD: t=703.6300, words `0000 0007 0001 0000 0000 0000`.
+- Receive record 2962 clears the loading status from w19=1200 to 1000.
+- Records 2983 and 3002 carry command 5 track length: words
+  `0005 0001 00ff 0000 0a00 0000 0000 ae1b`.
+- `loaded-track.png` shows TESTTONE.WAV, TRACK 01, REMAIN 00:10.000;
+  duration remains visible on the subsequent check, with no DSP fault.
+- Post-MVD full regression suite: 436 passed, 30 skipped.
+
+This proves firmware track-load completion, not audible playback. The
+strict run's McASP serializer clock is stopped, and no audio-output capture
+was requested. The launcher's default `firmware_load_verified=false` is
+not an automatic detector; this manual evidence establishes the narrower
+track-load milestone. Remaining work includes real-time audio output and
+the first browser click occasionally requiring a retry. Cold insertion
+also intentionally waits 20 virtual seconds, about 580 wall seconds here.
