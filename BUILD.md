@@ -92,16 +92,18 @@ Boot-error milestone evidence (strict, no exploratory DSP flags):
 sh scripts/build-qemu-sh4.sh build/qemu
 .venv/bin/python -m pytest -q tests/test_nxs_boot_evidence.py tests/test_dsp_replay.py
 .venv/bin/python -m tools.cdj_main.nxs_vm runs/NEW_STRICT_BOOT \
-  --seconds 90 --frame-interval 5 --ui \
+  --seconds 120 --frame-interval 5 --ui \
   --qemu build/qemu/build/qemu-system-sh4
 ```
 
 Use a new run directory each time. Closing the UI ends the run. The command
 collects evidence; a zero launcher exit is NOT a successful-boot result. Inspect
 the frame timeline and DSP fault/handshake state, record basic interactions,
-and require at least 60 seconds after error-free startup before repeating a
-cold boot. The latest short strict diagnostic has no final error banner, but
-the long/repeated/interactive milestone is still unproven; see HANDOFF.md.
+and require at least 60 seconds after the normal player appears without
+E-7010 before repeating a cold boot. Two strict 120-second captures and a
+late encoder response are recorded in DSP_BOOT_MILESTONE_AUDIT.md. E-7206
+AUTH CHIP ERROR remains; this evidence does not establish clean full boot,
+full DSP parity or working audio. See HANDOFF.md for current limitations.
 `frames/manifest.json` records observation times, hashes and incomplete/missing
 frames. Unchanged images do not prove liveness. `run.json` records the actual
 binary/firmware hashes before launch and after exit. No frame capture or input

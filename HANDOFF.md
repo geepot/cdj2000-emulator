@@ -8,6 +8,21 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Two longer strict cold captures now exist: `runs/nxs-sic-mask-strict-120s-1`
+and `-2`, with identical five input hashes and no changes at exit. Both
+complete the genuine ready/clear/ack sequence at events 104211/104213/104215,
+open UTILITY through MENU, and record only budget boundaries and HINT yields,
+not DSP faults. Run 2 additionally responds to an encoder detent in its
+105-second frame, moving PLAY MODE to EJECT/LOAD LOCK. E-7206 AUTH CHIP ERROR
+remains: these are DSP-specific milestone evidence, not clean full boot.
+Run 1 ends at 451,099,500 packets / 825,308,974 cycles; run 2 at
+446,099,500 / 816,358,705. Different wall-clock progress is not a correctness
+comparison. `runs/dsp-sic-mask-120s-tail-1` verifies the final nine run-1 stops
+and exact repeat trace/state/memory/coverage, SHA-256
+`74bddf5f3dd1d7529b4bb14f966e007d784d9a10c9de2086472aebc7c10aa0a9`.
+This is a tail replay, not a full-startup replay. Completion audit and source
+hash record are being collected separately; do not infer full DSP parity/audio.
+
 Independent strict post-SIC captures `runs/nxs-sic-mask-strict-90s-1` and `-2`
 both complete 90 seconds with default legacy DSP scheduling and no functional
 DSP switches. Both visibly open UTILITY after a ten-second MENU hold through
