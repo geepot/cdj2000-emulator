@@ -753,6 +753,7 @@ class UiViewer:
         board = nxs_panel.input_ids() if nxs else panel_control.input_ids()
         placed = {nxs_panel.deck_input(key) if nxs else key
                   for key in faceplate.PLACEMENTS}
+        placed.add("field7")  # the rotary gesture shares the encoder-push knob
         leftover = [key for key in board if key not in placed]
         by_id = {control.input_id: control for control in built
                  if control.input_id}

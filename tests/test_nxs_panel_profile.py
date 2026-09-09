@@ -1,6 +1,8 @@
 """Keep NXS key bindings separate and check names against the real image."""
 from pathlib import Path
 import struct
+import os
+from unittest.mock import Mock
 
 import pytest
 
@@ -63,3 +65,29 @@ def test_changed_contacts_match_nxs_firmware_service_names():
             table += 8
     for contact, status in decoded.items():
         assert nxs_panel.KEY_NAMES[contact] == names[status]
+
+
+@pytest.mark.skipif(os.environ.get('CDJ_TEST_TK') != '1', reason='opt-in native Tk smoke test')
+def test_native_nxs_source_contact_and_feedback(tmp_path):
+    args = view_ui.parse_args(['--attach', '--nxs-panel', '--output', str(tmp_path / 'screen.ppm')])
+    viewer = view_ui.UiViewer(args)
+    try:
+        viewer.root.update_idletasks()
+        viewer.send = Mock(return_value='ok')
+        viewer.deck.set_scale(1)
+        viewer.root.update_idletasks()
+        p = faceplate.PLACEMENTS['19.1']  # USB's visual position
+        viewer.deck.event_generate('<ButtonPress-1>', x=int(p.x+p.w/2), y=int(p.y+p.h/2))
+        assert (19, 4) in viewer.momentary
+        assert '19.1' in viewer.deck.latched
+        assert '19.2' not in viewer.deck.latched
+        viewer.deck.event_generate('<ButtonRelease-1>', x=-20, y=-20)
+        assert not viewer.momentary
+        assert '19.1' not in viewer.deck.latched
+        assert [call.args[1] for call in viewer.send.call_args_list] == [
+            panel_control.encode_hold(19, 4, True), panel_control.encode_hold(19, 4, False)]
+        viewer.show_contact('19.0', True)  # REKORDBOX must not light legacy LINK
+        assert not viewer.deck.latched
+        assert set(viewer.analog_value) == set(range(7))
+    finally:
+        viewer.root.destroy()

@@ -38,3 +38,8 @@ track-load investigation is required; TESTTONE.WAV is not yet verified loaded.
 
 Focused profile/layout/control/socket regression run: 119 passed, 2 optional
 skips. Name/profile/layout set: 28 passed, 8 optional skips.
+
+Full suite at the first profile commit: 430 passed, 29 optional skips.
+Native Tk follow-up: 35 passed, including actual NXS USB mouse down/up,
+the corresponding faceplate highlight, no LINK highlight for the raw
+REKORDBOX contact, and unchanged legacy encoder/inspector coverage.
