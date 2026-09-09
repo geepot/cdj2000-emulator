@@ -8,6 +8,30 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Exact semantic inventory tooling now runs GNU libopcodes only at confirmed
+source addresses, validates checkpoint hash, captured words/headers and decoded
+widths, and retains mnemonic aliases, predicates, units and exact operand text.
+It never promotes probable code or data to confirmed execution, and does not
+infer semantic test coverage. `runs/dsp-semantic-inventory-2.json` resolves all
+5,396 confirmed addresses to 68 mnemonic names and 262 mnemonic/unit/width
+groups, with zero unresolved decodes. Independently regenerated report 3 is
+byte-identical; SHA-256:
+`c6cfe963e0d6e85a2d2fb2177ec79dc9078004402836d50c113d7b1a353f0c47`.
+GNU frontend executable SHA-256:
+`7845ca22cad4f80b632c90586dbecf8206a4429170b8804be2fed0fab6e6e5e7`.
+52 inventory/coverage tests pass, including actual GNU batch decoding when
+`C6X_DISASSEMBLER` is set. No core or firmware execution changed in this batch.
+
+False-only semantic-test priorities from this exact inventory: BNOP 61,
+MVK 53, LDW 22, STW 20, OR 15, AND/ADD/STB 11 each, B/STH 8 each,
+LDHU 6, MVKH/LDBU/ADDAD 5 each, CMPEQ 3, ADDAH 2, MPYSP/EXTU 1 each.
+These total 248 addresses. Map their exact operand forms to focused reference
+tests next; these counts do not assert that the opcodes are unimplemented.
+In particular, GNU identifies the false-only `m_mpy`-format instruction as
+MPYSP, demonstrating why format names alone were insufficient for prioritizing
+instruction-family work. Full parity and the strict timing milestone remain
+unproven.
+
 AMR/circular-addressing batch implements AMR MVC read/write (id 0, mask
 0x03ffffff), per-base A4-A7/B4-B7 BK0/BK1 selection, all 32 block-size fields,
 and shared circular arithmetic for scalar/pair loads/stores and

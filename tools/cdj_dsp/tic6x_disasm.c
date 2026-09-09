@@ -2,6 +2,7 @@
  * Small raw-memory front end for GNU libopcodes' TI C6x disassembler.
  *
  * Usage: tic6x-disasm IMAGE BASE START END
+ *        tic6x-disasm IMAGE BASE --stdin (one exact address per input line)
  */
 #include <errno.h>
 #include <inttypes.h>
@@ -50,10 +51,12 @@ static bool number(const char *text, bfd_vma *value)
 
 int main(int argc, char **argv)
 {
-    if (argc != 5) return 2;
-    bfd_vma base, start, end;
-    if (!number(argv[2], &base) || !number(argv[3], &start) ||
-        !number(argv[4], &end) || end < start || start < base) return 2;
+    bool batch = argc == 4 && !strcmp(argv[3], "--stdin");
+    if (!batch && argc != 5) return 2;
+    bfd_vma base, start = 0, end = 0;
+    if (!number(argv[2], &base)) return 2;
+    if (!batch && (!number(argv[3], &start) || !number(argv[4], &end) ||
+                  end < start || start < base)) return 2;
 
     FILE *image_file = fopen(argv[1], "rb");
     if (!image_file) { perror(argv[1]); return 2; }
@@ -63,7 +66,7 @@ int main(int argc, char **argv)
     bfd_byte *image = malloc((size_t)image_size);
     if (!image || fread(image, 1, (size_t)image_size, image_file) !=
                       (size_t)image_size || fclose(image_file)) return 2;
-    if (end - base > (bfd_vma)image_size) return 2;
+    if (!batch && end - base > (bfd_vma)image_size) return 2;
 
     disassemble_info info;
     init_disassemble_info(&info, stdout, plain_fprintf, styled_fprintf);
@@ -81,13 +84,24 @@ int main(int argc, char **argv)
     info.symbol_is_valid = generic_symbol_is_valid;
     disassemble_init_for_target(&info);
 
-    for (bfd_vma pc = start; pc < end;) {
+    char line[128];
+    for (bfd_vma pc = start; batch || pc < end;) {
+        if (batch) {
+            if (!fgets(line, sizeof(line), stdin)) break;
+            char *newline = strchr(line, '\n');
+            if (!newline) return 2;
+            *newline = 0;
+            if (!number(line, &pc) || pc < base || (pc & 1) ||
+                pc - base >= (bfd_vma)image_size) return 2;
+        }
         printf("0x%08" PRIx64 ":\t", (uint64_t)pc);
         int bytes = print_insn_tic6x(pc, &info);
+        if (batch) printf("\t%d", bytes);
         putchar('\n');
         if (bytes <= 0) return 1;
         pc += bytes;
     }
+    if (batch && ferror(stdin)) return 2;
     free(image);
     return 0;
 }
