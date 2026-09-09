@@ -9,9 +9,11 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 ## Current checkpoint
 
 Post-commit gate: `e1b0b3a` rebuild succeeds and 68 focused checkpoint/replay/
-launcher tests pass. GUI task reports that its separate fresh-only transport
-diagnostic frees both exhausted pools for 90 seconds but still fails MENU
-interaction. Treat that as transport evidence, not DSP scheduling success.
+launcher tests pass. GUI task's fresh-only transport diagnostic is a regression:
+the inspected frame shows E8709 COMMUNICATION ERROR and no 240-byte payloads
+reach the GUI despite 18 such MAIN sends. Free pools reflect an earlier failed
+handshake, NOT elimination of the real deadlock. Reject it as a fix; defaults
+remain unchanged. The GUI task is tracing announcement/payload delivery.
 Do not mix a new worker policy into that ongoing isolation experiment.
 
 Potential scheduling follow-up (not implemented): a DSP worker may execute
