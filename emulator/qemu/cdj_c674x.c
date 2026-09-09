@@ -8,6 +8,19 @@ static int32_t sx(uint32_t value, unsigned bits)
     return (int32_t)((value ^ sign) - sign);
 }
 
+/* Return the number of cycles inserted by a NOP encoding, or zero when the
+ * instruction is not a NOP. The compact H-9 N3 field encodes count - 1;
+ * SPRUFE8B labels the operand N3, but TI dis6x and GNU binutils agree on the
+ * +1 translation used here. */
+static unsigned nop_cycles(const CdjC674xInstruction *insn)
+{
+    if (insn->compact)
+        return (insn->word & 0x1fffu) == 0x0c6eu ? (insn->word >> 13) + 1 : 0;
+    if ((insn->word & 0xfffe1ffeu) == 0)
+        return ((insn->word >> 13) & 15) + 1;
+    return 0;
+}
+
 /* Side-effect-free RAM reads; nonaligned words may span two bus words. */
 static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
                         unsigned size, uint64_t *value)
@@ -112,6 +125,14 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         const CdjC674xInstruction *insn = &packet->instructions[i];
         uint32_t w = insn->word, pc = insn->pc, value = 0;
         bool compact = insn->compact;
+        unsigned nop = nop_cycles(insn);
+        if (nop) {
+            if (nop > 9) return stop(cpu, pc, insn->word, "reserved NOP count");
+            if (nop > 1 && elapsed > 1)
+                return stop(cpu, pc, insn->word, "multiple multicycle instructions");
+            if (nop > elapsed) elapsed = nop;
+            continue;
+        }
         /* Figures C-8/C-9: lower compact immediate-offset transfers to the
          * existing scalar pipeline, preserving header PROT and register RS.
          * Pointer registers always come from A/B4-7, independent of RS. */
@@ -301,13 +322,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             static const unsigned index[] = {0,0,1,2,1,2,0};
             enabled = (cpu->r[bank[creg]][index[creg]] != 0) ^ z;
         }
-        if ((w & 0xfffe1ffeu) == 0) {
-            unsigned n = ((w >> 13) & 15) + 1;
-            if (n > 9) return stop(cpu, pc, insn->word, "reserved NOP count");
-            if (n > 1 && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-            if (n > elapsed) elapsed = n;
-            reg_write = false;
-        } else if ((w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154 ||
+        if ((w & 0x10c) == 0x04 || (w & 0x17c) == 0x134 || (w & 0x17c) == 0x154 ||
                    (w & 0x17c) == 0x124 || (w & 0x17c) == 0x174 ||
                    (w & 0x17c) == 0x164 || (w & 0x17c) == 0x144) {
             /* Scalar memory: address E1, RAM access E3, load destination E5. */
@@ -554,8 +569,8 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 finish = true;
                 continue;
             }
-            if (!insn.compact && (w & 0xfffe1ffeu) == 0) {
-                unsigned n = ((w >> 13) & 15) + 1;
+            unsigned n = nop_cycles(&insn);
+            if (n) {
                 if (n > 9 || (n > 1 && (finish || out.loop_wait)))
                     return stop(cpu, insn.pc, w, "invalid loop NOP packet");
                 if (n > 1) out.loop_wait = n - 1;
@@ -656,7 +671,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             CdjC674xInstruction other = packet.instructions[j];
             uint32_t v = other.word;
             if ((other.header & (1u << 20)) ||
-                (!other.compact && ((v & 0xfffe1ffeu) == 0 && ((v >> 13) & 15))) ||
+                (nop_cycles(&other) > 1) ||
                 (!other.compact && ((v & 0xffe) == 0x362 || (v & 0x7c) == 0x10)) ||
                 (other.compact && ((other.header & 0x8000) || (v & 0x187f) == 0x006f)))
                 return stop(cpu, other.pc, v, "multicycle loop setup packet not implemented");

@@ -59,6 +59,16 @@ int main(void)
         assert(c.r[1][20] == 0xffffffffu + (uint32_t)offset);
         assert(c.r[0][20] == 0xffffffff);
     }
+    /* Appendix H compact NOP stores cycles - 1 in N3. In particular the
+     * firmware blocker 0xec6e is NOP 8, not a one-cycle empty operation. */
+    for (unsigned n3 = 0; n3 < 8; ++n3) {
+        cdj_c674x_reset(&c, 0x1000);
+        CdjC674xPacket p = {.count = 1, .next_pc = 0x1002,
+            .instructions = {{.compact = true, .pc = 0x1000,
+                .word = 0x0c6e | n3 << 13}}};
+        assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+        assert(c.cycles == n3 + 1 && c.pc == 0x1002);
+    }
     /* Compact immediate-offset transfers share E3/E5 timing with full words.
      * Cover all header size selections and both register subsets. */
     for (unsigned rs = 0; rs < 2; ++rs)
@@ -630,6 +640,32 @@ int main(void)
     assert(c.loop_active && c.cycles == 5);
     for (unsigned j = 0; j < 4; ++j) assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(!c.loop_active && c.cycles == 9);
+    /* NOP cycles are empty loop-buffer cycles. Exercise the exact compact
+     * NOP 8 in a synthetic [B1] SPLOOPW 4, then change B1 late:
+     * the stage boundary still observes the condition from three cycles ago. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][1] = 1;
+    memory[0] = 0x4183e000; /* [B1] SPLOOPW 4 */
+    memory[1] = 0x0c6eec6e; /* compact NOP 8; compact NOP 1 */
+    memory[2] = mvk(1, 1, 0);
+    memory[3] = 0x34000; /* SPKERNEL 0,0 */
+    memory[4] = mvk(0, 10, 42);
+    memory[7] = 0xe0400000; /* slot 1 contains compact instructions */
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.loop_active && c.cycles == 1);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.loop_wait == 7 && c.loop.length == 1 && c.loop_tags == 0);
+    for (unsigned j = 0; j < 7; ++j)
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.loop_wait == 0 && c.loop.length == 8 && c.loop.cycle == 8);
+    unsigned compact_steps = 0;
+    while (c.loop_active) {
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(++compact_steps < 12);
+    }
+    assert(c.cycles == 17 && c.r[0][10] == 0);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[0][10] == 42);
     /* Decode SPLOOP/SPKERNEL from RAM and execute the complete copy loop,
      * without manually feeding the scheduler. Also exercise zero iterations. */
     for (unsigned iterations = 0; iterations <= 8; iterations += 8) {

@@ -443,8 +443,36 @@ malformed-input rejection. This replaces the untracked development probe as
 the repeatable diagnostic entry point; interactive stepping/resume and general
 memory inspection remain future work.
 
-Latest development checkpoint: partial SPLOOPW scheduling is now implemented
-and synthetically tested. Standalone firmware replay advances to 598 packets /
-700 cycles, stopping at compact instruction `0xec6e` at `0x11801f24`. The last
-connected-firmware result above predates this change. See `HANDOFF.md` for
-verification gaps, reproducible commands and migration details.
+Latest development checkpoint: compact NOP 1..8 is implemented, including
+loop-buffer dynamic length. Replay and a rebuilt connected MAIN/Blackfin run
+(`runs/nxs-compact-nop-connected`) agree at 606 packets / 708 cycles, stopping
+at compact `SPMASK S1`, `0x2d66` at `0x11801f26`. Repeated replay traces are
+byte-identical. The connected GUI exits 0 after 15 seconds and publishes a
+frame; full boot remains incomplete. The full suite passes 164 tests with
+43 skips; the CPU harness passes address/undefined-behavior sanitizers.
+See `HANDOFF.md` for hashes, timing limits, and the next implementation batch.
+
+### Static format inventory for batch implementation
+
+The GNU format table comes with the GDB 17.2 source extracted by the Blackfin
+build. Scan the uploaded stage-1 range, or narrow to the current loop:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.inventory runs/nxs-compact-nop-connected/dsp-l2.bin runs/formats.json --formats build/gdb-17.2/include/opcode/tic6x-insn-formats.h --range 0x11801da0:0x1180f4f0 --trace runs/dsp-compact-nop-replay-2/trace.jsonl
+.venv/bin/python -m tools.cdj_dsp.inventory runs/nxs-compact-nop-connected/dsp-l2.bin runs/loop-formats.json --formats build/gdb-17.2/include/opcode/tic6x-insn-formats.h --range 0x11801f20:0x11801f70
+```
+
+The output file must be new. Ranges are global L2 addresses with exclusive
+ends; `--range` can repeat. The scanner honors compact layout, skips fetch
+headers and applies SAT/BR/DSZ bits before matching the most-specific GNU
+format masks. It records hashes of input, format table, tool and optional trace.
+It reads the table as data and accepts only numeric OR expressions and the
+three documented macros; it never evaluates arbitrary code from the table.
+
+This discovery-only inventory scans beyond execution blockers without changing
+firmware state. Matches are format candidates, not validated mnemonics or
+reachability. The broad range includes data. Replay PC visits include idle and
+loading cycles, so they are not executed-instruction counts or coverage proof.
+Use the nearby families to plan a coherent implementation batch, consult TI
+operand/timing rules, run focused CPU tests and deterministic replay, then run
+the connected boards after material progress. Unsupported execution still stops.

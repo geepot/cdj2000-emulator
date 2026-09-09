@@ -8,10 +8,12 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
-The unmodified connected MAIN/Blackfin run last verified in
-`runs/nxs-c674x-pinmux-bank` uploads 13,781 DSP words, executes 597 DSP packets /
-699 cycles, and programs all 20 SYSCFG pinmux registers. It stops at
-`0x11801f20`, opcode `0x4683e000`: `[B1] SPLOOPW 14`.
+The latest connected MAIN/Blackfin run, `runs/nxs-compact-nop-connected`,
+uploads 13,781 DSP words and executes 606 DSP packets / 708 cycles. It stops at
+`0x11801f26`, compact opcode `0x2d66`: `SPMASK S1` (TI Figure H-8).
+The preceding `0xec6e` is now implemented as compact `NOP 8`, including its
+eight dynamic-length loop cycles. The GUI exits 0 after 15 seconds and produces
+a frame. This does not establish full boot.
 
 The latest checkpoint adds **partial SPLOOPW scheduling**: predicate history,
 three-cycle delayed stage-boundary tests, mandatory initial execution, no
@@ -23,17 +25,44 @@ An earlier loop-test binary was twice killed by macOS with SIGKILL; its sanitize
 build passed, and the subsequent expanded harness and full suite pass. Cause
 was not established.
 
-Standalone real-firmware replay with this code (`runs/dsp-sploopw-initial`)
-advances to 598 packets / 700 cycles and stops at `0x11801f24`, compact opcode
-`0xec6e`. It has one pending store. SYSCFG is relocked by the preceding firmware
-write. **This latest change has not yet had a connected QEMU/Blackfin run.**
-Next: verify SPLOOPW timing against TI SPRUFE8B section 7.10 and its examples,
-implement the next compact instruction, rebuild QEMU and run connected firmware.
+Two deterministic replays, `runs/dsp-compact-nop-replay-1` and `-2`, agree
+byte-for-byte with each other and agree with the connected stop. Neither has
+pending memory operations; SYSCFG is relocked by firmware. Trace SHA-256:
+`3b913fb57072982daae15a4b2210bbbedadcb5f4741b484b0c7ca9e68d35fc88`.
+The new connected L2 dump matches the prior capture, SHA-256:
+`d9a798cd6ba9e4d09cabca6c4ca124f55e9194be58c8ef7440f5799cf5217ecc`.
+
+Compact NOP tests cover counts 1..8 and a synthetic SPLOOPW loop with NOP 8
+and a late predicate update. TI section 7.10 remains the timing reference;
+these tests do not prove all multistage/interrupt cases. GNU GDB 17.2's
+`include/opcode/tic6x-opcode-table.h` explicitly corrects TI Figure H-9's
+operand label: the N3 field encodes count minus one, citing TI dis6x.
+
+## Batch development workflow
+
+Use `tools.cdj_dsp.inventory` before extending the next cluster. It scans
+explicit ranges using the locally built GNU format table, produces per-address
+candidate families and group counts, and optionally annotates replay PC visits.
+It never executes or skips unsupported instructions. It is a discovery report,
+not mnemonic disassembly, code/data separation, reachability, or proof of ISA
+support. The broad uploaded range has 13,978 candidates across 70 families;
+the current loop range has 23 candidates across 13 families. Broad counts
+include data and cannot be interpreted as instruction coverage percentages.
+
+Next batch: full/compact SPMASK with functional-unit classification and loop
+load/replay suppression, plus the nearby predicate/move/arithmetic families.
+The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
+instructions and did not implement buffered suppression. Do not resurrect that
+special case. Implement the family, validate synthetic schedules and replay,
+then rebuild/run connected firmware after substantial advancement.
+See BUILD.md for inventory commands. Full control-flow-aware disassembly and
+an exact supported-opcode coverage report remain to be built.
 
 ## Validation and tools
 
-Latest full fork suite: 163 passed, 42 skipped. CPU and loop standalone harnesses
-pass AddressSanitizer/UndefinedBehaviorSanitizer. Tests run with:
+Latest full fork suite: 164 passed, 43 skipped. The CPU standalone harness
+passes AddressSanitizer/UndefinedBehaviorSanitizer. The extra skip relative to
+the old machine is the optional Blackfin assembler/linker regression. Tests run with:
 
 ```sh
 .venv/bin/python -m pytest -q
