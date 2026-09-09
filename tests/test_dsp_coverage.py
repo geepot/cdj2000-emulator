@@ -3,7 +3,28 @@ import json
 import struct
 import pytest
 
-from tools.cdj_dsp.coverage import build_coverage, observed_predicate_outcomes
+from tools.cdj_dsp.coverage import (build_coverage, observed_predicate_outcomes,
+                                    predicate_description, write_coverage)
+
+
+@pytest.mark.parametrize('cc,expected', list(enumerate(
+    ['nonzero:A0', 'zero:A0', 'nonzero:B0', 'zero:B0'])))
+def test_compact_mvk_predicate_is_independent_of_side_and_rs(cc, expected):
+    for side in (0, 1):
+        for rs in (0, 1 << 19):
+            event = dict(word=(cc << 14) | 0x0866 | side, compact=True, header=rs)
+            assert predicate_description(event, [dict(name='lsdx1c', fields={})]) == expected
+
+
+def test_only_audited_unconditional_formats_are_classified():
+    for compact, names in ((True, ['l_l2c', 'd_doff4_dsz_01x', 'd_doff4_dsz_x11']),
+                           (False, ['nfu_nop_idle', 'nfu_spkernel'])):
+        event = dict(word=0, compact=compact, header=0)
+        specs = [dict(name=name, fields={}) for name in names]
+        assert predicate_description(event, specs) == 'unconditional'
+        assert predicate_description(event, []) == 'unconditional_or_format_specific'
+        assert predicate_description(event, specs + [dict(name='unknown', fields={})]) == \
+            'unconditional_or_format_specific'
 
 
 @pytest.mark.parametrize('bit,register', list(enumerate(['B0', 'B1', 'B2', 'A1', 'A2', 'A0'])))
@@ -92,6 +113,24 @@ def test_confirmed_packets_groups_edges_and_loop_scheduler_caveat():
     assert branch_row['direct_target'] == 0x11800024
     assert branch_row['delay_slots'] == 5
     assert branch_row['source_fetches'] == 3
+
+
+def test_standalone_coverage_cannot_claim_execution_provenance(tmp_path):
+    checkpoint_path = tmp_path / 'final.cdjdsp'
+    trace_path = tmp_path / 'trace.jsonl'
+    formats_path = tmp_path / 'formats.h'
+    output = tmp_path / 'coverage.json'
+    checkpoint_path.write_bytes(checkpoint())
+    trace_path.write_bytes(trace(
+        dict(event='coverage_summary', first_pc=0, last_pc=0,
+             unique_pcs=0, unique_edges=0, unique_source_pcs=0,
+             source_fetches=0, scheduler_cycles=0, idle_cycles=0, overflow=False),
+        dict(event='stop', reason='step_limit', fault='')))
+    formats_path.write_bytes(FORMATS)
+    report = write_coverage(checkpoint_path, trace_path, formats_path, output)
+    assert not report['validation_eligible']
+    assert not report['architectural_validation_eligible']
+    assert json.loads(output.read_text()) == report
 
 
 def test_faulting_word_is_probable_and_never_confirmed():

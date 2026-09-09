@@ -1,5 +1,20 @@
 # Building
 
+Reanalyze a captured predicate inventory without rerunning firmware:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.coverage \
+  runs/dsp-saturation-transcript-replay-1/final.cdjdsp \
+  runs/dsp-saturation-transcript-replay-1/trace.jsonl \
+  runs/NEW_SOURCE_PREDICATE_REPORT.json \
+  --formats build/gdb-17.2/include/opcode/tic6x-insn-formats.h
+```
+
+Standalone analysis is not validation-eligible: it does not evaluate inherited
+execution-mode approximations. Replay still combines coverage with its own
+provenance and equivalence gates. Classified source predicates are not proof
+of buffered issue or instruction-family correctness.
+
 Saturating arithmetic batch validation:
 
 ```sh

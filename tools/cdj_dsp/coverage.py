@@ -144,6 +144,11 @@ def architectural_state(family):
 def predicate_description(event, specs):
     value = expanded_word(event)
     names = {spec['name'] for spec in specs}
+    if event['compact'] and names == {'lsdx1c'}:
+        # SPRUFE8B Figure G-3: CC selects A0/!A0/B0/!B0, not the
+        # destination's side or RS-selected register subset.
+        cc = (event['word'] >> 14) & 3
+        return f'{"zero" if cc & 1 else "nonzero"}:{"B" if cc & 2 else "A"}0'
     if event['compact'] and names & {'s_sbs7c', 's_sbu8c'}:
         bank = 'B' if event['word'] & 1 else 'A'
         return f'{"zero" if (event["word"] >> 4) & 1 else "nonzero"}:{bank}0'
@@ -152,6 +157,29 @@ def predicate_description(event, specs):
         return f'{"zero" if (event["word"] >> 3) & 1 else "nonzero"}:{bank}0'
     spec = next((item for item in specs if 'creg' in item['fields']), None)
     if spec is None:
+        # Explicitly audited formats only. Section 3.6 describes compact
+        # operations as unconditional, but G-3 and conditional branch/loop
+        # formats above are exceptions; do not generalize to unknown names.
+        compact_unconditional = {
+            'nfu_unop', 'd_dpp', 'd_dstk', 'lsdmvfr', 'lsdmvto', 'l_lx5',
+            'l_l3i', 's_smvk8', 's_sx1b', 'l_l3_sat_0', 'l_l3_sat_1',
+            'l_l2c', 's_scs10', 'nfu_uspma', 'nfu_uspmb', 's_sc5', 'l_lx3c',
+            's_sx1', 'nfu_uspk', 'nfu_uspl', 'l_lx1', 's_sbs7', 'd_dx5',
+            's_ssh5_sat_0', 's_ssh5_sat_1', 'd_dx1', 's_s3i',
+            's_s3_sat_0', 's_s3_sat_1', 's_sx5', 's_s2ext', 'l_lx1c',
+            'd_dx5p', 'd_dx2op', 's_s2sh',
+        }
+        compact_unconditional.update(
+            f'd_{form}_dsz_{size}' for form in ('doff4', 'dinc', 'dind', 'ddec')
+            for size in ('000', '001', '010', '011', '100', '101', '110', '111',
+                         '01x', 'x11'))
+        full_unconditional = {
+            'nfu_nop_idle', 's_call_imm_nop', 'nfu_spkernel', 'nfu_spmask',
+            's_ext_1_or_2_src_noncond', 'nfu_dint', 'nfu_rint',
+        }
+        known = compact_unconditional if event['compact'] else full_unconditional
+        if names and names <= known:
+            return 'unconditional'
         return 'unconditional_or_format_specific'
     creg = field_value(spec, 'creg', value)
     zero = field_value(spec, 'z', value)
@@ -418,6 +446,13 @@ def write_coverage(checkpoint, trace, formats, output):
     checkpoint_data, trace_data, format_data = (checkpoint.read_bytes(), trace.read_bytes(),
                                                  formats.read_bytes())
     report = build_coverage(checkpoint_data, trace_data, format_data)
+    # A trace/checkpoint pair does not establish execution-mode provenance.
+    # Only the replay orchestrator evaluates inherited approximations and
+    # connected/repeat gates. Standalone reanalysis must not launder an
+    # exploratory checkpoint into an architectural validation result.
+    report['architectural_validation_eligible'] = False
+    report['validation_eligible'] = False
+    report['validation_provenance'] = 'not evaluated by standalone coverage analysis; use replay gates'
     report['sha256'] = {
         'checkpoint': hashlib.sha256(checkpoint_data).hexdigest(),
         'trace': hashlib.sha256(trace_data).hexdigest(),

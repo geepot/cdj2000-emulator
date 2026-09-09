@@ -8,6 +8,32 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Source-predicate format audit now recognizes compact conditional MVK's
+CC=A0/!A0/B0/!B0 (SPRUFE8B Figure G-3), independently of side and RS.
+Explicitly audited unconditional formats are classified using section 3.6 and
+appendices C-H; unknown/ambiguous formats still remain unavailable. Reanalysis
+`runs/dsp-source-predicate-complete-1.json` of the 71-stop saturation transcript
+classifies all 5,396 observed instruction addresses: 5,148 true-observed and
+248 false-only, with zero unclassified predicate formats. This does not prove
+issue-time execution, buffered-loop predication, SPMASK behavior or semantics.
+The 248 false-only addresses remain targeted semantic-test candidates, not
+demonstrated unsupported instructions. Instruction-family completeness remains
+unproven even though this particular predicate-format inventory is classified.
+
+Standalone coverage generation now always marks architectural validation as
+ineligible because it does not evaluate execution-mode provenance. Use replay
+gates for validation; reanalyzing an exploratory checkpoint must not upgrade
+its eligibility. A fresh 100,000-step exploratory repeat in
+`runs/dsp-predicate-format-replay-1` passes without faults to 56,199,500 packets /
+117,064,013 cycles. No CPU changes or connected run were needed for this
+report-only batch; strict loop timing and audio limitations are unchanged.
+The 35 focused coverage/replay tests pass. Reanalysis report SHA-256:
+`a1b2c228467c278f7c661ba3a7d6af0511517e33b1811047295892055edfe743`.
+Continuation trace SHA-256:
+`d60920bc0b3136321b971864de647d5003652f19ced538c908ec93b9e7343f03`;
+continuation coverage SHA-256:
+`a322c4bd13dcf494999698d1987406c66477fb215ae963d543b385080d990d9e`.
+
 Saturating arithmetic batch: full-width SADD (.L/.S), SSUB (.L), SSHL (.S),
 including every scalar and signed-40-bit SADD/SSUB operand form, now shares
 semantics with compact L3/S3/Ssh5/S2sh variants. SSHL uses the low six register
