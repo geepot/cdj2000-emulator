@@ -3,13 +3,20 @@
 #define CDJ_C6747_PLL_H
 #include <stdbool.h>
 #include <stdint.h>
-/* SPRUH91D 7.4.3-17. Configuration plus synthetic divider GO transition.
- * POR defaults substitute for ROM handoff; physical clocks are not driven. */
+/* SPRUH91D 7.4.3-17, SPRS377F Table 6-4. NXS-specific input-clock/reset
+ * timing plus synthetic divider GO. POR defaults substitute for ROM handoff;
+ * PLLEN and physical output clocks remain unsupported. Lock wait is a
+ * catalog bound applied to the custom chip, not measured lock status. */
 typedef struct {
     uint32_t config[13];
     bool legacy_bit4_used; /* Explicit unverified C6747 readback assumption. */
     uint32_t active_dividers[7], target_dividers[7], command;
     unsigned go_remaining;
+    /* NXS OSCIN is 16.9344 MHz (RRV4356 X501). While bypassed, one
+     * SYSCLK1/core cycle spans the active PLLDIV1 ratio in OSCIN periods.
+     * Initial bypass is a missing-ROM handoff assumption. */
+    uint64_t oscin_cycles;
+    unsigned reset_age, lock_wait_remaining;
 } CdjC6747Pll;
 /* One DSP-cycle edge before bus commits. GO lasts eight subsequent cycles;
  * still synthetic latency, not physical OSCIN/PLL alignment timing. */

@@ -129,6 +129,8 @@ static void start_dsp(NxsHpi *s)
                 s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
                 s->cpu.fault_word, s->cpu.fault ? s->cpu.fault : "startup budget",
                 s->cpu.r[1][15], s->cpu.r[1][14], s->cpu.r[1][3]);
+    info_report("nxs-pll: oscin-cycles=%" PRIu64 " reset-age=%u lock-wait-remaining=%u",
+                s->pll.oscin_cycles, s->pll.reset_age, s->pll.lock_wait_remaining);
 }
 
 static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)

@@ -62,6 +62,8 @@ def main():
                         dump_path=str(args.dump.resolve()), steps=args.steps,
                         break_pc=args.break_pc, boot_rom_executed=False,
                         pll_assumptions=['POR configuration at ROM handoff',
+                                         'initial bypass; NXS OSCIN 16934400 Hz, active SYSCLK1 division',
+                                         'catalog PLL reset/lock bounds applied to custom DSP; not measured lock',
                                          'oscillator counter complete at handoff, not PLL lock',
                                          'legacy PLLCTL bit 4 writable latch; C6747 effect unverified',
                                          'divider GO completes after eight subsequent DSP cycles; not physical clock timing'],

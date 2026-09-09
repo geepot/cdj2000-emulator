@@ -832,3 +832,34 @@ RRV4356-derived parent hardware research gives OSCIN=16.9344 MHz, N=1,M=23:
 rounding upward gives 17 assertion periods and 418 lock-wait periods. Do not
 use DSP step counts as oscillator periods after clock division/multiplication,
 or expose a made-up lock status bit. Full boot/audio remain unverified.
+
+### Bypass oscillator time and guarded reset release
+
+PLLRST release now validates powered square-wave operation, software-selected
+bypass, a 17-OSCIN-period reset minimum and catalog PLL operating ranges.
+OSCIN=16.9344 MHz is board-specific; bypass CPU cycles scale by active PLLDIV1,
+using the old ratio for the period ending at a GO transition. The integer
+lock-wait bound is ceil(2000*N/sqrt(M)); tests cover all multipliers, boundary
+rounding, invalid source/power/reference settings, reassertion cancellation,
+readback writes not restarting the timer, and divider scaling. PLLSTAT is
+unchanged by this wait; PLLEN/physical output clocks remain unsupported.
+
+```sh
+.venv/bin/pytest -q
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-pll.c emulator/qemu/cdj_c6747_pll.c -o /tmp/cdj-pll-reset-san
+/tmp/cdj-pll-reset-san
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-cycle-clock-connected/dsp-l2.bin runs/dsp-pll-release-1 --verify-repeat
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-pll-release-connected --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+```
+
+Suite: 171 passed / 43 skipped; PLL sanitizer passes. Repeat gate passes,
+trace hash `eb9d086289e93c47dba8ac9dcbf4f4746b7d54382b1dd5c825863bd183040fdb`.
+Replay and connected execution stop at 1,166 packets / 1,427 cycles,
+`0x11802ed8` / `0x0134`, attempting PLLCTL=`0x1c9`. Both report 414 lock-wait
+periods remaining from a 418-period bound. Only four modeled periods have
+elapsed since the reset-release store committed. The attempted enable would
+commit two cycles after E1 validation if accepted. This short wait is an
+unresolved firmware/model/catalog discrepancy, not permission to bypass timing
+or invent lock status. See HANDOFF.md for investigation priorities. Connected
+GUI exits 0/frame exists; full boot and audio remain incomplete.

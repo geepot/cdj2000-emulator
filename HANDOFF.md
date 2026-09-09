@@ -8,6 +8,39 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+PLL reset release is modeled in oscillator periods while still in bypass:
+NXS OSCIN=16.9344 MHz, one CPU cycle spans the active SYSCLK1 divider ratio.
+Time uses the old divider through a GO completion edge. Reset release requires
+software-selected bypass, square-wave input, power on, at least 17 qualified
+OSCIN periods of reset assertion, and catalog-valid PLL reference/output
+frequencies. Release starts ceil(2000*N/sqrt(M)) periods of conservative wait;
+the integer bound avoids floating-point rounding. Reset/power-down cancels the
+wait; configuration changes while released are rejected. No PLLSTAT lock bit
+was invented and PLLEN remains unsupported even after the bound expires.
+Catalog timing applied to the custom D810K013 is an explicit assumption.
+
+`runs/dsp-pll-release-1 --verify-repeat`: 1,166 packets / 1,427 cycles,
+PC `0x11802ed8`, compact `0x0134`, rejected PLLCTL=`0x1c9` (PLLEN).
+Trace SHA-256: `eb9d086289e93c47dba8ac9dcbf4f4746b7d54382b1dd5c825863bd183040fdb`.
+Connected `runs/nxs-pll-release-connected` agrees, including OSCIN=1427,
+reset-age=17 (saturated minimum counter), lock-wait-remaining=414. GUI exits 0
+with a frame at the 15-second bound. Suite: 171 passed / 43 skipped; PLL
+address/undefined sanitizer passes. Full boot/audio remain incomplete.
+
+**Next discrepancy to resolve:** firmware attempts PLL enable only four modeled
+OSCIN periods after reset release (E1 validation; an accepted store would commit
+two cycles later), versus a catalog maximum lock wait of 418. Do not bypass this
+guard or claim firmware is wrong. Recheck custom-chip PLLRST meaning, actual
+clock/stall timing and manual applicability. SPRUH91D Table 7-5 even qualifies
+PLLRST as "if supported". The bit-4 discrepancy remains separate evidence that
+catalog PLL register behavior may differ from this custom DSP. Observed bytes
+0x11802ecc..2ed8 are STW; LDW; NOP 4; OR-immediate 1; STW, with no explicit
+long wait. Parent compact decoder corroborates the memory forms but incorrectly
+labels nearby compact NOP 0x0c6e; it is not an independent timing oracle.
+Once resolved, implement PLLEN with clock ratios/consumers, not just a latch.
+
+### Previous cycle-edge clock checkpoint
+
 The CPU now has an optional per-cycle board-clock callback, invoked before E3
 bus effects on every cycle (including inserted NOPs, loop cycles and truncated
 branch delays). Both DSP hosts bind it to PLL ticking. GO now takes eight

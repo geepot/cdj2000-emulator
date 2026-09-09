@@ -5,6 +5,26 @@ static const unsigned offsets[] = {0x100,0x104,0x110,0x114,0x118,0x11c,
 static const uint32_t defaults[] = {0xf2,0x14,0x13,0x8000,0x8000,0x8001,
                                    0x8002,0x8000,0x8001,0x8003,0x8002,0x8000,0x8005};
 static const unsigned divider_index[] = {4,5,6,9,10,11,12};
+static unsigned ratio(uint32_t divider)
+{ return divider & 0x8000 ? (divider & 31) + 1 : 1; }
+static unsigned lock_wait(const CdjC6747Pll *s)
+{
+    /* SPRS377F Table 6-4: ceil(2000*N/sqrt(M)) OSCIN periods. Integer
+     * arithmetic preserves the conservative bound without libm rounding. */
+    unsigned n = ratio(s->config[3]), m = s->config[2] + 1, wait = 0;
+    uint64_t square = 4000000ull * n * n;
+    while ((uint64_t)wait * wait * m < square) ++wait;
+    return wait;
+}
+static bool valid_operating_point(const CdjC6747Pll *s)
+{
+    unsigned n = ratio(s->config[3]), m = s->config[2] + 1;
+    /* Board square-wave input; datasheet PLLREF 12..50 MHz, M=4..32,
+     * PLLOUT 300..600 MHz. The custom chip's core speed grade is separate. */
+    return 16934400u >= 12000000u * n && 16934400u <= 50000000u * n &&
+           m >= 4 && m <= 32 && 16934400ull * m >= 300000000ull * n &&
+           16934400ull * m <= 600000000ull * n;
+}
 static int index_of(uint32_t address)
 {
     for (unsigned i = 0; i < 13; ++i)
@@ -20,6 +40,21 @@ void cdj_c6747_pll_reset(CdjC6747Pll *s)
 }
 void cdj_c6747_pll_tick(CdjC6747Pll *s)
 {
+    /* PLLEN remains rejected, so the bypass clock is still selected.
+     * Measure the completed period using the divider BEFORE a GO edge. */
+    unsigned elapsed = ratio(s->active_dividers[0]);
+    s->oscin_cycles += elapsed;
+    if ((s->config[0] & 0x12b) == 0x100) {
+        /* Powered, square-wave input, software-selected bypass, reset held.
+         * 1000 ns minimum at 16.9344 MHz rounds upward to 17 periods. */
+        if (s->reset_age < 17) {
+            s->reset_age += elapsed;
+            if (s->reset_age > 17) s->reset_age = 17;
+        }
+    }
+    if (s->lock_wait_remaining)
+        s->lock_wait_remaining = s->lock_wait_remaining > elapsed ?
+                                 s->lock_wait_remaining - elapsed : 0;
     if (s->go_remaining && --s->go_remaining == 0)
         for (unsigned i = 0; i < 7; ++i) s->active_dividers[i] = s->target_dividers[i];
 }
@@ -57,19 +92,33 @@ bool cdj_c6747_pll_write(CdjC6747Pll *s, uint32_t address,
     if (s->go_remaining) return false;
     uint32_t mask = i == 0 ? 0x1fb : i <= 2 ? 31 : 0x801f;
     if (value & ~mask) return false;
+    if (i != 0 && (s->config[0] & 8)) return false;
     if (i == 0) {
         /* TI marks bit 4 reserved-one, but legacy DaVinci PLL code clears
          * it as PLLDIS (Linux v6.1 drivers/clk/davinci/pll.c). Preserve the
          * writable latch as a flagged compatibility assumption, NOT proof
-         * of C6747 physical clock semantics. PLLEN/PLLRST still stop. */
-        if (value & 9) return false;
+         * of C6747 physical clock semantics. PLLEN still stops. */
+        if (value & 1) return false;
         value |= 0xc0;
+        if (value & 8) {
+            if ((value & 0x123) != 0x100 || s->reset_age < 17 ||
+                !valid_operating_point(s)) return false;
+            /* While out of reset, source/power changes are not supported. */
+            if ((s->config[0] & 8) && value != s->config[0]) return false;
+        }
     }
     if (i == 1 && value != 0x14 && value != 0x1f && (value < 0x17 || value > 0x1d))
         return false; /* OCSEL reserved source selectors. */
     /* PLL_MASTER_LOCK defaults clear; setting it through SYSCFG remains
      * unsupported there. Physical clock outputs remain unconnected. */
     if (commit) {
+        if (i == 0) {
+            if ((value & 8) && !(s->config[0] & 8))
+                s->lock_wait_remaining = lock_wait(s);
+            if (!(value & 8)) s->lock_wait_remaining = 0;
+            if ((value & 0x123) != 0x100 ||
+                (!(value & 8) && (s->config[0] & 8))) s->reset_age = 0;
+        }
         s->config[i] = value;
         if (i == 0 && !(value & 16)) s->legacy_bit4_used = true;
     }
