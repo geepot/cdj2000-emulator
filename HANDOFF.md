@@ -8,6 +8,17 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Repeat profiling pair `runs/nxs-deferred-sync-profile-2` and
+`runs/nxs-legacy-sync-profile-2` uses identical five input-artifact hashes and
+neither changes at exit. Deferred MAIN waits: interrupt 11.79737s, MMIO read
+4.31198s, MMIO write 2.95456s (19.06391s total); I/O main-loop wait 0.05223s.
+Legacy I/O main-loop wait is 13.13850s, versus MAIN 0.02545/0.00861/0.00164s
+at those same sites. This reproduces the contention direction. The first pair
+straddled a simulator rebuild despite each run's stable hashes; use pair 2
+for same-binary evidence. Host load and profiling overhead remain uncontrolled,
+so these are not precise hardware-performance or sole-causation claims.
+Full committed-state suite: 367 passed, 28 optional skips. Root has no live run.
+
 Post-commit gate: `e1b0b3a` rebuild succeeds and 68 focused checkpoint/replay/
 launcher tests pass. GUI task's fresh-only transport diagnostic is a regression:
 the inspected frame shows E8709 COMMUNICATION ERROR and no 240-byte payloads
