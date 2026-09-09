@@ -365,3 +365,19 @@ The patch is generated, not hand-written, and it is checked the same way: unpack
 a pristine `gdb-17.2`, apply `01` then `02`, and the result must match the tree
 it was taken from byte for byte. `.github/workflows/patches.yml` runs the
 applying half on every push and fails on any fuzz or reject.
+
+## 05: opt-in fresh-only live-link diagnostic
+
+`BFIN_LINK_FRESH_ONLY=1` prevents the live SPORT frame cache from delivering a
+previously consumed record again. It also bypasses the cached announcing-record
+hold and the last-status fallback. New MAIN records retain their original bytes;
+this does not rewrite announcement fields or CRCs. Legacy behavior remains the
+default. The 200-byte housekeeping model and the independently timed emulators
+are unchanged, so this is **not** a hardware clock model or a boot fix.
+
+`tests/test_bfin_link_cache.py` compiles the actual patched cache function from
+the local simulator build and verifies fresh/legacy consumption, replenishment,
+length matching and repeated-payload gating. It requires that build and a C
+compiler. The first 90-second NXS test with this flag showed E-8709 and never
+consumed the announced 240-byte payload; it did not reach the later database
+request phase. Do not enable this flag in normal launches on that evidence.

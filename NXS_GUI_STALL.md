@@ -86,3 +86,22 @@ Revalidate with repeated uninstrumented connected boots and visible post-boot
 controls, not just free pools or increasing cached-DMA counts. USB/SD test-track
 loading remains pending that gate; this diagnostic does not implement media
 loading or claim successful playback.
+
+## Subsequent controls
+
+- `cdj-panel-deferred-diagnostic-1`, 90 seconds: the experimental deferred-v1
+  DSP policy shortened individual callbacks but still ended in the same two
+  exhausted pools, with 34 requests and 8 replies queued. MENU did not open.
+- `cdj-panel-no-payload-repeat-1`, 60 seconds: disabling only cached announced
+  payload repeats produced `repeat_payload=0`, but the same pool deadlock
+  remained. That setting alone is not a fix.
+- `cdj-panel-fresh-only-1`, 90 seconds: patch 05's opt-in fresh-only live
+  delivery left both pools free, **because the GUI failed earlier with E-8709**.
+  MAIN sent 8 status records and 18 240-byte command-9 payloads; the GUI consumed
+  no 240-byte payload. The later DbCli request phase was never reached. Thus
+  free pools here do not establish either a fix or causation by cached repeats.
+
+Frontend follow-up `20524e1` makes keyboard and Inspector/lab button holds
+physical down/up contacts as well. Native Tk tests verify actual bindings,
+repeat suppression, outside release and focus loss. The 122-test focused
+suite passed; these host-input tests do not establish a firmware response.

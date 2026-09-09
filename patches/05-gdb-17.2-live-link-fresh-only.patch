@@ -1,0 +1,46 @@
+--- a/sim/bfin/dv-bfin_ppi.c
++++ b/sim/bfin/dv-bfin_ppi.c
+@@ -1589,2 +1589,20 @@
+-static unsigned
+-bfin_sport_link_take (struct bfin_sport *sport, void *dest, unsigned nr_bytes)
++/* Diagnostic only: do not invent another DMA delivery from cached live-link
++   bytes. This does not model the board clocks or the 200-byte housekeeping
++   path, and therefore is not a hardware-correctness claim. Legacy is default. */
++static int
++bfin_sport_link_fresh_only (void)
++{
++  static int cached = -1;
++  if (cached < 0)
++    {
++      const char *env = getenv ("BFIN_LINK_FRESH_ONLY");
++      cached = env && !strcmp (env, "1");
++      if (cached)
++        fprintf (stderr, "link: fresh-only live delivery diagnostic enabled; "
++                 "not a hardware clock model\n");
++    }
++  return cached;
++}
++
++static unsigned
++bfin_sport_link_take (struct bfin_sport *sport, void *dest, unsigned nr_bytes)
+@@ -1619,3 +1637,9 @@
+-      if (entry == depth)
+-	{
+-	  /* Nothing unread.  A 64-byte status record is repeated anyway --
++      if (entry == depth)
++	{
++          if (bfin_sport_link_fresh_only ())
++            {
++              if (c >= 0)
++                bfin_link_census[c].stale++;
++              return 0;
++            }
++	  /* Nothing unread.  A 64-byte status record is repeated anyway --
+@@ -2387,1 +2411,2 @@
+-	  if (bfin_sport_link_hold_announce ()
++	  if (!bfin_sport_link_fresh_only ()
++              && bfin_sport_link_hold_announce ()
+@@ -2512,1 +2537,2 @@
+-	  if (nr_bytes == sizeof (sport->link_last) && sport->link_have_last)
++	  if (!bfin_sport_link_fresh_only ()
++              && nr_bytes == sizeof (sport->link_last) && sport->link_have_last)
