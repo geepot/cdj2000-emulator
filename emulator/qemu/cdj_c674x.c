@@ -2538,11 +2538,13 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 (w & 0x3c7e) == 0x1c66;
             if (full_kernel || compact_kernel) {
                 if (i != 0) return stop(cpu, insn.pc, w, "SPKERNEL must start packet");
-                /* Figure H-7 scatters the same six-bit combined
-                 * stage/cycle field across bits 0, 9:7 and 15:14. */
+                /* SPRUFE8B Figure H-7: bit 0 is field[5], bits 9:7
+                 * are field[2:0], and bits 15:14 are field[4:3].
+                 * Table 3-29's stage-bit reversal is applied below,
+                 * after reconstructing this combined field. */
                 unsigned field = compact_kernel ?
-                    (w & 1) | (((w >> 7) & 7) << 1) |
-                    (((w >> 14) & 3) << 4) : (w >> 22) & 63;
+                    ((w & 1) << 5) | ((w >> 7) & 7) |
+                    (((w >> 14) & 3) << 3) : (w >> 22) & 63;
                 unsigned cbits = 0, stage = 0;
                 while ((1u << cbits) < out.loop.ii) ++cbits;
                 for (unsigned j = 5; j >= cbits && j < 6; --j)

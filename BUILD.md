@@ -1,5 +1,17 @@
 # Building
 
+TI-backed compact SPKERNEL regression (user-installed C6000 CGT 8.5.0.LTS):
+
+```sh
+C6X_TI_BIN=/Applications/ti/ti-cgt-c6000_8.5.0.LTS/bin \
+  .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_spkernel_fields.py
+```
+
+Without `C6X_TI_BIN`, only the independent external-tool test skips; the full
+field/schedule test still runs. The TI assembler fixture is
+`tests/ti/spkernel-oracle.asm`. Do not use GNU libopcodes to validate its compact
+SPKERNEL operands: the checked GNU version has a field-scatter discrepancy.
+
 Boot-error milestone evidence (strict, no exploratory DSP flags):
 
 ```sh

@@ -12,7 +12,8 @@ Primary milestone is now a genuine cold connected boot without E-7010, with
 at least 60 seconds of subsequent fault-free operation and basic GUI interaction,
 repeated from cold startup. No exploratory DSP switches qualify. Instruction
 inventory expansion is secondary to the actual startup path. This milestone
-remains incomplete; no core timing fix was made in the boot-evidence batch.
+remains incomplete. Compact SPKERNEL decoding is now corrected using an
+independent TI assembler/disassembler oracle; the next strict stop is SPI1.
 
 NXS-specific handshake trace (do not substitute original-CDJ `caution.py`
 addresses): MAIN loader `0x041fc698` calls final handler `0x041fc646`, which
@@ -24,16 +25,39 @@ Success calls status `(1,1)` at `0x041fc794`; failure calls `(1,2)` at
 `0x1180304c`. Trace applies to MAIN firmware SHA-256
 `02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85`.
 
-New decoding hypothesis needs independent TI-toolchain confirmation:
+Confirmed compact SPKERNEL decoder correction:
 SPRUFE8B Figure H-7 visually labels compact SPKERNEL bits 15:14 as field[4:3],
-9:7 as field[2:0], and bit 0 as field[5]. The current/GNU scatter instead maps
+9:7 as field[2:0], and bit 0 as field[5]. The previous/GNU scatter instead maps
 these to field[5:4], [3:1], and [0]. Literal H-7 plus Table 3-29 interprets
-`0xdc66` at II=1 as stage 6, whereas current/GNU decoding says stage 3.
-This could explain the overlap without changing scheduling; it is a hypothesis,
-not yet a confirmed GNU/core defect. Obtain a TI assembler/disassembler result
-for stages 3, 6 and 24 before changing strict semantics. The original PDF
+`0xdc66` at II=1 as stage 6, whereas previous/GNU decoding says stage 3.
+TI C6000 CGT 8.5.0.LTS, installed by the user under `/Applications/ti`,
+independently assembles and disassembles 3,0 as `9c67`, 6,0 as `dc66`, and
+24,0 as `1f66`. `tests/ti/spkernel-oracle.asm` reproduces these results with
+zero assembler errors/warnings; the optional `C6X_TI_BIN` test invokes both
+tools. TI asm6x SHA-256:
+`a57a504751cd6d849f89b07a3e84557b51587ece3ffd9746ed46b0b44b09e2f3`;
+dis6x SHA-256:
+`65c54eca98ef6f50c5e4a02411fb73f7f61d3c0d529aa1112d810327e0a1722b`.
+The correction changes only compact field assembly, not loop timing or conflict
+checks. Tests cover all 64 fields at nine II values, valid/invalid cycle fields,
+full/compact schedule equivalence and exact `dc66`; the new harness passes
+ASan/UBSan. Core plus field/oracle tests: 19 passed; complete suite with the TI
+oracle enabled: 290 passed, 45 optional skips. The original PDF
 pages 482 and 766 were visually checked; packet grouping and dynlen=7 were
 independently rechecked and do not explain the conflict.
+
+Fresh strict `runs/nxs-spkernel-h7-strict-1` passes the old conflict and stops
+at PC `0xc004f42c`, word `0x021002f4`, 27,100,109 packets / 66,413,077 cycles:
+`unaligned or unmapped scalar memory access`. The next access is SPI1's
+currently functional-only WM8740 transmit path; do not simply remove that gate
+and call its immediate completion cycle-accurate. Strict replay from checkpoint
+64, `runs/dsp-spkernel-h7-strict-replay-1`, verifies all three following connected
+stops, exact repeat state/memory and coverage. Trace SHA-256:
+`ffa4168433f13b92b8c095911ff6a617bb9df42c3c4118ab7cb295d4abba0651`.
+This proves the decoder fix passes the old blocker, not successful startup.
+Earlier strict transcripts encode the old decoder failure and are no longer
+expected to match after that point. Historical GNU SPKERNEL operand reports
+likewise require correction; GNU agreement was not an independent oracle.
 
 Fresh rebuilt `runs/nxs-e7010-strict-baseline-1` ran for 75 seconds and visibly
 shows `E-7010: DSP DEVICE ERROR`. The DSP stops at the unchanged strict loop
