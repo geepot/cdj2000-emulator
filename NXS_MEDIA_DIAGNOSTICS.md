@@ -64,3 +64,35 @@ sites total approximately 0.62829 seconds. This is consistent with the known
 synchronous DSP blocking but does not establish sole causation. Profiling and
 two stop/save/resume RAM captures add observer effects. A longer same-binary
 run is needed to distinguish slow initialization from a persistent stall.
+
+## Longer USB run: progress and a late DSP fault
+
+`runs/nxs-usb-track-long-1` extends the same configuration to 600 seconds.
+USB retries TEST UNIT READY at 244.001 virtual seconds, then reads capacity
+and issues READ(10) for sector zero at 244.819. Numerous FAT sectors follow.
+This supersedes any interpretation of the 180-second run as a permanently
+stalled USB controller. The generated image has an unknown FSInfo free count;
+whether that causes the observed sequential FAT scan is not yet established.
+
+However, around virtual time 368.274 the strict DSP interpreter stops:
+
+- Packet 1,301,099,502, cycle 2,346,859,933, PC `008001e8`.
+- Reason: `delayed-result write conflict`.
+- Checkpoint `00000000000000001342.cdjdsp`, event sequence 151389.
+
+The previous budget checkpoint is at packet 1,301,099,500, PC `c004cbb8`.
+Preserve this transcript/checkpoint pair for deterministic diagnosis. Subsequent
+USB progress and faster RTOS ticks occur after the DSP fault; they are not
+clean end-to-end execution evidence. The fault's relation to the browser wait
+is not established.
+
+The inspected 460-second frame displays LINK after the contact currently
+labeled USB (`19/02`) was pressed and released. A subsequent `19/04` probe
+shows Wait. This raises a source-selection/protocol question; it does not yet
+prove a particular alternative mapping. Both probes use actual panel input.
+There is still no verified TESTTONE listing, track load or playback.
+
+Separately, static NXS panel analysis and RAM snapshots identify the SD lid
+gate: neutral raw byte 17 bit 2 is decoded as lid open and leaves `04cf222c=1`.
+The closed-contact state needs a connected `down 17 04` test before changing
+the launch defaults or declaring an SD fix. No guest RAM fields were forced.
