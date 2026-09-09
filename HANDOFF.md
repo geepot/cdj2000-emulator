@@ -8,6 +8,32 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Current-source strict regression `runs/dsp-return-bnop-strict-replay-1`
+starts at strict connected checkpoint 64, verifies the remaining connected
+stop twice, and reproduces `0xc004f306` / `0x2627` at 25,364,865 packets /
+60,779,972 cycles. Trace SHA-256:
+`275349621eb30b740a71f7d9373cf0b82069d454558a12d5d615254754a03c06`.
+Coverage now correctly records one execution fault, zero unsupported encodings,
+773 source packets, 1,098 instruction addresses, and four probable addresses.
+
+Remaining milestone evidence gaps, in priority order:
+
+- Strict SPLOOPD epilog behavior remains unresolved. A passing repeat of its
+  conflict is not a passing firmware execution. The +2-cycle exploratory
+  schedule cannot establish the strict milestone.
+- Confirmed packet fetches do not establish true-predicate execution of every
+  instruction. Existing grouped format coverage is not a complete mapping
+  from each encoding to tested semantic cases; this inventory audit remains
+  required before declaring instruction-family completeness.
+- Returned-loop SPMASK reconstruction and ISR-local loop replacement retain
+  the documented exploratory limitations. SPRUFE8B 7.13 describes draining
+  and re-piping the loop and requires software to save ILC/RILC/ITSR; it does
+  not by itself justify inventing a second persistent hardware loop context
+  across an ISR. Any replacement design needs that distinction resolved.
+- Compact saturation, circular addressing, reload forms and unimplemented
+  control registers remain fail-closed. Current traces have not established
+  them as terminal missing-opcode frontiers; probable code is not confirmation.
+
 Returned-loop immediate BNOP now follows SPRUFE8B 7.13.2: full-width and
 compact `BNOP label,n` become `NOP n+1` while piping up after interrupt
 return. They do not redirect execution or enter the loop buffer. Register

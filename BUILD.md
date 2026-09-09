@@ -1662,6 +1662,26 @@ functional run as full DSP parity, full boot, or working audio.
 
 ## Schema-9 SPI1, SPLOOPW and interrupt-return batch
 
+Current-source connected regression replay:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-return-bnop-connected-1/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_RETURN_CONNECTED_REPLAY --steps 100000000 \
+  --events runs/nxs-return-bnop-connected-1/dsp-events.jsonl \
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx --verify-repeat
+```
+
+Recorded `runs/dsp-return-bnop-connected-replay-1` verifies all 71 connected
+stops, repeat trace, state/memory and transmit capture. It ends at 58,099,500
+packets / 120,392,283 cycles with zero execution faults. Trace SHA-256:
+`06cfce913e51f11843c1109526a3cedf9c0aed3c608f6433beab6223500ec325`;
+coverage SHA-256:
+`a2ee57e7136f977630ac064b78c3d03bc7a456b0639193ea58db152581b1e792`.
+Coverage contains 4,469 source packets, 5,396 instruction addresses, 4,585
+encodings and 33 probable addresses. Coverage is explicitly ineligible for
+architectural validation because the run uses exploratory timing/audio.
+
 The returned immediate BNOP regression (SPRUFE8B 7.13.2) can be repeated with:
 
 ```sh
