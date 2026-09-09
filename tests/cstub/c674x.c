@@ -2368,6 +2368,49 @@ int main(void)
            !(c.loop_pred_history & 8) && c.r[0][4] == 11);
     cdj_c674x_loop_set_functional_timing(false);
 
+    /* Returned immediate BNOP is a timed NOP regardless of its predicate.
+     * Exercise every full-width N count and both sides without allowing the
+     * otherwise-taken branch to redirect or enter the retained loop tags. */
+    cdj_c674x_loop_set_functional_timing(true);
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned pred = 0; pred < 2; ++pred)
+    for (unsigned n = 0; n < 8; ++n) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[26] = 1u << 14; c.control[13] = 20;
+        c.r[1][0] = pred;
+        memory[0] = 0x38000; /* returned SPLOOP 1 */
+        memory[1] = (1u << 29) | (16u << 16) | (n << 13) |
+                    0x120 | (side << 1);
+        memory[2] = 0x34000;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        for (unsigned cycle = 0; cycle <= n; ++cycle) {
+            assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+            assert(!c.branch_due && !c.loop_tags && c.pc == 0x1008);
+        }
+        assert(c.cycles == n + 2 && !c.loop.sealed);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.loop.sealed && !(c.loop_pred_history & 8));
+    }
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned form = 0; form < 4; ++form) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[26] = 1u << 14; c.control[13] = 20;
+        memory[0] = 0x38000;
+        unsigned branch = (form & 1 ? 0xc000 : 3u << 13) |
+                          (form & 2 ? 0x2a : 0x0a) | side;
+        memory[1] = branch | (0x1c66u << 16);
+        memory[7] = 0xe0408000; /* word 1 compact, BR header */
+        unsigned cycles = form & 1 ? 6 : 4;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        for (unsigned cycle = 0; cycle < cycles; ++cycle) {
+            assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+            assert(!c.branch_due && !c.loop_tags && c.pc == 0x1006);
+        }
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.loop.sealed && !(c.loop_pred_history & 8));
+    }
+    cdj_c674x_loop_set_functional_timing(false);
+
     /* A legacy/partial checkpoint cannot provide the interrupted buffer.
      * Strict mode fails at returned setup instead of silently reconstructing
      * it from program memory. */

@@ -8,6 +8,22 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Returned-loop immediate BNOP now follows SPRUFE8B 7.13.2: full-width and
+compact `BNOP label,n` become `NOP n+1` while piping up after interrupt
+return. They do not redirect execution or enter the loop buffer. Register
+branches and ordinary loop branches retain existing checks. Tests cover all
+full-width N values, both sides, true/false predicates and four compact forms.
+The C674x sanitizer and 17 focused tests pass. Exploratory continuation
+`runs/dsp-return-bnop-replay-1` repeats exactly for 100,000 steps to
+56,199,500 packets / 117,064,013 cycles with no fault; trace SHA-256 is
+`6b1f1766c1a0d0295f2b394ba4110913ec58eb3fca09d9c159f7f22d98b3fc3f`.
+Rebuilt connected `runs/nxs-return-bnop-connected-1` ends by phase budget at
+58,099,500 packets / 120,392,283 cycles. Its 105,362-event transcript hash is
+`52b503613ac5fe450c04edf7664625e2582659f39d4b6fa483adb86b7f242cbb`.
+This is regression evidence; the new return case is established by focused
+tests, not claimed as newly observed in firmware. Strict SPLOOPD timing and
+the other documented approximations remain unresolved.
+
 Replay now preserves exploratory ancestry across explicit checkpoint resumes.
 Switching back to strict execution cannot make previously approximate state
 eligible for architectural validation. Inherited approximation descriptions

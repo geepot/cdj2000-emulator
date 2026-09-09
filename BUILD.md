@@ -1662,6 +1662,21 @@ functional run as full DSP parity, full boot, or working audio.
 
 ## Schema-9 SPI1, SPLOOPW and interrupt-return batch
 
+The returned immediate BNOP regression (SPRUFE8B 7.13.2) can be repeated with:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_c674x.py
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-wm8740-connected-replay-3/final.cdjdsp runs/NEW_RETURN_BNOP \
+  --steps 100000 --functional-dsp-timing --functional-dsp-audio --verify-repeat
+```
+
+Recorded `runs/dsp-return-bnop-replay-1` passes exact repeat with zero faults,
+ending at 56,199,500 packets / 117,064,013 cycles. Trace SHA-256:
+`6b1f1766c1a0d0295f2b394ba4110913ec58eb3fca09d9c159f7f22d98b3fc3f`.
+The rebuilt 15-second connected regression is
+`runs/nxs-return-bnop-connected-1`; it retains all functional timing labels.
+
 Explicit mode transitions inherit the input checkpoint's exploratory status.
 Even with strict execution selected, the manifest, gate and coverage remain
 ineligible for architectural validation if the checkpoint has exploratory

@@ -2368,6 +2368,17 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 return stop(cpu, insn.pc, w,
                             "DINT/RINT cannot share SPKERNEL packet");
             unsigned n = nop_cycles(&insn);
+            /* SPRUFE8B 7.13.2: returned-loop BNOP label,n is NOP n+1.
+             * Decode only immediate forms, leaving register branches under
+             * the existing fail-closed control-instruction check. */
+            if (returning && !insn.compact && (w & 0x1ffc) == 0x120) {
+                if ((w >> 29) == 7 || (!(w >> 29) && (w & (1u << 28))))
+                    return stop(cpu, insn.pc, w, "reserved predicate");
+                n = ((w >> 13) & 7) + 1;
+            } else if (returning && insn.compact && (insn.header & 0x8000) &&
+                       ((w & 0x3e) == 0x0a || (w & 0x2e) == 0x2a)) {
+                n = (w & 0xc000) == 0xc000 ? 6 : (w >> 13) + 1;
+            }
             if (n) {
                 if (n > 9 || (n > 1 && (finish || out.loop_wait)))
                     return stop(cpu, insn.pc, w, "invalid loop NOP packet");
