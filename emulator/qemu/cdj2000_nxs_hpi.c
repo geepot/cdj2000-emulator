@@ -17,6 +17,7 @@
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
+#include "cdj_dsp_checkpoint.h"
 
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
@@ -35,6 +36,7 @@ typedef struct {
     bool reset_released, dsp_started, dsp_halted, dsp_running;
     unsigned boot_phase;
     uint64_t words;
+    uint64_t event_sequence, checkpoint_sequence;
     CdjC674x cpu;
     CdjC6747Syscfg syscfg;
     CdjC6747Psc psc;
@@ -46,9 +48,75 @@ typedef struct {
     uint8_t *sdram;
     void (*hint)(void *, bool);
     void *opaque;
+    FILE *event_log;
 } NxsHpi;
 static NxsHpi *nxs_hpi;
 static void run_dsp(NxsHpi *s);
+
+static void record_event(NxsHpi *s, const char *type, uint64_t offset,
+                         uint64_t address, uint64_t value, unsigned size)
+{
+    const char *path = getenv("CDJ_NXS_DSP_EVENTS");
+    if (!path || !*path) return;
+    if (!s->event_log) {
+        s->event_log = fopen(path, "a");
+        if (!s->event_log) {
+            error_report("nxs-hpi: cannot open DSP event transcript %s", path);
+            return;
+        }
+    }
+    ++s->event_sequence;
+    if (fprintf(s->event_log,
+                "{\"sequence\":%" PRIu64 ",\"event\":\"%s\","
+                "\"offset\":%" PRIu64 ",\"address\":%" PRIu64 ","
+                "\"value\":%" PRIu64 ",\"size\":%u,\"boot_phase\":%u,"
+                "\"hint\":%s,\"dspint\":%s,\"packets\":%" PRIu64 ","
+                "\"cycles\":%" PRIu64 "}\n",
+                s->event_sequence, type, offset, address, value, size,
+                s->boot_phase, s->hpi.hint ? "true" : "false",
+                s->hpi.dspint ? "true" : "false", s->cpu.packets,
+                s->cpu.cycles) < 0 || fflush(s->event_log))
+        error_report("nxs-hpi: DSP event transcript write failed");
+}
+
+static void capture_checkpoint(NxsHpi *s, const char *reason)
+{
+    const char *directory = getenv("CDJ_NXS_DSP_CHECKPOINT_DIR");
+    if (!directory || !*directory || !s->sdram) return;
+    if (g_mkdir_with_parents(directory, 0700)) {
+        error_report("nxs-hpi: cannot create DSP checkpoint directory %s", directory);
+        return;
+    }
+    CdjDspCheckpointState state = {0};
+    state.hpi_address = s->address;
+    state.boot_phase = s->boot_phase;
+    state.words = s->words;
+    state.event_sequence = s->event_sequence;
+    state.checkpoint_sequence = ++s->checkpoint_sequence;
+    state.reset_released = s->reset_released;
+    state.dsp_started = s->dsp_started;
+    state.dsp_halted = s->dsp_halted;
+    state.cpu = s->cpu;
+    state.syscfg = s->syscfg;
+    state.psc = s->psc;
+    state.mcasp = s->mcasp;
+    state.gpio = s->gpio;
+    state.i2c = s->i2c;
+    state.pll = s->pll;
+    state.hpi = s->hpi;
+    state.emifb = s->emifb;
+    cdj_dsp_checkpoint_prepare(&state, reason);
+    g_autofree char *name = g_strdup_printf("%020" PRIu64 ".cdjdsp",
+                                             state.checkpoint_sequence);
+    g_autofree char *path = g_build_filename(directory, name, NULL);
+    char error[160] = {0};
+    if (!cdj_dsp_checkpoint_write(path, &state, s->l2, sizeof(s->l2),
+                                  s->sdram, SDRAM_SIZE, error, sizeof(error)))
+        error_report("nxs-hpi: checkpoint failed: %s", error);
+    else
+        info_report("nxs-hpi: checkpoint=%s reason=%s event-sequence=%" PRIu64,
+                    path, reason, state.event_sequence);
+}
 
 bool cdj_nxs_hpi_port(hwaddr address)
 {
@@ -68,6 +136,7 @@ void cdj_nxs_hpi_reset_line(bool released)
         cdj_c6747_hpi_reset(&s->hpi);
         s->dsp_started = s->dsp_halted = s->dsp_running = false;
         if (s->hint) s->hint(s->opaque, true);
+        record_event(s, "reset_assert", 0, 0, 0, 0);
         info_report("nxs-hpi: DSP reset asserted; HPI boot state reset");
         return;
     }
@@ -77,6 +146,7 @@ void cdj_nxs_hpi_reset_line(bool released)
      * the sole ROM handoff abstraction; uploaded firmware remains genuine. */
     cdj_c6747_hpi_rom_boot_ready(&s->hpi);
     if (s->hint) s->hint(s->opaque, false);
+    record_event(s, "rom_hpi_ready", 0, 0, 1, 0);
     info_report("nxs-hpi: DSP reset released; ROM HPI-ready HINT asserted");
 }
 
@@ -93,10 +163,15 @@ void cdj_nxs_hpi_boot_phase(unsigned phase)
     cdj_c6747_gpio_set_input(&s->gpio, 4, 3, phase & 4);
     info_report("nxs-hpi: MAIN boot phase=%u -> DSP GP4 inputs=%#x",
                 phase, s->gpio.input[2] & 0x2c);
+    record_event(s, "boot_phase", 0, 0, phase, 0);
     /* A phase-budget yield is a cooperative scheduling boundary, not a DSP
      * halt.  Resume when the genuine MAIN firmware changes the sideband that
      * the DSP is polling. */
-    if (changed) run_dsp(s);
+    if (changed) {
+        if (s->dsp_started && !s->dsp_halted)
+            capture_checkpoint(s, "boot-phase boundary");
+        run_dsp(s);
+    }
 }
 
 static bool valid_data(NxsHpi *s)
@@ -175,6 +250,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
             if (commit) {
                 info_report("nxs-hpi: DSP HPIC write value=%#x DSPINT=%d HINT=%d",
                             (uint32_t)value, s->hpi.dspint, s->hpi.hint);
+                record_event(s, "dsp_hpic_write", 0, address, value, size);
                 if (!old_hint && s->hpi.hint && s->hint) s->hint(s->opaque, false);
             }
             return true;
@@ -215,6 +291,9 @@ static void report_dsp(NxsHpi *s, const char *reason)
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
                 s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
                 s->cpu.fault_word, reason, s->cpu.r[1][15], s->cpu.r[1][14], s->cpu.r[1][3]);
+    record_event(s, "dsp_stop", 0, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
+                 s->cpu.fault_word, 0);
+    capture_checkpoint(s, reason);
 }
 
 static void run_dsp(NxsHpi *s)
@@ -244,6 +323,8 @@ static void start_dsp(NxsHpi *s)
     s->cpu.cycle_tick = dsp_cycle_tick;
     s->cpu.cycle_opaque = s;
     s->dsp_started = true;
+    record_event(s, "dsp_start", 0, s->cpu.pc, 0, 0);
+    capture_checkpoint(s, "DSP start boundary");
     run_dsp(s);
     info_report("nxs-pll: oscin-cycles=%" PRIu64 " reset-age=%u lock-wait-remaining=%u early-enable=%d",
                 s->pll.oscin_cycles, s->pll.reset_age, s->pll.lock_wait_remaining,
@@ -257,24 +338,34 @@ static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)
 {
     NxsHpi *s = opaque;
     uint32_t result = 0xffffffff;
-    if (offset == 0) return cdj_c6747_hpi_host_read(&s->hpi);
-    if (offset == 0x40000) return s->address;
-    if ((offset == 0x80000 || offset == 0xc0000) && valid_data(s)) {
+    uint32_t address = s->address;
+    bool data_access = offset == 0x80000 || offset == 0xc0000;
+    bool data_valid = data_access && valid_data(s);
+    if (offset == 0) result = cdj_c6747_hpi_host_read(&s->hpi);
+    else if (offset == 0x40000) result = s->address;
+    if (data_valid) {
         result = ldl_le_p(s->l2 + s->address - L2_BASE);
         if (offset == 0x80000) s->address += 4;
-    } else {
+    } else if (offset != 0 && offset != 0x40000) {
         qemu_log_mask(LOG_GUEST_ERROR, "nxs-hpi: unsupported read offset=%" HWADDR_PRIx " address=%#x HWOB=%d reset=%d\n",
                       offset, s->address, s->hpi.hwob, s->hpi.hpirst);
     }
+    /* HPIC polling is DSP-to-MAIN observation, not an external stimulus, and
+     * produced hundreds of thousands of redundant records. Data-port reads do
+     * advance HPIA and therefore remain ordered state-changing events. */
+    if (data_valid)
+        record_event(s, "hpi_host_data_read", offset, address, result, size);
     return result;
 }
 
 static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size)
 {
     NxsHpi *s = opaque;
+    uint32_t address = s->address;
     if (offset == 0) {
         bool old_hint = s->hpi.hint, old_dspint = s->hpi.dspint;
         cdj_c6747_hpi_host_write(&s->hpi, value);
+        record_event(s, "hpi_host_control_write", offset, address, value, size);
         if (old_hint != s->hpi.hint && s->hint) s->hint(s->opaque, !s->hpi.hint);
         if (!old_dspint && s->hpi.dspint && !s->dsp_started) {
             info_report("nxs-hpi: DSPINT after %" PRIu64 " written words; starting partial C674x interpreter", s->words);
@@ -296,11 +387,17 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
         }
         return;
     }
-    if (offset == 0x40000) { s->address = value; return; }
+    if (offset == 0x40000) {
+        s->address = value;
+        record_event(s, "hpi_host_address_write", offset, address, value, size);
+        return;
+    }
     if ((offset == 0x80000 || offset == 0xc0000) && valid_data(s)) {
         stl_le_p(s->l2 + s->address - L2_BASE, value);
         ++s->words;
         if (offset == 0x80000) s->address += 4;
+        record_event(s, offset == 0x80000 ? "hpi_host_data_autoincrement_write" :
+                     "hpi_host_data_fixed_write", offset, address, value, size);
     } else {
         qemu_log_mask(LOG_GUEST_ERROR, "nxs-hpi: unsupported write offset=%" HWADDR_PRIx " address=%#x HWOB=%d reset=%d\n",
                       offset, s->address, s->hpi.hwob, s->hpi.hpirst);

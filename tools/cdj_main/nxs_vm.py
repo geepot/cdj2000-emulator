@@ -5,13 +5,90 @@ No proxy or generated status packets. DSP uses UHPI transport and a partial C674
 """
 from __future__ import annotations
 import argparse
+from collections import Counter
+import hashlib
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
+import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+
+CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def checkpoint_metadata(path: Path) -> dict:
+    raw = path.read_bytes()
+    if len(raw) < CHECKPOINT_HEADER.size:
+        raise RuntimeError(f'incomplete DSP checkpoint: {path}')
+    fields = CHECKPOINT_HEADER.unpack_from(raw)
+    magic, schema, endian, header_size, state_size = fields[:5]
+    component_sizes = list(fields[5:14])
+    l2_size, sdram_size, page_size, page_count, present_pages = fields[14:19]
+    payload_size, payload_checksum = fields[19:21]
+    if (magic != b'CDJDSP1\0' or schema != 1 or endian != 0x01020304 or
+            header_size != CHECKPOINT_HEADER.size or len(raw) != header_size + payload_size):
+        raise RuntimeError(f'incompatible or incomplete DSP checkpoint: {path}')
+    return dict(file=path.name, sha256=hashlib.sha256(raw).hexdigest(),
+                size=len(raw), schema=schema, endian='little', state_size=state_size,
+                component_sizes=component_sizes, l2_size=l2_size,
+                sdram_size=sdram_size, page_size=page_size,
+                page_count=page_count, present_pages=present_pages,
+                payload_checksum=f'{payload_checksum:016x}')
+
+
+def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
+    checkpoint_dir = run / 'dsp-checkpoints'
+    checkpoints = [checkpoint_metadata(path) for path in sorted(checkpoint_dir.glob('*.cdjdsp'))]
+    events = run / 'dsp-events.jsonl'
+    event_counts = Counter()
+    last_sequence = 0
+    boot_phases = []
+    if events.is_file():
+        with events.open() as stream:
+            for line in stream:
+                event = json.loads(line)
+                if event['sequence'] != last_sequence + 1:
+                    raise RuntimeError('DSP event transcript sequence is incomplete')
+                last_sequence = event['sequence']
+                event_counts[event['event']] += 1
+                if event['event'] == 'boot_phase':
+                    boot_phases.append(event['value'])
+    sources = sorted((ROOT / 'emulator/qemu').glob('cdj_c674*.c')) + \
+              sorted((ROOT / 'emulator/qemu').glob('cdj_c674*.h')) + \
+              [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
+               ROOT / 'emulator/qemu/cdj_dsp_checkpoint.h',
+               ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
+    manifest = dict(schema=1, format='ABI-bound native state plus sparse zero-default SDRAM pages',
+        byte_order=sys.byteorder, complete=bool(checkpoints and events.is_file()),
+        checkpoints=checkpoints, latest=checkpoints[-1]['file'] if checkpoints else None,
+        event_transcript=dict(file=events.name, sha256=sha256(events) if events.is_file() else None,
+                              events=last_sequence, counts=dict(sorted(event_counts.items())),
+                              boot_phases=boot_phases),
+        firmware_sha256={path.name: sha256(path) for path in
+            (firmware / 'main-firmware.bin', firmware / 'gui-boot-memory.elf',
+             firmware / 'gui-flash-image.bin')},
+        source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
+        approximations=[
+            'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
+            'checkpoint schema 1 is ABI-bound and rejects structure-size or endianness changes',
+            'sparse SDRAM pages are lossless because omitted pages restore as zero',
+            'SDRAM command timing, arbitration and retention are not modeled',
+            'PSC transition ticks and PLL divider GO latency remain deterministic approximations',
+            'physical HPI pins, FIFO/HRDY timing and DSP interrupt delivery are not modeled'])
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    (checkpoint_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 
 def main():
@@ -45,6 +122,8 @@ def main():
     main_env = {k:v for k,v in os.environ.items() if not k.startswith('CDJ_')}
     main_env['CDJ_INPUT_PORT'] = str(args.port + 4)
     main_env['CDJ_NXS_HPI_DUMP'] = str(run / 'dsp-l2.bin')
+    main_env['CDJ_NXS_DSP_EVENTS'] = str(run / 'dsp-events.jsonl')
+    main_env['CDJ_NXS_DSP_CHECKPOINT_DIR'] = str(run / 'dsp-checkpoints')
     main_env['CDJ_REQ_STATUS_FRESH'] = '0'
     (run / 'run.json').write_text(json.dumps(dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
@@ -72,6 +151,7 @@ def main():
                     process.terminate()
                     try: process.wait(timeout=5)
                     except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
+            finalize_dsp_artifacts(run, firmware)
             (run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     return 0 if result.get('gui_exit') == 0 and result.get('frame_exists') else 1
 

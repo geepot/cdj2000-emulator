@@ -23,6 +23,16 @@ def test_c6747_hpi_control(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c6747_hpi.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
+def test_dsp_checkpoint_round_trip(tmp_path):
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'dsp-checkpoint-test'
+    checkpoint = tmp_path / 'state.cdjdsp'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/dsp-checkpoint.c'),
+        str(ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary), str(checkpoint)], check=True, timeout=5)
+
 def test_c6747_pll_cycle_clock(tmp_path):
     cc = shutil.which('cc')
     if not cc: pytest.skip('requires C compiler')
