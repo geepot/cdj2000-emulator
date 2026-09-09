@@ -1,5 +1,8 @@
 # Building
 
+Current validation checkpoint is the final section and HANDOFF.md. Earlier
+milestones below are historical and retain the limitations measured then.
+
 Two emulators, built separately, from sources that live outside this repository.
 Neither build needs firmware.
 
@@ -558,3 +561,40 @@ it is not evidence of audio operation or full boot. Suite: 165 passed / 43
 skipped; CPU address/undefined-behavior sanitizer passes.
 The rebuilt connected run `runs/nxs-logic-batch-connected` agrees at the same
 PC/opcode and packet/cycle counts; its GUI exits 0 with a frame after 15 seconds.
+
+### McASP pin-register and bit-field batch
+
+`cdj_c6747_mcasp.c` models PFUNC/PDIR/PDOUT latches and PDSET/PDCLR write
+aliases for all three ports, following SPRUH91D 24.1.3-8. Serializer counts
+are 16/12/4 (SPRS377F Table 6-43), not the ambiguous summary's 16/9.
+Reset is zero. Check-phase writes have no effects; commit updates the latch.
+Changing direction/function does not modify PDOUT. PDIN, PDCLR reads,
+clock/reset release, physical routing, FIFO/DMA, serializer status and audio
+remain unsupported. Nonzero reserved writes stop rather than being ignored.
+
+Full-width CLR/SET/EXT/EXTU implement the eight constant/register variants
+from SPRUFE8B, with both banks/cross paths. Independent bit-by-bit tests cover
+all 1,024 parameter pairs, including full-width masks, reversed CLR/SET fields,
+zero shifts and sign extension. Invalid register count upper bits stop;
+this is conservative for CLR, whose text is less explicit than SET/EXT/EXTU.
+False predicates do not fault on unused invalid counts. Compact forms remain
+future work. Inventory `runs/mcasp-next-inventory.json` scans
+`0x11802ca0:0x11802f00`: 180 candidates in 24 format families, not proof that
+all candidates are code or supported instructions.
+
+Reproduce this checkpoint (choose new output directories):
+
+```sh
+.venv/bin/pytest -q
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-logic-batch-connected/dsp-l2.bin runs/NEW_REPLAY
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/NEW_CONNECTED --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+```
+
+Suite: 166 passed / 43 skipped. CPU and McASP C harnesses pass Clang
+`-fsanitize=address,undefined`. Replays `runs/dsp-mcasp-fields-1` and
+`runs/dsp-mcasp-fields-repeat` are byte-identical, reaching 1,051 packets /
+1,214 cycles. Rebuilt connected run `runs/nxs-mcasp-fields-connected` matches
+the stop at `0x11802d5c`, word `0x02140264`, LDW from GPIO DIR45 at
+`0x01e26060` (SPRUH91D Table 20-1). All three McASP ports receive firmware
+configuration writes. This proves neither physical audio operation nor full boot.

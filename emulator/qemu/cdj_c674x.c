@@ -521,6 +521,28 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = (uint32_t)sx(a, 5) ^ cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xdf8 || (w & 0xffc) == 0x2e0 || (w & 0xffc) == 0xbb0) {
             value = cpu->r[side][a] ^ cpu->r[cross][b];
+        } else if ((w & 0x3c) == 8 || (w & 0xafc) == 0xae0) {
+            /* SPRUFE8B CLR/SET/EXT/EXTU: constant .S field format or
+             * register counts packed as src1[9:5],src1[4:0]. EXT counts
+             * describe left/right shifts, NOT low/high bit indices. */
+            bool immediate = (w & 0x3c) == 8;
+            unsigned op = immediate ? (w >> 6) & 3 : ((w >> 9) & 2) | ((w >> 8) & 1);
+            uint32_t fields = cpu->r[side][a];
+            if (!immediate && enabled && (fields & ~1023u))
+                return stop(cpu, pc, insn->word, "invalid bit-field register counts");
+            unsigned left = immediate ? a : (fields >> 5) & 31;
+            unsigned right = immediate ? (w >> 8) & 31 : fields & 31;
+            uint32_t source = cpu->r[immediate ? side : cross][b];
+            if (op < 2) {
+                uint32_t shifted = source << left;
+                value = shifted >> right;
+                if (op == 1 && right && (shifted & 0x80000000u))
+                    value |= UINT32_MAX << (32 - right);
+            } else {
+                uint32_t mask = right < left ? 0 :
+                    (UINT32_MAX << left) & (UINT32_MAX >> (31 - right));
+                value = op == 2 ? source | mask : source & ~mask;
+            }
         } else if ((w & 0xfbc) == 0x9a0 || (w & 0xfbc) == 0xda0 ||
                    (w & 0xfbc) == 0xca0) {
             /* Scalar .S shifts; register counts use only six low bits. */

@@ -8,6 +8,31 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+McASP pin-register and full-width bit-field batch: PFUNC, PDIR, PDOUT and
+write aliases PDSET/PDCLR now share a model between replay and connected DSP
+execution. C6747 has 16/12/4 serializers (SPRS377F Table 6-43). Input pin
+readback, clock/reset release, serializers, FIFO/DMA and audio remain unsupported;
+no pin values or audio-ready status are invented. Nonzero reserved writes stop.
+
+Full-width CLR/SET/EXT/EXTU support constant and register forms, both banks and
+register cross paths. Tests cover all 1,024 field-parameter pairs per form.
+Register counts above ten bits stop (conservative for CLR; explicitly invalid
+for SET/EXT/EXTU in TI's text). Compact bit-field forms remain incomplete.
+
+Replays `runs/dsp-mcasp-fields-1` and `runs/dsp-mcasp-fields-repeat` are identical:
+1,051 packets / 1,214 cycles, stopping at PC `0x11802d5c`, word `0x02140264`,
+LDW from A5=`0x01e26060`: GPIO DIR45 (SPRUH91D Table 20-1).
+Trace SHA-256: `33cce07cf17dfaca1965aa1311c7829c9e947f891e4b9b173dfd6312d411dda7`.
+Rebuilt connected run `runs/nxs-mcasp-fields-connected` agrees at the same stop
+and records configuration writes to all three McASP ports.
+The 15-second bounded GUI run exits 0 and publishes a frame, not a full boot.
+Suite: 166 passed / 43 skipped; CPU and McASP address/undefined sanitizers pass.
+Next: GPIO direction/output/edge-control register family, with physical inputs
+and interrupt routing explicitly separated from configuration storage.
+Full boot and audio remain incomplete.
+
+### Previous logic/address checkpoint
+
 Latest instruction/header batch: ADDAD register/immediate is implemented
 (there is no SUBAD), and full-width OR/XOR now cover L/S/D register/immediate
 forms with cross paths. PROT/BR loop guards now inspect instruction kinds,
@@ -124,7 +149,8 @@ include data and cannot be interpreted as instruction coverage percentages.
 
 The first inventory-driven batch implemented full/compact SPMASK with
 functional-unit classification and loop load/replay suppression, plus nearby
-predicated MVK. The current blocker is the PSC peripheral described above.
+predicated MVK. Later batches advanced through PSC and McASP pin configuration;
+the current blocker is GPIO DIR45, as recorded at the top of this handoff.
 The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
 instructions and did not implement buffered suppression. Do not resurrect that
 special case. Implement the family, validate synthetic schedules and replay,
@@ -134,7 +160,7 @@ an exact supported-opcode coverage report remain to be built.
 
 ## Validation and tools
 
-Latest full fork suite: 164 passed, 43 skipped. The CPU standalone harness
+Latest full fork suite: 166 passed, 43 skipped. The CPU standalone harness
 passes AddressSanitizer/UndefinedBehaviorSanitizer. The extra skip relative to
 the old machine is the optional Blackfin assembler/linker regression. Tests run with:
 

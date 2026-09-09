@@ -15,7 +15,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
     ROOT / 'emulator/qemu' / name for name in
-    ('cdj_c674x.c', 'cdj_c674x_loop.c', 'cdj_c6747_syscfg.c', 'cdj_c6747_psc.c')]]
+    ('cdj_c674x.c', 'cdj_c674x_loop.c', 'cdj_c6747_syscfg.c', 'cdj_c6747_psc.c',
+     'cdj_c6747_mcasp.c')]]
 
 
 def main():

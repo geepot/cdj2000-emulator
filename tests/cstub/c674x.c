@@ -31,6 +31,48 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* Full .S bit-field family: all 1024 parameter pairs, both banks,
+     * immediate/register operands and both register cross paths. Expected
+     * results use a bit-by-bit oracle rather than the implementation masks. */
+    const uint32_t field_ops[] = {0xae0, 0xbe0, 0xee0, 0xfe0};
+    for (unsigned op = 0; op < 4; ++op)
+    for (unsigned mode = 0; mode < 3; ++mode)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned left = 0; left < 32; ++left)
+    for (unsigned right = 0; right < 32; ++right) {
+        uint32_t source = 0xa5367e91u, expected = 0;
+        for (unsigned bit = 0; bit < 32; ++bit) {
+            unsigned set;
+            if (op < 2) {
+                unsigned from = bit + right;
+                if (from >= 32) set = op == 1 ? (source >> (31-left)) & 1 : 0;
+                else set = from >= left ? (source >> (from-left)) & 1 : 0;
+            } else {
+                set = (source >> bit) & 1;
+                if (bit >= left && bit <= right) set = op == 2;
+            }
+            expected |= (uint32_t)set << bit;
+        }
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side ^ (mode == 2)][2] = source;
+        c.r[side][3] = left * 32 + right;
+        memory[0] = (4u << 23) | (2u << 18) | (side << 1) |
+            (mode == 0 ? (left << 13) | (right << 8) | (op << 6) | 8 :
+             (3u << 13) | ((mode == 2) << 12) | field_ops[op]);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][4] == expected && c.cycles == 1);
+    }
+    for (unsigned op = 0; op < 4; ++op) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[0][3] = 1024;
+        memory[0] = (4u << 23) | (2u << 18) | (3u << 13) | field_ops[op];
+        assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.cycles == 0 && c.r[0][4] == 0);
+        cdj_c674x_reset(&c, 0x1000); c.r[0][3] = 1024;
+        memory[0] |= 2u << 29; /* false [B1] does not fault on unused count */
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[0][4] == 0);
+    }
     /* OR/XOR on all three units, immediates/registers, banks and cross paths. */
     const unsigned logic_ops[] = {0xfd8,0xff8,0x6a0,0x6e0,0x8f0,0x8b0,
                                   0xdd8,0xdf8,0x2a0,0x2e0,0xbf0,0xbb0};
