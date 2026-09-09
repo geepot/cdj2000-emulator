@@ -1,5 +1,16 @@
 # Building
 
+Standalone SH7764 IIC empty-bus controller regression:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_sh7764_iic.py
+```
+
+This controller is not yet wired into MAIN. Its explicit protocol-event API
+models idle readback, address NACK and automatic STOP, not elapsed clocks.
+No authentication chip is attached or synthesized. Strict integration needs
+reference-backed scheduling and documented remaining timing limitations.
+
 Strict timed SPI/schema-10 focused regression:
 
 ```sh

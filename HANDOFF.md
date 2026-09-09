@@ -8,6 +8,23 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Standalone SH7764 IIC frontend now has tested idle-line readback, transactional
+unsupported-mode rejection, W0C status, separate RX/TX and explicit empty-bus
+address-NACK/STOP events. All 128 write addresses NACK; there is no identity
+device. It is deliberately not integrated into MAIN yet. Firmware-shaped
+ICCCR read-modify-write testing yields 0x0e: the prior logged value 2 was an
+artifact of zero-read MMIO. Manual section 16.3.9 gives SCL=Pck/132 at 0x0e;
+at the board's modeled 54MHz this is approximately 409kHz and nine periods
+take 22us. Actual NXS IIC Pck, START/filter latency and STOP timing remain
+unverified; do not silently inherit timer acceleration or claim cycle accuracy.
+
+Strict tail replay `runs/dsp-spi-gap-tail-replay-1`, starting at long-run
+checkpoint 364 with its transcript and a 10-million-step cap, verifies the
+final nine connected stops through 333,099,500 packets / 614,081,898 cycles.
+Repeat trace, coverage, final state and memory match exactly; no DSP fault.
+Trace SHA-256: `eb03cdd4392ae535a8b962276a73d5163e5b36d82297c17b57feb2e0eef618fb`.
+This validates that tail only, not the full transcript or GUI liveness.
+
 Launcher integrity audit: NXS now explicitly sets `CDJ_LINK_LINK_ROWS=off`
 as well as `CDJ_REQ_STATUS_FRESH=0`; the legacy board otherwise enables a
 browse-command rewrite. Tests assert the actual child environment and manifest
@@ -29,6 +46,13 @@ A ten-second `down 20 08` / `up 20 08` on panel port 6084 was accepted,
 with held state and empty queue observed, but this run did not visually confirm
 UTILITY. Therefore interaction, frame-timeline audit and repeat cold boot are
 still required; do not mark the milestone complete from this run alone.
+Transcript audit confirms MAIN read ready=1 at event 104211 and wrote the
+acknowledgement at event 104215. There are 346 recorded DSP stops, all with
+zero fault words (the stop log still determines their meaning). Input hashes
+did not change between launch and exit. Frame content and source timestamp
+remain unchanged from approximately 40 seconds to the end, so this run does
+not establish GUI liveness. The shared SPI clock-adapter harness independently
+passes ASan/UBSan after the final inter-transfer-gap correction.
 
 In-progress strict SPI follow-up: `runs/nxs-spi-timed-strict-1` is a rebuilt
 20-second connected diagnostic without functional DSP overrides. Firmware
@@ -52,8 +76,23 @@ Primary milestone is now a genuine cold connected boot without E-7010, with
 at least 60 seconds of subsequent fault-free operation and basic GUI interaction,
 repeated from cold startup. No exploratory DSP switches qualify. Instruction
 inventory expansion is secondary to the actual startup path. This milestone
-remains incomplete. Compact SPKERNEL decoding is now corrected using an
-independent TI assembler/disassembler oracle; the next strict stop is SPI1.
+remains incomplete. Compact SPKERNEL decoding and the reached strict SPI1
+path are corrected. Current blockers are continued GUI communication and
+MAIN's missing SH7764 IIC controller, not the historical SPI1 stop below.
+
+Auth controller evidence: SH7764 manual R01UH0360EJ0300 Table 16.2 maps
+0xffe70000 as IIC. Firmware first polls ICMCR (+4), expecting idle FSCL bit
+0x40; the generic peripheral trap returns zero. The 90-second run's main.log
+lines 544-577 captures configuration and this poll, without a START write.
+This establishes failure before any authentication-chip transaction, not a
+missing-key or identity mismatch. A standalone controller model is in progress;
+an absent slave must NACK, never receive fabricated identity bytes.
+
+Long replay diagnostic `runs/dsp-spi-gap-connected-replay-1` verified stops
+through sequence 107841 (125,099,500 packets), then exited at host event 107876
+when its 100-million-step budget was exhausted. No complete/repeat gate was
+produced. The tool currently mislabels this condition as an event mismatch;
+budget handling is under repair without relaxing genuine divergence checks.
 
 NXS-specific handshake trace (do not substitute original-CDJ `caution.py`
 addresses): MAIN loader `0x041fc698` calls final handler `0x041fc646`, which
