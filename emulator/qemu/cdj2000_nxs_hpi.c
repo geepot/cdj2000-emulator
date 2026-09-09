@@ -18,6 +18,7 @@
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_timer.h"
 #include "cdj_c6747_spi.h"
+#include "cdj_c6747_spi_clock.h"
 #include "cdj_c6747_cache.h"
 #include "cdj_c6747_edma.h"
 #include "cdj_c6747_hpi.h"
@@ -58,6 +59,7 @@ typedef struct {
     CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
     CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
     CdjWm8740 wm8740;
+    CdjC6747SpiTransfer spi_transfer;
     CdjC6747Cache cache;
     CdjC6747Edma edma;
     CdjC6747SyscfgPriority syscfg_priority;
@@ -133,6 +135,7 @@ static void capture_checkpoint(NxsHpi *s, const char *reason)
     state.intc_delivery = s->intc_delivery;
     memcpy(state.timers, s->timers, sizeof(state.timers));
     memcpy(state.spis, s->spis, sizeof(state.spis));
+    state.spi_transfer = s->spi_transfer;
     state.wm8740 = s->wm8740;
     state.cache = s->cache;
     state.edma = s->edma;
@@ -171,6 +174,7 @@ void cdj_nxs_hpi_reset_line(bool released)
         cdj_c6747_intc_delivery_reset(&s->intc_delivery);
         cdj_c6747_timers_reset(s->timers);
         cdj_c6747_spis_reset(s->spis);
+        cdj_c6747_spi_transfer_reset(&s->spi_transfer);
         cdj_wm8740_reset(&s->wm8740);
         cdj_c6747_cache_reset(&s->cache);
         cdj_c6747_edma_reset(&s->edma);
@@ -248,6 +252,10 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     if (cdj_c6747_i2c_read(&s->i2c, address, value)) return true;
     if (cdj_c6747_intc_read(&s->intc, address, value)) return true;
     if (cdj_c6747_timers_read(s->timers, address, value)) return true;
+    if (!cdj_c674x_loop_functional_timing() &&
+        cdj_c6747_spi_wm8740_timed_mapped(address))
+        return cdj_c6747_spi_wm8740_read_timed(s->spis, &s->spi_transfer,
+                                               address, value);
     if (cdj_c6747_spis_read(s->spis, address, value)) return true;
     if (cdj_c6747_cache_read(&s->cache, address, value)) return true;
     if (cdj_c6747_edma_read(&s->edma, address, value)) return true;
@@ -518,6 +526,9 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                                 address, (uint32_t)value);
         return true;
     }
+    if (!cdj_c674x_loop_functional_timing() &&
+        (s->spi_transfer.phase || s->spi_transfer.queued_valid) &&
+        cdj_c6747_pll_write_mapped(address, size)) return false;
     if (cdj_c6747_pll_write(&s->pll, address, value, size, commit)) {
         if (commit) info_report("nxs-pll: write address=%#x value=%#x legacy-bit4-assumption=%d",
                                 address, (uint32_t)value, s->pll.legacy_bit4_used);
@@ -537,6 +548,15 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         if (commit) info_report("nxs-timer: write address=%#x value=%#x",
                                 address, (uint32_t)value);
         return true;
+    }
+    if (!cdj_c674x_loop_functional_timing() &&
+        cdj_c6747_spi_wm8740_timed_mapped(address)) {
+        if ((address == CDJ_C6747_SPI1_BASE + 0x38 ||
+             address == CDJ_C6747_SPI1_BASE + 0x3c) &&
+            (s->spis[1].gcr1 & (1u << 24)) &&
+            !cdj_spi_clock_ready(&s->pll)) return false;
+        return cdj_c6747_spi_wm8740_write_timed(s->spis, &s->wm8740,
+                  &s->spi_transfer, address, value, size, commit);
     }
     if (cdj_c6747_spis_write_wm8740(
             s->spis, &s->wm8740, address, value, size,
@@ -646,6 +666,12 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
 static void dsp_cycle_tick(void *opaque)
 {
     NxsHpi *s = opaque;
+    uint64_t transfers = s->wm8740.transfers;
+    if (!cdj_c674x_loop_functional_timing())
+        cdj_spi_core_tick(s->spis, &s->wm8740, &s->spi_transfer, &s->pll);
+    if (s->wm8740.transfers != transfers)
+        info_report("nxs-spi: timed WM8740 latch word=%#x transfers=%" PRIu64,
+                    s->wm8740.last_word, s->wm8740.transfers);
     cdj_c6747_pll_tick(&s->pll);
 }
 
@@ -676,6 +702,13 @@ static void run_dsp(NxsHpi *s)
         }
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
+            s->dsp_halted = true;
+            break;
+        }
+        if (s->spi_transfer.fault) {
+            s->cpu.fault = "unsupported SPI transfer clock or state";
+            s->cpu.fault_pc = s->cpu.pc;
+            reason = s->cpu.fault;
             s->dsp_halted = true;
             break;
         }
@@ -822,6 +855,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c6747_intc_delivery_reset(&s->intc_delivery);
     cdj_c6747_timers_reset(s->timers);
     cdj_c6747_spis_reset(s->spis);
+    cdj_c6747_spi_transfer_reset(&s->spi_transfer);
     cdj_wm8740_reset(&s->wm8740);
     cdj_c6747_cache_reset(&s->cache);
     cdj_c6747_edma_reset(&s->edma);

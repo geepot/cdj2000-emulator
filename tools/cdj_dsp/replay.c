@@ -15,6 +15,7 @@
 #include "cdj_c6747_intc.h"
 #include "cdj_c6747_timer.h"
 #include "cdj_c6747_spi.h"
+#include "cdj_c6747_spi_clock.h"
 #include "cdj_c6747_cache.h"
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_hpi.h"
@@ -34,6 +35,7 @@ static CdjC6747IntcDelivery intc_delivery;
 static CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
 static CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
 static CdjWm8740 wm8740;
+static CdjC6747SpiTransfer spi_transfer;
 static CdjC6747Cache cache;
 static CdjC6747Edma edma;
 static CdjC6747SyscfgPriority syscfg_priority;
@@ -262,6 +264,7 @@ static void restore_devices(const CdjDspCheckpointState *state)
     memcpy(timers, state->timers, sizeof(timers));
     memcpy(spis, state->spis, sizeof(spis));
     wm8740 = state->wm8740;
+    spi_transfer = state->spi_transfer;
     cache = state->cache;
     edma = state->edma;
     syscfg_priority = state->syscfg_priority;
@@ -284,6 +287,7 @@ static void capture_devices(CdjDspCheckpointState *state, const char *reason)
     memcpy(state->timers, timers, sizeof(state->timers));
     memcpy(state->spis, spis, sizeof(state->spis));
     state->wm8740 = wm8740;
+    state->spi_transfer = spi_transfer;
     state->cache = cache;
     state->edma = edma;
     state->syscfg_priority = syscfg_priority;
@@ -295,6 +299,12 @@ static void capture_devices(CdjDspCheckpointState *state, const char *reason)
 static void cycle_tick(void *unused)
 {
     (void)unused;
+    uint64_t transfers = wm8740.transfers;
+    if (!cdj_c674x_loop_functional_timing())
+        cdj_spi_core_tick(spis, &wm8740, &spi_transfer, &pll);
+    if (wm8740.transfers != transfers)
+        printf("{\"event\":\"wm8740_latch\",\"word\":%u,\"transfers\":%" PRIu64 "}\n",
+               wm8740.last_word, wm8740.transfers);
     cdj_c6747_pll_tick(&pll);
 }
 static uint32_t global(uint32_t a)
@@ -320,6 +330,9 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
     if (cdj_c6747_i2c_read(&i2c, a, v)) return true;
     if (cdj_c6747_intc_read(&intc, a, v)) return true;
     if (cdj_c6747_timers_read(timers, a, v)) return true;
+    if (!cdj_c674x_loop_functional_timing() &&
+        cdj_c6747_spi_wm8740_timed_mapped(a))
+        return cdj_c6747_spi_wm8740_read_timed(spis, &spi_transfer, a, v);
     if (cdj_c6747_spis_read(spis, a, v)) return true;
     if (cdj_c6747_cache_read(&cache, a, v)) return true;
     if (cdj_c6747_edma_read(&edma, a, v)) return true;
@@ -577,7 +590,22 @@ static bool functional_audio_tick(void)
 static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool commit)
 {
     (void)unused;
-    bool ok = cdj_c6747_syscfg_write(&syscfg, a, v, size, commit);
+    bool ok = false;
+    if (!cdj_c674x_loop_functional_timing()) {
+        if (cdj_c6747_spi_wm8740_timed_mapped(a)) {
+            if ((a == CDJ_C6747_SPI1_BASE + 0x38 ||
+                 a == CDJ_C6747_SPI1_BASE + 0x3c) &&
+                (spis[1].gcr1 & (1u << 24)) && !cdj_spi_clock_ready(&pll))
+                goto record;
+            ok = cdj_c6747_spi_wm8740_write_timed(spis, &wm8740,
+                       &spi_transfer, a, v, size, commit);
+            goto record;
+        }
+        if ((spi_transfer.phase || spi_transfer.queued_valid) &&
+            !cdj_c6747_syscfg_pll_locked(&syscfg) &&
+            cdj_c6747_pll_write_mapped(a, size)) goto record;
+    }
+    ok = cdj_c6747_syscfg_write(&syscfg, a, v, size, commit);
     if (!ok) ok = cdj_c6747_syscfg_priority_write(
         &syscfg_priority, &syscfg, a, v, size, commit);
     if (!ok) ok = cdj_c6747_psc_write(&psc, a, v, size, commit);
@@ -633,6 +661,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
         if (commit) for (unsigned i = 0; i < size; ++i)
             ram[physical - 0x11800000 + i] = v >> (8*i);
     }
+record:
     if (commit || !ok)
         printf("{\"event\":\"%s\",\"address\":%" PRIu32 ",\"value\":%" PRIu64 ",\"size\":%u}\n",
                ok ? "write" : "rejected_write", a, v, size);
@@ -709,6 +738,11 @@ static const char *run_budget(ReplayLimits *limits, uint32_t breakpoint)
             return cpu.fault ? cpu.fault : "CPU stopped";
         coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
         --limits->steps_remaining;
+        if (spi_transfer.fault) {
+            cpu.fault = "unsupported SPI transfer clock or state";
+            cpu.fault_pc = cpu.pc;
+            return cpu.fault;
+        }
         cdj_c6747_psc_tick(&psc);
         if (!functional_audio_tick())
             return cpu.fault;
@@ -883,7 +917,8 @@ int main(int argc, char **argv)
                        !memcmp(magic, "CDJDSP6\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP7\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP8\0", sizeof(magic)) ||
-                       !memcmp(magic, "CDJDSP9\0", sizeof(magic)));
+                       !memcmp(magic, "CDJDSP9\0", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP10", sizeof(magic)));
     rewind(f);
     bool valid = false;
     if (!checkpoint)
@@ -899,6 +934,11 @@ int main(int argc, char **argv)
             return 2;
         }
         restore_devices(&checkpoint_state);
+        if (cdj_c674x_loop_functional_timing() &&
+            cdj_c6747_spi_transfer_active(&spi_transfer)) {
+            fputs("cannot switch an in-flight timed SPI transfer to instantaneous mode\n", stderr);
+            return 2;
+        }
         /* A fault is recorded after an atomic rejected packet. Clearing only
          * its diagnostic latch retries the same PC against the current core. */
         cpu.fault = NULL;
@@ -922,6 +962,7 @@ int main(int argc, char **argv)
         cdj_c6747_intc_delivery_reset(&intc_delivery);
         cdj_c6747_timers_reset(timers);
         cdj_c6747_spis_reset(spis);
+        cdj_c6747_spi_transfer_reset(&spi_transfer);
         cdj_wm8740_reset(&wm8740);
         cdj_c6747_pll_reset(&pll);
         cdj_c6747_cache_reset(&cache);
@@ -975,6 +1016,12 @@ int main(int argc, char **argv)
             if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL)) { reason = "fault"; break; }
             coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
             --limits.steps_remaining;
+            if (spi_transfer.fault) {
+                cpu.fault = "unsupported SPI transfer clock or state";
+                cpu.fault_pc = cpu.pc;
+                reason = "fault";
+                break;
+            }
             cdj_c6747_psc_tick(&psc);
             if (!functional_audio_tick()) { reason = "fault"; break; }
             if (hpi.hint) { reason = "host_event_required"; break; }

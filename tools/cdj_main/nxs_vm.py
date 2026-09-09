@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
-                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0'}
+                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0',
+                    10: b'CDJDSP10'}
 SHARED_RAM_SIZE = 0x20000
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 
@@ -211,7 +212,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
               [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
                ROOT / 'emulator/qemu/cdj_dsp_checkpoint.h',
                ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
-    manifest = dict(schema=9, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA, SYSCFG priority and WM8740 control, '
+    manifest = dict(schema=10, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA, SYSCFG priority, WM8740 control and timed SPI1 transfer state, '
                                      'L2 and shared RAM plus sparse zero-default SDRAM pages'),
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
         dsp_audio_mode=('coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
@@ -230,7 +231,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
         source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
         approximations=[
             'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
-            'checkpoint schema 9 is ABI-bound and rejects structure-size or endianness changes',
+            'checkpoint schema 10 is ABI-bound and rejects structure-size or endianness changes',
             '128 KiB C6747 shared RAM is captured losslessly',
             'sparse SDRAM pages are lossless because omitted pages restore as zero',
             'SDRAM command timing, arbitration and retention are not modeled',

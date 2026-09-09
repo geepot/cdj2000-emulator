@@ -8,6 +8,37 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Post-gap gate: full suite with TI oracle enabled passes 321 tests / 27 skips;
+timed SPI harness also passes ASan/UBSan. `runs/dsp-spi-gap-strict-1` repeats
+one million steps from the previous SPI fault with eight DAC writes and no
+fault. Rebuilt `runs/nxs-spi-gap-strict-90s-1` runs 90 seconds without a DSP
+fault, ending by phase budget at 333,099,500 packets / 614,081,898 cycles.
+Final inspected frame is normal `Not Loaded.` without an error banner.
+Transcript SHA-256: `b1cd011017e968eafaf148bf5530c38dc19193d985f47927306ceb6396a06d9c`.
+Frame SHA-256: `9ea6b13c57b8b37eb842d2811e0519f0499a7de86e9d8025bd48dbbbd9f0978b`.
+A ten-second `down 20 08` / `up 20 08` on panel port 6084 was accepted,
+with held state and empty queue observed, but this run did not visually confirm
+UTILITY. Therefore interaction, frame-timeline audit and repeat cold boot are
+still required; do not mark the milestone complete from this run alone.
+
+In-progress strict SPI follow-up: `runs/nxs-spi-timed-strict-1` is a rebuilt
+20-second connected diagnostic without functional DSP overrides. Firmware
+completed eight timed WM8740 writes and ended at a cooperative phase budget,
+75,099,500 packets / 152,246,445 cycles, without a DSP fault. The inspected final
+frame has no error banner. This is NOT the required 60-second/repeated/interactive
+milestone. That binary predates the additional mandatory two-module-clock
+inter-transfer CS-inactive gap now being tested; rerun connected validation.
+The new SPI state is appended in schema 10, preserving schema-9 state on import.
+Single-word reference edges are RX at 783 and DAC latch at 814 core clocks for
+the observed CPU:SPI-module ratio 2:1; the subsequent idle gap is four core clocks.
+Internal RX publication latency has not been measured against hardware.
+
+The earlier SPKERNEL-only strict run received DSP ready=1 but displayed an auth
+error, not E-7010. A separate firmware trace identifies MAIN's identity probe
+through MMIO 0xffe70000 (register 0 expects 5, register 1 expects 1), unrelated
+to DSP SPI. Do not synthesize those bytes merely to satisfy firmware checks.
+Whether that error recurs in longer current strict runs remains to be tested.
+
 Primary milestone is now a genuine cold connected boot without E-7010, with
 at least 60 seconds of subsequent fault-free operation and basic GUI interaction,
 repeated from cold startup. No exploratory DSP switches qualify. Instruction

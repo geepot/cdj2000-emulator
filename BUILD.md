@@ -1,5 +1,21 @@
 # Building
 
+Strict timed SPI/schema-10 focused regression:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_c6747_spi_timed.py \
+  tests/test_c6747_spi_clock.py tests/test_dsp_checkpoint_replay.py
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-spkernel-h7-strict-1 \
+  runs/NEW_SPI_STRICT_REPLAY --steps 1000000 --verify-repeat
+```
+
+The current 40-byte transfer state preserves pending RX, chip-select latch,
+queued TX and mandatory inter-transfer gap across checkpoints. Schema 9
+migration retains all prior peripheral state and initializes only this new tail.
+The strict endpoint supports the observed WM8740 format/configuration, not
+arbitrary SPI devices, IRQ/DMA or chip-select-hold modes. Unsupported accesses
+fail closed. The original instantaneous exploratory endpoint remains separate.
+
 TI-backed compact SPKERNEL regression (user-installed C6000 CGT 8.5.0.LTS):
 
 ```sh
@@ -26,7 +42,8 @@ Use a new run directory each time. Closing the UI ends the run. The command
 collects evidence; a zero launcher exit is NOT a successful-boot result. Inspect
 the frame timeline and DSP fault/handshake state, record basic interactions,
 and require at least 60 seconds after error-free startup before repeating a
-cold boot. Current strict firmware still displays E-7010; see HANDOFF.md.
+cold boot. The latest short strict diagnostic has no final error banner, but
+the long/repeated/interactive milestone is still unproven; see HANDOFF.md.
 `frames/manifest.json` records observation times, hashes and incomplete/missing
 frames. Unchanged images do not prove liveness. `run.json` records the actual
 binary/firmware hashes before launch and after exit. No frame capture or input

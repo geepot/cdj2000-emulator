@@ -112,3 +112,28 @@ def test_schema1_checkpoint_remains_readable_without_invented_shared_ram():
     memories, info = read_input(header + payload)
     assert info['schema'] == 1 and not info['shared_ram_captured']
     assert SHARED_RAM_BASE not in memories
+
+
+def test_schema10_magic_is_accepted_by_checkpoint_metadata_readers(tmp_path):
+    from tools.cdj_dsp.replay import checkpoint_info
+    from tools.cdj_main.nxs_vm import checkpoint_metadata
+
+    state = bytes(16)
+    l2 = bytes(0x40000)
+    shared = bytes(SHARED_RAM_SIZE)
+    bitmap = bytes(1024)
+    payload = state + l2 + shared + bitmap
+    header = CHECKPOINT_HEADER.pack(
+        b'CDJDSP10', 10, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 0,
+        len(payload), _fnv1a(payload),
+    )
+    raw = header + payload
+    _, inventory_info = read_input(raw)
+    replay_info = checkpoint_info(raw)
+    path = tmp_path / 'schema10.cdjdsp'
+    path.write_bytes(raw)
+    vm_info = checkpoint_metadata(path)
+    assert inventory_info['schema'] == 10
+    assert replay_info['schema'] == 10
+    assert vm_info['schema'] == 10

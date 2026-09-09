@@ -1,5 +1,7 @@
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cdj_dsp_checkpoint.h"
@@ -10,6 +12,63 @@ static uint8_t restored_shared_ram[CDJ_DSP_SHARED_RAM_SIZE];
 static uint8_t sdram[CDJ_DSP_SDRAM_SIZE], restored_sdram[CDJ_DSP_SDRAM_SIZE];
 
 static void unused_tick(void *opaque) { (void)opaque; }
+
+#define CHECKPOINT_COMPONENTS 9u
+typedef struct {
+    char magic[8];
+    uint32_t schema, endian, header_size, state_size;
+    uint32_t component_size[CHECKPOINT_COMPONENTS];
+    uint32_t l2_size, sdram_size, page_size, page_count, present_pages;
+    uint64_t payload_size, payload_checksum;
+} TestCheckpointHeader;
+
+static uint64_t test_checksum(const void *data, size_t size)
+{
+    const uint8_t *bytes = data;
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= bytes[i];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static void downgrade_to_schema9(const char *path)
+{
+    FILE *file = fopen(path, "rb");
+    assert(file && fseek(file, 0, SEEK_END) == 0);
+    long end = ftell(file);
+    assert(end > 0 && fseek(file, 0, SEEK_SET) == 0);
+    size_t size = (size_t)end;
+    uint8_t *bytes = malloc(size);
+    assert(bytes && fread(bytes, 1, size, file) == size && fclose(file) == 0);
+
+    TestCheckpointHeader *header = (TestCheckpointHeader *)bytes;
+    assert(header->header_size == sizeof(*header) &&
+           header->state_size == sizeof(CdjDspCheckpointState) &&
+           header->payload_size == size - sizeof(*header));
+    size_t alignment = _Alignof(CdjDspCheckpointState);
+    size_t schema9_state_size = (offsetof(CdjDspCheckpointState, spi_transfer) +
+                                 alignment - 1) / alignment * alignment;
+    assert(schema9_state_size <= header->state_size);
+    size_t removed = header->state_size - schema9_state_size;
+    memmove(bytes + sizeof(*header) + schema9_state_size,
+            bytes + sizeof(*header) + header->state_size,
+            header->payload_size - header->state_size);
+    memcpy(header->magic, "CDJDSP9\0", sizeof(header->magic));
+    header->schema = 9;
+    header->state_size = schema9_state_size;
+    header->component_size[8] -= sizeof(CdjC6747SpiTransfer);
+    header->payload_size -= removed;
+    header->payload_checksum = test_checksum(bytes + sizeof(*header),
+                                             header->payload_size);
+    size -= removed;
+
+    file = fopen(path, "wb");
+    assert(file && fwrite(bytes, 1, size, file) == size &&
+           fflush(file) == 0 && fclose(file) == 0);
+    free(bytes);
+}
 
 int main(int argc, char **argv)
 {
@@ -129,6 +188,18 @@ int main(int argc, char **argv)
     before.wm8740.transfers = 2;
     before.wm8740.active_attenuation[0] = 0xff;
     before.wm8740.active_attenuation[1] = 0xfe;
+    cdj_c6747_spi_transfer_reset(&before.spi_transfer);
+    before.spi_transfer.clock_phase = 0;
+    before.spi_transfer.half_ticks_remaining = 775;
+    before.spi_transfer.active_control = 0x1ff;
+    before.spi_transfer.active_format = 0x00021810;
+    before.spi_transfer.active_delay = 0x02020408;
+    before.spi_transfer.queued_control = 0x3ff;
+    before.spi_transfer.queued_format = 0x00021810;
+    before.spi_transfer.queued_delay = 0x02020408;
+    before.spi_transfer.phase = 2;
+    before.spi_transfer.queued_valid = 1;
+    before.spi_transfer.tx_full = 1;
     l2[0] = 0x68;
     l2[sizeof(l2) - 1] = 0xa5;
     shared_ram[0] = 0x56;
@@ -195,6 +266,37 @@ int main(int argc, char **argv)
            after.wm8740.transfers == 2 &&
            after.wm8740.active_attenuation[0] == 0xff &&
            after.wm8740.active_attenuation[1] == 0xfe);
+    assert(after.spi_transfer.half_ticks_remaining == 775 &&
+           after.spi_transfer.active_control == 0x1ff &&
+           after.spi_transfer.queued_control == 0x3ff &&
+           after.spi_transfer.phase == 2 && after.spi_transfer.queued_valid &&
+           after.spi_transfer.tx_full &&
+           cdj_c6747_spi_transfer_valid(&after.spi_transfer));
+    CdjDspCheckpointState invalid = before;
+    invalid.spi_transfer.reserved[0] = 1;
+    assert(!cdj_dsp_checkpoint_write(argv[1], &invalid, l2, sizeof(l2),
+                                     shared_ram, sizeof(shared_ram), sdram,
+                                     sizeof(sdram), error, sizeof(error)));
+
+    downgrade_to_schema9(argv[1]);
+    memset(&after, 0xa5, sizeof(after));
+    assert(cdj_dsp_checkpoint_read(argv[1], &after, restored_l2,
+                                   sizeof(restored_l2), restored_shared_ram,
+                                   sizeof(restored_shared_ram), restored_sdram,
+                                   sizeof(restored_sdram), error, sizeof(error)));
+    CdjC6747SpiTransfer reset_transfer;
+    cdj_c6747_spi_transfer_reset(&reset_transfer);
+    assert(memcmp(&after.spi_transfer, &reset_transfer,
+                  sizeof(reset_transfer)) == 0);
+    assert(after.wm8740.program[0] == 0x1ff &&
+           after.wm8740.program[1] == 0x1fe &&
+           after.wm8740.last_word == 0x3fe &&
+           after.wm8740.transfers == 2 &&
+           after.wm8740.active_attenuation[0] == 0xff &&
+           after.wm8740.active_attenuation[1] == 0xfe);
+    assert(memcmp(l2, restored_l2, sizeof(l2)) == 0);
+    assert(memcmp(shared_ram, restored_shared_ram, sizeof(shared_ram)) == 0);
+    assert(memcmp(sdram, restored_sdram, sizeof(sdram)) == 0);
 
     FILE *file = fopen(argv[1], "r+b");
     assert(file && fputc('X', file) != EOF && fclose(file) == 0);
@@ -202,6 +304,6 @@ int main(int argc, char **argv)
                                     sizeof(restored_l2), restored_shared_ram,
                                     sizeof(restored_shared_ram), restored_sdram,
                                     sizeof(restored_sdram), error, sizeof(error)));
-    puts("DSP checkpoint pipeline, loop, peripheral, L2, shared RAM and SDRAM round trip passed");
+    puts("DSP checkpoint schema-10 timed SPI round trip and schema-9 migration passed");
     return 0;
 }

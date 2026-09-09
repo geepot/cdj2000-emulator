@@ -37,6 +37,20 @@ typedef struct {
     uint8_t register4_unlocked;
 } CdjWm8740;
 
+/* Serializable timing state for the schematic-confirmed SPI1/WM8740 path.
+ * Time is counted in half SPI-module-clock periods so PHASE-dependent half
+ * serial-clock edges remain integral for the reached even SYSCLK1/SYSCLK2
+ * ratio.  The board clock adapter owns clock_phase; this core only consumes
+ * already-derived half-module ticks.  Keep this separate from CdjC6747Spi so
+ * existing schema-5..9 SPI state retains its native ABI. */
+typedef struct {
+    uint32_t clock_phase, half_ticks_remaining;
+    uint32_t active_control, active_format, active_delay;
+    uint32_t queued_control, queued_format, queued_delay;
+    uint8_t phase, queued_valid, tx_full, previous_cshold, fault;
+    uint8_t reserved[3];
+} CdjC6747SpiTransfer;
+
 void cdj_c6747_spis_reset(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT]);
 void cdj_c6747_spi_set_pins(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
                             unsigned index, uint32_t valid, uint32_t value);
@@ -56,6 +70,26 @@ bool cdj_c6747_spis_write_wm8740(
     CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjWm8740 *dac,
     uint32_t address, uint64_t value, unsigned size,
     bool functional_timing, bool commit);
+void cdj_c6747_spi_transfer_reset(CdjC6747SpiTransfer *transfer);
+bool cdj_c6747_spi_transfer_valid(const CdjC6747SpiTransfer *transfer);
+bool cdj_c6747_spi_transfer_active(const CdjC6747SpiTransfer *transfer);
+/* The timed wrapper owns the complete SPI1 window.  Callers must not fall
+ * through to the register-only writer after a mapped rejection, otherwise a
+ * busy configuration mutation could evade fail-closed validation. */
+bool cdj_c6747_spi_wm8740_timed_mapped(uint32_t address);
+bool cdj_c6747_spi_wm8740_read_timed(
+    CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjC6747SpiTransfer *transfer,
+    uint32_t address, uint32_t *value);
+bool cdj_c6747_spi_wm8740_write_timed(
+    CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjWm8740 *dac,
+    CdjC6747SpiTransfer *transfer, uint32_t address, uint64_t value,
+    unsigned size, bool commit);
+/* Advance by elapsed half SPI-module-clock periods.  All write acceptance is
+ * checked up front, so false indicates corrupt serialized state rather than a
+ * late external-bus rejection. */
+bool cdj_c6747_spi_wm8740_advance(
+    CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjWm8740 *dac,
+    CdjC6747SpiTransfer *transfer, unsigned half_module_ticks);
 void cdj_wm8740_reset(CdjWm8740 *dac);
 bool cdj_wm8740_valid(const CdjWm8740 *dac);
 

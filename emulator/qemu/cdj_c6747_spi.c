@@ -16,6 +16,18 @@
 #define SPI_RX_FLAG (UINT32_C(1) << 8)
 #define SPI_OVERRUN_FLAG (UINT32_C(1) << 6)
 #define SPI_WM8740_FUNCTION_PINS 0x00000601u
+#define SPI_WM8740_STRICT_PINS 0x00000e01u
+#define SPI_WM8740_STRICT_GCR1 0x01000003u
+#define SPI_WM8740_STRICT_FORMAT 0x00021810u
+#define SPI_WM8740_STRICT_DELAY 0x02020408u
+
+enum {
+    SPI_TRANSFER_IDLE,
+    SPI_TRANSFER_C2T,
+    SPI_TRANSFER_SHIFT,
+    SPI_TRANSFER_T2C,
+    SPI_TRANSFER_GAP,
+};
 
 static CdjC6747Spi *decode(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
                            uint32_t address, uint32_t *offset)
@@ -93,6 +105,65 @@ static bool wm8740_write(CdjWm8740 *dac, uint16_t word, bool commit)
         dac->program[4] = data & 0x70;
     }
     return true;
+}
+
+static bool wm8740_word_valid(uint32_t control)
+{
+    unsigned address = (control >> 9) & 7;
+    return !(control & 0xffff0000u) && (address <= 3 || address == 6);
+}
+
+void cdj_c6747_spi_transfer_reset(CdjC6747SpiTransfer *transfer)
+{
+    if (transfer) memset(transfer, 0, sizeof(*transfer));
+}
+
+bool cdj_c6747_spi_transfer_active(const CdjC6747SpiTransfer *transfer)
+{
+    return transfer && (transfer->phase != SPI_TRANSFER_IDLE ||
+                        transfer->queued_valid || transfer->tx_full);
+}
+
+static bool transfer_word_valid(uint32_t control, uint32_t format,
+                                uint32_t delay)
+{
+    return wm8740_word_valid(control) && format == SPI_WM8740_STRICT_FORMAT &&
+           delay == SPI_WM8740_STRICT_DELAY;
+}
+
+bool cdj_c6747_spi_transfer_valid(const CdjC6747SpiTransfer *transfer)
+{
+    if (!transfer || transfer->phase > SPI_TRANSFER_GAP ||
+        transfer->queued_valid > 1 || transfer->tx_full > 1 ||
+        transfer->previous_cshold > 1 || transfer->fault > 1 ||
+        transfer->reserved[0] || transfer->reserved[1] || transfer->reserved[2])
+        return false;
+    bool active = transfer->phase != SPI_TRANSFER_IDLE;
+    bool shifting_word = transfer->phase >= SPI_TRANSFER_C2T &&
+                         transfer->phase <= SPI_TRANSFER_T2C;
+    if (active != (transfer->half_ticks_remaining != 0)) return false;
+    if (shifting_word != transfer_word_valid(transfer->active_control,
+                                             transfer->active_format,
+                                             transfer->active_delay)) return false;
+    if (!shifting_word && (transfer->active_control || transfer->active_format ||
+                           transfer->active_delay)) return false;
+    if ((bool)transfer->queued_valid !=
+        transfer_word_valid(transfer->queued_control, transfer->queued_format,
+                            transfer->queued_delay)) return false;
+    if (!transfer->queued_valid &&
+        (transfer->queued_control || transfer->queued_format ||
+         transfer->queued_delay || transfer->tx_full)) return false;
+    if (transfer->queued_valid && !active) return false;
+    /* TXBUF can only remain full before the active shift finishes.  A word
+     * written during T2C copies directly into the now-empty shift register. */
+    if (transfer->tx_full && transfer->phase >= SPI_TRANSFER_T2C) return false;
+    return true;
+}
+
+bool cdj_c6747_spi_wm8740_timed_mapped(uint32_t address)
+{
+    return address >= CDJ_C6747_SPI1_BASE &&
+           address < CDJ_C6747_SPI1_BASE + 0x1000;
 }
 
 void cdj_c6747_spi_set_pins(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
@@ -180,6 +251,233 @@ bool cdj_c6747_spis_read(CdjC6747Spi spis[CDJ_C6747_SPI_COUNT],
     case 0x5c: *value = s->format[(offset - 0x50) / 4]; break;
     case 0x64: *value = interrupt_vector(s); break;
     default: return false;
+    }
+    return true;
+}
+
+bool cdj_c6747_spi_wm8740_read_timed(
+    CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjC6747SpiTransfer *transfer,
+    uint32_t address, uint32_t *value)
+{
+    if (!cdj_c6747_spi_wm8740_timed_mapped(address) ||
+        !cdj_c6747_spi_transfer_valid(transfer) || transfer->fault ||
+        !cdj_c6747_spis_read(spis, address, value))
+        return false;
+    if (address - CDJ_C6747_SPI1_BASE == 0x40 && transfer->tx_full)
+        *value |= UINT32_C(1) << 29;
+    return true;
+}
+
+static void discard_transfer(CdjC6747SpiTransfer *transfer)
+{
+    /* SYSCLK2 continues through a peripheral reset.  Preserve the board-owned
+     * fractional clock accumulator while discarding every pending bus effect. */
+    uint32_t clock_phase = transfer->clock_phase;
+    cdj_c6747_spi_transfer_reset(transfer);
+    transfer->clock_phase = clock_phase;
+}
+
+static unsigned shift_half_ticks(uint32_t format)
+{
+    unsigned bits = format & 0x1f;
+    unsigned prescale = (format >> 8) & 0xff;
+    /* PHASE=0: the first transmit edge is the C2T boundary.  The final sample
+     * edge for N bits follows after 2*N-1 half serial-clock periods. */
+    return (2 * bits - 1) * (prescale + 1);
+}
+
+static unsigned c2t_half_ticks(uint32_t delay)
+{
+    unsigned c2t = delay >> 24;
+    return c2t ? 2 * (c2t + 2) : 0;
+}
+
+static unsigned t2c_half_ticks(uint32_t format, uint32_t delay)
+{
+    unsigned t2c = (delay >> 16) & 0xff;
+    unsigned prescale = (format >> 8) & 0xff;
+    /* PHASE=0 adds one half serial-clock period after the final receive edge. */
+    return (t2c ? 2 * (t2c + 1) : 0) + prescale + 1;
+}
+
+static void start_transfer(CdjC6747SpiTransfer *transfer, uint32_t control,
+                           uint32_t format, uint32_t delay)
+{
+    transfer->active_control = control;
+    transfer->active_format = format;
+    transfer->active_delay = delay;
+    transfer->phase = SPI_TRANSFER_C2T;
+    transfer->half_ticks_remaining = c2t_half_ticks(delay);
+    if (!transfer->half_ticks_remaining) {
+        transfer->phase = SPI_TRANSFER_SHIFT;
+        transfer->half_ticks_remaining = shift_half_ticks(format);
+    }
+}
+
+static bool strict_wm8740_configuration(const CdjC6747Spi *spi,
+                                         const CdjWm8740 *dac,
+                                         uint32_t control)
+{
+    return spi && cdj_wm8740_valid(dac) &&
+           spi->gcr1 == SPI_WM8740_STRICT_GCR1 &&
+           spi->pin_function == SPI_WM8740_STRICT_PINS &&
+           !spi->interrupt_enable && !spi->interrupt_level &&
+           spi->chip_select_default == 0xff &&
+           spi->format[0] == SPI_WM8740_STRICT_FORMAT &&
+           spi->delay == SPI_WM8740_STRICT_DELAY &&
+           wm8740_word_valid(control);
+}
+
+bool cdj_c6747_spi_wm8740_write_timed(
+    CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjWm8740 *dac,
+    CdjC6747SpiTransfer *transfer, uint32_t address, uint64_t value,
+    unsigned size, bool commit)
+{
+    if (!cdj_c6747_spi_wm8740_timed_mapped(address) || !spis || !dac ||
+        !cdj_c6747_spi_transfer_valid(transfer) || transfer->fault ||
+        size != 4 || value > UINT32_MAX || (address & 3))
+        return false;
+    CdjC6747Spi *spi = &spis[1];
+    uint32_t offset = address - CDJ_C6747_SPI1_BASE;
+    uint32_t word = value;
+    bool reset = offset == 0 && !(word & 1);
+    bool disable = offset == 4 && !(word & (UINT32_C(1) << 24));
+
+    if (cdj_c6747_spi_transfer_active(transfer) && !reset && !disable &&
+        offset != 0x10 && offset != 0x3c)
+        return false;
+
+    if (offset != 0x3c || !(spi->gcr1 & (UINT32_C(1) << 24))) {
+        if (!cdj_c6747_spis_write(spis, address, value, size, commit))
+            return false;
+        if (commit && (reset || disable)) discard_transfer(transfer);
+        /* A disabled control write is how software initializes the otherwise
+         * undefined previous CSHOLD latch before enabling the master. */
+        if (commit && offset == 0x3c)
+            transfer->previous_cshold = (word >> 28) & 1;
+        return true;
+    }
+
+    /* Strict timing intentionally covers only the reached 4-pin, CS0,
+     * 16-bit WM8740 mode.  Every mutable choice is validated before E3. */
+    if (!strict_wm8740_configuration(spi, dac, word) ||
+        transfer->previous_cshold || transfer->queued_valid ||
+        !wm8740_write(dac, word, false))
+        return false;
+    if (!commit) return true;
+
+    spi->dat1 = word & SPI_DAT1_WRITE_MASK;
+    spi->flags &= ~SPI_TX_FLAG;
+    if (!cdj_c6747_spi_transfer_active(transfer)) {
+        start_transfer(transfer, word, spi->format[0], spi->delay);
+        /* An empty shift register accepts the word directly, leaving TXBUF
+         * empty again in the same transaction. */
+        spi->flags |= SPI_TX_FLAG;
+    } else {
+        transfer->queued_control = word;
+        transfer->queued_format = spi->format[0];
+        transfer->queued_delay = spi->delay;
+        transfer->queued_valid = true;
+        if (transfer->phase == SPI_TRANSFER_T2C ||
+            transfer->phase == SPI_TRANSFER_GAP) {
+            /* The completed word vacated the shift register already. */
+            transfer->tx_full = false;
+            spi->flags |= SPI_TX_FLAG;
+        } else {
+            transfer->tx_full = true;
+        }
+    }
+    return true;
+}
+
+static void receive_pulled_up_word(CdjC6747Spi *spi)
+{
+    if (spi->receive_empty) {
+        spi->receive_data = 0xffff;
+        spi->receive_status &= SPI_RX_OVERRUN_STATUS;
+        spi->receive_empty = false;
+        spi->flags |= SPI_RX_FLAG;
+    } else if (!spi->receive_buffer_full) {
+        spi->receive_buffer_data = 0xffff;
+        spi->receive_buffer_full = true;
+    } else {
+        spi->flags |= SPI_OVERRUN_FLAG;
+        spi->receive_status |= SPI_RX_OVERRUN_STATUS;
+    }
+}
+
+static bool finish_chip_select(CdjC6747Spi *spi, CdjWm8740 *dac,
+                               CdjC6747SpiTransfer *transfer)
+{
+    if (!wm8740_write(dac, transfer->active_control, true)) return false;
+    transfer->previous_cshold = (transfer->active_control >> 28) & 1;
+    transfer->active_control = transfer->active_format = transfer->active_delay = 0;
+    /* CSHOLD=0/WDEL=0 still requires CS to remain inactive for at least two
+     * module clocks before another transaction (SPRUH91D Table 27-21).
+     * C2T cannot provide this gap because it starts after the next CS edge. */
+    transfer->phase = SPI_TRANSFER_GAP;
+    transfer->half_ticks_remaining = 4;
+    if (!transfer->queued_valid)
+        spi->flags |= SPI_TX_FLAG;
+    return true;
+}
+
+static void finish_gap(CdjC6747Spi *spi, CdjC6747SpiTransfer *transfer)
+{
+    if (transfer->queued_valid) {
+        uint32_t control = transfer->queued_control;
+        uint32_t format = transfer->queued_format;
+        uint32_t delay = transfer->queued_delay;
+        transfer->queued_control = transfer->queued_format = transfer->queued_delay = 0;
+        transfer->queued_valid = transfer->tx_full = false;
+        start_transfer(transfer, control, format, delay);
+        spi->flags |= SPI_TX_FLAG;
+    } else {
+        transfer->phase = SPI_TRANSFER_IDLE;
+        transfer->half_ticks_remaining = 0;
+    }
+}
+
+bool cdj_c6747_spi_wm8740_advance(
+    CdjC6747Spi spis[CDJ_C6747_SPI_COUNT], CdjWm8740 *dac,
+    CdjC6747SpiTransfer *transfer, unsigned half_module_ticks)
+{
+    if (!spis || !dac || !cdj_wm8740_valid(dac) ||
+        !cdj_c6747_spi_transfer_valid(transfer) || transfer->fault) {
+        if (transfer) transfer->fault = true;
+        return false;
+    }
+    CdjC6747Spi *spi = &spis[1];
+    while (half_module_ticks && transfer->phase != SPI_TRANSFER_IDLE) {
+        if (half_module_ticks < transfer->half_ticks_remaining) {
+            transfer->half_ticks_remaining -= half_module_ticks;
+            break;
+        }
+        half_module_ticks -= transfer->half_ticks_remaining;
+        transfer->half_ticks_remaining = 0;
+        if (transfer->phase == SPI_TRANSFER_C2T) {
+            transfer->phase = SPI_TRANSFER_SHIFT;
+            transfer->half_ticks_remaining = shift_half_ticks(transfer->active_format);
+        } else if (transfer->phase == SPI_TRANSFER_SHIFT) {
+            receive_pulled_up_word(spi);
+            if (transfer->queued_valid) {
+                transfer->tx_full = false;
+                spi->flags |= SPI_TX_FLAG;
+            }
+            transfer->phase = SPI_TRANSFER_T2C;
+            transfer->half_ticks_remaining =
+                t2c_half_ticks(transfer->active_format, transfer->active_delay);
+        } else if (transfer->phase == SPI_TRANSFER_T2C) {
+            if (!finish_chip_select(spi, dac, transfer)) {
+                transfer->fault = true;
+                return false;
+            }
+        } else if (transfer->phase == SPI_TRANSFER_GAP) {
+            finish_gap(spi, transfer);
+        } else {
+            transfer->fault = true;
+            return false;
+        }
     }
     return true;
 }
