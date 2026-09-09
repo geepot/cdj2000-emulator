@@ -313,6 +313,9 @@ def main():
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
     main_env['CDJ_REQ_STATUS_FRESH'] = '0'
+    # The legacy board defaults to rewriting browse reply commands. Genuine
+    # NXS validation must transport the firmware's bytes unchanged.
+    main_env['CDJ_LINK_LINK_ROWS'] = 'off'
     run_manifest = dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
         dsp='NXS UHPI plus partial C674x interpreter; incomplete ISA, ROM handoff abstraction', profile='experimental NXS',

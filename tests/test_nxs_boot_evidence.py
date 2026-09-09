@@ -130,6 +130,9 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(tmp_path
             return 0
     def launch(command, **kwargs):
         gui = '--model' in command
+        if not gui:
+            assert kwargs['env']['CDJ_REQ_STATUS_FRESH'] == '0'
+            assert kwargs['env']['CDJ_LINK_LINK_ROWS'] == 'off'
         if gui:
             (tmp_path / 'run/screen.ppm').write_bytes(FRAME)
             (tmp_path / paths[0]).write_bytes(b'rebuilt after GUI launch')
@@ -137,6 +140,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(tmp_path
     monkeypatch.setattr(nxs_vm.subprocess, 'Popen', launch)
     assert nxs_vm.main() == 0
     manifest = json.loads((tmp_path / 'run/run.json').read_text())
+    assert manifest['main_environment']['CDJ_LINK_LINK_ROWS'] == 'off'
     assert len(manifest['input_artifacts']) == 5
     assert manifest['input_artifacts']['simulator']['sha256'] == original_simulator
     assert manifest['inputs_differ_at_exit'] == ['simulator']

@@ -8,6 +8,15 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Launcher integrity audit: NXS now explicitly sets `CDJ_LINK_LINK_ROWS=off`
+as well as `CDJ_REQ_STATUS_FRESH=0`; the legacy board otherwise enables a
+browse-command rewrite. Tests assert the actual child environment and manifest
+(25 boot-evidence tests pass). No rewrite log was observed in the preceding
+90-second run, so an actual mutation is not established, but future genuine
+validation must use the explicit off policy. The UI task is independently
+investigating the stalled MAIN-to-GUI link and unconfirmed MENU response in
+that run. A stable final image is not GUI liveness evidence.
+
 Post-gap gate: full suite with TI oracle enabled passes 321 tests / 27 skips;
 timed SPI harness also passes ASan/UBSan. `runs/dsp-spi-gap-strict-1` repeats
 one million steps from the previous SPI fault with eight DAC writes and no
