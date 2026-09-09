@@ -8,6 +8,24 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Post-commit gate: `e1b0b3a` rebuild succeeds and 68 focused checkpoint/replay/
+launcher tests pass. GUI task reports that its separate fresh-only transport
+diagnostic frees both exhausted pools for 90 seconds but still fails MENU
+interaction. Treat that as transport evidence, not DSP scheduling success.
+Do not mix a new worker policy into that ongoing isolation experiment.
+
+Potential scheduling follow-up (not implemented): a DSP worker may execute
+outside BQL under a device-state mutex, using lock order BQL→device only and
+thread-safe bottom-half publication after releasing the device mutex. QEMU
+`hw/misc/edu.c` demonstrates this ownership pattern. Required work includes
+generation-safe reset/shutdown, ordered HINT publication, immutable checkpoint
+snapshots and explicit event-queue overflow. Critically, allowing host accesses
+between individual core steps changes the current replay contract (which runs
+a whole recorded slice atomically); implement and test those boundaries before
+running a worker. Never unlock BQL around the existing interpreter without
+protecting HPI, memory, peripherals and publication state. Prioritize the
+remaining boot interaction gate over this performance-oriented follow-up.
+
 Legacy profile comparison `runs/nxs-legacy-sync-profile-1` also completed
 20 seconds with unchanged input hashes. It records the opposite contention:
 main-loop BQL wait 13.33982s, versus MAIN interrupt 0.02559s, MMIO read

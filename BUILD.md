@@ -18,6 +18,13 @@ mode remains architecturally ineligible, and short callbacks do not prove MAIN
 receives sufficient execution time. The first longer GUI diagnostic still
 stalls; do not promote this flag to the strict default.
 
+Add `--qemu-sync-profile` to either legacy or deferred diagnostics to enable
+QEMU lock-wait profiling. Before teardown the launcher captures
+`info sync-profile -n 30` and `info sync-profile -m -n 30` through its run-local
+Unix monitor socket, saving `qemu-sync-profile.txt` and collection status/hash
+in `run.json`. Profiling introduces observer overhead; compare both policies
+with identical inputs, and do not interpret lock waits as firmware cycle timing.
+
 Connected replay limits are diagnostic, not firmware events. If a step,
 packet or cycle ceiling prevents reaching the next recorded boundary, replay
 exits nonzero with `outcome=event_budget_exhausted` in `failure.json` and its
