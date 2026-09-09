@@ -149,3 +149,24 @@ UTILITY, both fixed pools remain completely free and both mailboxes are empty.
 It still displays **E-7206 AUTH CHIP ERROR**. This establishes a specific
 interrupt-order fix, not complete boot, media loading, or playback. Untraced
 and normal cached-delivery controls must still pass before changing defaults.
+
+Those controls subsequently passed:
+
+- `cdj-panel-mask-order-fresh-quiet-1`, 60 seconds: detailed MAIN/GUI traces
+  and statistics disabled; fresh-only delivery; MENU opened UTILITY.
+- `cdj-panel-mask-order-default-quiet-1`, 80 seconds: normal cached delivery,
+  detailed traces/statistics disabled. The actual native Tk deck sent MENU down
+  at 40 seconds and released outside the button at 50 seconds. UTILITY opened;
+  panel frames were 184 held and 223 released, with an empty pulse queue.
+  Both fixed pools remained fully free and mailboxes 44/50 empty at 80 seconds.
+  A second direct MENU hold/release also left no held bits.
+
+These controls used simulator SHA-256
+`2663e8402b14d16a077665a835017f8f2dc298c0a5515699cb945db670591841`
+and QEMU SHA-256
+`f69c34b53bdbb92bee51d3ec6db6a0ade27cd9f935700c65237dcf3e7798bd71`.
+The original firmware and synchronous DSP scheduler were retained; no binary
+was rebuilt between the controls. **Fresh-only remains opt-in**, since the
+mask-order fix also passes with normal transport. Native Tk/input/RAM/cache/
+SIC focused regression: **128 passed**. The separate E-7206 device-model
+problem remains; no media-loading or playback gate has passed.

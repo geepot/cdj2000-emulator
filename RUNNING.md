@@ -286,6 +286,18 @@ ended each phase by its cooperative budget rather than the earlier SPI fault.
 This is visible-viewer interaction evidence, not an error-free boot gate or
 evidence that USB/SD track loading is ready.
 
+A later reproducible communication failure was traced to the GUI simulator's
+SIC interrupt-mask write ordering, corrected by patch 07 (`69d0d88`). Rebuild
+`bin/cdj-run` with `sh scripts/build-bfin-sim.sh build/gdb-17.2` to include it.
+The fix prevents a duplicate interrupt from cancelling a newly armed payload
+receive. A normal cached-transport boot with detailed tracing disabled now
+passes a native Tk MENU hold/outside release, opens UTILITY, and retains free
+MAIN message pools after 80 seconds. The focused native/input/transport suite
+passes 128 tests. See `NXS_GUI_STALL.md` for the before/after trace and controls.
+Do not enable fresh-only delivery as a workaround: it remains diagnostic-only.
+E-7206 auth-chip emulation is still unresolved; USB/SD loading and audio playback
+are not yet validated.
+
 ### Existing tracing tools
 
 ```sh
