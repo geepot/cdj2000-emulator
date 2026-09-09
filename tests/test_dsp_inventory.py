@@ -3,7 +3,10 @@ import struct
 
 import pytest
 
-from tools.cdj_dsp.inventory import BASE, build_report, expression, read_formats
+from tools.cdj_dsp.inventory import (
+    BASE, CHECKPOINT_HEADER, SDRAM_BASE, _fnv1a, build_report, expression,
+    read_formats, read_input,
+)
 
 
 def test_mixed_layout_header_flags_and_trace_evidence():
@@ -38,3 +41,30 @@ def test_header_bits_select_distinct_formats():
                              FMT(branch, 16, BR(1), BR(1), ignored)''')
     report = build_report(data, [(BASE, BASE + 2)], formats, [])
     assert report['instructions'][0]['families'] == ['branch']
+
+
+def test_checkpoint_sparse_sdram_inventory_and_corruption_rejection():
+    state = bytes(16)
+    l2 = bytes(0x40000)
+    bitmap = bytearray(1024)
+    bitmap[2 // 8] |= 1 << (2 % 8)
+    page = bytearray(4096)
+    struct.pack_into('<I', page, 0, 0x12345678)
+    payload = state + l2 + bitmap + page
+    header = CHECKPOINT_HEADER.pack(
+        b'CDJDSP1\0', 1, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 1,
+        len(payload), _fnv1a(payload),
+    )
+    memories, info = read_input(header + payload)
+    assert info['kind'] == 'checkpoint' and info['present_sdram_pages'] == 1
+    formats = read_formats('FMT(test, 32, 0x12345678, 0xffffffff, ignored)')
+    start = SDRAM_BASE + 2 * 4096
+    report = build_report(memories, [(start, start + 4)], formats,
+                          [{'event': 'step', 'pc': start}])
+    assert report['instructions'][0]['families'] == ['test']
+    assert report['instructions'][0]['trace_pc_visits'] == 1
+    damaged = bytearray(header + payload)
+    damaged[-1] ^= 1
+    with pytest.raises(ValueError, match='checksum'):
+        read_input(damaged)

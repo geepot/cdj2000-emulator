@@ -330,6 +330,35 @@ int main(void)
                 assert(cdj_c674x_step(&c, read_word, NULL, NULL));
                 assert(c.r[side][1] == 99);
             }
+    /* Figure H-5 / GNU nfu_uspl: compact SPLOOP scatters ii-1 across
+     * bits 9:7 and 14 and shares the full-width loop scheduler. */
+    for (unsigned ii = 1; ii <= 14; ++ii) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[13] = 1;
+        unsigned encoded = ii - 1;
+        memory[0] = 0x1c660000 | 0x0c66 |
+                    (encoded & 7) << 7 | (encoded & 8) << 11;
+        memory[7] = 0xe0200000; /* compact SPLOOP; compact SPKERNEL 0,0 */
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.loop_active && c.loop.ii == ii && c.control[13] == 0);
+        unsigned steps = 0;
+        while (c.loop_active) {
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(++steps < 64);
+        }
+    }
+    /* H-5 op=1 and H-6 are SPLOOPD, not Appendix-G ALU forms. Recognize
+     * and reject their four-cycle delayed testing until that scheduler
+     * behavior is modeled; the setup packet remains atomic. */
+    const unsigned compact_sploopd[] = {0x0c67, 0x8c66, 0x8c67};
+    for (unsigned i = 0; i < 3; ++i) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[13] = 3; c.r[0][1] = 99;
+        memory[0] = compact_sploopd[i]; memory[7] = 0xe0200000;
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 0 && !c.loop_active && c.r[0][1] == 99);
+        assert(!strcmp(c.fault, "SPLOOPD delayed testing not implemented"));
+    }
     /* More than 14 source packets fit when they occupy no functional slots. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.control[13] = 1;
@@ -609,6 +638,23 @@ int main(void)
     memory[1] = (6u << 29) | (1u << 23) | (4u << 18) | (1u << 12) | 0xa78;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL)); assert(c.r[0][1] == 0);
 
+    /* Scalar .L comparisons share adjacent immediate/register opfields.
+     * The signed relations sign-extend scst5; unsigned relations do not. */
+    const unsigned compare_immediate[] = {0xa58, 0x8d8, 0x9d8, 0xad8, 0xbd8};
+    const unsigned compare_expected[] = {0, 0, 1, 1, 0};
+    for (unsigned relation = 0; relation < 5; ++relation)
+    for (unsigned immediate = 0; immediate < 2; ++immediate)
+    for (unsigned side = 0; side < 2; ++side) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        unsigned left = immediate ? 31 : 3, right = 4, dst = 5;
+        c.r[side][left] = 0xffffffff;
+        c.r[side ^ 1][right] = 1;
+        memory[0] = dst << 23 | right << 18 | left << 13 | 1u << 12 |
+                    compare_immediate[relation] | ((!immediate) << 5) | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == compare_expected[relation]);
+    }
+
     /* A later unknown compact instruction rolls back the whole packet. */
     memset(memory, 0, sizeof(memory));
     cdj_c674x_reset(&c, 0x1000);
@@ -727,6 +773,81 @@ int main(void)
     memory[0] = 0xb5d62046; memory[7] = 0xe0200001;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][1] == 7 && c.r[0][13] == 0x11223344);
+
+    /* Figures C-8 through C-15 share the compact .D transfer layout.
+     * Exercise every DSZ scalar interpretation plus aligned/nonaligned
+     * doublewords across immediate, register, postincrement and predecrement
+     * addressing. RS applies to data/register offsets but not A/B4-7 ptrs. */
+    struct CompactMemoryCase {
+        unsigned dsz, sz, na, size;
+        bool pair, sign_extend;
+    } compact_memory_cases[] = {
+        {0, 0, 0, 4, false, false},
+        {0, 1, 0, 1, false, false}, {1, 1, 0, 1, false, true},
+        {2, 1, 0, 2, false, false}, {3, 1, 0, 2, false, true},
+        {4, 1, 0, 4, false, false}, {5, 1, 0, 1, false, true},
+        {6, 1, 0, 4, false, false}, {7, 1, 0, 2, false, true},
+        {4, 0, 0, 8, true, false}, {4, 0, 1, 8, true, false},
+    };
+    for (unsigned family = 0; family < 4; ++family)
+    for (unsigned load = 0; load < 2; ++load)
+    for (unsigned j = 0; j < sizeof(compact_memory_cases) /
+                                    sizeof(compact_memory_cases[0]); ++j) {
+        struct CompactMemoryCase tc = compact_memory_cases[j];
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        unsigned reg_field = tc.pair ? 2 : 3;
+        unsigned reg = reg_field + 16; /* header RS=1 */
+        unsigned scale = tc.size;
+        if (tc.pair && tc.na && family < 2) scale = 1; /* C-9/C-11 */
+        uint32_t target = tc.na ? 0x10c1 : 0x10c0;
+        uint32_t base = family == 3 ? target + 2 * scale : target;
+        uint32_t address = family < 2 ? base + 2 * scale : target;
+        c.r[0][5] = base; c.r[0][18] = 2;
+        c.r[1][reg] = 0x12345678;
+        if (tc.pair) c.r[1][reg + 1] = 0x9abcdef0;
+        unsigned fixed = family == 0 ? 0x0004 : family == 1 ? 0x0404 :
+                         family == 2 ? 0x0c04 : 0x4c04;
+        unsigned offset_field = family < 2 ? 2 : 1; /* offset 2 / ucst0=1 */
+        uint32_t word = fixed | offset_field << 13 | 1u << 12 |
+                        tc.sz << 9 | 1u << 7 | reg_field << 4 |
+                        tc.na << 4 | load << 3;
+        memory[0] = word | 0x0c6e0000;
+        memory[7] = 0xe0200000 | tc.dsz << 16 | 1u << 19;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.r[0][5] == (family < 2 ? base :
+                             family == 2 ? base + 2 * scale : target));
+        if (load) {
+            assert(c.load_count == 1 && !c.store_count);
+            assert(c.loads[0].address == address && c.loads[0].size == tc.size);
+            assert(c.loads[0].bank == 1 && c.loads[0].dst == reg);
+            assert(c.loads[0].sign_extend == tc.sign_extend);
+        } else {
+            assert(c.store_count == 1 && !c.load_count);
+            assert(c.stores[0].address == address && c.stores[0].size == tc.size);
+            assert(c.stores[0].value == (tc.pair ?
+                UINT64_C(0x9abcdef012345678) : UINT64_C(0x12345678)));
+        }
+    }
+
+    /* The genuine next word is STDW .D2 B5:B4,*B6[2]++.  It updates B6
+     * in E1, captures both old source registers and commits the pair in E3. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][4] = 0x11223344; c.r[1][5] = 0xaabbccdd; c.r[1][6] = 0x10c0;
+    memory[0] = 0x0c6e3d45; memory[7] = 0xe0240000;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][6] == 0x10d0 && c.store_count == 1 && memory[48] == 0);
+    c.r[1][4] = c.r[1][5] = 0;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(memory[48] == 0x11223344 && memory[49] == 0xaabbccdd &&
+           !c.store_count);
+
+    /* A later packet failure rolls compact base updates and queues back. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][6] = 0x10c0; c.r[1][4] = 0x12345678;
+    memory[0] = 0xffff3d45; memory[7] = 0xe0240001;
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.r[1][6] == 0x10c0 && !c.store_count && !c.cycles);
     /* LDW postincrement updates its pointer in E1, samples RAM in E3,
      * and makes its destination visible only after E5. */
     memset(memory, 0, sizeof(memory));

@@ -95,6 +95,9 @@ def main():
     checkpoint = data.startswith(b'CDJDSP1\0')
     capture_manifest = None
     input_checkpoint = None
+    checkpoint_origin = None
+    checkpoint_manifest_sha256 = None
+    checkpoint_gate_sha256 = None
     if checkpoint:
         try:
             input_checkpoint = checkpoint_info(data)
@@ -102,13 +105,28 @@ def main():
             parser.error(str(error))
         manifest_path = args.dump.parent / 'manifest.json'
         if not manifest_path.is_file():
-            parser.error('connected checkpoint requires its manifest.json provenance file')
-        capture_manifest = json.loads(manifest_path.read_text())
+            parser.error('checkpoint requires its manifest.json provenance file')
+        manifest_data = manifest_path.read_bytes()
+        checkpoint_manifest_sha256 = hashlib.sha256(manifest_data).hexdigest()
+        capture_manifest = json.loads(manifest_data)
         matching = [item for item in capture_manifest.get('checkpoints', [])
                     if item.get('file') == args.dump.name]
-        if (not capture_manifest.get('complete') or len(matching) != 1 or
-                matching[0].get('sha256') != input_checkpoint['checkpoint_sha256']):
-            parser.error('checkpoint is absent from, or does not match, its complete manifest')
+        if (capture_manifest.get('complete') and len(matching) == 1 and
+                matching[0].get('sha256') == input_checkpoint['checkpoint_sha256']):
+            checkpoint_origin = 'connected_checkpoint'
+        else:
+            gate_path = args.dump.parent / 'gate.json'
+            gate_data = gate_path.read_bytes() if gate_path.is_file() else b''
+            gate = json.loads(gate_data) if gate_data else {}
+            key = ('final_checkpoint' if args.dump.name == 'final.cdjdsp' else
+                   'repeat_final_checkpoint' if args.dump.name == 'repeat-final.cdjdsp' else None)
+            recorded = gate.get(key, {}) if key else {}
+            if (not gate.get('passed') or not gate.get('repeat_matches') or
+                    not gate.get('final_state_and_memory_match') or
+                    recorded.get('checkpoint_sha256') != input_checkpoint['checkpoint_sha256']):
+                parser.error('checkpoint is absent from a complete connected manifest or exact replay gate')
+            checkpoint_origin = 'deterministic_replay_checkpoint'
+            checkpoint_gate_sha256 = hashlib.sha256(gate_data).hexdigest()
     elif len(data) != 0x40000:
         parser.error('legacy dump must be exactly 256 KiB')
     event_data = args.events.read_bytes() if args.events is not None else None
@@ -116,9 +134,10 @@ def main():
         if not checkpoint:
             parser.error('event injection requires a connected checkpoint')
         transcript = capture_manifest.get('event_transcript')
-        if not isinstance(transcript, dict) or not isinstance(transcript.get('sha256'), str):
+        expected_event_hash = (transcript.get('sha256') if isinstance(transcript, dict)
+                               else capture_manifest.get('event_transcript_sha256'))
+        if not isinstance(expected_event_hash, str):
             parser.error('checkpoint manifest has no complete event-transcript provenance')
-        expected_event_hash = transcript['sha256']
         if hashlib.sha256(event_data).hexdigest() != expected_event_hash:
             parser.error('event transcript does not match the checkpoint manifest')
     expected = args.expect_trace.read_bytes() if args.expect_trace is not None else None
@@ -146,12 +165,18 @@ def main():
         manifest = dict(dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
                         break_pc=args.break_pc, boot_phase=args.boot_phase,
-                        input_kind='connected_checkpoint' if checkpoint else 'legacy_l2_dump',
+                        input_kind=checkpoint_origin if checkpoint else 'legacy_l2_dump',
                         input_checkpoint=input_checkpoint,
+                        input_manifest_sha256=checkpoint_manifest_sha256,
+                        input_gate_sha256=checkpoint_gate_sha256,
                         event_transcript_sha256=(hashlib.sha256(event_data).hexdigest()
                                                  if event_data is not None else None),
-                        capture_source_sha256=capture_manifest.get('source_sha256') if capture_manifest else None,
-                        capture_firmware_sha256=capture_manifest.get('firmware_sha256') if capture_manifest else None,
+                        capture_source_sha256=(capture_manifest.get('source_sha256') or
+                                               capture_manifest.get('capture_source_sha256'))
+                                              if capture_manifest else None,
+                        capture_firmware_sha256=(capture_manifest.get('firmware_sha256') or
+                                                 capture_manifest.get('capture_firmware_sha256'))
+                                                if capture_manifest else None,
                         boot_rom_executed=False,
                         pll_assumptions=['POR configuration at ROM handoff',
                                          'initial bypass; NXS OSCIN 16934400 Hz, active SYSCLK1 division',

@@ -990,3 +990,47 @@ Full boot/audio remain incomplete. Schema 1 is not cross-ABI portable and DSP
 interrupt delivery remains absent. Event replay only injects the captured
 transcript; it neither predicts new MAIN behavior nor validates physical HPI
 timing, HRDY/FIFO behavior or pin-level effects.
+
+### Compact loop, memory and external-stage replay batch
+
+Compact SPLOOP/SPKERNEL and the C-8 through C-15 compact .D memory families
+are implemented from SPRUFE8B Figures H-5, H-7 and C-8 through C-15. SPLOOPD
+is recognized and remains fail-closed. The scalar .L comparison batch covers
+CMPEQ, CMPGT, CMPGTU, CMPLT and CMPLTU register/immediate forms. Tests cover
+all compact loop intervals, stage/cycle field reconstruction, every scalar DSZ
+interpretation, aligned/nonaligned doublewords, address-update timing, RS and
+pointer selection, predicates, signedness, delayed queues and rollback.
+
+An exact-repeat replay final checkpoint can be chained as the next input. Its
+gate must prove repeat trace equality and identical final state/memory; the new
+manifest records hashes of the input manifest and gate and preserves original
+connected firmware/source provenance. Inventory accepts either raw 256 KiB L2
+or schema-1 checkpoints, checks the checkpoint FNV-1a payload checksum, restores
+sparse SDRAM pages, and scans explicit L2 or SDRAM ranges.
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-compact-loop-connected/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_CONNECTED_EVENT_REPLAY --steps 10000000 \
+  --events runs/nxs-compact-loop-connected/dsp-events.jsonl --verify-repeat
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_CONNECTED_EVENT_REPLAY/final.cdjdsp runs/NEW_CHAINED_REPLAY \
+  --steps 1000000 --verify-repeat
+.venv/bin/python -m tools.cdj_dsp.inventory \
+  runs/NEW_CONNECTED_EVENT_REPLAY/final.cdjdsp runs/NEW_SDRAM_INVENTORY.json \
+  --formats build/gdb-17.2/include/opcode/tic6x-insn-formats.h \
+  --range 0xc000e800:0xc000ec00 \
+  --trace runs/NEW_CONNECTED_EVENT_REPLAY/trace.jsonl
+```
+
+Current evidence: `runs/dsp-compact-loop-connected-events-1` gates all 39
+connected DSP stops and exact repeat state/memory, then stops at
+`0xc000ea94` / `0x018c0958`, `INTSP .L1 A3,A3`, after 2,600,603 packets /
+6,133,200 cycles. Its trace SHA-256 is
+`e9e265bbda0b8ac8217b2b813bcfaa47adc970aafbc3fa3b0f354fbf7a4f9df6`.
+The rebuilt connected `runs/nxs-compact-loop-connected` records the same
+boundary. Suite: 180 passed / 43 skipped; C674x address/undefined sanitizer
+passes. Full boot and audio remain incomplete. Next implement the reachable
+external-stage floating-point/conversion cluster beginning with INTSP as a
+documented family, using checkpoint replay for iteration and another connected
+run only after a meaningful batch.

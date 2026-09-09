@@ -65,6 +65,17 @@ def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
     assert gate['passed'] and gate['repeat_matches']
     assert gate['trace_sha256'] == gate['repeat_sha256']
     assert 'not architectural correctness or boot' in gate['scope']
+    # An exactly repeated final checkpoint is a provenance-bearing resume
+    # point; normal iteration must not fall back to a connected checkpoint.
+    chained = tmp_path / 'chained'
+    result = run(first / 'final.cdjdsp', chained, '--verify-repeat')
+    assert result.returncode == 0, result.stderr
+    chained_manifest = json.loads((chained / 'manifest.json').read_text())
+    assert chained_manifest['input_kind'] == 'deterministic_replay_checkpoint'
+    assert chained_manifest['input_checkpoint']['checkpoint_sha256'] == \
+        gate['final_checkpoint']['checkpoint_sha256']
+    assert chained_manifest['input_manifest_sha256'] and \
+        chained_manifest['input_gate_sha256']
     baseline = first / 'trace.jsonl'
     second = tmp_path / 'second'
     result = run(dump, second, '--verify-repeat', '--expect-trace', str(baseline))

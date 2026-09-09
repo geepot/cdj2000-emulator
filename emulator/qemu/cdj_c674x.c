@@ -223,19 +223,28 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             if (nop > elapsed) elapsed = nop;
             continue;
         }
-        /* Figures C-8/C-9: lower compact immediate-offset transfers to the
-         * existing scalar pipeline, preserving header PROT and register RS.
-         * Pointer registers always come from A/B4-7, independent of RS. */
-        if (compact && (w & 0x0406) == 0x0004) {
+        /* Figures C-8 through C-15: lower the compact .D memory families to
+         * the existing E1/E3/E5 scalar pipeline.  Pointer registers are
+         * always A/B4-7 and ignore RS; data and register-offset operands use
+         * RS.  Dinc is scaled post-increment, Ddec scaled pre-decrement.
+         * The nonaligned doubleword offset is unscaled for Doff/Dind but
+         * scaled for Dinc/Ddec, as called out by Figures C-9/11/13/15. */
+        bool compact_doff = compact && (w & 0x0406) == 0x0004;
+        bool compact_dind = compact && (w & 0x0c06) == 0x0404;
+        bool compact_dinc = compact && (w & 0xcc06) == 0x0c04;
+        bool compact_ddec = compact && (w & 0xcc06) == 0x4c04;
+        if (compact_doff || compact_dind || compact_dinc || compact_ddec) {
             unsigned dsz = (insn->header >> 16) & 7;
             bool load = (w & 8) != 0, secondary = (w & 0x200) != 0;
             unsigned reg = ((w >> 4) & 7) + ((insn->header & 0x80000) ? 16 : 0);
             unsigned op, extended = 0;
+            bool nonaligned_pair = false;
             if (!secondary && (dsz & 4)) {
                 bool nonaligned = (w & 0x10) != 0;
                 reg &= ~1u;
                 op = load ? (nonaligned ? 2 : 6) : (nonaligned ? 7 : 4);
                 extended = 0x100;
+                nonaligned_pair = nonaligned;
             } else if (!secondary) op = load ? 6 : 7;
             else {
                 static const unsigned loads[8] = {1, 2, 0, 4, 6, 2, 3, 4};
@@ -243,9 +252,23 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 op = load ? loads[dsz] : stores[dsz];
                 if (dsz == 6) extended = 0x100;
             }
-            unsigned offset = ((w >> 13) & 7) | (((w >> 11) & 1) << 3);
+            unsigned offset, mode;
+            if (compact_doff) {
+                offset = ((w >> 13) & 7) | (((w >> 11) & 1) << 3);
+                mode = 1;              /* positive constant offset */
+            } else if (compact_dind) {
+                offset = ((w >> 13) & 7) +
+                         ((insn->header & 0x80000) ? 16 : 0);
+                mode = 5;              /* positive register offset */
+            } else {
+                offset = ((w >> 13) & 1) + 1;
+                mode = compact_dinc ? 11 : 8; /* postincrement / predecrement */
+            }
+            unsigned scaled_nonaligned = nonaligned_pair &&
+                (compact_dinc || compact_ddec) ? 1u << 23 : 0;
             w = reg << 23 | (4 + ((w >> 7) & 3)) << 18 | offset << 13 |
-                0x200 | extended | (w & 1) << 7 | op << 4 | 4 | ((w >> 12) & 1) << 1;
+                mode << 9 | scaled_nonaligned | extended | (w & 1) << 7 |
+                op << 4 | 4 | ((w >> 12) & 1) << 1;
             compact = false;
         }
         unsigned side = (w >> 1) & 1, dst = (w >> 23) & 31;
@@ -646,14 +669,27 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = (uint32_t)sx(a, 5) - cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xf8 || (w & 0xffc) == 0x5e0) {
             value = cpu->r[side][a] - cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0x8d8) {
-            value = sx(a, 5) > (int32_t)cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0x8f8) {
-            value = (int32_t)cpu->r[side][a] > (int32_t)cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0xbd8) {
-            value = a < cpu->r[cross][b]; /* CMPLTU .L ucst4,xuint */
-        } else if ((w & 0xffc) == 0xbf8) {
-            value = cpu->r[side][a] < cpu->r[cross][b]; /* CMPLTU .L uint,xuint */
+        } else if ((w & 0xffc) == 0xa58 || (w & 0xffc) == 0xa78 ||
+                   (w & 0xffc) == 0x8d8 || (w & 0xffc) == 0x8f8 ||
+                   (w & 0xffc) == 0x9d8 || (w & 0xffc) == 0x9f8 ||
+                   (w & 0xffc) == 0xad8 || (w & 0xffc) == 0xaf8 ||
+                   (w & 0xffc) == 0xbd8 || (w & 0xffc) == 0xbf8) {
+            /* CMPEQ/CMPGT/CMPGTU/CMPLT/CMPLTU scalar .L forms.  Even
+             * opfields use a signed or unsigned five-bit constant; odd
+             * opfields read src1 from the local register file. */
+            unsigned encoding = w & 0xffc;
+            bool immediate = !(encoding & 0x20);
+            uint32_t left = immediate ? a : cpu->r[side][a];
+            uint32_t right = cpu->r[cross][b];
+            switch (encoding & ~0x20u) {
+            case 0xa58: value = (immediate ? (uint32_t)sx(a, 5) : left) == right; break;
+            case 0x8d8: value = (immediate ? sx(a, 5) : (int32_t)left) >
+                                (int32_t)right; break;
+            case 0x9d8: value = left > right; break;
+            case 0xad8: value = (immediate ? sx(a, 5) : (int32_t)left) <
+                                (int32_t)right; break;
+            default:    value = left < right; break;
+            }
         } else if ((w & 0xffc) == 0xfd8 || (w & 0xffc) == 0x6a0 || (w & 0xffc) == 0x8f0) {
             value = (uint32_t)sx(a, 5) | cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xff8 || (w & 0xffc) == 0x6e0 || (w & 0xffc) == 0x8b0) {
@@ -697,10 +733,6 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 value = source >> n;
                 if (n && (source & 0x80000000u)) value |= UINT32_MAX << (32 - n);
             }
-        } else if ((w & 0xffc) == 0xa58) {
-            value = (uint32_t)sx(a, 5) == cpu->r[cross][b];
-        } else if ((w & 0xffc) == 0xa78) {
-            value = cpu->r[side][a] == cpu->r[cross][b];
         } else if ((w & 0xffe) == 0x3a2 && a == 0) {
             /* FADCR/FAUCR/FMCR storage only; FP operations are not decoded yet. */
             if (dst != 13 && dst != 14 && (dst < 18 || dst > 20)) return stop(cpu, pc, insn->word, "control register write not implemented");
@@ -848,9 +880,18 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 if (i) return stop(cpu, insn.pc, w, "SPMASK must start packet");
                 continue;
             }
-            if (!insn.compact && (w & 0xf03ffffc) == 0x34000) {
+            bool full_kernel = !insn.compact &&
+                (w & 0xf03ffffc) == 0x34000;
+            bool compact_kernel = insn.compact &&
+                (w & 0x3c7e) == 0x1c66;
+            if (full_kernel || compact_kernel) {
                 if (i != 0) return stop(cpu, insn.pc, w, "SPKERNEL must start packet");
-                unsigned cbits = 0, stage = 0, field = (w >> 22) & 63;
+                /* Figure H-7 scatters the same six-bit combined
+                 * stage/cycle field across bits 0, 9:7 and 15:14. */
+                unsigned field = compact_kernel ?
+                    (w & 1) | (((w >> 7) & 7) << 1) |
+                    (((w >> 14) & 3) << 4) : (w >> 22) & 63;
+                unsigned cbits = 0, stage = 0;
                 while ((1u << cbits) < out.loop.ii) ++cbits;
                 for (unsigned j = 5; j >= cbits && j < 6; --j)
                     stage |= ((field >> j) & 1) << (5 - j);
@@ -970,16 +1011,29 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
     }
     CdjC674xPacket packet;
     if (!cdj_c674x_fetch(cpu, read, opaque, &packet)) return false;
-    bool while_loop = (packet.instructions[0].word & 0x007ffffe) == 0x3e000;
-    if (!packet.instructions[0].compact &&
-        ((packet.instructions[0].word & 0x007ffffc) == 0x38000 || while_loop)) {
-        uint32_t w = packet.instructions[0].word;
-        unsigned pred = w >> 29;
-        if (while_loop ? (!pred || pred == 7) : (w >> 28) != 0)
+    CdjC674xInstruction first = packet.instructions[0];
+    bool compact_sploop = first.compact && (first.word & 0xbc7f) == 0x0c66;
+    bool compact_sploopd = first.compact &&
+        (((first.word & 0xbc7f) == 0x0c67) ||
+         ((first.word & 0xbc7e) == 0x8c66));
+    bool while_loop = !first.compact && (first.word & 0x007ffffe) == 0x3e000;
+    bool full_sploop = !first.compact &&
+        (first.word & 0x007ffffc) == 0x38000;
+    if (compact_sploopd)
+        return stop(cpu, cpu->pc, first.word,
+                    "SPLOOPD delayed testing not implemented");
+    if (full_sploop || compact_sploop || while_loop) {
+        uint32_t w = first.word;
+        unsigned pred = first.compact ? 0 : w >> 29;
+        if (while_loop ? (!pred || pred == 7) : (!first.compact && (w >> 28) != 0))
             return stop(cpu, cpu->pc, w, "unsupported loop predicate");
         if (!while_loop && cpu->cycles < cpu->control_ready[13]) return stop(cpu, cpu->pc, w, "ILC not yet available");
         CdjC674x out = *cpu;
-        if (!cdj_c674x_loop_init(&out.loop, ((w >> 23) & 31) + 1, cpu->control[13]))
+        /* SPRUFE8B Figure H-5 scatters compact ii-1 across bits 9:7 and
+         * bit 14. GNU binutils format nfu_uspl independently agrees. */
+        unsigned ii = first.compact ? (((w >> 7) & 7) | ((w >> 11) & 8)) + 1
+                                    : ((w >> 23) & 31) + 1;
+        if (!cdj_c674x_loop_init(&out.loop, ii, cpu->control[13]))
             return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
         out.loop.predicate_loop = while_loop;
         if (while_loop) {

@@ -35,18 +35,49 @@ state-divergent events fail closed. Starting from checkpoint 1,
 DSP stops through every HPI chunk in about 2.3 seconds. Its trace and final
 checkpoint repeat byte-for-byte; final L2 and logical SDRAM hashes also agree.
 
-From the connected `0xc09868c0` checkpoint, the TI-documented scalar ADD/SUB
-.D and CMPLTU forms advance nine packets to PC `0x118044c0`, compact word
-`0x0c66`; rebuilt connected execution agrees at 2,599,589 packets / 6,132,090
-cycles. The compact word's classification still needs primary-reference
-reconciliation: the parent decoder calls it `[A0] MVK.L 0,A0`, while the
-visible SPRUFE8B G-3 fixed-field layout appears inconsistent. Keep it
-fail-closed until corroborated. The bounded GUI exit/frame is not full boot or
-working audio.
+The latest batch resolves compact `0x0c66` as SPLOOP (SPRUFE8B Figure H-5 and
+GNU `nfu_uspl`), decodes all II values 1..14, and reuses the existing software
+loop scheduler. Compact SPLOOPD encodings are recognized but still stop
+explicitly because delayed testing is not implemented. Compact SPKERNEL
+(Figure H-7) now reconstructs its scattered stage/cycle field and shares the
+full-width scheduling path. The existing SPLOOPW predicate timing remains a
+model based on TI's three-cycle delayed boundary test; termination during
+loading, interrupt/reload behavior and broader multistage schedules still need
+verification and are not claimed complete.
 
-Next reconcile `0x0c66` against TI/GNU encoding sources, inventory the nearby
-reachable compact family and implement it as a tested batch. Do not relax
-compatibility checks or infer correctness from packet count alone.
+Compact .D Figures C-8 through C-15 now share the scalar E1/E3/E5 memory
+pipeline. The batch covers immediate/register offsets, scaled postincrement
+and predecrement, RS selection, fixed A/B4-7 pointers, all scalar DSZ forms and
+aligned/nonaligned doublewords. Nonaligned doubleword offsets follow the
+figure-specific unscaled C-9/C-11 and scaled C-13/C-15 rules. The genuine
+`0x3d45` executes as `STDW .D2 B5:B4,*B6[2]++`. Full scalar .L CMPEQ, CMPGT,
+CMPGTU, CMPLT and CMPLTU register/immediate forms are covered as one family.
+
+Replay outputs are now first-class resume checkpoints only after an exact
+repeat gate proves byte-identical traces and final architectural/memory state.
+Their manifests chain the prior manifest/gate SHA-256 values and carry the
+connected firmware/source provenance. The inventory tool accepts schema-1
+checkpoints, verifies their structure/checksum and scans both L2 and losslessly
+reconstructed sparse SDRAM; its results remain discovery-only.
+
+`runs/dsp-compact-loop-connected-events-1 --verify-repeat` starts at the new
+connected run's DSP-start checkpoint, gates all 39 connected stops and ends at
+the same fail-closed boundary: `INTSP .L1 A3,A3`, PC `0xc000ea94`, word
+`0x018c0958`, after 2,600,603 packets / 6,133,200 cycles. Trace SHA-256 is
+`e9e265bbda0b8ac8217b2b813bcfaa47adc970aafbc3fa3b0f354fbf7a4f9df6`;
+the repeated final checkpoint SHA-256 is
+`fe9843643e340426fa0e7593daf9d6212db680606948a7b94b8f3ff4f6d5568a`.
+The rebuilt 15-second connected MAIN/Blackfin run
+`runs/nxs-compact-loop-connected` independently records that same PC, word,
+packet count and cycle count, exits the GUI with status zero and publishes a
+frame. This is connected execution evidence, not full boot or working audio.
+
+Focused and complete validation passes: 180 tests passed / 43 skipped, and the
+C674x harness passes AddressSanitizer/UndefinedBehaviorSanitizer. Next inventory
+the reachable external-stage floating-point/conversion cluster around INTSP
+and implement the useful TI-documented family as a batch, including latency,
+IEEE-754 boundaries, predicates, parallel issue and fault atomicity. Do not
+relax checkpoint gates or infer correctness from packet count alone.
 
 ### Previous SYSCFG checkpoint
 
