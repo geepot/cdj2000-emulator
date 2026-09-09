@@ -1,5 +1,20 @@
 # Building
 
+Source-predicate audit regression (tool-only; no QEMU rebuild needed):
+
+```sh
+.venv/bin/python -m pytest -q tests/test_dsp_coverage.py tests/test_dsp_replay.py
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-return-bnop-connected-replay-1/final.cdjdsp \
+  runs/NEW_PREDICATE_AUDIT --steps 100000 \
+  --functional-dsp-timing --functional-dsp-audio --verify-repeat
+```
+
+Inspect `coverage.json`'s `source_predicate_audit` and per-instruction
+`source_predicate_outcomes`. These are pre-source-fetch observations, not proof
+of predicate-body execution in buffered loops or under SPMASK. Exploratory
+ancestry remains ineligible for architectural validation.
+
 Current validation checkpoint is the final section and HANDOFF.md. Earlier
 milestones below are historical and retain the limitations measured then.
 

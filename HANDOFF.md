@@ -8,6 +8,21 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Predicate audit tooling now records the six predicate-register boolean states
+before successful source fetch steps. Coverage reports distinguish true-observed,
+false-only, unavailable and empty observations; legacy traces remain unavailable.
+This is not an issue-time or buffered-loop execution oracle and does not account
+for SPMASK suppression. No CPU semantics or checkpoint ABI changed.
+`runs/dsp-predicate-audit-2` continues the latest connected replay for 100,000
+steps with exact repeat equivalence and no fault, ending at 58,199,500 packets /
+120,567,521 cycles. Of 1,217 observed instruction addresses, 710 have true
+source-predicate observations, 49 only false, and 458 are format-specific and
+unclassified. Those 49 are audit candidates, not demonstrated missing opcodes.
+Next inventory work should map these encodings to focused semantic tests and
+resolve compact predicate classification without assuming unknown formats are
+unconditional. Strict loop timing, zero-only audio and full-boot limitations
+below are unchanged.
+
 Current-source strict regression `runs/dsp-return-bnop-strict-replay-1`
 starts at strict connected checkpoint 64, verifies the remaining connected
 stop twice, and reproduces `0xc004f306` / `0x2627` at 25,364,865 packets /

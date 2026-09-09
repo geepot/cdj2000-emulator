@@ -65,6 +65,7 @@ static bool read_bus(void *unused, uint32_t address, uint32_t *value);
 typedef struct {
     uint32_t pc;
     uint64_t direct_fetches, loop_fetches, scheduler_cycles, idle_cycles;
+    uint64_t predicate_states;
     CdjC674xPacket packet;
     bool used, has_packet, encoding_changed;
 } CoveragePc;
@@ -150,6 +151,13 @@ static void coverage_record(const CdjC674x *before,
     if (before->loop_active) ++coverage_scheduler_cycles;
     if (!before->loop_active && before->idle_cycles) ++coverage_idle_cycles;
     if (!source_fetch) return;
+    if (matched) {
+        unsigned predicates = (before->r[1][0] != 0) |
+            (before->r[1][1] != 0) << 1 | (before->r[1][2] != 0) << 2 |
+            (before->r[0][1] != 0) << 3 | (before->r[0][2] != 0) << 4 |
+            (before->r[0][0] != 0) << 5;
+        matched->predicate_states |= UINT64_C(1) << predicates;
+    }
     if (matched && !matched->has_packet) {
         matched->packet = *packet;
         matched->has_packet = true;
@@ -210,9 +218,10 @@ static void coverage_emit(void)
                ",\"loop_fetches\":%" PRIu64
                ",\"scheduler_cycles\":%" PRIu64
                ",\"idle_cycles\":%" PRIu64
+               ",\"source_predicate_states\":%" PRIu64
                ",\"encoding_changed\":%s}\n",
                entry->pc, entry->direct_fetches, entry->loop_fetches,
-               entry->scheduler_cycles, entry->idle_cycles,
+               entry->scheduler_cycles, entry->idle_cycles, entry->predicate_states,
                entry->encoding_changed ? "true" : "false");
         if (!entry->has_packet) continue;
         for (unsigned j = 0; j < entry->packet.count; ++j) {

@@ -178,6 +178,22 @@ def direct_target(event, format_names):
     return None
 
 
+def observed_predicate_outcomes(description, states):
+    """Source-fetch observations only; buffered issue and SPMASK are separate."""
+    if states is None:
+        return None  # Legacy traces did not record predicate state.
+    if not isinstance(states, int) or not 0 <= states < (1 << 64):
+        raise ValueError('invalid source predicate states')
+    if description == 'unconditional':
+        return [True] if states else []
+    parts = description.split(':')
+    if len(parts) != 2 or parts[0] not in ('zero', 'nonzero'):
+        return None
+    bit = ['B0', 'B1', 'B2', 'A1', 'A2', 'A0'].index(parts[1])
+    return sorted({bool(pattern & (1 << bit)) ^ (parts[0] == 'zero')
+                   for pattern in range(64) if states & (1 << pattern)})
+
+
 def branch_delay_slots(event, family):
     if family != 'control_flow':
         return None
@@ -276,6 +292,8 @@ def build_coverage(checkpoint_data, trace_data, format_data):
                        formats=names, instruction_family=family,
                        functional_unit=unit, side=side, cross_path=cross,
                        predication=predicate, delay_slots=delay,
+                       source_predicate_outcomes=observed_predicate_outcomes(
+                           predicate, pc_event.get('source_predicate_states')),
                        architectural_state=architectural_state(family),
                        direct_target=target)
             rows.append(row)
@@ -350,9 +368,19 @@ def build_coverage(checkpoint_data, trace_data, format_data):
     return dict(
         schema=1,
         evidence_scope='completed deterministic replay source packets only',
+        source_predicate_audit=dict(
+            true_observed_addresses=sum(True in (row['source_predicate_outcomes'] or [])
+                                        for row in rows),
+            false_only_addresses=sum(row['source_predicate_outcomes'] == [False]
+                                     for row in rows),
+            unavailable_addresses=sum(row['source_predicate_outcomes'] is None
+                                      for row in rows),
+            no_observations_addresses=sum(row['source_predicate_outcomes'] == []
+                                          for row in rows)),
         validation_eligible=not faults,
         caveats=[
             'A completed packet proves that this emulator accepted that observed encoding; it does not prove architectural correctness or that a predicate body was true.',
+            'source_predicate_outcomes samples predicate registers before successful source fetch steps; it does not establish buffered instruction execution or account for SPMASK suppression. Null means unavailable or format-specific.',
             'Software-loop scheduler_cycles count issue cycles at a parked fetch PC and are not instruction-issue frequencies; only direct_fetches and loop_fetches establish source-packet observations.',
             'Observed source transitions span delayed branches, loop scheduling, and external event resumes; they are dynamic continuity evidence, not attributed branch edges.',
             'Unvisited captured memory remains unclassified and may be code or data.',

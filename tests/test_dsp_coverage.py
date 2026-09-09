@@ -3,7 +3,26 @@ import json
 import struct
 import pytest
 
-from tools.cdj_dsp.coverage import build_coverage
+from tools.cdj_dsp.coverage import build_coverage, observed_predicate_outcomes
+
+
+@pytest.mark.parametrize('bit,register', list(enumerate(['B0', 'B1', 'B2', 'A1', 'A2', 'A0'])))
+def test_source_predicate_observations(bit, register):
+    nonzero = 1 << (1 << bit)
+    assert observed_predicate_outcomes('nonzero:' + register, nonzero) == [True]
+    assert observed_predicate_outcomes('zero:' + register, nonzero) == [False]
+    assert observed_predicate_outcomes('nonzero:' + register, 1) == [False]
+    assert observed_predicate_outcomes('zero:' + register, nonzero | 1) == [False, True]
+
+
+def test_source_predicate_missing_and_invalid_observations():
+    assert observed_predicate_outcomes('unconditional', None) is None
+    assert observed_predicate_outcomes('unconditional', 0) == []
+    assert observed_predicate_outcomes('unconditional', 1) == [True]
+    assert observed_predicate_outcomes('unconditional_or_format_specific', 1) is None
+    for mask in (-1, 1 << 64, '1'):
+        with pytest.raises(ValueError):
+            observed_predicate_outcomes('unconditional', mask)
 from tools.cdj_dsp.inventory import CHECKPOINT_HEADER, SHARED_RAM_SIZE, _fnv1a
 
 

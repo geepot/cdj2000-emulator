@@ -17,6 +17,28 @@ def run(dump, output, *args):
                           text=True, capture_output=True, timeout=20)
 
 
+def test_replay_records_false_and_true_source_predicates(tmp_path):
+    data = bytearray(0x40000)
+    struct.pack_into('<I', data, 0, 0x00800020)
+    struct.pack_into('<III', data, 0x20,
+                     (1 << 29) | (3 << 23) | (123 << 7) | 0x28,
+                     (1 << 7) | 0x2a,
+                     (1 << 29) | (4 << 23) | (123 << 7) | 0x28)
+    dump = tmp_path / 'predicates.bin'
+    dump.write_bytes(data)
+    output = tmp_path / 'replay'
+    result = run(dump, output, '--steps', '3', '--verify-repeat')
+    assert result.returncode == 0, result.stderr
+    report = json.loads((output / 'coverage.json').read_text())
+    rows = sorted(report['confirmed_instructions'], key=lambda row: row['pc'])
+    assert [row['source_predicate_outcomes'] for row in rows] == [[False], [True], [True]]
+    assert report['source_predicate_audit'] == dict(true_observed_addresses=2,
+        false_only_addresses=1, unavailable_addresses=0, no_observations_addresses=0)
+    stop = json.loads((output / 'trace.jsonl').read_text().splitlines()[-1])
+    assert stop['registers'][0][3] == 0
+    assert stop['registers'][0][4] == 123
+
+
 def test_replay_determinism_breakpoints_and_limits(tmp_path):
     data = bytearray(0x40000)
     struct.pack_into('<I', data, 0, 0x00800020)  # local L2 alias
