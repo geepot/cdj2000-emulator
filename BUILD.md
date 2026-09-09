@@ -1125,6 +1125,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
   emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  emulator/qemu/cdj_c6747_cache.c \
   -o /tmp/cdj-checkpoint-v3-san
 /tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
 .venv/bin/python -m pytest -q
@@ -1206,6 +1207,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
   emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  emulator/qemu/cdj_c6747_cache.c \
   -o /tmp/cdj-checkpoint-coverage-san
 /tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1216,6 +1218,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c6747_hpi.c \
   emulator/qemu/cdj_c6747_emifb.c emulator/qemu/cdj_c6747_intc.c \
   emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  emulator/qemu/cdj_c6747_cache.c \
   emulator/qemu/cdj_dsp_checkpoint.c \
   -o /tmp/cdj-replay-coverage-san
 /tmp/cdj-replay-coverage-san \
@@ -1272,6 +1275,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
   emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  emulator/qemu/cdj_c6747_cache.c \
   -o /tmp/cdj-checkpoint-v3-san
 /tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
 ```
@@ -1320,6 +1324,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
   emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  emulator/qemu/cdj_c6747_cache.c \
   -o /tmp/cdj-checkpoint-v4-san
 /tmp/cdj-checkpoint-v4-san /tmp/cdj-checkpoint-v4-san.cdjdsp
 .venv/bin/python -m pytest -q
@@ -1376,6 +1381,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
   emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  emulator/qemu/cdj_c6747_cache.c \
   -o /tmp/cdj-checkpoint-v5-san
 /tmp/cdj-checkpoint-v5-san /tmp/cdj-checkpoint-v5-san.cdjdsp
 .venv/bin/python -m tools.cdj_dsp.replay \
@@ -1419,3 +1425,221 @@ zero, then enable) and next reached L1PCFG at `0x01840020`, followed by
 L1DCFG at `0x01840040`. The exploratory scheduler edit was removed and QEMU
 rebuilt before final validation. Cache state/effects are the next peripheral
 family; none of this establishes the disputed SPLOOPD timing, boot, or audio.
+
+### Functional DSP breadth mode, schema-6 cache state and scalar multiplies
+
+Strict timing remains the default and its validated boundary is unchanged:
+25,364,865 packets / 60,779,972 cycles, PC `0xc004f306`, compact `0x2627`, at
+the II=1 `SPLOOPD` L2 resource conflict. For breadth-first firmware inventory,
+set `CDJ_NXS_DSP_FUNCTIONAL_TIMING=1` or pass
+`--functional-dsp-timing` to `tools.cdj_main.nxs_vm` and
+`tools.cdj_dsp.replay`. This opt-in mode adds two cycles to the delayed-loop
+post-loop fetch. It is an explicit approximation of the unresolved epilog
+timing, and generated manifests record `dsp_timing_mode` as
+`functional-runahead` and `architectural_validation_eligible` as false. Never
+use functional-mode packet/cycle counts as strict timing evidence.
+
+The cache/memory-system control block now handles the C6747-valid register
+surface at `0x01840000`: L2CFG, L1PCFG/L1PCC, L1DCFG/L1DCC, the documented
+block-operation base/count registers, global writeback/invalidate commands,
+and the valid MAR64-103, MAR128 and MAR192-223 ranges. Reset cache sizes follow
+the C6747 device documentation. Reserved or unmodeled addresses fail closed,
+including EDMAWEIGHT and L2ALLOC0-3. Cache contents/tags, miss and command
+latency, privilege, and arbitration are not modeled. Memory is a unified,
+always-coherent backing store, so cache operations complete immediately and
+their status/count registers read zero; this is register-level functional
+behavior, not a cache timing model.
+
+Schema-6 checkpoints append cache-control state. Schemas 1-5 remain readable;
+their original payload/checksum is validated before missing cache state is
+reset. The current native state is 9,520 bytes and the final peripheral-tail
+component is 1,528 bytes. Any direct checkpoint/replay harness link must now
+include `emulator/qemu/cdj_c6747_cache.c`.
+
+The full-width `.M` non-saturating scalar 16-by-16 multiply batch covers all 18
+signed, unsigned, mixed-sign low/high-halfword and signed-immediate opcode
+forms, on both sides and cross paths. Results publish at E2 and use the common
+delayed-result conflict machinery. Saturating `SMPY` remains fail closed until
+its delayed CSR.SAT effects are modeled.
+
+Reproduce focused and sanitizer checks:
+
+```sh
+.venv/bin/python -m pytest -q \
+  tests/test_c674x.py::test_c6747_cache_registers \
+  tests/test_c674x.py::test_dsp_checkpoint_round_trip \
+  tests/test_c674x.py::test_c674x_loop_schedule \
+  tests/test_dsp_checkpoint_replay.py tests/test_dsp_inventory.py \
+  tests/test_dsp_coverage.py
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/c6747-cache.c \
+  emulator/qemu/cdj_c6747_cache.c -o /tmp/cdj-c6747-cache-san
+/tmp/cdj-c6747-cache-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c \
+  emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-mpy-san
+/tmp/cdj-c674x-mpy-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/dsp-checkpoint.c \
+  emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  emulator/qemu/cdj_c6747_cache.c -o /tmp/cdj-checkpoint-v6-san
+/tmp/cdj-checkpoint-v6-san /tmp/cdj-checkpoint-v6-san.cdjdsp
+```
+
+The focused Python gate reports 13 passed. A restricted-sandbox complete run
+reports 181 passed / 43 skipped, with four failures and four setup errors caused
+by denied localhost socket binds. Rerun the complete suite in a socket-enabled
+environment before recording a final full-suite result.
+
+Validate schema-5 migration and the unmodified strict scheduler, then rebuild
+QEMU and collect a fresh strict connected run:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-spi-connected-1/dsp-checkpoints/00000000000000000064.cdjdsp \
+  runs/NEW_CACHE_SCHEMA5_MIGRATION --steps 1000000 \
+  --events runs/nxs-spi-connected-1/dsp-events.jsonl --verify-repeat
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_CACHE_MPY_STRICT_CONNECTED --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4
+```
+
+Use the functional mode only for downstream discovery, and preserve its label
+through standalone repeat:
+
+```sh
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_CACHE_MPY_FUNCTIONAL_CONNECTED --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4 --functional-dsp-timing
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_CACHE_MPY_FUNCTIONAL_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_CACHE_MPY_FUNCTIONAL_REPLAY --steps 100000000 \
+  --events runs/NEW_CACHE_MPY_FUNCTIONAL_CONNECTED/dsp-events.jsonl \
+  --functional-dsp-timing --verify-repeat
+```
+
+Recorded connected functional evidence is deliberately non-architectural.
+`runs/nxs-cache-functional-1` observes SPI1 plus L1PCFG/L1DCFG setup and stops
+at 25,378,653 packets / 60,793,894 cycles, PC `0xc0038a40`, word
+`0x01a86e80` (`MPYUS .M1 A3,A10,A3`). With the multiply batch,
+`runs/nxs-mpy-functional-1` passes that blocker and stops at 25,380,302 packets
+/ 60,796,809 cycles, PC `0xc003b3a0`, compact `0xccf7`
+(`SUBAW .D2 B15,6,B15`). Each run records 65 schema-6 checkpoints, 110,208
+ordered events and 39 DSP stops. Both have a status-zero bounded GUI exit and a
+frame, which does not prove boot. The next breadth-oriented ISA batch is the
+compact `.D` address-arithmetic family including the nearby `ADDAW`. Strict
+repeat/connected validation is still required after that batch; full boot,
+cache timing, interrupt delivery and audio remain unproven.
+
+### Schema-8 DSP batch, connected gates and bounded replay
+
+The current integrated DSP state is checkpoint schema 8.  Direct checkpoint
+and replay harnesses must link `cdj_c6747_syscfg.c`, `cdj_c6747_intc.c`,
+`cdj_c6747_timer.c`, `cdj_c6747_spi.c`, `cdj_c6747_cache.c`,
+`cdj_c6747_mcasp.c`, and `cdj_c6747_edma.c`.  The native state size is 15,704
+bytes with component sizes `6592,112,784,36,84,32,144,6,7712`.
+
+Replay has three independent ceilings. `--steps` (also
+`--instructions`) bounds successful core calls; `--packets` and `--cycles`
+bound deltas from the input checkpoint. Limits are checked between successful
+steps, so a multicycle instruction may cross a cycle ceiling. Manifests and
+gates record the limits, progress deltas, stop state, functional
+approximations, and architectural-validation eligibility. A fault also writes
+`failure.json` and a resumable checkpoint. The broader fault-encoding list may
+contain valid instructions rejected for resource/timing conflicts; only the
+separate unsupported-encoding list is an opcode-support claim.
+
+Run the focused and complete gates:
+
+```sh
+.venv/bin/python -m pytest -q \
+  tests/test_c674x.py tests/test_dsp_replay.py \
+  tests/test_dsp_checkpoint_replay.py
+.venv/bin/python -m pytest -q
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+```
+
+The focused gate reports 24 passed.  With localhost sockets available, the
+complete suite reports 191 passed / 43 optional skips.  CPU, INTC, McASP,
+EDMA, and checkpoint C stubs also pass when compiled with
+`-fsanitize=address,undefined -Wall -Wextra -Werror`.
+
+Recheck old checkpoint migration with new output directories:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-addk-functional-1/final.cdjdsp \
+  runs/NEW_SCHEMA6_TO_8 --steps 1 \
+  --functional-dsp-timing --verify-repeat
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-mcasp-functional-2/final.cdjdsp \
+  runs/NEW_SCHEMA7_TO_8 --steps 1 \
+  --functional-dsp-timing --verify-repeat
+```
+
+Recorded migrations are `runs/dsp-schema6-to-8-migration-2` and
+`runs/dsp-schema7-to-8-migration-2`. Both produce schema-8 checkpoints and
+pass trace, coverage, state and memory repeat gates.
+
+Collect strict connected evidence and replay all MAIN/HPI events:
+
+```sh
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_DSP_STRICT --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_DSP_STRICT/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_DSP_STRICT_REPLAY --steps 100000000 \
+  --events runs/NEW_DSP_STRICT/dsp-events.jsonl --verify-repeat
+```
+
+`runs/nxs-dsp-batch-strict-3` and `runs/dsp-batch-strict-replay-5`
+verify 39 connected stops and exact repeat state/memory. Strict execution
+fails closed at 25,364,865 packets / 60,779,972 cycles, PC `0xc004f306`, word
+`0x2627`, on the known SPLOOPD epilog register conflict. Trace SHA-256 is
+`e87f6d32b6cadc3760cd733776071dbf7b41a8f73ba8e0216b9dc2cf87c1eab3`;
+coverage SHA-256 is
+`d391220454a1da003e573451596389ea3472da36712e4109ad44af9610aa42ce`.
+The repeat gate passing proves reproducibility of this failure, not boot.
+
+For downstream breadth and coarse audio-flow discovery, preserve both labels:
+
+```sh
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_DSP_FUNCTIONAL --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4 \
+  --functional-dsp-timing --functional-dsp-audio
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_DSP_FUNCTIONAL/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_DSP_FUNCTIONAL_REPLAY --steps 100000000 \
+  --events runs/NEW_DSP_FUNCTIONAL/dsp-events.jsonl \
+  --functional-dsp-timing --functional-dsp-audio --verify-repeat
+```
+
+`runs/nxs-dsp-batch-functional-3` and
+`runs/dsp-batch-functional-replay-3` verify all 40 connected stops and exact
+repeat state/memory. The run ends by budget at 27,099,500 packets / 66,177,094
+cycles. Coverage has 3,447 confirmed source packets, 4,276 confirmed
+instruction addresses, 3,654 distinct encodings, 3,560 dynamic edges, 13
+probable direct targets, and zero unsupported faults. Trace SHA-256 is
+`18e075624287cc0f0a2cfaedb1c2bbf8f5125ea9a718f84c6abfd0f4305f971b`;
+coverage SHA-256 is
+`4cee443f0f9b77e18c8e0e4fcc7dd3934c7a9f2ed754aa41bc34c05b9fb166ce`.
+
+Functional audio advances active McASP1/2 slots once per 1,024 successful DSP
+packets and services the resulting EDMA work atomically. This is a deterministic
+coarse scheduler, not a sample clock. It consumes only genuine accepted XBUF
+words, records underruns, and does not synthesize PCM, input, a host sink, or
+rate matching. Both functional switches make the run ineligible for
+architectural timing claims.
+
+The strict schedule around `0xc004f2ec..0xc004f306` matches SPRUFE8B's
+SPLOOPD formulas: II=1, 128 iterations, dynamic length 7, and
+`SPKERNEL 3,0`. The post-loop `MVK .L2 1,B4` overlaps a buffered
+`MV .L2X A3,B4`. A two-cycle delay avoids the conflict but is not supported by
+the ISA documentation. Keep it functional-only pending C6747 ISS/EVM or
+D810K013 IERR/LBX evidence. TSR.SPLX loop-return behavior is also not yet
+implemented. Do not relax the strict resource check or describe the functional
+run as full DSP parity, full boot, or working audio.

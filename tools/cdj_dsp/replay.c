@@ -15,6 +15,7 @@
 #include "cdj_c6747_intc.h"
 #include "cdj_c6747_timer.h"
 #include "cdj_c6747_spi.h"
+#include "cdj_c6747_cache.h"
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
@@ -25,11 +26,16 @@ static uint8_t sdram[0x2000000];
 static CdjC6747Syscfg syscfg;
 static CdjC6747Psc psc;
 static CdjC6747Mcasp mcasp;
+static CdjC6747McaspControl mcasp_control;
 static CdjC6747Gpio gpio;
 static CdjC6747I2c i2c;
 static CdjC6747Intc intc;
+static CdjC6747IntcDelivery intc_delivery;
 static CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
 static CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
+static CdjC6747Cache cache;
+static CdjC6747Edma edma;
+static CdjC6747SyscfgPriority syscfg_priority;
 static CdjC6747Pll pll;
 static CdjC6747Hpi hpi;
 static CdjC6747Emifb emifb;
@@ -44,6 +50,7 @@ typedef struct {
 static PendingHpicEvent hpic_events[16];
 static unsigned hpic_count;
 static bool hpic_overflow;
+static bool functional_audio;
 static bool read_bus(void *unused, uint32_t address, uint32_t *value);
 
 /* Compact dynamic coverage is emitted once at the end of a run. Keeping it
@@ -231,14 +238,19 @@ static void restore_devices(const CdjDspCheckpointState *state)
     syscfg = state->syscfg;
     psc = state->psc;
     mcasp = state->mcasp;
+    mcasp_control = state->mcasp_control;
     gpio = state->gpio;
     i2c = state->i2c;
     pll = state->pll;
     hpi = state->hpi;
     emifb = state->emifb;
     intc = state->intc;
+    intc_delivery = state->intc_delivery;
     memcpy(timers, state->timers, sizeof(timers));
     memcpy(spis, state->spis, sizeof(spis));
+    cache = state->cache;
+    edma = state->edma;
+    syscfg_priority = state->syscfg_priority;
 }
 
 static void capture_devices(CdjDspCheckpointState *state, const char *reason)
@@ -247,14 +259,19 @@ static void capture_devices(CdjDspCheckpointState *state, const char *reason)
     state->syscfg = syscfg;
     state->psc = psc;
     state->mcasp = mcasp;
+    state->mcasp_control = mcasp_control;
     state->gpio = gpio;
     state->i2c = i2c;
     state->pll = pll;
     state->hpi = hpi;
     state->emifb = emifb;
     state->intc = intc;
+    state->intc_delivery = intc_delivery;
     memcpy(state->timers, timers, sizeof(state->timers));
     memcpy(state->spis, spis, sizeof(state->spis));
+    state->cache = cache;
+    state->edma = edma;
+    state->syscfg_priority = syscfg_priority;
     state->dsp_started = true;
     state->dsp_halted = cpu.fault != NULL;
     ++state->checkpoint_sequence;
@@ -280,13 +297,17 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
 {
     (void)unused;
     if (cdj_c6747_syscfg_read(&syscfg, a, v)) return true;
+    if (cdj_c6747_syscfg_priority_read(&syscfg_priority, a, v)) return true;
     if (cdj_c6747_psc_read(&psc, a, v)) return true;
     if (cdj_c6747_mcasp_read(&mcasp, a, v)) return true;
+    if (cdj_c6747_mcasp_control_read(&mcasp_control, a, v)) return true;
     if (cdj_c6747_gpio_read(&gpio, a, v)) return true;
     if (cdj_c6747_i2c_read(&i2c, a, v)) return true;
     if (cdj_c6747_intc_read(&intc, a, v)) return true;
     if (cdj_c6747_timers_read(timers, a, v)) return true;
     if (cdj_c6747_spis_read(spis, a, v)) return true;
+    if (cdj_c6747_cache_read(&cache, a, v)) return true;
+    if (cdj_c6747_edma_read(&edma, a, v)) return true;
     if (cdj_c6747_pll_read(&pll, a, v)) return true;
     if (cdj_c6747_emifb_read(&emifb, a, v)) return true;
     if ((syscfg.cfgchip[1] & 0x8000) && cdj_c6747_hpi_cpu_read(&hpi, a, v)) return true;
@@ -310,17 +331,219 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
     *v = ram[a] | (uint32_t)ram[a+1] << 8 | (uint32_t)ram[a+2] << 16 | (uint32_t)ram[a+3] << 24;
     return true;
 }
+
+static uint8_t *memory_span(uint32_t address, size_t size)
+{
+    uint64_t end;
+    address = global(address);
+    end = (uint64_t)address + size;
+    if (!size || end > UINT64_C(0x100000000)) return NULL;
+    if (address >= 0x11800000u && end <= UINT64_C(0x11840000))
+        return ram + address - 0x11800000u;
+    if (address >= 0x80000000u && end <= UINT64_C(0x80020000))
+        return shared_ram + address - 0x80000000u;
+    if (cdj_c6747_emifb_sdram_enabled(&emifb) &&
+        address >= 0xc0000000u && end <= UINT64_C(0xc2000000))
+        return sdram + address - 0xc0000000u;
+    return NULL;
+}
+
+typedef struct {
+    uint8_t *target;
+    uint8_t *bytes;
+    size_t size;
+} EdmaStagedWrite;
+
+typedef struct {
+    CdjC6747McaspControl *mcasp;
+    EdmaStagedWrite *writes;
+    size_t write_count, write_capacity;
+} EdmaBusContext;
+
+static bool edma_stage_write(EdmaBusContext *context, uint8_t *target,
+                             const uint8_t *bytes, size_t size)
+{
+    if (context->write_count == context->write_capacity) {
+        size_t capacity = context->write_capacity ?
+                          context->write_capacity * 2u : 8u;
+        if (capacity < context->write_capacity) return false;
+        EdmaStagedWrite *writes = realloc(
+            context->writes, capacity * sizeof(*writes));
+        if (!writes) return false;
+        context->writes = writes;
+        context->write_capacity = capacity;
+    }
+    uint8_t *copy = malloc(size);
+    if (!copy) return false;
+    memcpy(copy, bytes, size);
+    context->writes[context->write_count++] =
+        (EdmaStagedWrite){target, copy, size};
+    return true;
+}
+
+static void edma_free_staged_writes(EdmaBusContext *context)
+{
+    for (size_t i = 0; i < context->write_count; ++i)
+        free(context->writes[i].bytes);
+    free(context->writes);
+}
+
+static bool edma_read_bytes(void *unused, uint32_t address, uint8_t *bytes,
+                            size_t size)
+{
+    (void)unused;
+    uint8_t *source = memory_span(address, size);
+    if (!source) return false;
+    memcpy(bytes, source, size);
+    EdmaBusContext *context = unused;
+    uintptr_t read_start = (uintptr_t)source;
+    uintptr_t read_end = read_start + size;
+    for (size_t i = 0; i < context->write_count; ++i) {
+        EdmaStagedWrite *write = &context->writes[i];
+        uintptr_t write_start = (uintptr_t)write->target;
+        uintptr_t write_end = write_start + write->size;
+        if (write_start < read_end && read_start < write_end) {
+            uintptr_t start = write_start > read_start ? write_start : read_start;
+            uintptr_t end = write_end < read_end ? write_end : read_end;
+            memcpy(bytes + start - read_start,
+                   write->bytes + start - write_start, end - start);
+        }
+    }
+    return true;
+}
+
+static bool edma_write_bytes(void *unused, uint32_t address,
+                             const uint8_t *bytes, size_t size, bool commit)
+{
+    EdmaBusContext *context = unused;
+    uint8_t *target = memory_span(address, size);
+    if (target) {
+        return !commit || edma_stage_write(context, target, bytes, size);
+    }
+    if (size == 4) {
+        uint32_t value = bytes[0] | (uint32_t)bytes[1] << 8 |
+                         (uint32_t)bytes[2] << 16 |
+                         (uint32_t)bytes[3] << 24;
+        return cdj_c6747_mcasp_control_write(context->mcasp, address,
+                                             value, 4, commit);
+    }
+    return false;
+}
+
+static bool service_mcasp_axevt(CdjC6747Edma *edma_state,
+                                CdjC6747McaspControl *mcasp_state,
+                                EdmaBusContext *context)
+{
+    const CdjC6747EdmaBus bus = {edma_read_bytes, edma_write_bytes, context};
+    for (unsigned instance = 1; instance <= 2; ++instance) {
+        unsigned channel = instance == 1 ? 3 : 5;
+        for (unsigned serializer = 0;
+             serializer < 16 &&
+             cdj_c6747_mcasp_axevt_ready(mcasp_state, instance);
+             ++serializer) {
+            uint64_t before = mcasp_state->xbuf_writes[instance];
+            if (!cdj_c6747_edma_event(edma_state, channel, &bus)) return false;
+            if (mcasp_state->xbuf_writes[instance] == before) break;
+        }
+    }
+    return true;
+}
+
+static void deliver_edma_notifications(void)
+{
+    if (cdj_c6747_edma_take_irq_notification(&edma, 1))
+        cdj_c6747_intc_deliver_event(&intc, &intc_delivery, 8);
+}
+
+static bool edma_mcasp_transaction(bool edma_access, uint32_t address,
+                                   uint64_t value, unsigned size, bool commit)
+{
+    CdjC6747Edma trial_edma = edma;
+    CdjC6747McaspControl trial_mcasp = mcasp_control;
+    EdmaBusContext trial_context = {.mcasp = &trial_mcasp};
+    const CdjC6747EdmaBus trial_bus = {
+        edma_read_bytes, edma_write_bytes, &trial_context,
+    };
+    bool ok = edma_access ?
+        cdj_c6747_edma_write(&trial_edma, address, value, size, true,
+                             &trial_bus) :
+        cdj_c6747_mcasp_control_write(&trial_mcasp, address, value, size, true);
+    if (ok) ok = service_mcasp_axevt(&trial_edma, &trial_mcasp,
+                                     &trial_context);
+    if (ok && commit) {
+        for (size_t i = 0; i < trial_context.write_count; ++i) {
+            EdmaStagedWrite *write = &trial_context.writes[i];
+            memcpy(write->target, write->bytes, write->size);
+        }
+        edma = trial_edma;
+        mcasp_control = trial_mcasp;
+        deliver_edma_notifications();
+    }
+    edma_free_staged_writes(&trial_context);
+    return ok;
+}
+
+static bool advance_functional_mcasp_slots(void)
+{
+    CdjC6747Edma trial_edma = edma;
+    CdjC6747McaspControl trial_mcasp = mcasp_control;
+    EdmaBusContext trial_context = {.mcasp = &trial_mcasp};
+    bool advanced = false, ok = true;
+
+    for (unsigned instance = 1; instance <= 2; ++instance) {
+        if ((trial_mcasp.gblctl[instance] & 0x1f00u) != 0x1f00u)
+            continue;
+        bool axevt;
+        if (!cdj_c6747_mcasp_tx_slot(&trial_mcasp, instance, &axevt)) {
+            ok = false;
+            break;
+        }
+        advanced = true;
+    }
+    if (ok && advanced)
+        ok = service_mcasp_axevt(&trial_edma, &trial_mcasp, &trial_context);
+    if (ok && advanced) {
+        for (size_t i = 0; i < trial_context.write_count; ++i) {
+            EdmaStagedWrite *write = &trial_context.writes[i];
+            memcpy(write->target, write->bytes, write->size);
+        }
+        edma = trial_edma;
+        mcasp_control = trial_mcasp;
+        deliver_edma_notifications();
+    }
+    edma_free_staged_writes(&trial_context);
+    return ok;
+}
+
+static bool functional_audio_tick(void)
+{
+    if (!functional_audio ||
+        cpu.packets % CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL)
+        return true;
+    if (advance_functional_mcasp_slots()) return true;
+    cpu.fault = "unsupported functional McASP transmit slot";
+    cpu.fault_pc = cpu.pc;
+    cpu.fault_word = 0;
+    return false;
+}
+
 static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool commit)
 {
     (void)unused;
     bool ok = cdj_c6747_syscfg_write(&syscfg, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_syscfg_priority_write(
+        &syscfg_priority, &syscfg, a, v, size, commit);
     if (!ok) ok = cdj_c6747_psc_write(&psc, a, v, size, commit);
     if (!ok) ok = cdj_c6747_mcasp_write(&mcasp, a, v, size, commit);
+    if (!ok) ok = edma_mcasp_transaction(false, a, v, size, commit);
     if (!ok) ok = cdj_c6747_gpio_write(&gpio, a, v, size, commit);
     if (!ok) ok = cdj_c6747_i2c_write(&i2c, a, v, size, commit);
-    if (!ok) ok = cdj_c6747_intc_write(&intc, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_intc_write_delivery(
+        &intc, &intc_delivery, a, v, size, commit);
     if (!ok) ok = cdj_c6747_timers_write(timers, a, v, size, commit);
     if (!ok) ok = cdj_c6747_spis_write(spis, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_cache_write(&cache, a, v, size, commit);
+    if (!ok) ok = edma_mcasp_transaction(true, a, v, size, commit);
     if (!ok && cdj_c6747_syscfg_pll_locked(&syscfg) &&
         cdj_c6747_pll_write_mapped(a, size)) ok = true;
     if (!ok) ok = cdj_c6747_pll_write(&pll, a, v, size, commit);
@@ -395,25 +618,56 @@ static bool parse_event(const char *line, RecordedEvent *event)
     return true;
 }
 
-static const char *run_budget(unsigned long long *remaining, uint32_t breakpoint)
+typedef struct {
+    uint64_t steps_remaining;
+    uint64_t initial_packets, initial_cycles;
+    uint64_t packet_limit, cycle_limit;
+} ReplayLimits;
+
+static uint64_t counter_delta(uint64_t value, uint64_t initial)
+{
+    return value >= initial ? value - initial : 0;
+}
+
+static const char *limit_reached(const ReplayLimits *limits)
+{
+    if (!limits->steps_remaining) return "step_limit";
+    if (limits->packet_limit &&
+        counter_delta(cpu.packets, limits->initial_packets) >= limits->packet_limit)
+        return "packet_limit";
+    if (limits->cycle_limit &&
+        counter_delta(cpu.cycles, limits->initial_cycles) >= limits->cycle_limit)
+        return "cycle_limit";
+    return NULL;
+}
+
+static const char *run_budget(ReplayLimits *limits, uint32_t breakpoint)
 {
     const char *reason = "phase budget exhausted";
-    for (unsigned step = 0; step < CDJ_DSP_COOPERATIVE_BUDGET && *remaining;
-         ++step, --*remaining) {
+    for (unsigned step = 0; step < CDJ_DSP_COOPERATIVE_BUDGET; ++step) {
+        const char *limited = limit_reached(limits);
+        if (limited) return limited;
         if (breakpoint && cpu.pc == breakpoint) return "breakpoint";
+        deliver_edma_notifications();
+        if (!cdj_c674x_interrupt(
+                &cpu, cdj_c6747_intc_cpu_pending(&intc_delivery)))
+            return cpu.fault ? cpu.fault : "CPU interrupt stopped";
         CdjC674x before = cpu;
         CdjC674xPacket coverage_packet;
         bool has_coverage_packet = coverage_capture(&before, &coverage_packet);
         if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL))
             return cpu.fault ? cpu.fault : "CPU stopped";
         coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
+        --limits->steps_remaining;
         cdj_c6747_psc_tick(&psc);
+        if (!functional_audio_tick())
+            return cpu.fault;
         if (hpi.hint) return "HINT host-event yield";
     }
-    return *remaining ? reason : "step_limit";
+    return reason;
 }
 
-static bool replay_external_events(const char *path, unsigned long long limit,
+static bool replay_external_events(const char *path, ReplayLimits *limits,
                                    uint32_t breakpoint, const char **reason)
 {
     FILE *file = fopen(path, "r");
@@ -425,7 +679,7 @@ static bool replay_external_events(const char *path, unsigned long long limit,
     *reason = "event_eof";
     if (!strcmp(checkpoint_state.stop_reason, "DSP start boundary") ||
         !strcmp(checkpoint_state.stop_reason, "boot-phase boundary")) {
-        *reason = run_budget(&limit, breakpoint);
+        *reason = run_budget(limits, breakpoint);
         stop_pending = true;
     }
     while (fgets(line, sizeof(line), file)) {
@@ -453,8 +707,10 @@ static bool replay_external_events(const char *path, unsigned long long limit,
             bool old_hint = hpi.hint;
             bool old_dspint = hpi.dspint;
             cdj_c6747_hpi_host_write(&hpi, event.value);
-            if (!old_dspint && hpi.dspint) cdj_c6747_intc_event(&intc, 34);
-            trigger = old_hint && !hpi.hint;
+            bool dspint_rising = !old_dspint && hpi.dspint;
+            if (dspint_rising)
+                cdj_c6747_intc_deliver_event(&intc, &intc_delivery, 34);
+            trigger = (old_hint && !hpi.hint) || dspint_rising;
         } else if (!strcmp(event.type, "hpi_host_address_write")) {
             if (event.offset != 0x40000 || event.size != 4 ||
                 event.address != checkpoint_state.hpi_address || event.value > UINT32_MAX)
@@ -518,8 +774,8 @@ static bool replay_external_events(const char *path, unsigned long long limit,
         if (event.boot_phase != checkpoint_state.boot_phase ||
             event.hint != hpi.hint || event.dspint != hpi.dspint) goto mismatch;
         if (trigger) {
-            if (stop_pending || cpu.fault || !limit) goto mismatch;
-            *reason = run_budget(&limit, breakpoint);
+            if (stop_pending || cpu.fault || limit_reached(limits)) goto mismatch;
+            *reason = run_budget(limits, breakpoint);
             stop_pending = true;
         }
         continue;
@@ -536,16 +792,26 @@ mismatch:
 }
 int main(int argc, char **argv)
 {
-    if (argc < 5 || argc > 7) return 2;
+    const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
+    const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
+    cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
+    functional_audio = audio && !strcmp(audio, "1");
+    if (argc != 8 && argc != 9) return 2;
     char *end;
     errno = 0;
     unsigned long long limit = strtoull(argv[2], &end, 10);
     if (errno || *end || !limit || argv[2][0] == '-') return 2;
     errno = 0;
-    unsigned long long breakpoint = strtoull(argv[3], &end, 0);
+    unsigned long long packet_limit = strtoull(argv[3], &end, 10);
+    if (errno || *end || argv[3][0] == '-') return 2;
+    errno = 0;
+    unsigned long long cycle_limit = strtoull(argv[4], &end, 10);
+    if (errno || *end || argv[4][0] == '-') return 2;
+    errno = 0;
+    unsigned long long breakpoint = strtoull(argv[5], &end, 0);
     if (errno || *end || breakpoint > UINT32_MAX) return 2;
     errno = 0;
-    unsigned long boot_phase = strtoul(argv[4], &end, 0);
+    unsigned long boot_phase = strtoul(argv[6], &end, 0);
     if (errno || *end || boot_phase > 7) return 2;
     FILE *f = fopen(argv[1], "rb");
     if (!f) { perror("dump"); return 2; }
@@ -555,7 +821,10 @@ int main(int argc, char **argv)
                        !memcmp(magic, "CDJDSP2\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP3\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP4\0", sizeof(magic)) ||
-                       !memcmp(magic, "CDJDSP5\0", sizeof(magic)));
+                       !memcmp(magic, "CDJDSP5\0", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP6\0", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP7\0", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP8\0", sizeof(magic)));
     rewind(f);
     bool valid = false;
     if (!checkpoint)
@@ -584,14 +853,19 @@ int main(int argc, char **argv)
     } else {
         if (!valid) { fputs("expected exactly 256 KiB of L2 or a compatible checkpoint\n", stderr); return 2; }
         cdj_c6747_syscfg_reset(&syscfg);
+        cdj_c6747_syscfg_priority_reset(&syscfg_priority);
         cdj_c6747_psc_reset(&psc);
         cdj_c6747_mcasp_reset(&mcasp);
+        cdj_c6747_mcasp_control_reset(&mcasp_control);
         cdj_c6747_gpio_reset(&gpio);
         cdj_c6747_i2c_reset(&i2c);
         cdj_c6747_intc_reset(&intc);
+        cdj_c6747_intc_delivery_reset(&intc_delivery);
         cdj_c6747_timers_reset(timers);
         cdj_c6747_spis_reset(spis);
         cdj_c6747_pll_reset(&pll);
+        cdj_c6747_cache_reset(&cache);
+        cdj_c6747_edma_reset(&edma);
         cdj_c6747_hpi_reset(&hpi);
         cdj_c6747_emifb_reset(&emifb);
         cdj_c6747_gpio_set_input(&gpio, 4, 5, boot_phase & 1);
@@ -600,7 +874,7 @@ int main(int argc, char **argv)
         cdj_c6747_hpi_rom_boot_ready(&hpi);
         cdj_c6747_hpi_host_write(&hpi, 0x01050105); /* MAIN acks ROM HINT and selects HWOB. */
         cdj_c6747_hpi_host_write(&hpi, 0x01030103); /* Captured dump precedes DSPINT. */
-        cdj_c6747_intc_event(&intc, 34);
+        cdj_c6747_intc_deliver_event(&intc, &intc_delivery, 34);
         uint32_t entry;
         read_bus(NULL, 0x11800000, &entry);
         cdj_c674x_reset(&cpu, entry);
@@ -610,13 +884,28 @@ int main(int argc, char **argv)
     cpu.cycle_tick = cycle_tick;
     coverage_initial_packets = cpu.packets;
     coverage_initial_cycles = cpu.cycles;
+    ReplayLimits limits = {
+        .steps_remaining = limit,
+        .initial_packets = cpu.packets,
+        .initial_cycles = cpu.cycles,
+        .packet_limit = packet_limit,
+        .cycle_limit = cycle_limit,
+    };
     const char *reason = "step_limit";
-    if (argc == 7) {
-        if (!checkpoint || !replay_external_events(argv[6], limit, breakpoint, &reason))
+    if (argc == 9) {
+        if (!checkpoint || !replay_external_events(argv[8], &limits, breakpoint, &reason))
             return 2;
     } else {
-        for (unsigned long long step = 0; step < limit; ++step) {
+        for (;;) {
+            const char *limited = limit_reached(&limits);
+            if (limited) { reason = limited; break; }
             if (breakpoint && cpu.pc == breakpoint) { reason = "breakpoint"; break; }
+            deliver_edma_notifications();
+            if (!cdj_c674x_interrupt(
+                    &cpu, cdj_c6747_intc_cpu_pending(&intc_delivery))) {
+                reason = "fault";
+                break;
+            }
             printf("{\"event\":\"step\",\"pc\":%" PRIu32 ",\"cycles\":%" PRIu64
                    ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
                    cpu.pc, cpu.cycles, cpu.loop_active ? "true" : "false", cpu.branch_due);
@@ -625,7 +914,9 @@ int main(int argc, char **argv)
             bool has_coverage_packet = coverage_capture(&before, &coverage_packet);
             if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL)) { reason = "fault"; break; }
             coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
+            --limits.steps_remaining;
             cdj_c6747_psc_tick(&psc);
+            if (!functional_audio_tick()) { reason = "fault"; break; }
             if (hpi.hint) { reason = "host_event_required"; break; }
         }
     }
@@ -657,10 +948,10 @@ int main(int argc, char **argv)
            hpi.dspint ? "true" : "false", hpi.hint ? "true" : "false",
            emifb.sdcfg, emifb.sdrfc, emifb.sdtim1, emifb.sdtim2,
            emifb.init_sequences);
-    if (argc >= 6) {
+    if (argc >= 8) {
         char error[160] = {0};
         capture_devices(&checkpoint_state, reason);
-        if (!cdj_dsp_checkpoint_write(argv[5], &checkpoint_state, ram, sizeof(ram),
+        if (!cdj_dsp_checkpoint_write(argv[7], &checkpoint_state, ram, sizeof(ram),
                                       shared_ram, sizeof(shared_ram), sdram,
                                       sizeof(sdram), error, sizeof(error))) {
             fprintf(stderr, "%s\n", error);

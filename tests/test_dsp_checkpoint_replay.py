@@ -19,7 +19,7 @@ def encoded_event(sequence, kind, *, offset=0, address=0, value=0, size=0,
     return json.dumps(event, separators=(',', ':')) + '\n'
 
 
-def make_checkpoint(tmp_path):
+def make_checkpoint(tmp_path, stop_reason='boot-phase boundary'):
     cc = shutil.which('cc')
     if not cc:
         pytest.skip('requires C compiler')
@@ -32,12 +32,17 @@ def make_checkpoint(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'),
         str(ROOT / 'tests/cstub/dsp-event-checkpoint.c'),
         str(ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_syscfg.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_intc.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_timer.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_spi.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_cache.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_mcasp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_edma.c'),
         '-o', str(maker),
     ], check=True)
-    subprocess.run([str(maker), str(checkpoint)], check=True, timeout=5)
+    subprocess.run([str(maker), str(checkpoint), stop_reason],
+                   check=True, timeout=5)
     return checkpoint_dir, checkpoint
 
 
@@ -68,6 +73,10 @@ def test_injects_and_repeat_gates_connected_stop(tmp_path):
     assert gate['passed']
     assert gate['verified_connected_stops'] == 1
     assert gate['repeat_matches'] and gate['final_state_and_memory_match']
+    failure = json.loads((output / 'failure.json').read_text())
+    assert failure['outcome'] == 'fail_closed_fault'
+    assert failure['stop']['fault']
+    assert failure['stop']['reason'] == failure['stop']['fault']
 
 
 def test_rejects_event_transcript_without_manifest_provenance(tmp_path):
@@ -113,3 +122,36 @@ def test_rejects_connected_stop_state_mismatch(tmp_path):
     ], cwd=ROOT, text=True, capture_output=True, timeout=30)
     assert result.returncode != 0
     assert 'event replay mismatch at sequence 2 (dsp_stop)' in result.stderr
+
+
+def test_later_dspint_alone_resumes_event_replay(tmp_path):
+    checkpoint_dir, checkpoint = make_checkpoint(
+        tmp_path, stop_reason='phase budget exhausted')
+    transcript = tmp_path / 'events.jsonl'
+    transcript.write_text(
+        encoded_event(1, 'boot_phase') +
+        encoded_event(2, 'hpi_host_control_write', address=0x11800000,
+                      value=2, size=4, dspint=True) +
+        encoded_event(3, 'dsp_stop', address=0x118001e0,
+                      value=0xdeadcafe, dspint=True)
+    )
+    (checkpoint_dir / 'manifest.json').write_text(json.dumps({
+        'complete': True,
+        'checkpoints': [{
+            'file': checkpoint.name,
+            'sha256': hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        }],
+        'event_transcript': {
+            'sha256': hashlib.sha256(transcript.read_bytes()).hexdigest(),
+        },
+    }))
+    output = tmp_path / 'replay'
+    result = subprocess.run([
+        sys.executable, '-m', 'tools.cdj_dsp.replay', str(checkpoint),
+        str(output), '--steps', '100', '--events', str(transcript),
+        '--verify-repeat',
+    ], cwd=ROOT, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    gate = json.loads((output / 'gate.json').read_text())
+    assert gate['passed'] and gate['verified_connected_stops'] == 1
+    assert gate['repeat_matches'] and gate['final_state_and_memory_match']

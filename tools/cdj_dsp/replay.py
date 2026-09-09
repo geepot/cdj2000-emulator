@@ -7,6 +7,7 @@ Faults and step limits are diagnostic outcomes, never evidence of boot success.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -24,11 +25,14 @@ SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
      'cdj_c6747_hpi.c', 'cdj_c6747_emifb.c', 'cdj_c6747_intc.c',
      'cdj_c6747_timer.c',
      'cdj_c6747_spi.c',
+     'cdj_c6747_cache.c',
+     'cdj_c6747_edma.c',
      'cdj_dsp_checkpoint.c')]]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
-                    4: b'CDJDSP4\0', 5: b'CDJDSP5\0'}
+                    4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
+                    7: b'CDJDSP7\0', 8: b'CDJDSP8\0'}
 SHARED_RAM_SIZE = 0x20000
 DEFAULT_FORMATS = ROOT / 'build/gdb-17.2/include/opcode/tic6x-insn-formats.h'
 ANALYSIS_SOURCES = [ROOT / 'tools/cdj_dsp/coverage.py',
@@ -109,13 +113,18 @@ def checkpoint_provenance(path: Path, data: bytes, info: dict) -> dict:
     key = ('final_checkpoint' if path.name == 'final.cdjdsp' else
            'repeat_final_checkpoint' if path.name == 'repeat-final.cdjdsp' else None)
     recorded = gate.get(key, {}) if key else {}
-    if (not gate.get('passed') or not gate.get('repeat_matches') or
-            not gate.get('final_state_and_memory_match') or
-            recorded.get('checkpoint_sha256') != info['checkpoint_sha256']):
-        raise ValueError('checkpoint is absent from a complete connected manifest or exact replay gate')
-    result.update(origin='deterministic_replay_checkpoint',
-                  gate_sha256=hashlib.sha256(gate_data).hexdigest())
-    return result
+    if (gate.get('passed') and gate.get('repeat_matches') and
+            gate.get('final_state_and_memory_match') and
+            recorded.get('checkpoint_sha256') == info['checkpoint_sha256']):
+        result.update(origin='deterministic_replay_checkpoint',
+                      gate_sha256=hashlib.sha256(gate_data).hexdigest())
+        return result
+    output = capture_manifest.get('output_checkpoint', {})
+    if (capture_manifest.get('complete') and output.get('file') == path.name and
+            output.get('checkpoint_sha256') == info['checkpoint_sha256']):
+        result.update(origin='diagnostic_replay_checkpoint')
+        return result
+    raise ValueError('checkpoint is absent from a complete connected manifest or replay provenance')
 
 
 def newest_checkpoint(directory: Path):
@@ -142,7 +151,12 @@ def main():
     parser.add_argument('dump', type=Path,
                         help='checkpoint/raw L2 file, or directory whose newest valid checkpoint is selected')
     parser.add_argument('output', type=Path, help='new directory for manifest and trace')
-    parser.add_argument('--steps', type=int, default=10000)
+    parser.add_argument('--steps', '--instructions', dest='steps', type=int, default=10000,
+                        help='maximum successful core step calls (default: 10000)')
+    parser.add_argument('--packets', type=int, default=0,
+                        help='maximum packet-count delta from input checkpoint (0 disables)')
+    parser.add_argument('--cycles', type=int, default=0,
+                        help='maximum cycle-count delta from input checkpoint (0 disables)')
     parser.add_argument('--break-pc', type=lambda value: int(value, 0), default=0,
                         help='stop before executing this program counter (0 disables)')
     parser.add_argument('--boot-phase', type=lambda value: int(value, 0), default=0,
@@ -153,12 +167,20 @@ def main():
                         help='also require byte-identical output to this saved trace; not a boot test')
     parser.add_argument('--events', type=Path,
                         help='inject later events from the checkpoint connected-run transcript')
+    parser.add_argument('--functional-dsp-timing', action='store_true',
+                        help='use labeled two-cycle SPLOOPD run-ahead; deterministic but not cycle-validation evidence')
+    parser.add_argument('--functional-dsp-audio', action='store_true',
+                        help='schedule labeled coarse McASP slots; deterministic but not audio-timing evidence')
     parser.add_argument('--formats', type=Path, default=DEFAULT_FORMATS,
                         help='GNU tic6x-insn-formats.h used for automatic coverage')
     args = parser.parse_args()
-    if (not 0 < args.steps <= 100000000 or not 0 <= args.break_pc <= 0xffffffff or
+    if (not 0 < args.steps <= 100000000 or
+            not 0 <= args.packets <= 0xffffffffffffffff or
+            not 0 <= args.cycles <= 0xffffffffffffffff or
+            not 0 <= args.break_pc <= 0xffffffff or
             not 0 <= args.boot_phase <= 7):
-        parser.error('steps must be 1..100000000, breakpoint must fit 32 bits, and boot phase must be 0..7')
+        parser.error('steps must be 1..100000000; packets/cycles must fit 64 bits; '
+                     'breakpoint must fit 32 bits; boot phase must be 0..7')
     selected_checkpoint = None
     selected_provenance = None
     if args.dump.is_dir():
@@ -235,8 +257,22 @@ def main():
             'ordered post-checkpoint MAIN/HPI events injected and gated against every connected DSP stop'
             if event_data is not None else
             'no later MAIN/HPI events injected; replay stops when an external event is required')
+        approximations = [
+            *(['two-cycle SPLOOPD functional run-ahead; not cycle-accurate']
+               if args.functional_dsp_timing else []),
+            *(['coarse packet-driven McASP slots; not audio-rate or cycle-accurate']
+               if args.functional_dsp_audio else []),
+        ]
+        limits = dict(steps=args.steps, packets=args.packets, cycles=args.cycles,
+                      packet_cycle_origin='input checkpoint counters',
+                      boundary_semantics='checked between successful core steps; multicycle steps may cross a cycle ceiling')
         manifest = dict(dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
+                        limits=limits, approximations=approximations,
+                        dsp_timing_mode=('functional-runahead' if args.functional_dsp_timing else 'strict'),
+                        dsp_audio_mode=('coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
+                        architectural_validation_eligible=not (
+                            args.functional_dsp_timing or args.functional_dsp_audio),
                         break_pc=args.break_pc, boot_phase=args.boot_phase,
                         input_kind=checkpoint_origin if checkpoint else 'legacy_l2_dump',
                         input_checkpoint=input_checkpoint,
@@ -272,17 +308,27 @@ def main():
                             str(args.formats.resolve()): hashlib.sha256(format_data).hexdigest(),
                         })
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-        command = [str(binary), str(snapshot), str(args.steps), str(args.break_pc),
-                   str(args.boot_phase), str(args.output / 'final.cdjdsp')]
+        command = [str(binary), str(snapshot), str(args.steps), str(args.packets),
+                   str(args.cycles), str(args.break_pc), str(args.boot_phase),
+                   str(args.output / 'final.cdjdsp')]
         if event_data is not None:
             command.append(str(event_snapshot))
+        replay_env = os.environ.copy()
+        if args.functional_dsp_timing:
+            replay_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
+        else:
+            replay_env.pop('CDJ_NXS_DSP_FUNCTIONAL_TIMING', None)
+        if args.functional_dsp_audio:
+            replay_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
+        else:
+            replay_env.pop('CDJ_NXS_DSP_FUNCTIONAL_AUDIO', None)
         with (args.output / 'trace.jsonl').open('w') as trace:
-            subprocess.run(command, stdout=trace, check=True)
+            subprocess.run(command, stdout=trace, check=True, env=replay_env)
         if args.verify_repeat:
             repeat_command = command.copy()
-            repeat_command[5] = str(args.output / 'repeat-final.cdjdsp')
+            repeat_command[7] = str(args.output / 'repeat-final.cdjdsp')
             with (args.output / 'repeat.jsonl').open('w') as trace:
-                subprocess.run(repeat_command, stdout=trace, check=True)
+                subprocess.run(repeat_command, stdout=trace, check=True, env=replay_env)
     coverage_data = {}
     for trace_name, checkpoint_name, output_name in [
             ('trace.jsonl', 'final.cdjdsp', 'coverage.json'),
@@ -310,20 +356,82 @@ def main():
         'counts': coverage_data['coverage.json'][0]['counts'],
         'validation_eligible': coverage_data['coverage.json'][0]['validation_eligible'],
     }
-    (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    primary_coverage = coverage_data['coverage.json'][0]
+    manifest['progress'] = primary_coverage.get('progress', {})
+    final_checkpoint_bytes = (args.output / 'final.cdjdsp').read_bytes()
+    manifest['output_checkpoint'] = {
+        'file': 'final.cdjdsp',
+        **checkpoint_info(final_checkpoint_bytes),
+    }
+    stop = None
     with (args.output / 'trace.jsonl').open() as trace:
-        last = None
         for line in trace:
-            last = line
-    print(last.strip() if last else 'No trace output')
+            event = json.loads(line)
+            if event.get('event') == 'stop':
+                stop = event
+    if stop is None:
+        parser.error('replay trace has no terminal stop record')
+    manifest['stop'] = {key: stop.get(key) for key in
+                        ('reason', 'fault', 'pc', 'fault_pc', 'fault_word',
+                         'packets', 'cycles')}
+    failure_bytes = None
+    if stop.get('fault'):
+        unsupported = {}
+        for item in primary_coverage.get('unsupported', []):
+            key = (item.get('word'), item.get('reason'))
+            unsupported[key] = dict(
+                word=item.get('word'), pc=item.get('pc'),
+                reason=item.get('reason'), width=None,
+                width_limitation='fault latch does not retain compact/full width')
+        unsupported_encodings = list(unsupported.values())
+        # A valid instruction can still terminate a packet for a resource or
+        # timing conflict.  Keep that terminal encoding in the broader fault
+        # set without misclassifying it as an unsupported opcode.
+        faults = dict(unsupported)
+        terminal_key = (stop.get('fault_word'), stop.get('fault'))
+        if stop.get('fault_word') is not None and terminal_key not in faults:
+            faults[terminal_key] = dict(
+                word=stop.get('fault_word'), pc=stop.get('fault_pc'),
+                reason=stop.get('fault'), width=None,
+                width_limitation='fault latch does not retain compact/full width')
+        failure = dict(
+            schema=1,
+            outcome='fail_closed_fault',
+            stop=manifest['stop'],
+            distinct_fault_encodings=list(faults.values()),
+            distinct_unsupported_encodings=unsupported_encodings,
+            resumable_checkpoint=manifest['output_checkpoint'],
+            progress=manifest['progress'],
+            approximations=manifest['approximations'],
+            limitation=('one fail-closed run normally exposes one terminal encoding; '
+                        'width is reported only when the core records it'),
+        )
+        failure_bytes = (json.dumps(failure, indent=2) + '\n').encode()
+        (args.output / 'failure.json').write_bytes(failure_bytes)
+        manifest['failure_artifact'] = {
+            'file': 'failure.json',
+            'sha256': hashlib.sha256(failure_bytes).hexdigest(),
+            'distinct_unsupported_encodings': len(unsupported_encodings),
+        }
+    manifest['complete'] = True
+    (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    print(json.dumps(stop, separators=(',', ':')))
     if args.verify_repeat or expected is not None:
         actual = (args.output / 'trace.jsonl').read_bytes()
         gate = dict(scope='trace equivalence only; not architectural correctness or boot',
+                    architectural_validation_eligible=not (
+                        args.functional_dsp_timing or args.functional_dsp_audio),
+                    limits=manifest['limits'],
+                    approximations=manifest['approximations'],
+                    progress=manifest['progress'],
+                    stop=manifest['stop'],
                     trace_sha256=hashlib.sha256(actual).hexdigest(),
                     coverage_sha256=manifest['coverage']['sha256'],
                     coverage_counts=manifest['coverage']['counts'],
                     coverage_validation_eligible=manifest['coverage']['validation_eligible'],
                     passed=True)
+        if failure_bytes is not None:
+            gate['failure_artifact_sha256'] = hashlib.sha256(failure_bytes).hexdigest()
         if event_data is not None:
             verified_stops = sum(
                 json.loads(line).get('event') == 'verified_connected_stop'

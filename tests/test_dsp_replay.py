@@ -31,6 +31,8 @@ def test_replay_determinism_breakpoints_and_limits(tmp_path):
     assert stop['reason'] == 'fault' and stop['fault_word'] == 0xffffffff
     assert stop['packets'] == 1 and stop['registers'][0][3] == 123
     for args, reason in [(('--steps', '1'), 'step_limit'),
+                         (('--packets', '1'), 'packet_limit'),
+                         (('--cycles', '1'), 'cycle_limit'),
                          (('--break-pc', '0x00800024'), 'breakpoint')]:
         result = run(dump, tmp_path / reason, *args)
         assert result.returncode == 0, result.stderr
@@ -41,7 +43,32 @@ def test_replay_determinism_breakpoints_and_limits(tmp_path):
     assert manifest['boot_rom_executed'] is False and len(manifest['dump_sha256']) == 64
     assert 'emulator/qemu/cdj_c674x.h' in manifest['sources']
     assert manifest['coverage']['counts']['confirmed_source_packets'] == 1
+    assert manifest['complete'] and manifest['progress']['packet_delta'] == 1
+    assert manifest['progress']['cycle_delta'] == 1
+    assert manifest['limits']['packets'] == 0 and manifest['limits']['cycles'] == 0
+    assert manifest['approximations'] == []
+    assert manifest['output_checkpoint']['file'] == 'final.cdjdsp'
     assert (tmp_path / 'first/coverage.json').is_file()
+    failure = json.loads((tmp_path / 'first/failure.json').read_text())
+    assert failure['outcome'] == 'fail_closed_fault'
+    assert failure['distinct_unsupported_encodings'] == [{
+        'word': 0xffffffff, 'pc': 0x11800024,
+        'reason': 'reserved predicate', 'width': None,
+        'width_limitation': 'fault latch does not retain compact/full width',
+    }]
+    assert failure['distinct_fault_encodings'] == \
+        failure['distinct_unsupported_encodings']
+    assert failure['resumable_checkpoint']['checkpoint_sha256'] == \
+        manifest['output_checkpoint']['checkpoint_sha256']
+    # Even a single diagnostic run is resumable with explicit (non-repeat)
+    # provenance; this does not claim deterministic equivalence.
+    resumed = tmp_path / 'resumed'
+    result = run(tmp_path / 'first/final.cdjdsp', resumed, '--instructions', '1')
+    assert result.returncode == 0, result.stderr
+    assert json.loads((resumed / 'manifest.json').read_text())['input_kind'] == \
+        'diagnostic_replay_checkpoint'
+    for reason in ('packet_limit', 'cycle_limit', 'breakpoint'):
+        assert not (tmp_path / reason / 'failure.json').exists()
 
 
 def test_replay_rejects_invalid_input_without_artifacts(tmp_path):
@@ -69,6 +96,7 @@ def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
     assert not gate['coverage_validation_eligible']
     assert gate['trace_sha256'] == gate['repeat_sha256']
     assert 'not architectural correctness or boot' in gate['scope']
+    assert gate['limits']['steps'] == 10000 and gate['approximations'] == []
     # An exactly repeated final checkpoint is a provenance-bearing resume
     # point; normal iteration must not fall back to a connected checkpoint.
     chained = tmp_path / 'chained'

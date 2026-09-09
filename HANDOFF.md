@@ -8,6 +8,131 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+### Latest integrated DSP batch (schema 8)
+
+This section supersedes the older chronological status below.  The current
+source combines the broad C674x ISA batches with CPU interrupt recognition,
+C6747 INTC pulse delivery, cache-control registers, McASP transmit state,
+EDMA3CC transfers/events, SYSCFG master-priority registers, transactional
+McASP/EDMA integration, and a labeled coarse functional-audio scheduler.
+Checkpoint schema 8 preserves all of that state.  Its native state is 15,704
+bytes; the final component is 7,712 bytes.  Exact one-step migrations from
+schemas 6 and 7 are recorded in `runs/dsp-schema6-to-8-migration-2` and
+`runs/dsp-schema7-to-8-migration-2`; both repeat/state/memory gates pass.
+
+The latest strict connected run is `runs/nxs-dsp-batch-strict-3`.  It records
+65 checkpoints, 110,208 ordered events and 39 DSP stops, then reproduces the
+known fail-closed SPLOOPD conflict at exactly 25,364,865 packets / 60,779,972
+cycles, PC `0xc004f306`, compact `0x2627`.  Standalone
+`runs/dsp-batch-strict-replay-5` verifies all 39 connected stops and exact
+repeat state/memory.  This is architectural-validation-eligible evidence of
+the failure, not successful boot.
+
+The strict schedule has now been reconstructed against SPRUFE8B 7.6, 7.9.4
+and 7.15.  It is an II=1, 128-iteration, seven-cycle SPLOOPD body with
+`SPKERNEL 3,0`.  At the documented post-fetch cycle, buffered
+`MV .L2X A3,B4` overlaps post-loop `MVK .L2 1,B4`, a prohibited register/unit
+conflict.  The existing functional two-cycle delay reaches a safe drain cycle,
+but the ISA does not justify making that delay strict.  TI compiler defect
+SDSCM00042974 produced this class of malformed epilog overlap; that is a
+plausible lead, not proof about this firmware.  Keep strict mode fail-closed
+until the fragment can be checked on a C6747 ISS/EVM or D810K013 hardware.
+TSR.SPLX loop/return handling is a separate real omission.
+
+The latest breadth run is `runs/nxs-dsp-batch-functional-3`, using both
+`--functional-dsp-timing` and `--functional-dsp-audio`.  It reaches the genuine
+DSP scheduler/poll loop and ends by budget at 27,099,500 packets / 66,177,094
+cycles, not at an unsupported instruction.  Exact replay in
+`runs/dsp-batch-functional-replay-3` verifies all 40 connected stops plus
+state/memory.  Coverage contains 3,447 confirmed source packets, 4,276
+confirmed instruction addresses, 3,654 distinct encodings, 3,560 dynamic
+edges, 13 probable direct targets and zero unsupported faults.  All probable
+targets use already exercised decoder families.  This shows strong reachable
+functional breadth; it is explicitly not cycle-validation, full-ISA, boot or
+working-audio evidence.
+
+The functional-audio mode advances active McASP1/2 transmit slots once per
+1,024 successful DSP packets and services resulting EDMA requests atomically.
+It consumes only genuine firmware/EDMA XBUF writes and records underruns rather
+than inventing samples.  It has no physical sample clock, PCM sink, host audio,
+receive path or rate matching.  Completing observable PCM transport and the
+interrupt/service-loop path are higher-value next steps than speculative ISA
+families: the currently reached instruction inventory has no missing-opcode
+frontier.
+
+Replay now accepts independent packet and cycle delta ceilings in addition to
+step limits, reports progress and approximation/eligibility fields, writes an
+exact resumable checkpoint, and emits `failure.json` for fail-closed outcomes.
+Diagnostic single-run checkpoints are explicitly labeled and remain distinct
+from repeat-gated checkpoints.  A connected transcript still must reach its
+next recorded stop; an earlier user ceiling is not accepted as a partial
+connected validation.
+
+The complete socket-enabled suite reports 191 passed / 43 optional skips.
+CPU, INTC, McASP, EDMA and schema-8 checkpoint ASan/UBSan harnesses pass, and
+the current QEMU SH4 build completes.  A visible MAIN run can still stop on a
+panel/GUI contract outside this DSP milestone; a rendered frame or GUI exit
+status must never be presented as DSP boot or audio success.
+
+The strict validation baseline is intentionally unchanged: 25,364,865 DSP
+packets / 60,779,972 cycles, PC `0xc004f306`, compact word `0x2627`, where the
+II=1 `SPLOOPD` epilog produces a genuine L2 resource conflict. Strict mode is
+still the default for connected and standalone replay. The opt-in environment
+variable `CDJ_NXS_DSP_FUNCTIONAL_TIMING=1`, exposed by both runners as
+`--functional-dsp-timing`, adds exactly two cycles to the post-loop fetch for a
+delayed software loop. This is a development run-ahead approximation for
+inventorying downstream firmware, not resolved C674x timing. Its manifests say
+`dsp_timing_mode: functional-runahead` and
+`architectural_validation_eligible: false`; results obtained in this mode must
+not be cited as strict or cycle-validation evidence.
+
+The C6747 cache/memory-system control block at `0x01840000` is now modeled as a
+functional register family from SPRUFK5A chapters 2-4, with device map/reset
+details from SPRUH91D and SPRS377F. It covers L2CFG, L1PCFG/L1PCC,
+L1DCFG/L1DCC, documented block-operation base/count registers, global
+writeback/invalidate commands, and the C6747-valid MAR ranges. L1P/L1D reset to
+the device's 32 KiB/max-cache encoding and L2 resets to all RAM. Unsupported or
+reserved registers and MAR ranges fail closed. Cache data/tags, cache misses,
+privilege checks, arbitration, and operation timing are not modeled: all
+backing memory remains unified and coherent, cache operations complete
+immediately, and operation registers consequently read zero. This is sufficient
+register-level initialization behavior, not evidence of cache or cycle
+accuracy. EDMAWEIGHT and L2ALLOC0-3 remain unmodeled and fail closed if reached.
+
+Checkpoint schema 6 appends cache-control state and accepts schemas 1-5 only
+after validating their original payload/checksum, then initializes the absent
+cache state to documented reset values. The current native ABI state is 9,520
+bytes with final peripheral-tail component size 1,528. Cache, checkpoint,
+software-loop, deterministic replay, inventory, and coverage focused tests
+report 13 passed. The broader restricted-sandbox run reports 181 passed / 43
+skipped; four failures and four setup errors require localhost socket binds and
+are environmental rather than observed semantic failures. A socket-enabled
+full-suite rerun is still required before recording a final suite result.
+
+The full-width `.M` non-saturating scalar 16-by-16 multiply family is now
+implemented as one batch: signed, unsigned and mixed-sign low/high-halfword
+forms plus both signed-immediate forms, on both register sides and cross paths.
+Results use the documented E2 publication path and existing delayed-result
+conflict checks. Table-driven tests cover all 18 opcodes across sides/cross
+paths, signedness, delay, and false predicates. Saturating `SMPY` forms remain
+fail closed until delayed CSR.SAT semantics are implemented rather than
+approximated.
+
+Two connected MAIN/Blackfin/C674x runs exercise this downstream work in the
+explicitly non-validating run-ahead mode. `runs/nxs-cache-functional-1` passes
+the strict conflict, observes genuine SPI1 and L1PCFG/L1DCFG initialization,
+then stops at 25,378,653 packets / 60,793,894 cycles, PC `0xc0038a40`, word
+`0x01a86e80`, decoded as `MPYUS .M1 A3,A10,A3`. After the multiply-family
+batch, `runs/nxs-mpy-functional-1` passes that instruction and stops at
+25,380,302 packets / 60,796,809 cycles, PC `0xc003b3a0`, compact `0xccf7`,
+decoded as `SUBAW .D2 B15,6,B15`. Both runs have schema-6 checkpoints, 110,208
+ordered events and 39 DSP stops, exit the bounded GUI process with status zero,
+and publish a frame. Those last two facts do not establish boot. The next
+high-leverage ISA batch is the compact `.D` address-arithmetic family around
+this `SUBAW` and the nearby `ADDAW`; full boot, interrupt delivery, cache
+timing, peripherals beyond their modeled register surfaces, and audio remain
+incomplete.
+
 Compact protected loads now receive PROT timing before format-specific
 lowering.  The stage-two return sequence at `0xc001dcda` uses compact Dpp
 `LDW *++B15(8),B3` (`0x71f7`) under a PROT header; the old early return skipped
