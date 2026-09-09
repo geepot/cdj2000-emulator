@@ -510,7 +510,8 @@ class Faceplate(tk.Canvas):
                  rotate: Callable[[int, int], None],
                  long_press: Callable[[object], None] | None = None,
                  hold: Callable[[object], None] | None = None,
-                 contact: Callable[[object, bool], bool] | None = None) -> None:
+                 contact: Callable[[object, bool], bool] | None = None,
+                 key_contact: Callable[[object, bool], bool] | None = None) -> None:
         self.scale = scale
         self.renderer = Renderer(2)
         self.assets: dict[object, Image.Image] = {}
@@ -520,6 +521,9 @@ class Faceplate(tk.Canvas):
         self.on_long_press = long_press or click
         self.on_hold = hold or click
         self.on_contact = contact
+        self.on_key_contact = key_contact or contact
+        self.active_key: tuple[str, str] | None = None
+        self.key_release_timer = None
         self.last_frame = Image.new("RGB", (LCD_W, LCD_H))
         self.latched: set[str] = set()
         super().__init__(parent, width=PANEL_W * scale,
@@ -548,8 +552,9 @@ class Faceplate(tk.Canvas):
         self.bind("<Right>", lambda _event: self._move_focus(1, 0))
         self.bind("<Up>", lambda _event: self._move_focus(0, -1))
         self.bind("<Down>", lambda _event: self._move_focus(0, 1))
-        self.bind("<Return>", lambda _event: self._pressed(self.focused_name))
-        self.bind("<space>", lambda _event: self._pressed(self.focused_name))
+        for key in ("Return", "space"):
+            self.bind(f"<KeyPress-{key}>", self._key_down)
+            self.bind(f"<KeyRelease-{key}>", self._key_up)
 
         # The LCD.  One Tk image for the life of the window; `set_frame` pastes
         # into it.  Building a fresh PhotoImage per frame costs 8.0 ms against
@@ -690,7 +695,43 @@ class Faceplate(tk.Canvas):
 
     def _focus_out(self, _event) -> None:
         self.cancel_pointer()
+        self.cancel_key()
         self._show_resting(self.focused_name, focused=False)
+
+    def _key_down(self, event) -> str:
+        if self.active_key is not None:
+            if self.active_key[0] == event.keysym and self.key_release_timer is not None:
+                self.after_cancel(self.key_release_timer)
+                self.key_release_timer = None
+            return "break"  # OS key repeat must not enqueue extra pulses.
+        name = self.focused_name
+        self.active_key = (event.keysym, name)
+        control = self.resolve(name)
+        if self.on_key_contact is not None and not name.endswith("-hold"):
+            if control is not None:
+                self.on_key_contact(control, True)
+        else:
+            self._pressed(name)
+        return "break"
+
+    def _key_up(self, event) -> str:
+        if (self.active_key is not None and self.active_key[0] == event.keysym
+                and self.key_release_timer is None):
+            # Some Tk platforms report auto-repeat as release/press pairs in
+            # one event batch. A following press cancels this pending release.
+            self.key_release_timer = self.after_idle(self.cancel_key)
+        return "break"
+
+    def cancel_key(self) -> None:
+        if self.key_release_timer is not None:
+            self.after_cancel(self.key_release_timer)
+            self.key_release_timer = None
+        active, self.active_key = self.active_key, None
+        if active is not None and self.on_key_contact is not None:
+            name = active[1]
+            control = self.resolve(name)
+            if control is not None and not name.endswith("-hold"):
+                self.on_key_contact(control, False)
 
     def _modified_press(self, name, callback):
         control = self.resolve(name)

@@ -23,8 +23,11 @@ Closing an attached viewer releases its owned contacts without clearing analog
 settings. Shift-click is a long
 press, Ctrl/right-click latches a key, and the browse knob accepts drag and
 scroll without also sending a push. Arrow keys navigate the focused deck;
-Enter or Space sends a timed pulse for the focused control, as do Inspector
-buttons. The UTILITY shortcut and browse push remain timed gestures. Mouse
+holding Enter or Space holds the originally focused control until key-up or
+focus loss. Inspector and lab buttons also support mouse and keyboard holds;
+auto-repeat does not enqueue additional presses. Releasing one input source
+does not release another source or a right-click latch on the same key.
+The UTILITY shortcut and mouse browse push remain timed gestures. Ordinary
 holds bypass the serialized pulse queue; rapid clicks can still miss firmware
 sampling, so hold a key deliberately when testing. Lights represent host input
 feedback, not decoded hardware LEDs. The existing `--skin lab` viewer remains

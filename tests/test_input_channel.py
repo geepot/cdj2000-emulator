@@ -207,6 +207,7 @@ def test_viewer_contacts_reach_payload_without_entering_pulse_queue(harness, tmp
 
     viewer = object.__new__(view_ui.UiViewer)
     viewer.held, viewer.momentary = {}, {}
+    viewer.contact_sources = {}
     viewer.deck = None
     viewer.send = Mock(return_value="ok")
     control = next(c for c in view_ui.controls() if c.input_id == "16.0")

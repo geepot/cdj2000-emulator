@@ -105,6 +105,7 @@ def test_knob_click_pushes_once_and_modified_release_does_not_push():
 def contact_viewer():
     viewer = object.__new__(view_ui.UiViewer)
     viewer.held, viewer.momentary = {}, {}
+    viewer.contact_sources = {}
     viewer.deck, viewer.control_note = Mock(), Mock()
     viewer.send = Mock(return_value='ok')
     return viewer
@@ -144,6 +145,18 @@ def test_failed_contact_is_not_painted_as_delivered():
     viewer.deck.set_latched.assert_not_called()
 
 
+def test_keyboard_release_does_not_release_a_held_mouse_contact():
+    viewer, control = contact_viewer(), play_control()
+    viewer.contact(control, True)
+    viewer.contact(control, True, source='deck-keyboard')
+    viewer.contact(control, False, source='deck-keyboard')
+    assert (16, 1) in viewer.momentary
+    viewer.send.assert_called_once()
+    viewer.contact(control, False)
+    assert viewer.send.call_count == 2
+    assert not viewer.contact_sources
+
+
 def test_rejected_protocol_reply_is_a_failure():
     viewer = contact_viewer()
     viewer.args = SimpleNamespace(control_port=5984)
@@ -167,6 +180,11 @@ def test_closing_attached_viewer_releases_owned_contacts_only():
 def pointer_deck():
     deck = knob()
     deck.active_pointer = None
+    deck.active_key = None
+    deck.key_release_timer = None
+    deck.on_key_contact = Mock(return_value=True)
+    deck.after_idle = Mock(return_value='release-timer')
+    deck.after_cancel = Mock()
     deck.on_contact = Mock(return_value=True)
     deck.resolve = lambda name: name
     deck.hit_control = Mock(return_value='16.0')
@@ -196,6 +214,33 @@ def test_focus_loss_releases_once_and_cancels_knob_without_a_push():
     deck._focus_out(None)
     assert deck._drag_angle is None
     deck._pressed.assert_not_called()
+
+
+def test_keyboard_hold_and_repeat_release_original_focused_control():
+    deck = pointer_deck()
+    deck.focused_name = '20.3'
+    key = SimpleNamespace(keysym='space')
+    deck._key_down(key)
+    deck._key_down(key)
+    deck._key_up(key)
+    deck._key_down(key)  # Unix-style repeat release/press pair.
+    deck.after_cancel.assert_called_once_with('release-timer')
+    deck.on_key_contact.assert_called_once_with('20.3', True)
+    deck.focused_name = '16.0'
+    deck._key_up(key)
+    deck.after_idle.call_args.args[0]()
+    assert [call.args for call in deck.on_key_contact.call_args_list] == [
+        ('20.3', True), ('20.3', False)]
+    assert deck.active_key is None
+
+
+def test_keyboard_focus_loss_releases_immediately():
+    deck = pointer_deck()
+    deck.focused_name = '16.0'
+    deck._key_down(SimpleNamespace(keysym='Return'))
+    deck._focus_out(None)
+    deck.on_key_contact.assert_called_with('16.0', False)
+    assert deck.active_key is None
 
 
 def test_attach_mode_does_not_start_a_simulator_or_remove_frame(tmp_path):
@@ -265,6 +310,46 @@ def test_native_deck_resize_and_inspector(tmp_path):
                                    y=int(p.y+p.h/2))
         assert (16, 1) in viewer.momentary
         viewer.deck.event_generate('<ButtonRelease-1>', x=-20, y=-20)
+        assert not viewer.momentary
+        assert [call.args[1] for call in viewer.send.call_args_list] == [
+            panel_control.encode_hold(16, 1, True),
+            panel_control.encode_hold(16, 1, False)]
+        viewer.send.reset_mock()
+        viewer.deck.focus_force()
+        viewer.root.update()
+        viewer.deck.focused_name = '20.3'
+        viewer.deck.event_generate('<KeyPress-space>')
+        viewer.deck.event_generate('<KeyPress-space>')
+        assert (20, 8) in viewer.momentary
+        viewer.deck.event_generate('<KeyRelease-space>')
+        viewer.root.update()
+        assert not viewer.momentary
+        assert [call.args[1] for call in viewer.send.call_args_list] == [
+            panel_control.encode_hold(20, 8, True),
+            panel_control.encode_hold(20, 8, False)]
+        # Exercise a real Inspector/lab ttk.Button, not just callback methods.
+        button = viewer.hardware_button(viewer.inspector, play_control())
+        button.grid(row=99, column=0)
+        viewer.inspector.lift()
+        viewer.inspector.focus_force()
+        viewer.root.update()
+        viewer.send.reset_mock()
+        button.event_generate('<ButtonPress-1>', x=5, y=5)
+        assert (16, 1) in viewer.momentary
+        assert button.instate(['pressed'])
+        button.event_generate('<ButtonRelease-1>', x=-20, y=-20)
+        assert not viewer.momentary
+        assert not button.instate(['pressed'])
+        assert [call.args[1] for call in viewer.send.call_args_list] == [
+            panel_control.encode_hold(16, 1, True),
+            panel_control.encode_hold(16, 1, False)]
+        button.focus_force()
+        viewer.root.update()
+        viewer.send.reset_mock()
+        button.event_generate('<KeyPress-space>')
+        button.event_generate('<KeyPress-space>')
+        assert (16, 1) in viewer.momentary
+        button.event_generate('<FocusOut>')
         assert not viewer.momentary
         assert [call.args[1] for call in viewer.send.call_args_list] == [
             panel_control.encode_hold(16, 1, True),

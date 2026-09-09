@@ -487,6 +487,7 @@ class UiViewer:
         self.status = tk.StringVar(value="Starting Blackfin firmware…")
         self.held: dict[tuple[int, int], Control] = {}
         self.momentary: dict[tuple[int, int], Control] = {}
+        self.contact_sources: dict[tuple[int, int], set[object]] = {}
         # Key -> the time its click's press is over (hold plus the board's
         # gap).  The board queues presses one behind the other, so a click
         # repeated while the first is still down does not land sooner: it
@@ -627,7 +628,8 @@ class UiViewer:
             rotate=lambda field, delta: self.rotate(
                 panel_control.ANALOG_CONTROLS[field], delta),
             long_press=self.long_press, hold=self.toggle_hold,
-            contact=self.contact)
+            contact=self.contact,
+            key_contact=lambda c, down: self.contact(c, down, source="deck-keyboard"))
         self.deck.place(relx=0.5, rely=0.5, anchor="center")
         self.resize_timer = None
         self.viewport.bind("<Configure>", self.queue_resize)
@@ -701,14 +703,14 @@ class UiViewer:
         messagebox.showinfo("Deck controls", "Hold the mouse down to hold a key; release to let go.\n"
             "Shift-click: long press. Ctrl-click or right-click: latch / release.\n"
             "Browse knob: drag or scroll to turn; click to push.\n"
-            "Keyboard: Tab to the deck, arrow keys to navigate, Enter / Space to press.\n"
+            "Keyboard: Tab to the deck, arrows to navigate; hold Enter / Space to hold a key.\n"
             "Escape leaves full screen.\n\n"
             "Inspector contains every unassigned input and the channel controls.\n"
             "Lights show host input feedback, not measured hardware LEDs.\n"
             "The jog center is not an emulated jog display. Jog rotation and tempo "
             "are not yet mapped to verified hardware controls.\n\n"
-            "Firmware responses can take several seconds. Keyboard and Inspector "
-            "presses use timed pulses; physical mouse holds do not queue pulses.",
+            "Firmware responses can take several seconds. Ordinary button holds "
+            "do not queue pulses. Shift-click and UTILITY use timed long presses.",
             parent=self.root)
 
     def build_rack(self, parent: tk.Misc, built: list[Control]) -> None:
@@ -831,6 +833,7 @@ class UiViewer:
         """
         button = ttk.Button(parent, text=button_text(control), width=11,
                             command=lambda: self.click(control))
+        self.bind_hardware_contact(button, control)
         # Shift-click holds the key long enough to count as held (UTILITY on
         # MENU); "break" keeps the plain click from firing on top of it.
         button.bind("<Shift-Button-1>",
@@ -838,6 +841,54 @@ class UiViewer:
         if control.input_id is None:
             button.configure(style="Unbound.TButton")
         return button
+
+    def bind_hardware_contact(self, button: ttk.Button, control: Control) -> None:
+        """Inspector/lab buttons use the same contact contract as the deck."""
+        if control.input_id is None or control.kind != "button":
+            return
+        active: set[str] = set()
+        releases: dict[str, str] = {}
+
+        def paint():
+            if button.winfo_exists():
+                button.state(["pressed" if active else "!pressed"])
+
+        def release(token):
+            timer = releases.pop(token, None)
+            if timer is not None:
+                button.after_cancel(timer)
+            if token in active:
+                self.contact(control, False, source=(str(button), token))
+                active.discard(token)
+            paint()
+            return "break"
+
+        def down(token):
+            timer = releases.pop(token, None)
+            if timer is not None:
+                button.after_cancel(timer)
+            if token not in active and self.contact(control, True, source=(str(button), token)):
+                active.add(token)
+                button.focus_set()
+            paint()
+            return "break"
+
+        def key_up(token):
+            if token in active and token not in releases:
+                releases[token] = button.after_idle(lambda: release(token))
+            return "break"
+
+        def cancel(_event):
+            for token in tuple(active):
+                release(token)
+
+        button.bind("<ButtonPress-1>", lambda _e: down("pointer"))
+        button.bind("<ButtonRelease-1>", lambda _e: release("pointer"))
+        for key in ("Return", "space"):
+            button.bind(f"<KeyPress-{key}>", lambda _e, k=key: down(k))
+            button.bind(f"<KeyRelease-{key}>", lambda _e, k=key: key_up(k))
+        button.bind("<FocusOut>", cancel, add="+")
+        button.bind("<Destroy>", cancel, add="+")
 
     def build_bit_grid(self, parent: tk.Misc, bits: list[Control]) -> None:
         """Every decoded payload bit, with MAIN's name and the last verdict.
@@ -864,10 +915,7 @@ class UiViewer:
             column = 2 * (index // per_column)
             button = ttk.Button(box, text=control.label, width=6,
                                 command=lambda c=control: self.click(c))
-            # A pulse is what the edge detector at 0x28ddc8 wants, so the plain
-            # click stays a pulse.  Some things the firmware times need a level,
-            # and the channel has `down`/`up` for it; without a way to reach
-            # them from here those two verbs existed and nobody could use them.
+            self.bind_hardware_contact(button, control)
             button.bind("<Button-3>",
                         lambda _event, c=control: self.toggle_hold(c))
             button.bind("<Shift-Button-1>",
@@ -1005,31 +1053,36 @@ class UiViewer:
         if line.strip() == "clear" and not reply.startswith("err"):
             self.held.clear()
             self.momentary.clear()
+            self.contact_sources.clear()
             self.in_flight.clear()
             if self.deck is not None:
                 for name in list(self.deck.latched):
                     self.deck.set_latched(name, False)
         return None if reply.startswith("err") else reply
 
-    def contact(self, control: Control, down: bool) -> bool:
-        """Physical mouse contact, independent of the explicit right-click latch."""
+    def contact(self, control: Control, down: bool, *, source: object = "deck-pointer") -> bool:
+        """Combine pointer/keyboard/widget ownership, independently of latches."""
         if control.input_id is None or control.kind not in ("button", "hold"):
             self.click(control)
             return False
         bit_id = control.input_id.split("-")[0]
         byte, mask = panel_control.button_mask(bit_id)
         key = (byte, mask)
-        if down == (key in self.momentary):
+        owners = self.contact_sources.get(key, set())
+        if down == (source in owners):
             return True
-        # A mouse release must not undo an explicitly latched hardware key.
-        if key not in self.held:
+        next_owners = owners | {source} if down else owners - {source}
+        # A release must not undo another active contact or an explicit latch.
+        if key not in self.held and bool(owners) != bool(next_owners):
             if self.send(control, panel_control.encode_hold(byte, mask, down)) is None:
                 return False
-        if down:
+        if next_owners:
+            self.contact_sources[key] = next_owners
             self.momentary[key] = control
         else:
+            self.contact_sources.pop(key, None)
             self.momentary.pop(key, None)
-        self.show_contact(bit_id, key in self.held or down)
+        self.show_contact(bit_id, key in self.held or bool(next_owners))
         return True
 
     def show_contact(self, bit_id: str, down: bool) -> None:
@@ -1344,6 +1397,10 @@ class UiViewer:
         # contacts, not analog values or queued input from another controller.
         for (byte, mask), control in (self.held | self.momentary).items():
             self.send(control, panel_control.encode_hold(byte, mask, False))
+        # Destroy/FocusOut callbacks must not reconnect after transport close.
+        self.held.clear()
+        self.momentary.clear()
+        self.contact_sources.clear()
         if self.panel is not None:
             self.panel.close()
             self.panel = None
