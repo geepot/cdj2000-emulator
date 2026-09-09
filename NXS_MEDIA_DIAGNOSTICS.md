@@ -37,3 +37,30 @@ this was caller misuse, not a panel regression. `PanelControl.hold('sd', True)`
 was acknowledged normally and opened the browser. The run ended before manual
 release, so this is not a complete press/release interaction test. Teardown
 destroyed the emulated input state.
+
+## USB comparison
+
+`runs/nxs-usb-track-trace-1` used the same protected fixture and QEMU binary,
+`--usb`, `--trace-media`, `--qemu-sync-profile`, and a 180-second duration.
+Unlike SD, USB progressed through bus reset (106.877 to 111.749 virtual
+seconds), address assignment and bulk transport. INQUIRY returned the QEMU
+disk identity; TEST UNIT READY returned a failed CSW followed by REQUEST SENSE
+reporting unit attention, ASC 0x29 (reset). This is observed initialization
+progress, not proof of a permanent failure or a successful filesystem mount.
+No READ(10) command was recorded before this run ended.
+
+Stopped 128-MiB MAIN RAM captures at approximately 90 and 165 seconds have
+identical readiness fields: `04cf2180=0`, `04cf222c=1`, `04cf2994=0`.
+The SD-present latch is zero (expected for this USB-only run), device pointer
+`049832f0` is `04951c74`, callback at device+0x1c is zero and flags at +0x66
+are 1. These are snapshot observations, not proof the gate never clears.
+Both GUI message pools are fully free in the first snapshot, receiver-ready
+is 1, and the previous pool-deadlock signature is absent. USB down and up were
+acknowledged and the panel state reported no held buttons.
+
+The lock profiler measures 170.94540 seconds of I/O-thread BQL waiting at
+`util/main-loop.c:313`; MAIN waits at interrupt, MMIO-read and MMIO-write
+sites total approximately 0.62829 seconds. This is consistent with the known
+synchronous DSP blocking but does not establish sole causation. Profiling and
+two stop/save/resume RAM captures add observer effects. A longer same-binary
+run is needed to distinguish slow initialization from a persistent stall.
