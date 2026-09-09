@@ -354,6 +354,10 @@ def main():
                         help='profile QEMU lock waits; observer overhead changes host timing')
     parser.add_argument('--ui', action='store_true',
                         help='open the interactive deck; closing it stops this run')
+    parser.add_argument('--sd', type=Path,
+                        help='raw FAT32 SD image; writes go to a temporary overlay')
+    parser.add_argument('--usb', type=Path,
+                        help='raw FAT32 USB image; writes go to a temporary overlay')
     parser.add_argument('--port', type=int, default=5980)
     parser.add_argument('--qemu', type=Path, default=ROOT / 'build/qemu/build/qemu-system-sh4')
     parser.add_argument('--functional-dsp-timing', action='store_true',
@@ -380,12 +384,19 @@ def main():
                   main_firmware=firmware / 'main-firmware.bin',
                   gui_boot=firmware / 'gui-boot-memory.elf',
                   gui_flash=firmware / 'gui-flash-image.bin')
+    from tools.cdj_main.test_media import media_drives
+    try:
+        media_command, media_inputs = media_drives(args.sd, args.usb)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    inputs.update(media_inputs)
     input_artifacts = {name: input_metadata(path) for name, path in inputs.items()}
     run.mkdir(parents=True, exist_ok=False)
     main_command = [str(args.qemu.resolve()), '-M', 'cdj2000nxs-main', '-bios', str(firmware / 'main-firmware.bin'),
         '-display', 'none', '-no-reboot', '-d', 'unimp,guest_errors', '-D', str(run / 'main.log'),
         '-serial', f'tcp:127.0.0.1:{args.port},server,nowait',
         '-serial', f'tcp:127.0.0.1:{args.port + 2},server,nowait', '-serial', 'null']
+    main_command += media_command
     if args.qemu_sync_profile:
         monitor_path = os.path.relpath(run / 'qemu-monitor.sock', ROOT)
         if ',' in monitor_path or len(os.fsencode(monitor_path)) >= 104:
@@ -429,6 +440,9 @@ def main():
                        limitations='START/STOP and pin timing approximate; 53.930MHz board reference discrepancy; '
                                    'no IRQ, arbitration, double buffering, repeated START or certificates'),
         input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
+        media=dict(images={name: str(path) for name, path in media_inputs.items()},
+                   writes='temporary QEMU snapshot overlays; discarded at exit',
+                   firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
         qemu_sync_profile=dict(enabled=args.qemu_sync_profile,
             commands=list(SYNC_PROFILE_COMMANDS) if args.qemu_sync_profile else [],

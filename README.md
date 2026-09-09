@@ -101,6 +101,13 @@ not yet validated. The legacy functionality described above is not an NXS
 completion claim. See [RUNNING.md](RUNNING.md) and
 [NXS_GUI_STALL.md](NXS_GUI_STALL.md) for current evidence and limitations.
 
+The NXS launcher also accepts experimental `--sd IMAGE` and `--usb IMAGE`
+mounts. Generate a plain WAV/FAT32 fixture with
+`python -m tools.cdj_main.test_media runs/test-media`, then supply
+`runs/test-media/test-track.img`. Each image uses a disposable QEMU overlay;
+guest writes are discarded when the run closes. Image attachment does not
+establish firmware track loading or audible playback, which remain unverified.
+
 ### Original CDJ-2000 setup
 
 ```sh

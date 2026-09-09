@@ -1,0 +1,79 @@
+import json
+import mmap
+from pathlib import Path
+import struct
+import wave
+
+import pytest
+
+from tools.cdj_main import test_media
+
+
+def test_generated_wav_is_stereo_pcm_and_low_level(tmp_path):
+    track = tmp_path / 'test.wav'
+    test_media.write_track(track)
+    with wave.open(str(track)) as wav:
+        assert wav.getparams()[:4] == (2, 2, 44100, 441000)
+        frames = list(struct.iter_unpack('<hh', wav.readframes(wav.getnframes())))
+    assert all(left == right for left, right in frames)
+    assert max(abs(left) for left, _ in frames) == test_media.AMPLITUDE
+    assert sum(left for left, _ in frames) == 0
+    with pytest.raises(FileExistsError):
+        test_media.write_track(track)
+
+
+def test_fat32_fixture_contains_the_exact_wav(tmp_path):
+    directory = tmp_path / 'media'
+    manifest = test_media.create(directory)
+    with (directory / manifest['image']).open('rb') as file:
+        with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as image:
+            assert len(image) == test_media.IMAGE_BYTES
+            assert image[510:512] == b'\x55\xaa'
+            assert image[450] == 0x0c
+            base = struct.unpack_from('<I', image, 454)[0] * 512
+            assert base == 2048 * 512
+            assert image[base + 82:base + 90] == b'FAT32   '
+            reserved = struct.unpack_from('<H', image, base + 14)[0]
+            fats, cluster_sectors = image[base + 16], image[base + 13]
+            fat_sectors = struct.unpack_from('<I', image, base + 36)[0]
+            data = base + (reserved + fats * fat_sectors) * 512
+            assert (len(image) - data) // (cluster_sectors * 512) >= 65525
+            assert image[data:data + 11] == b'TESTTONEWAV'
+            cluster = struct.unpack_from('<H', image, data + 26)[0]
+            size = struct.unpack_from('<I', image, data + 28)[0]
+            offset = data + (cluster - 2) * cluster_sectors * 512
+            assert image[offset:offset + size] == (directory / manifest['track']).read_bytes()
+    assert json.loads((directory / 'manifest.json').read_text()) == manifest
+    with pytest.raises(FileExistsError):
+        test_media.create(directory)
+
+
+def test_mounts_use_temporary_overlays_and_escape_commas(tmp_path):
+    image = tmp_path / 'my, test.img'
+    original = b'\0' * 1024
+    image.write_bytes(original)
+    command, inputs = test_media.media_drives(image, image)
+    drives = [command[i + 1] for i, value in enumerate(command) if value == '-drive']
+    assert len(drives) == 2
+    assert all('snapshot=on' in value and 'format=raw' in value for value in drives)
+    assert all('my,, test.img' in value for value in drives)
+    assert 'if=sd' in drives[0]
+    assert command[-1] == 'usb-storage,drive=cdj-usb-media,removable=on'
+    assert inputs == {'sd_image': image, 'usb_image': image}
+    assert image.read_bytes() == original
+    assert test_media.media_drives(None, None) == ([], {})
+
+
+@pytest.mark.parametrize('size', [0, 513, 1536])
+def test_invalid_sd_image_sizes_are_rejected(tmp_path, size):
+    image = tmp_path / 'bad.img'
+    image.write_bytes(bytes(size))
+    with pytest.raises(ValueError):
+        test_media.media_drives(image, None)
+
+
+def test_missing_or_directory_images_are_rejected(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        test_media.media_drives(None, tmp_path / 'absent.img')
+    with pytest.raises(ValueError):
+        test_media.media_drives(None, tmp_path)
