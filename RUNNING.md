@@ -32,7 +32,7 @@ python -m tools.cdj_main.nxs_vm runs/nxs-deck --ui --seconds 3600
 
 The launcher owns both emulators; the deck attaches to their framebuffer and
 input port. Closing the deck stops that run. This does not remove the NXS
-profile's remaining E-8709 communication failure or add jog rotation/audio.
+profile's remaining DSP limitations or add jog rotation/audio.
 To view an existing run without starting or stopping its emulators:
 
 ```sh
@@ -201,9 +201,10 @@ valid frame and woken it.
 After respecting DMA source/destination modes, a stock NXS MAIN/GUI boot
 with the unchanged zero panel payload produced a valid endpoint (`31` at
 `0x04d10874`), zero UDP receive errors (`0x04d10e60`), and initialized panel
-state (`1` at `0x051e2184`). The display no longer showed E-7022; it showed
-the separate `E-8709: COMMUNICATION ERROR`. This is not a claim that the
-experimental NXS profile has a fully working boot or DSP.
+state (`1` at `0x051e2184`). The display no longer showed E-7022. That probe
+still showed E-8709, but its serial wiring was incomplete: it exposed only
+the request socket and sent the status serial channel to `null`. This was a
+probe error, not evidence of a remaining communication failure in `nxs_vm`.
 Another boot with no `CDJ_PANEL_FRAME` override confirmed the same state.
 A live `analog 2 4660` command then appeared as `12 34` in both the received
 frame (`0x04d1209c + 4`) and the validated payload (`0x051e218c + 4`).
@@ -219,6 +220,28 @@ python -m pytest -q tests/test_main_dmac.py
 The tests cover fixed, incrementing and decrementing addresses, 4- and
 16-byte transfers, final register values, and copies crossing the DMA chunk
 boundary. Set `CDJ_QEMU` if the binary lives outside `build/qemu/build/`.
+
+### NXS E-8709 versus E-7010
+
+The GUI's `BFIN_MAIN_LINK=host:port` bridge opens **two** TCP connections:
+the request channel at `port` and the status channel at `port + 2`. It closes
+both if either connection fails. QEMU therefore needs both `-serial`
+backends; a listening request port alone is insufficient. `nxs_vm` already
+sets these correctly. With its default port, they are 5980 and 5982;
+5984 is the separate host panel-control port.
+
+Verification on 2026-09-09 used the normal NXS launcher for 45 seconds,
+without a proxy, firmware patches, or functional DSP overrides. The GUI
+received 772,448 link bytes, displayed `Not Loaded.`, and reported
+`E-7010: DSP DEVICE ERROR`, not E-8709. MAIN was running and communicating.
+
+The tested QEMU binary's DSP interpreter stopped at PC `0xc004f306`, compact
+instruction `0x2627`, with `parallel register write conflict`. Its captured
+checkpoint was number 65, after 25,364,865 DSP packets. This identifies the
+next execution blocker, not its architectural cause: decoding, packet
+grouping, and delayed-result/loop timing still need to be distinguished.
+The working tree's in-progress C674x changes were not rebuilt or altered by
+this communication diagnosis, so this result describes the tested binary.
 
 ### Existing tracing tools
 
