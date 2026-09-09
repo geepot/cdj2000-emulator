@@ -3,18 +3,19 @@
 #define CDJ_C674X_LOOP_H
 #include <stdbool.h>
 #include <stdint.h>
-/* Unconditional SPLOOP scheduling model, TI SPRUFE8B chapter 7.
+/* SPLOOP/SPLOOPD/SPLOOPW scheduling model, TI SPRUFE8B chapter 7.
  * Tags identify decoded instructions; the CPU owns their contents. SPLOOP's
  * own packet is outside this timeline. The caller handles SPMASK through the
- * candidate filter; reload and interrupts are not implemented. The caller supplies
- * each program-memory packet at its original
+ * candidate filter. SPLOOPD's initial four-cycle count delay and SPLOOPW's
+ * predicate history are caller-owned; reload and interrupts are not
+ * implemented. The caller supplies each program-memory packet at its original
  * cycle while loading; NOP cycles have no tags but still advance time. */
 typedef struct {
     uint32_t tags[48][8];
     unsigned count[48], ii, length;
     uint32_t iterations;
     uint64_t cycle, post_cycle, end_cycle;
-    bool sealed, predicate_loop;
+    bool sealed, predicate_loop, delayed_count;
 } CdjC674xLoop;
 bool cdj_c674x_loop_init(CdjC674xLoop *, unsigned ii, uint32_t iterations);
 /* Add the current cycle's instructions; finish marks SPKERNEL. delay is the

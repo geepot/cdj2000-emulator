@@ -4,7 +4,7 @@
 
 bool cdj_c674x_loop_init(CdjC674xLoop *loop, unsigned ii, uint32_t iterations)
 {
-    if (!ii || ii > 14) return false;
+    if (!ii || ii > 16) return false;
     memset(loop, 0, sizeof(*loop));
     loop->ii = ii;
     loop->iterations = iterations;

@@ -8,6 +8,41 @@ static int32_t sx(uint32_t value, unsigned bits)
     return (int32_t)((value ^ sign) - sign);
 }
 
+static bool queued_memory_load(const CdjC674xLoad *load)
+{
+    return load->size == 1 || load->size == 2 ||
+           load->size == 4 || load->size == 8;
+}
+
+static unsigned queued_result_registers(const CdjC674xLoad *load)
+{
+    return load->size == 8 || load->size == 16 ? 2 : 1;
+}
+
+static uint64_t arithmetic_shift_right64(uint64_t value, unsigned count)
+{
+    uint64_t shifted = value >> count;
+    if (value >> 63) shifted |= UINT64_MAX << (64 - count);
+    return shifted;
+}
+
+static uint64_t register_long40(const CdjC674x *cpu, unsigned bank,
+                                unsigned reg)
+{
+    return ((uint64_t)(cpu->r[bank][reg + 1] & 0xff) << 32) |
+           cpu->r[bank][reg];
+}
+
+static uint32_t shift_32(uint32_t source, unsigned count, unsigned operation)
+{
+    if (operation == 0) return count >= 32 ? 0 : source << count;
+    if (operation == 2) return count >= 32 ? 0 : source >> count;
+    if (count >= 32) return (source & 0x80000000u) ? UINT32_MAX : 0;
+    if (!count) return source;
+    return (source >> count) |
+           ((source & 0x80000000u) ? UINT32_MAX << (32 - count) : 0);
+}
+
 /* Convert a 32-bit integer to IEEE-754 binary32 without depending on the
  * host floating-point environment.  FADCR modes are nearest-even, toward
  * zero, toward +infinity and toward -infinity (SPRUFE8B Table 2-25). */
@@ -47,6 +82,149 @@ static uint32_t integer_to_sp(uint32_t source, bool signed_source,
 }
 
 typedef struct { uint32_t value, status; } SpResult;
+
+static SpResult compare_sp(uint32_t left, uint32_t right, unsigned relation)
+{
+    unsigned le = (left >> 23) & 255, re = (right >> 23) & 255;
+    uint32_t lf = left & 0x7fffff, rf = right & 0x7fffff;
+    bool lnan = le == 255 && lf, rnan = re == 255 && rf;
+    bool lden = !le && lf, rden = !re && rf;
+    uint32_t status = (lnan ? 1u : 0) | (rnan ? 2u : 0) |
+                      (lden ? 4u : 0) | (rden ? 8u : 0);
+    if (lnan || rnan) {
+        status |= 1u << 9;             /* UNORD */
+        if (relation) status |= 1u << 4; /* ordered compare is invalid */
+        return (SpResult){0, status};
+    }
+    if (lden) left &= 0x80000000u;
+    if (rden) right &= 0x80000000u;
+    bool both_zero = !(left << 1) && !(right << 1);
+    bool equal = both_zero || left == right;
+    bool less;
+    if (equal) less = false;
+    else if ((left ^ right) & 0x80000000u) less = (left >> 31) != 0;
+    else less = (left >> 31) ? left > right : left < right;
+    uint32_t value = relation == 0 ? equal : relation == 1 ? (!equal && !less) : less;
+    return (SpResult){value, status};
+}
+
+static uint32_t right_shift_jam32(uint32_t value, unsigned count)
+{
+    if (!count) return value;
+    if (count < 32)
+        return (value >> count) | ((value << (32 - count)) != 0);
+    return value != 0;
+}
+
+/* operation is add, src1-src2, or src2-src1.  Warning bits always describe
+ * the encoded src1/src2 fields, including the reversed .S SUBSP form. */
+static SpResult add_sub_sp(uint32_t source1, uint32_t source2,
+                           unsigned operation, unsigned rmode)
+{
+    unsigned e1 = (source1 >> 23) & 255, e2 = (source2 >> 23) & 255;
+    uint32_t f1 = source1 & 0x7fffff, f2 = source2 & 0x7fffff;
+    bool nan1 = e1 == 255 && f1, nan2 = e2 == 255 && f2;
+    bool inf1 = e1 == 255 && !f1, inf2 = e2 == 255 && !f2;
+    bool den1 = !e1 && f1, den2 = !e2 && f2;
+    uint32_t status = (nan1 ? 1u : 0) | (nan2 ? 2u : 0) |
+                      (den1 ? 4u : 0) | (den2 ? 8u : 0);
+    if (nan1 || nan2) {
+        if ((nan1 && !(f1 & 0x400000)) || (nan2 && !(f2 & 0x400000)))
+            status |= 1u << 4;
+        return (SpResult){0x7fffffffu, status};
+    }
+    if (den1 && !inf2) status |= 1u << 7;
+    if (den2 && !inf1) status |= 1u << 7;
+
+    uint32_t left = source1, right = source2;
+    if (operation == 2) {
+        left = source2;
+        right = source1;
+    }
+    if (operation) right ^= 0x80000000u;
+    unsigned le = (left >> 23) & 255, re = (right >> 23) & 255;
+    uint32_t lf = left & 0x7fffff, rf = right & 0x7fffff;
+    if (!le && lf) left &= 0x80000000u;
+    if (!re && rf) right &= 0x80000000u;
+    bool linf = le == 255 && !lf, rinf = re == 255 && !rf;
+    if (linf || rinf) {
+        if (linf && rinf && ((left ^ right) & 0x80000000u))
+            return (SpResult){0x7fffffffu, status | (1u << 4)};
+        uint32_t infinity = linf ? left : right;
+        return (SpResult){infinity & 0xff800000u, status | (1u << 5)};
+    }
+
+    le = (left >> 23) & 255; re = (right >> 23) & 255;
+    bool lzero = le == 0, rzero = re == 0;
+    unsigned lsign = left >> 31, rsign = right >> 31;
+    if (lzero && rzero) {
+        unsigned sign = lsign == rsign ? lsign : (rmode == 3);
+        return (SpResult){sign << 31, status};
+    }
+    if (lzero) return (SpResult){right, status};
+    if (rzero) return (SpResult){left, status};
+
+    uint32_t lsig = (0x800000u | (left & 0x7fffff)) << 3;
+    uint32_t rsig = (0x800000u | (right & 0x7fffff)) << 3;
+    int exponent;
+    if (le > re) {
+        rsig = right_shift_jam32(rsig, le - re);
+        exponent = le;
+    } else if (re > le) {
+        lsig = right_shift_jam32(lsig, re - le);
+        exponent = re;
+    } else exponent = le;
+
+    uint32_t significand;
+    unsigned sign;
+    if (lsign == rsign) {
+        sign = lsign;
+        significand = lsig + rsig;
+        if (significand & (1u << 27)) {
+            significand = right_shift_jam32(significand, 1);
+            ++exponent;
+        }
+    } else {
+        if (lsig == rsig)
+            return (SpResult){rmode == 3 ? 0x80000000u : 0, status};
+        if (lsig > rsig) {
+            sign = lsign; significand = lsig - rsig;
+        } else {
+            sign = rsign; significand = rsig - lsig;
+        }
+        while (!(significand & (1u << 26))) {
+            significand <<= 1;
+            --exponent;
+        }
+    }
+
+    if (exponent <= 0) {
+        bool smallest = (rmode == 2 && !sign) || (rmode == 3 && sign);
+        return (SpResult){sign << 31 | (smallest ? 0x00800000u : 0),
+                          status | (1u << 8) | (1u << 7)};
+    }
+    uint32_t mantissa = significand >> 3;
+    unsigned remainder = significand & 7;
+    bool increment = (rmode == 0 &&
+                      (remainder > 4 || (remainder == 4 && (mantissa & 1)))) ||
+                     (rmode == 2 && !sign && remainder) ||
+                     (rmode == 3 && sign && remainder);
+    if (increment && ++mantissa == (1u << 24)) {
+        mantissa >>= 1;
+        ++exponent;
+    }
+    if (exponent >= 255) {
+        bool infinity = rmode == 0 || (rmode == 2 && !sign) ||
+                        (rmode == 3 && sign);
+        uint32_t result = sign << 31 |
+                          (infinity ? 0x7f800000u : 0x7f7fffffu);
+        status |= (1u << 7) | (1u << 6) | (infinity ? 1u << 5 : 0);
+        return (SpResult){result, status};
+    }
+    if (remainder) status |= 1u << 7;
+    return (SpResult){sign << 31 | (uint32_t)exponent << 23 |
+                      (mantissa & 0x7fffff), status};
+}
 
 /* C674x MPYSP treats denormal sources as signed zero and flushes an
  * underflow result to signed zero or the smallest normal according to FMCR.
@@ -465,6 +643,59 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if (!((cpu->r[cc >> 1][0] != 0) ^ (cc & 1))) continue;
                 dst = ((w >> 7) & 7) + rs;
                 value = (w >> 13) & 1;
+            } else if (!(insn->header & (1u << 15)) &&
+                       (w & 0x040e) == 0x000a) {
+                /* Figure F-22: compact .S ADD/SUB.  Header SAT changes ADD
+                 * into SADD, whose delayed CSR.SAT behavior remains
+                 * deliberately unsupported; SAT does not alter SUB. */
+                bool subtract = (w & 0x0800) != 0;
+                if (!subtract && (insn->header & (1u << 14)))
+                    return stop(cpu, pc, insn->word,
+                                "compact SADD saturation not implemented");
+                dst = ((w >> 4) & 7) + rs;
+                uint32_t left = cpu->r[side][((w >> 13) & 7) + rs];
+                uint32_t right = cpu->r[cross][((w >> 7) & 7) + rs];
+                value = subtract ? left - right : left + right;
+            } else if ((w & 0x047e) == 0x0036) {
+                /* Figure C-17: compact .D in-place ADD/SUB. */
+                dst = ((w >> 13) & 7) + rs;
+                uint32_t left = cpu->r[side][dst];
+                uint32_t right = cpu->r[cross][((w >> 7) & 7) + rs];
+                value = (w & 0x0800) ? left - right : left + right;
+            } else if (!(insn->header & (1u << 15)) &&
+                       (w & 0x040e) == 0x040a) {
+                /* Figure F-23: compact .S SHL/SHR with the special
+                 * 0->16 and 7->8 constant translation. */
+                unsigned encoded = (w >> 13) & 7;
+                unsigned count = encoded == 0 ? 16 : encoded == 7 ? 8 : encoded;
+                dst = ((w >> 4) & 7) + rs;
+                value = shift_32(cpu->r[cross][((w >> 7) & 7) + rs],
+                                 count, (w >> 11) & 1);
+            } else if ((w & 0x041e) == 0x0402 &&
+                       (w & 0x047e) != 0x0462) {
+                /* Figure F-25: compact in-place constant shifts.  SAT
+                 * changes op 2 from SHRU into delayed-status SSHL. */
+                unsigned op = (w >> 5) & 3;
+                if (op == 3)
+                    return stop(cpu, pc, insn->word,
+                                "reserved compact Ssh5 instruction");
+                if (op == 2 && (insn->header & (1u << 14)))
+                    return stop(cpu, pc, insn->word,
+                                "compact SSHL saturation not implemented");
+                unsigned count = ((w >> 13) & 7) | (((w >> 11) & 3) << 3);
+                dst = ((w >> 7) & 7) + rs;
+                value = shift_32(cpu->r[side][dst], count, op);
+            } else if ((w & 0x047e) == 0x0462) {
+                /* Figure F-26: compact in-place register-count shifts.
+                 * As for full-width scalar shifts, only the low six count
+                 * bits participate. */
+                unsigned op = (w >> 11) & 3;
+                if (op == 3)
+                    return stop(cpu, pc, insn->word,
+                                "compact SSHL saturation not implemented");
+                dst = ((w >> 7) & 7) + rs;
+                unsigned count = cpu->r[side][((w >> 13) & 7) + rs] & 63;
+                value = shift_32(cpu->r[side][dst], count, op);
             } else if ((w & 0x040e) == 0x0400) { /* Figure D-5, ADD.L immediate */
                 dst = ((w >> 4) & 7) + rs;
                 unsigned imm = (w >> 13) & 7;
@@ -490,12 +721,44 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 dst = ((w >> 7) & 7) + rs;
                 value = ((w >> 13) & 7) | (((w >> 11) & 3) << 3) |
                         (((w >> 5) & 3) << 5) | (((w >> 10) & 1) << 7);
+            } else if ((w & 0x1c66) == 0x1866 &&
+                       ((w >> 13) & 7) != 6) {
+                /* Figure G-4 joins the compact .L/.S/.D zero, one,
+                 * increment and XOR-one forms.  Unit-specific op 2 is
+                 * integer negation on .L/.S and reserved on .D; op 3 is
+                 * decrement on every unit.  Op 6 is the separate .S2 MVC
+                 * to ILC handled below. */
+                unsigned unit = (w >> 3) & 3;
+                unsigned op = (w >> 13) & 7;
+                if (unit == 3 || op == 4 || (op == 2 && unit == 2))
+                    return stop(cpu, pc, insn->word,
+                                "reserved compact LSDx1 instruction");
+                dst = ((w >> 7) & 7) + rs;
+                uint32_t source = cpu->r[side][dst];
+                switch (op) {
+                case 0: value = 0; break;
+                case 1: value = 1; break;
+                case 2: value = 0u - source; break;
+                case 3: value = source - 1; break;
+                case 5: value = source + 1; break;
+                default: value = source ^ 1; break;
+                }
             } else if ((w & 0x047e) == 0x0426) { /* Figure D-8, MVK.L */
                 dst = ((w >> 7) & 7) + rs;
                 value = sx(((w >> 13) & 7) | (((w >> 11) & 3) << 3), 5);
             } else if ((w & 0x147e) == 0x0026) { /* Figure D-9, CMPEQ immediate */
                 dst = (w >> 11) & 1;
                 value = ((w >> 13) & 7) == cpu->r[side][((w >> 7) & 7) + rs];
+            } else if ((w & 0x147e) == 0x1026) { /* Figure D-10, ordered compare */
+                dst = ((w >> 11) & 1) + rs;
+                uint32_t constant = (w >> 13) & 1;
+                uint32_t source = cpu->r[side][((w >> 7) & 7) + rs];
+                switch (w >> 14) {
+                case 0: value = (int32_t)constant < (int32_t)source; break;
+                case 1: value = (int32_t)constant > (int32_t)source; break;
+                case 2: value = constant < source; break;
+                default: value = constant > source; break;
+                }
             } else if ((w & 0x040e) == 0x0408) { /* Figure D-7, L2c */
                 dst = (w >> 4) & 1;
                 uint32_t left = cpu->r[side][((w >> 13) & 7) + rs];
@@ -784,6 +1047,129 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = sx(a, 5); /* MVK .D */
         } else if ((w & 0x3effc) == 0xa358) {
             value = sx(b, 5); /* MVK .L */
+        } else if ((w & 0x1c) == 0x18 &&
+                   (((w >> 5) & 0x7f) == 0x20 ||
+                    ((w >> 5) & 0x7f) == 0x21 ||
+                    ((w >> 5) & 0x7f) == 0x23 ||
+                    ((w >> 5) & 0x7f) == 0x24 ||
+                    ((w >> 5) & 0x7f) == 0x27 ||
+                    ((w >> 5) & 0x7f) == 0x29 ||
+                    ((w >> 5) & 0x7f) == 0x2b ||
+                    ((w >> 5) & 0x7f) == 0x2f ||
+                    ((w >> 5) & 0x7f) == 0x37 ||
+                    ((w >> 5) & 0x7f) == 0x3f)) {
+            /* ADD/ADDU/SUB/SUBU extended .L forms write a 40-bit long in
+             * an even/odd register pair.  The low register holds bits 31:0;
+             * only bits 7:0 of the high register are architecturally part
+             * of the value (SPRUFE8B ADD/ADDU/SUB/SUBU). */
+            unsigned op = (w >> 5) & 0x7f;
+            bool pair_source = op == 0x20 || op == 0x21 ||
+                               op == 0x24 || op == 0x29;
+            reg_write = false;
+            if ((dst & 1) || (pair_source && (b & 1)))
+                return stop(cpu, pc, insn->word,
+                            "invalid long register pair");
+            if (enabled) {
+                uint64_t left, right, result;
+                switch (op) {
+                case 0x20: /* ADD signed 5-bit, signed long. */
+                    left = (uint64_t)(int64_t)sx(a, 5);
+                    right = register_long40(cpu, side, b);
+                    result = left + right;
+                    break;
+                case 0x21: /* ADD cross signed 32-bit, signed long. */
+                    left = (uint64_t)(int64_t)(int32_t)cpu->r[cross][a];
+                    right = register_long40(cpu, side, b);
+                    result = left + right;
+                    break;
+                case 0x23: /* ADD signed 32-bit, cross signed 32-bit. */
+                    left = (uint64_t)(int64_t)(int32_t)cpu->r[side][a];
+                    right = (uint64_t)(int64_t)(int32_t)cpu->r[cross][b];
+                    result = left + right;
+                    break;
+                case 0x24: /* SUB signed 5-bit, signed long. */
+                    left = (uint64_t)(int64_t)sx(a, 5);
+                    right = register_long40(cpu, side, b);
+                    result = left - right;
+                    break;
+                case 0x27: /* SUB signed 32-bit, cross signed 32-bit. */
+                    left = (uint64_t)(int64_t)(int32_t)cpu->r[side][a];
+                    right = (uint64_t)(int64_t)(int32_t)cpu->r[cross][b];
+                    result = left - right;
+                    break;
+                case 0x29: /* ADDU cross unsigned 32-bit, unsigned long. */
+                    left = cpu->r[cross][a];
+                    right = register_long40(cpu, side, b);
+                    result = left + right;
+                    break;
+                case 0x2b: /* ADDU unsigned 32-bit, cross unsigned 32-bit. */
+                    left = cpu->r[side][a];
+                    right = cpu->r[cross][b];
+                    result = left + right;
+                    break;
+                case 0x2f: /* SUBU unsigned 32-bit, cross unsigned 32-bit. */
+                    left = cpu->r[side][a];
+                    right = cpu->r[cross][b];
+                    result = left - right;
+                    break;
+                case 0x37: /* SUB cross signed 32-bit, signed 32-bit. */
+                    left = (uint64_t)(int64_t)(int32_t)cpu->r[cross][a];
+                    right = (uint64_t)(int64_t)(int32_t)cpu->r[side][b];
+                    result = left - right;
+                    break;
+                default:   /* SUBU cross unsigned 32-bit, unsigned 32-bit. */
+                    left = cpu->r[cross][a];
+                    right = cpu->r[side][b];
+                    result = left - right;
+                    break;
+                }
+                result &= UINT64_C(0xffffffffff);
+                if (written[side][dst] || written[side][dst + 1])
+                    return stop(cpu, pc, insn->word,
+                                "parallel register write conflict");
+                out.r[side][dst] = (uint32_t)result;
+                out.r[side][dst + 1] = (uint32_t)(result >> 32);
+                written[side][dst] = written[side][dst + 1] = true;
+            }
+        } else if ((w & 0x83c) == 0x30 &&
+                   (((w >> 6) & 31) == 0x0e ||
+                    ((w >> 6) & 31) == 0x10 ||
+                    ((w >> 6) & 31) == 0x14 ||
+                    ((w >> 6) & 31) == 0x15)) {
+            /* MPYIH/MPYHI and MPYIL/MPYLI multiply a signed high/low
+             * halfword by a signed 32-bit operand.  Their R variants add
+             * 0x4000 and arithmetically shift by 15.  All sample in E1 and
+             * write either one register or a full pair in E4. */
+            unsigned op = (w >> 6) & 31;
+            bool high = op == 0x10 || op == 0x14;
+            bool pair = op == 0x14 || op == 0x15;
+            reg_write = false;
+            if (pair && (dst & 1))
+                return stop(cpu, pc, insn->word,
+                            "invalid multiply result register pair");
+            if (enabled) {
+                int16_t half = high ? (int16_t)(cpu->r[side][a] >> 16)
+                                    : (int16_t)cpu->r[side][a];
+                int64_t product = (int64_t)half * (int32_t)cpu->r[cross][b];
+                uint64_t result = pair ? (uint64_t)product :
+                    arithmetic_shift_right64((uint64_t)(product + 0x4000), 15);
+                uint64_t due = cpu->cycles + 4;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                unsigned count = pair ? 2 : 1;
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned old_count = queued_result_registers(&out.loads[j]);
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + count &&
+                        dst < out.loads[j].dst + old_count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due, .value = result, .bank = side, .dst = dst,
+                    .size = pair ? 16 : 0
+                };
+            }
         } else if ((w & 0x3cffc) == 0x958 ||
                    (w & 0x3cffc) == 0x938) {
             /* INTSP/INTSPU read the integer in E1 and write binary32 in E4.
@@ -800,7 +1186,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if (out.load_count == 40)
                     return stop(cpu, pc, insn->word, "delayed-result queue full");
                 for (unsigned j = 0; j < out.load_count; ++j) {
-                    unsigned count = out.loads[j].size == 8 ? 2 : 1;
+                    unsigned count = queued_result_registers(&out.loads[j]);
                     if (out.loads[j].due == due && out.loads[j].bank == side &&
                         out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
                         return stop(cpu, pc, insn->word,
@@ -826,7 +1212,86 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if (out.load_count == 40)
                     return stop(cpu, pc, insn->word, "delayed-result queue full");
                 for (unsigned j = 0; j < out.load_count; ++j) {
-                    unsigned count = out.loads[j].size == 8 ? 2 : 1;
+                    unsigned count = queued_result_registers(&out.loads[j]);
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due, .value = result.value,
+                    .address = result.status << shift,
+                    .bank = side, .dst = dst, .size = 0
+                };
+            }
+        } else if ((w & 0x3effc) == 0xf20) {
+            /* ABSSP is the single-cycle .S auxiliary absolute operation.
+             * It treats denormals as zero and records its warnings in FAUCR,
+             * not FADCR.  No host floating-point operation is involved. */
+            uint32_t source = cpu->r[cross][b];
+            unsigned exponent = (source >> 23) & 255;
+            uint32_t fraction = source & 0x7fffff;
+            uint32_t status = 0;
+            if (exponent == 255 && fraction) {
+                value = 0x7fffffffu;
+                status = 1u << 1;
+                if (!(fraction & 0x400000)) status |= 1u << 4;
+            } else if (!exponent && fraction) {
+                value = 0;
+                status = (1u << 7) | (1u << 3);
+            } else {
+                value = source & 0x7fffffffu;
+                if (exponent == 255) status = 1u << 5;
+            }
+            if (enabled && status) {
+                if (controls[19])
+                    return stop(cpu, pc, insn->word,
+                                "parallel FAUCR status write conflict");
+                out.control[19] |= status << (side ? 16 : 0);
+                controls[19] = true;
+            }
+        } else if ((w & 0x3c) == 0x20 &&
+                   ((w >> 6) & 63) >= 0x38 &&
+                   ((w >> 6) & 63) <= 0x3a) {
+            /* CMPEQSP/CMPGTSP/CMPLTSP are bit-exact single-cycle .S
+             * comparisons.  Signed denormals compare as signed zero; NaNs
+             * are unordered.  Warning bits are sticky in FAUCR. */
+            unsigned relation = ((w >> 6) & 63) - 0x38;
+            SpResult result = compare_sp(cpu->r[side][a],
+                                         cpu->r[cross][b], relation);
+            value = result.value;
+            if (enabled && result.status) {
+                if (controls[19])
+                    return stop(cpu, pc, insn->word,
+                                "parallel FAUCR status write conflict");
+                out.control[19] |= result.status << (side ? 16 : 0);
+                controls[19] = true;
+            }
+        } else if ((w & 0xffc) == 0x218 || (w & 0xffc) == 0xe18 ||
+                   (w & 0xffc) == 0x238 || (w & 0xffc) == 0x2b8 ||
+                   (w & 0xffc) == 0xe38 || (w & 0xffc) == 0xeb8) {
+            /* ADDSP/SUBSP use FADCR on both .L and .S.  The .L reverse
+             * subtract places the cross source in src1; the .S reverse form
+             * computes encoded src2-src1.  Results and warnings appear E4. */
+            unsigned encoding = w & 0xffc;
+            unsigned operation = encoding == 0x218 || encoding == 0xe18 ? 0 :
+                                 encoding == 0xeb8 ? 2 : 1;
+            uint32_t source1 = cpu->r[side][a];
+            uint32_t source2 = cpu->r[cross][b];
+            if (encoding == 0x2b8) {
+                source1 = cpu->r[cross][a];
+                source2 = cpu->r[side][b];
+            }
+            unsigned shift = side ? 16 : 0;
+            unsigned rmode = (cpu->control[18] >> (shift + 9)) & 3;
+            SpResult result = add_sub_sp(source1, source2, operation, rmode);
+            reg_write = false;
+            if (enabled) {
+                uint64_t due = cpu->cycles + 4;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned count = queued_result_registers(&out.loads[j]);
                     if (out.loads[j].due == due && out.loads[j].bank == side &&
                         out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
                         return stop(cpu, pc, insn->word,
@@ -851,7 +1316,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 if (out.load_count == 40)
                     return stop(cpu, pc, insn->word, "delayed-result queue full");
                 for (unsigned j = 0; j < out.load_count; ++j) {
-                    unsigned count = out.loads[j].size == 8 ? 2 : 1;
+                    unsigned count = queued_result_registers(&out.loads[j]);
                     if (out.loads[j].due == due && out.loads[j].bank == side &&
                         out.loads[j].dst < dst + 1 && dst < out.loads[j].dst + count)
                         return stop(cpu, pc, insn->word,
@@ -890,6 +1355,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                         (right & 0xff000000) >> 16 |
                         (right & 0x0000ff00) >> 8; break;
             }
+        } else if ((w & 0xffc) == 0xf98 || (w & 0xffc) == 0xdb0 ||
+                   (w & 0xffc) == 0x830) {
+            /* ANDN is available on .L/.S/.D with identical single-cycle
+             * semantics: src1 AND the bitwise inverse of src2. */
+            value = cpu->r[side][a] & ~cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x7a0 || (w & 0xffc) == 0xf58 || (w & 0xffc) == 0x9f0) {
             value = (uint32_t)sx(a, 5) & cpu->r[cross][b];
         } else if ((w & 0xffc) == 0x7e0 || (w & 0xffc) == 0xf78 || (w & 0xffc) == 0x9b0) {
@@ -902,6 +1372,10 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             value = (uint32_t)sx(a, 5) - cpu->r[cross][b];
         } else if ((w & 0xffc) == 0xf8 || (w & 0xffc) == 0x5e0) {
             value = cpu->r[side][a] - cpu->r[cross][b];
+        } else if ((w & 0xffc) == 0x2f8) {
+            /* Reverse-cross .L SUB encodes its cross source in src1 and
+             * its local source in src2. */
+            value = cpu->r[cross][a] - cpu->r[side][b];
         } else if ((w & 0xffc) == 0xa58 || (w & 0xffc) == 0xa78 ||
                    (w & 0xffc) == 0x8d8 || (w & 0xffc) == 0x8f8 ||
                    (w & 0xffc) == 0x9d8 || (w & 0xffc) == 0x9f8 ||
@@ -959,13 +1433,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             unsigned n = (w & 0x40) ? (cpu->r[side][a] & 63) : a;
             uint32_t source = cpu->r[cross][b];
             unsigned op = w & 0xfbc;
-            if (op == 0xca0) value = n >= 32 ? 0 : source << n;
-            else if (op == 0x9a0) value = n >= 32 ? 0 : source >> n;
-            else if (n >= 32) value = (source & 0x80000000u) ? UINT32_MAX : 0;
-            else {
-                value = source >> n;
-                if (n && (source & 0x80000000u)) value |= UINT32_MAX << (32 - n);
-            }
+            value = shift_32(source, n, op == 0xca0 ? 0 : op == 0x9a0 ? 2 : 1);
         } else if ((w & 0xffe) == 0x3a2 && a == 0) {
             /* FADCR/FAUCR/FMCR storage only; FP operations are not decoded yet. */
             if (dst != 13 && dst != 14 && (dst < 18 || dst > 20)) return stop(cpu, pc, insn->word, "control register write not implemented");
@@ -1026,15 +1494,17 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         return stop(cpu, cpu->pc, 0, "parallel access with nonaligned memory instruction");
     /* Same-cycle overlapping RAM reads/writes need bus arbitration that
      * this core does not yet model. Do not choose an invented ordering. */
-    for (unsigned j = 0; j < out.load_count; ++j)
+    for (unsigned j = 0; j < out.load_count; ++j) {
+        if (!queued_memory_load(&out.loads[j])) continue;
         for (unsigned k = 0; k < out.store_count; ++k)
             if (out.loads[j].due - 2 == out.stores[k].due &&
                 (uint64_t)out.loads[j].address < (uint64_t)out.stores[k].address + out.stores[k].size &&
                 (uint64_t)out.stores[k].address < (uint64_t)out.loads[j].address + out.loads[j].size)
                 return stop(cpu, cpu->pc, 0, "simultaneous overlapping RAM accesses not implemented");
+    }
     /* Reject E5/E1 register collisions before any RAM transaction commits. */
     for (unsigned j = 0; j < out.load_count; ++j) {
-        unsigned count = out.loads[j].size == 8 ? 2 : 1;
+        unsigned count = queued_result_registers(&out.loads[j]);
         if (out.loads[j].due == cpu->cycles + 1 &&
             (written[out.loads[j].bank][out.loads[j].dst] ||
              (count == 2 && written[out.loads[j].bank][out.loads[j].dst + 1])))
@@ -1061,7 +1531,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
         for (unsigned j = 0; j < out.load_count;) {
             CdjC674xLoad *load = &out.loads[j];
-            if (load->size && load->due == out.cycles + 2) {
+            if (queued_memory_load(load) && load->due == out.cycles + 2) {
                 uint64_t data;
                 if (!read_scalar(read, opaque, load->address, load->size, &data))
                     return stop(cpu, cpu->pc, 0, "RAM load mapping changed during execution");
@@ -1070,7 +1540,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             }
             if (load->due > out.cycles) { ++j; continue; }
             out.r[load->bank][load->dst] = load->value;
-            if (load->size == 8) out.r[load->bank][load->dst + 1] = load->value >> 32;
+            if (queued_result_registers(load) == 2)
+                out.r[load->bank][load->dst + 1] = load->value >> 32;
             if (!load->size)
                 out.control[load->sign_extend ? 20 : 18] |= load->address;
             memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
@@ -1229,7 +1700,14 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     if (!cdj_c674x_execute(&out, &combined, read, write, opaque))
         return stop(cpu, out.fault_pc, out.fault_word, out.fault);
     uint64_t launched = 1 + out.loop.cycle / out.loop.ii;
-    if (!out.loop.predicate_loop)
+    if (out.loop.delayed_count) {
+        /* SPLOOPD forces termination false and suppresses ILC decrement
+         * during the first three loop cycles.  At later stage boundaries,
+         * test ILC before conditionally decrementing it (7.9.2/7.9.3). */
+        if (out.loop.cycle >= 4 && out.loop.cycle % out.loop.ii == 0 &&
+            out.control[13])
+            --out.control[13];
+    } else if (!out.loop.predicate_loop)
         out.control[13] = launched < out.loop.iterations ? out.loop.iterations - launched : 0;
     if (end_while) out.loop_active = false;
     if (drained && scheduler_post) out.loop_active = false;
@@ -1255,20 +1733,27 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
     CdjC674xInstruction first = packet.instructions[0];
     bool compact_sploop = first.compact && (first.word & 0xbc7f) == 0x0c66;
     bool compact_sploopd = first.compact &&
-        (((first.word & 0xbc7f) == 0x0c67) ||
-         ((first.word & 0xbc7e) == 0x8c66));
+        (first.word & 0xbc7f) == 0x0c67;
+    bool compact_sploopd_reload = first.compact &&
+        (first.word & 0xbc7e) == 0x8c66;
     bool while_loop = !first.compact && (first.word & 0x007ffffe) == 0x3e000;
     bool full_sploop = !first.compact &&
         (first.word & 0x007ffffc) == 0x38000;
-    if (compact_sploopd)
+    bool full_sploopd = !first.compact &&
+        (first.word & 0x007ffffc) == 0x3a000;
+    if (compact_sploopd_reload)
         return stop(cpu, cpu->pc, first.word,
-                    "SPLOOPD delayed testing not implemented");
-    if (full_sploop || compact_sploop || while_loop) {
+                    "SPLOOPD reload not implemented");
+    if (full_sploop || compact_sploop || full_sploopd ||
+        compact_sploopd || while_loop) {
         uint32_t w = first.word;
+        bool delayed_loop = full_sploopd || compact_sploopd;
         unsigned pred = first.compact ? 0 : w >> 29;
         if (while_loop ? (!pred || pred == 7) : (!first.compact && (w >> 28) != 0))
             return stop(cpu, cpu->pc, w, "unsupported loop predicate");
-        if (!while_loop && cpu->cycles < cpu->control_ready[13]) return stop(cpu, cpu->pc, w, "ILC not yet available");
+        if (!while_loop && !delayed_loop &&
+            cpu->cycles < cpu->control_ready[13])
+            return stop(cpu, cpu->pc, w, "ILC not yet available");
         CdjC674x out = *cpu;
         /* SPRUFE8B Figure H-5 scatters compact ii-1 across bits 9:7 and
          * bit 14. GNU binutils format nfu_uspl independently agrees. */
@@ -1277,6 +1762,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         if (!cdj_c674x_loop_init(&out.loop, ii, cpu->control[13]))
             return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
         out.loop.predicate_loop = while_loop;
+        out.loop.delayed_count = delayed_loop;
         if (while_loop) {
             static const unsigned banks[] = {0,1,1,1,0,0,0};
             static const unsigned regs[] = {0,0,1,2,1,2,0};
@@ -1301,8 +1787,14 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         memmove(packet.instructions, packet.instructions + 1, (--packet.count) * sizeof(packet.instructions[0]));
         if (!cdj_c674x_execute(&out, &packet, read, write, opaque))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
+        if (delayed_loop) {
+            uint32_t minimum = (4 + ii - 1) / ii;
+            if (out.control[13] > UINT32_MAX - minimum)
+                return stop(cpu, cpu->pc, w, "SPLOOPD iteration count overflow");
+            out.loop.iterations = out.control[13] + minimum;
+        }
         out.loop_active = !(cpu->branch_due && out.cycles >= cpu->branch_due); out.loop_wait = out.loop_tags = out.loop_packets = 0;
-        if (!while_loop && out.control[13]) --out.control[13];
+        if (!while_loop && !delayed_loop && out.control[13]) --out.control[13];
         *cpu = out;
         return true;
     }

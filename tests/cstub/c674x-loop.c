@@ -54,7 +54,8 @@ int main(void)
         assert(!n && post == (t == 4) && drained == (t == 4));
     }
     assert(!cdj_c674x_loop_init(&loop, 0, 1));
-    assert(!cdj_c674x_loop_init(&loop, 15, 1));
+    assert(cdj_c674x_loop_init(&loop, 16, 1));
+    assert(!cdj_c674x_loop_init(&loop, 17, 1));
     assert(cdj_c674x_loop_init(&loop, 1, 2));
     uint32_t full[8] = {1,2,3,4,5,6,7,8};
     assert(cdj_c674x_loop_load(&loop, full, 8, false, 0));

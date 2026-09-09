@@ -196,6 +196,28 @@ int main(void)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
         assert(c.r[side][5 + subset*16] == expected[op]);
     }
+    /* Figure D-10 compact signed/unsigned comparisons use constants 0/1,
+     * honor RS for source and destination, and cover all four relations. */
+    const uint32_t compact_compare_sources[] = {0, 1, 2, 0xffffffffu, 0x80000000u};
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned subset = 0; subset < 2; ++subset)
+    for (unsigned op = 0; op < 4; ++op)
+    for (unsigned constant = 0; constant < 2; ++constant)
+    for (unsigned j = 0; j < sizeof(compact_compare_sources) /
+                              sizeof(compact_compare_sources[0]); ++j) {
+        unsigned src = 5 + subset * 16, dst = (j & 1) + subset * 16;
+        uint32_t source = compact_compare_sources[j];
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][src] = source;
+        memory[0] = op << 14 | constant << 13 | (dst & 1) << 11 |
+                    5u << 7 | 0x1026 | side;
+        memory[7] = 0xe0200000 | subset << 19;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        uint32_t expected = op == 0 ? (int32_t)constant < (int32_t)source :
+                            op == 1 ? (int32_t)constant > (int32_t)source :
+                            op == 2 ? constant < source : constant > source;
+        assert(c.r[side][dst] == expected);
+    }
     /* Full .S bit-field family: all 1024 parameter pairs, both banks,
      * immediate/register operands and both register cross paths. Expected
      * results use a bit-by-bit oracle rather than the implementation masks. */
@@ -332,7 +354,7 @@ int main(void)
             }
     /* Figure H-5 / GNU nfu_uspl: compact SPLOOP scatters ii-1 across
      * bits 9:7 and 14 and shares the full-width loop scheduler. */
-    for (unsigned ii = 1; ii <= 14; ++ii) {
+    for (unsigned ii = 1; ii <= 16; ++ii) {
         memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
         c.control[13] = 1;
         unsigned encoded = ii - 1;
@@ -347,17 +369,57 @@ int main(void)
             assert(++steps < 64);
         }
     }
-    /* H-5 op=1 and H-6 are SPLOOPD, not Appendix-G ALU forms. Recognize
-     * and reject their four-cycle delayed testing until that scheduler
-     * behavior is modeled; the setup packet remains atomic. */
-    const unsigned compact_sploopd[] = {0x0c67, 0x8c66, 0x8c67};
-    for (unsigned i = 0; i < 3; ++i) {
+    /* H-5 SPLOOPD supports all compact II values.  Its initial condition
+     * is forced false and ILC is not decremented for the first three loop
+     * cycles, giving ceil(4/II) guaranteed iterations even for ILC=0. */
+    for (unsigned ii = 1; ii <= 16; ++ii) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control_ready[13] = 999;
+        unsigned encoded = ii - 1, minimum = (4 + ii - 1) / ii;
+        memory[0] = 0x1c660000 | 0x0c67 |
+                    (encoded & 7) << 7 | (encoded & 8) << 11;
+        memory[7] = 0xe0200000;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.loop_active && c.loop.delayed_count && c.loop.ii == ii &&
+               c.loop.iterations == minimum && c.control[13] == 0);
+        unsigned steps = 0;
+        while (c.loop_active) {
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(++steps < 80);
+        }
+    }
+    /* Full SPLOOPD can load ILC in its own execute packet.  The scheduler
+     * observes that E1 value after setup and adds the documented minimum;
+     * ILC itself remains unchanged until the first eligible boundary. */
+    for (unsigned ii = 1; ii <= 14; ++ii) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[0][2] = 2;
+        unsigned minimum = (4 + ii - 1) / ii;
+        memory[0] = (ii - 1) << 23 | 0x3a001; /* SPLOOPD || */
+        memory[1] = 13u << 23 | 2u << 18 | 0x13a2; /* MVC A2,ILC */
+        memory[2] = 3u << 23 | 3u << 18 | 1u << 13 | 0x58; /* ADD 1,A3,A3 */
+        memory[3] = 0x34000;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.loop_active && c.loop.delayed_count &&
+               c.loop.iterations == 2 + minimum && c.control[13] == 2 &&
+               c.control_ready[13] == 4);
+        unsigned steps = 0;
+        while (c.loop_active) {
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(++steps < 100);
+        }
+        assert(c.r[0][3] == 2 + minimum && c.control[13] == 0);
+    }
+    /* H-6 conditional SPLOOPD requests reload/nested-loop behavior, which
+     * remains fail-closed and leaves the setup packet atomic. */
+    const unsigned compact_sploopd_reload[] = {0x8c66, 0x8c67};
+    for (unsigned i = 0; i < 2; ++i) {
         memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
         c.control[13] = 3; c.r[0][1] = 99;
-        memory[0] = compact_sploopd[i]; memory[7] = 0xe0200000;
+        memory[0] = compact_sploopd_reload[i]; memory[7] = 0xe0200000;
         assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
         assert(c.cycles == 0 && !c.loop_active && c.r[0][1] == 99);
-        assert(!strcmp(c.fault, "SPLOOPD delayed testing not implemented"));
+        assert(!strcmp(c.fault, "SPLOOPD reload not implemented"));
     }
     /* More than 14 source packets fit when they occupy no functional slots. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
@@ -838,6 +900,241 @@ int main(void)
     assert(c.cycles == 3 && c.r[0][4] == 99 && c.load_count == 1 &&
            c.loads[0].size == 0 && c.loads[0].value == 0x40e00000);
 
+    /* MPYIH/MPYHI, MPYIL/MPYLI and their rounded forms are one M-unit
+     * compound family.  The full products are signed, sign-extended 64-bit
+     * register pairs; rounded variants add 0x4000 before arithmetic >> 15. */
+    struct CompoundMpyCase {
+        uint32_t half_source, full_source;
+        uint64_t expected;
+        unsigned op;
+    } compound_mpy_cases[] = {
+        /* TI MPYLI examples 1 and 2. */
+        {0x6a321193, 0xb1746ca4, UINT64_C(0xfffffa9ba111462c), 0x15},
+        {0x12343497, 0x21ff50a7, UINT64_C(0x000006fbe9fa7e81), 0x15},
+        {0xfffe1234, 0x40000001, UINT64_C(0xffffffff7ffffffe), 0x14},
+        {0x80000000, 0x80000000, UINT64_C(0x0000400000000000), 0x14},
+        {0x00000001, 0x00003fff, UINT64_C(0x00000000), 0x0e},
+        {0x00000001, 0x00004000, UINT64_C(0x00000001), 0x0e},
+        {0x0000ffff, 0x00004000, UINT64_C(0x00000000), 0x0e},
+        {0xffff0000, 0x00004001, UINT64_C(0xffffffff), 0x10},
+        {0x7fff0000, 0x7fffffff, UINT64_C(0x7ffeffff), 0x10},
+    };
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+    for (unsigned j = 0; j < sizeof(compound_mpy_cases) /
+                              sizeof(compound_mpy_cases[0]); ++j) {
+        struct CompoundMpyCase tc = compound_mpy_cases[j];
+        bool pair = tc.op == 0x14 || tc.op == 0x15;
+        unsigned dst = 6, half_src = 4, full_src = 3;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][half_src] = tc.half_source;
+        c.r[side ^ cross_path][full_src] = tc.full_source;
+        c.r[side][dst] = c.r[side][dst + 1] = 0xdeadbeef;
+        memory[0] = dst << 23 | full_src << 18 | half_src << 13 |
+                    cross_path << 12 | tc.op << 6 | 0x30 | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.cycles == 1 && c.load_count == 1 &&
+               c.loads[0].due == 4 && c.loads[0].size == (pair ? 16u : 0u));
+        assert(c.r[side][dst] == 0xdeadbeef &&
+               c.r[side][dst + 1] == 0xdeadbeef);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == (uint32_t)tc.expected && !c.load_count);
+        assert(c.r[side][dst + 1] ==
+               (pair ? (uint32_t)(tc.expected >> 32) : 0xdeadbeefu));
+    }
+
+    /* Pair alignment and both halves of an E4/E1 collision are checked
+     * before state changes.  A false predicate queues no multiply result. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 5u << 23 | 3u << 18 | 4u << 13 | 0x15u << 6 | 0x30;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && !c.load_count);
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 9; c.r[0][4] = 7;
+    memory[0] = 6u << 23 | 3u << 18 | 4u << 13 | 0x15u << 6 | 0x30;
+    memory[3] = mvk(0, 7, 1);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 3 && c.load_count == 1 && c.loads[0].size == 16 &&
+           c.r[0][6] == 0 && c.r[0][7] == 0);
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][0] = 0; c.r[0][6] = c.r[0][7] = 99;
+    memory[0] = 2u << 29 | 6u << 23 | 3u << 18 | 4u << 13 |
+                0x15u << 6 | 0x30;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][6] == 99 && c.r[0][7] == 99 && !c.load_count);
+
+    /* ABSSP is a bit-exact single-cycle .S operation.  Its NaN, denormal and
+     * infinity warnings go to FAUCR; normal values and signed zero only have
+     * their sign bit cleared. */
+    struct AbsSpCase { uint32_t source, expected, status; } abs_sp_cases[] = {
+        {0xc0200000, 0x40200000, 0x00},
+        {0x80000000, 0x00000000, 0x00},
+        {0x00000001, 0x00000000, 0x88},
+        {0x807fffff, 0x00000000, 0x88},
+        {0x7f800000, 0x7f800000, 0x20},
+        {0xff800000, 0x7f800000, 0x20},
+        {0x7fc00001, 0x7fffffff, 0x02},
+        {0xff800001, 0x7fffffff, 0x12},
+    };
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+    for (unsigned j = 0; j < sizeof(abs_sp_cases) / sizeof(abs_sp_cases[0]); ++j) {
+        struct AbsSpCase tc = abs_sp_cases[j];
+        unsigned dst = 12, src = 4, shift = side ? 16 : 0;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side ^ cross_path][src] = tc.source;
+        memory[0] = dst << 23 | src << 18 | cross_path << 12 |
+                    0xf20 | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.cycles == 1 && c.r[side][dst] == tc.expected);
+        assert(c.control[19] == tc.status << shift);
+        assert(!c.control[18] && !c.control[20]);
+    }
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][0] = 0; c.r[0][4] = 0x7f800001; c.r[0][12] = 99;
+    memory[0] = 2u << 29 | 12u << 23 | 4u << 18 | 0xf20;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][12] == 99 && !c.control[19]);
+
+    /* The complete scalar SP comparison family treats denormals as signed
+     * zero, makes NaNs unordered, and writes only the documented FAUCR
+     * NANn/DENn/UNORD/INVAL bits. */
+    struct CompareSpCase {
+        uint32_t left, right, expected, status;
+        unsigned relation;
+    } compare_sp_cases[] = {
+        {0xc0200000, 0x4109999a, 0, 0x000, 0}, /* -2.5 == 8.6 */
+        {0xc0200000, 0x4109999a, 0, 0x000, 1},
+        {0xc0200000, 0x4109999a, 1, 0x000, 2},
+        {0x4109999a, 0xc0200000, 1, 0x000, 1},
+        {0x80000000, 0x00000000, 1, 0x000, 0},
+        {0x00000001, 0x80000000, 1, 0x004, 0},
+        {0x80000001, 0x00000001, 1, 0x00c, 0},
+        {0x00000001, 0x00000000, 0, 0x004, 1},
+        {0xff800000, 0x7f800000, 1, 0x000, 2},
+        {0x7f800000, 0x3f800000, 1, 0x000, 1},
+        {0x7fc00001, 0x3f800000, 0, 0x201, 0},
+        {0x3f800000, 0x7f800001, 0, 0x212, 1},
+        {0x7fc00001, 0xffc00001, 0, 0x213, 2},
+    };
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+    for (unsigned j = 0; j < sizeof(compare_sp_cases) /
+                              sizeof(compare_sp_cases[0]); ++j) {
+        struct CompareSpCase tc = compare_sp_cases[j];
+        unsigned dst = 6, left = 4, right = 3, shift = side ? 16 : 0;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][left] = tc.left;
+        c.r[side ^ cross_path][right] = tc.right;
+        c.control[19] = 1u << shift; /* warnings are sticky */
+        memory[0] = dst << 23 | right << 18 | left << 13 |
+                    cross_path << 12 | (0x38u + tc.relation) << 6 |
+                    0x20 | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.cycles == 1 && c.r[side][dst] == tc.expected);
+        assert(c.control[19] == (1u | tc.status) << shift);
+    }
+
+    /* ADDSP/SUBSP cover both .L/.S encodings and both reverse-subtract
+     * layouts.  All forms read in E1 and commit result plus FADCR warnings
+     * together in E4. */
+    const unsigned add_sub_sp_forms[] = {0x218, 0xe18, 0x238, 0x2b8, 0xe38, 0xeb8};
+    for (unsigned form = 0; form < 6; ++form)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path) {
+        unsigned encoding = add_sub_sp_forms[form];
+        bool add = form < 2, l_reverse = form == 3, s_reverse = form == 5;
+        unsigned dst = 6, src1 = 4, src2 = 3;
+        uint32_t left = 0x4109999a, right = 0xc0200000;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        if (l_reverse) {
+            c.r[side ^ cross_path][src1] = left;
+            c.r[side][src2] = right;
+        } else if (s_reverse) {
+            c.r[side][src1] = right;
+            c.r[side ^ cross_path][src2] = left;
+        } else {
+            c.r[side][src1] = left;
+            c.r[side ^ cross_path][src2] = right;
+        }
+        c.r[side][dst] = 0xdeadbeef;
+        memory[0] = dst << 23 | src2 << 18 | src1 << 13 |
+                    cross_path << 12 | encoding | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.load_count == 1 && c.loads[0].due == 4 &&
+               c.loads[0].size == 0 && c.r[side][dst] == 0xdeadbeef);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == (add ? 0x40c33334u : 0x4131999au));
+        assert(!c.load_count && !c.control[18]);
+    }
+
+    struct AddSubSpCase {
+        uint32_t left, right, expected, status;
+        unsigned encoding, rmode;
+    } add_sub_sp_cases[] = {
+        {0x3f800000, 0x3f800000, 0x40000000, 0x000, 0x218, 0},
+        {0x3f800000, 0x33800000, 0x3f800000, 0x080, 0x218, 0},
+        {0x3f800000, 0x33800000, 0x3f800001, 0x080, 0x218, 2},
+        {0x3f800000, 0x33c00000, 0x3f800001, 0x080, 0x218, 0},
+        {0x7f7fffff, 0x7f7fffff, 0x7f800000, 0x0e0, 0x218, 0},
+        {0x7f7fffff, 0x7f7fffff, 0x7f7fffff, 0x0c0, 0x218, 1},
+        {0xff7fffff, 0xff7fffff, 0xff7fffff, 0x0c0, 0x218, 2},
+        {0xff7fffff, 0xff7fffff, 0xff800000, 0x0e0, 0x218, 3},
+        {0x00800000, 0x80800001, 0x80000000, 0x180, 0x218, 0},
+        {0x00800000, 0x80800001, 0x80800000, 0x180, 0x218, 3},
+        {0x3f800000, 0xbf800000, 0x00000000, 0x000, 0x218, 0},
+        {0x3f800000, 0xbf800000, 0x80000000, 0x000, 0x218, 3},
+        {0x80000000, 0x80000000, 0x80000000, 0x000, 0x218, 0},
+        {0x7fc00001, 0x3f800000, 0x7fffffff, 0x001, 0x218, 0},
+        {0x3f800000, 0x7f800001, 0x7fffffff, 0x012, 0x218, 0},
+        {0x7f800000, 0xff800000, 0x7fffffff, 0x010, 0x218, 0},
+        {0xff800000, 0xbf800000, 0xff800000, 0x020, 0x218, 0},
+        {0x00000001, 0x3f800000, 0x3f800000, 0x084, 0x218, 0},
+        {0x80000001, 0x7f800000, 0x7f800000, 0x024, 0x218, 0},
+        {0x3f800000, 0x3f800000, 0x00000000, 0x000, 0x238, 0},
+        {0x3f800000, 0x3f800000, 0x80000000, 0x000, 0x238, 3},
+        {0x80000000, 0x00000000, 0x80000000, 0x000, 0x238, 0},
+        {0x00000000, 0x80000000, 0x00000000, 0x000, 0x238, 0},
+        {0x7f800000, 0x7f800000, 0x7fffffff, 0x010, 0x238, 0},
+    };
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned j = 0; j < sizeof(add_sub_sp_cases) /
+                              sizeof(add_sub_sp_cases[0]); ++j) {
+        struct AddSubSpCase tc = add_sub_sp_cases[j];
+        unsigned dst = 6, src1 = 4, src2 = 3, shift = side ? 16 : 0;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][src1] = tc.left; c.r[side][src2] = tc.right;
+        c.control[18] = tc.rmode << (shift + 9);
+        memory[0] = dst << 23 | src2 << 18 | src1 << 13 |
+                    tc.encoding | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == tc.expected);
+        assert(c.control[18] == ((tc.rmode << (shift + 9)) |
+                                (tc.status << shift)));
+    }
+
+    /* Reverse .S subtraction reports source-specific warnings according to
+     * encoded fields: the assembly left operand is encoded as src2. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][4] = 0x3f800000; /* encoded src1 / assembly right */
+    c.r[1][3] = 0x00000001; /* encoded src2 / assembly left */
+    memory[0] = 6u << 23 | 3u << 18 | 4u << 13 | 1u << 12 | 0xeb8;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][6] == 0xbf800000 && c.control[18] == 0x88);
+
     /* A later unknown compact instruction rolls back the whole packet. */
     memset(memory, 0, sizeof(memory));
     cdj_c674x_reset(&c, 0x1000);
@@ -1284,6 +1581,230 @@ int main(void)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
         assert(c.r[0][3] == (j < 2 ? 0xfffffffe : 0x7fffffff));
     }
+    /* Reverse-cross .L SUB plus the complete signed/unsigned 40-bit
+     * ADD/ADDU/SUB/SUBU family.  Long values use low register bits 31:0
+     * and only bits 7:0 of the following register. */
+    for (unsigned side = 0; side < 2; ++side) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side ^ 1][3] = 2; c.r[side][5] = 7;
+        memory[0] = 6u << 23 | 5u << 18 | 3u << 13 |
+                    1u << 12 | 0x17u << 5 | 0x18 | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][6] == 0xfffffffbu);
+    }
+    struct LongArithmeticCase {
+        unsigned op, a, b;
+        uint32_t a_value, b_low, b_high;
+        uint64_t expected;
+        bool pair_source;
+    } long_arithmetic_cases[] = {
+        {0x20, 31, 4, 0,          0xfffffffe, 0xff, UINT64_C(0xfffffffffd), true},
+        {0x21, 3,  4, 0xfffffffd, 0xfffffffe, 0xff, UINT64_C(0xfffffffffb), true},
+        {0x23, 3,  5, 0xfffffffd, 5,          0,    UINT64_C(0x0000000002), false},
+        {0x24, 31, 4, 0,          0xfffffffe, 0xff, UINT64_C(0x0000000001), true},
+        {0x27, 3,  5, 0xfffffffd, 5,          0,    UINT64_C(0xfffffffff8), false},
+        {0x29, 3,  4, 7,          0xfffffffc, 0xff, UINT64_C(0x0000000003), true},
+        {0x2b, 3,  5, 0xffffffff, 2,          0,    UINT64_C(0x0100000001), false},
+        {0x2f, 3,  5, 1,          2,          0,    UINT64_C(0xffffffffff), false},
+        {0x37, 3,  5, 0xfffffffd, 5,          0,    UINT64_C(0xfffffffff8), false},
+        {0x3f, 3,  5, 1,          2,          0,    UINT64_C(0xffffffffff), false},
+    };
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path)
+    for (unsigned j = 0; j < sizeof(long_arithmetic_cases) /
+                              sizeof(long_arithmetic_cases[0]); ++j) {
+        struct LongArithmeticCase tc = long_arithmetic_cases[j];
+        if ((tc.op == 0x20 || tc.op == 0x24) && cross_path) continue;
+        unsigned cross_bank = side ^ cross_path;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        if (tc.op == 0x20 || tc.op == 0x24) {
+            c.r[side][tc.b] = tc.b_low;
+            c.r[side][tc.b + 1] = tc.b_high | 0xdeadbe00;
+        } else if (tc.op == 0x21 || tc.op == 0x29) {
+            c.r[cross_bank][tc.a] = tc.a_value;
+            c.r[side][tc.b] = tc.b_low;
+            c.r[side][tc.b + 1] = tc.b_high | 0xdeadbe00;
+        } else if (tc.op == 0x37 || tc.op == 0x3f) {
+            c.r[cross_bank][tc.a] = tc.a_value;
+            c.r[side][tc.b] = tc.b_low;
+        } else {
+            c.r[side][tc.a] = tc.a_value;
+            c.r[cross_bank][tc.b] = tc.b_low;
+        }
+        c.r[side][6] = c.r[side][7] = 0xdeadbeef;
+        memory[0] = 6u << 23 | tc.b << 18 | tc.a << 13 |
+                    cross_path << 12 | tc.op << 5 | 0x18 | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][6] == (uint32_t)tc.expected);
+        assert(c.r[side][7] == (uint32_t)(tc.expected >> 32));
+        assert(c.cycles == 1 && !c.load_count);
+    }
+    /* Invalid source/destination pairs and parallel writes fail atomically;
+     * a false predicate leaves both destination registers unchanged. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 7u << 23 | 5u << 18 | 3u << 13 | 0x2bu << 5 | 0x18;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.r[0][7] == 0);
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 6u << 23 | 5u << 18 | 3u << 13 | 0x21u << 5 | 0x18;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.r[0][6] == 0);
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][6] = c.r[0][7] = 99;
+    memory[0] = 2u << 29 | 6u << 23 | 5u << 18 | 3u << 13 |
+                0x2bu << 5 | 0x18;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][6] == 99 && c.r[0][7] == 99);
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 1; c.r[0][5] = 2;
+    memory[0] = 6u << 23 | 5u << 18 | 3u << 13 |
+                0x2bu << 5 | 0x19;
+    memory[1] = mvk(0, 7, 4);
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.r[0][6] == 0 && c.r[0][7] == 0);
+    /* ANDN has the same src1 & ~src2 behavior on all three functional-unit
+     * encodings, both sides and both cross-path selections. */
+    const unsigned andn_encodings[] = {0xf98, 0xdb0, 0x830};
+    for (unsigned unit = 0; unit < 3; ++unit)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][3] = 0x195721ab;
+        c.r[side ^ cross_path][5] = 0x081c17e6;
+        memory[0] = 6u << 23 | 5u << 18 | 3u << 13 |
+                    cross_path << 12 | andn_encodings[unit] | side << 1;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][6] == 0x11432009 && c.cycles == 1);
+        cdj_c674x_reset(&c, 0x1000); c.r[side][6] = 99;
+        memory[0] |= 2u << 29; /* false B0 predicate */
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][6] == 99);
+    }
+    /* Figure G-4 compact LSDx1 family: zero/one, negate/decrement,
+     * increment and XOR-one, including RS-selected registers. */
+    const unsigned lsdx1_ops[] = {0, 1, 2, 3, 5, 7};
+    for (unsigned unit = 0; unit < 3; ++unit)
+    for (unsigned op_index = 0; op_index < sizeof(lsdx1_ops) /
+                                           sizeof(lsdx1_ops[0]); ++op_index)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned subset = 0; subset < 2; ++subset) {
+        unsigned op = lsdx1_ops[op_index];
+        if (op == 2 && unit == 2) continue;
+        unsigned reg = 5 + subset * 16;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][reg] = 0x80000000;
+        memory[0] = op << 13 | 5u << 7 | unit << 3 | 0x1866 | side;
+        memory[7] = 0xe0200000 | subset << 19;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        uint32_t expected = op == 0 ? 0 : op == 1 ? 1 :
+                            op == 2 ? 0x80000000 :
+                            op == 3 ? 0x7fffffff :
+                            op == 5 ? 0x80000001 : 0x80000001;
+        assert(c.r[side][reg] == expected && c.cycles == 1);
+    }
+    const unsigned reserved_lsdx1[] = {
+        4u << 13 | 0x1866,                 /* op 4 on .L */
+        2u << 13 | 2u << 3 | 0x1866,      /* op 2 on .D */
+        0u << 13 | 3u << 3 | 0x1866,      /* reserved unit */
+    };
+    for (unsigned j = 0; j < sizeof(reserved_lsdx1) /
+                              sizeof(reserved_lsdx1[0]); ++j) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        memory[0] = reserved_lsdx1[j]; memory[7] = 0xe0200000;
+        assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(!c.cycles);
+    }
+    /* The genuine blocker is MVK .D2 0,B5 in a mixed fetch packet. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1010);
+    c.r[1][5] = 99; memory[4] = 0x1af7; memory[7] = 0xe2000200;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][5] == 0);
+    /* Compact register ADD/SUB on .S and in-place .D complete the
+     * non-saturating arithmetic batch across both sides, RS subsets and
+     * cross paths.  SADD still fails closed because CSR.SAT is delayed. */
+    for (unsigned unit = 0; unit < 2; ++unit)
+    for (unsigned subtract = 0; subtract < 2; ++subtract)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned subset = 0; subset < 2; ++subset)
+    for (unsigned cross_path = 0; cross_path < 2; ++cross_path) {
+        unsigned dst = 5 + subset * 16;
+        unsigned left = unit ? dst : 7 + subset * 16;
+        unsigned right = 6 + subset * 16;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][left] = 0x80000001;
+        c.r[side ^ cross_path][right] = 3;
+        if (unit) memory[0] = 5u << 13 | cross_path << 12 |
+                              subtract << 11 | 6u << 7 | 0x36 | side;
+        else memory[0] = 7u << 13 | cross_path << 12 |
+                         subtract << 11 | 6u << 7 | 5u << 4 | 0x0a | side;
+        memory[7] = 0xe0200000 | subset << 19;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][dst] == (subtract ? 0x7ffffffe : 0x80000004));
+    }
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][7] = 0x7fffffff;
+    memory[0] = 7u << 13 | 7u << 7 | 5u << 4 | 0x0a;
+    memory[7] = 0xe0204000; /* SAT makes the ADD an unsupported SADD. */
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.r[0][5] == 0);
+    /* SUB ignores the header SAT selector and retains modular arithmetic. */
+    cdj_c674x_reset(&c, 0x1000); c.r[0][7] = 0x7fffffff;
+    memory[0] |= 1u << 11;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][5] == 0);
+    /* Compact .S shift formats: translated immediate counts, all in-place
+     * constant counts, and register counts through the six-bit boundary. */
+    const uint32_t compact_shift_source = 0x87654321;
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned subset = 0; subset < 2; ++subset)
+    for (unsigned op = 0; op < 2; ++op)
+    for (unsigned encoded = 0; encoded < 8; ++encoded) {
+        unsigned src = 4 + subset * 16, dst = 5 + subset * 16;
+        unsigned count = encoded == 0 ? 16 : encoded == 7 ? 8 : encoded;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side ^ 1][src] = compact_shift_source;
+        memory[0] = encoded << 13 | 1u << 12 | op << 11 |
+                    4u << 7 | 5u << 4 | 0x40a | side;
+        memory[7] = 0xe0200000 | subset << 19;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        uint32_t expected = op == 0 ? compact_shift_source << count :
+                            (compact_shift_source >> count) |
+                            (UINT32_MAX << (32 - count));
+        assert(c.r[side][dst] == expected);
+    }
+    const unsigned compact_shift_counts[] = {0, 1, 8, 16, 31, 32, 63};
+    for (unsigned form = 0; form < 2; ++form)
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned subset = 0; subset < 2; ++subset)
+    for (unsigned op = 0; op < 3; ++op)
+    for (unsigned j = 0; j < sizeof(compact_shift_counts) /
+                              sizeof(compact_shift_counts[0]); ++j) {
+        unsigned count = compact_shift_counts[j];
+        if (!form && count >= 32) continue;
+        unsigned srcdst = 4 + subset * 16;
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[side][srcdst] = compact_shift_source;
+        if (form) {
+            c.r[side][5 + subset * 16] = count;
+            memory[0] = 5u << 13 | op << 11 | 4u << 7 | 0x462 | side;
+        } else {
+            memory[0] = (count & 7) << 13 | ((count >> 3) & 3) << 11 |
+                        4u << 7 | op << 5 | 0x402 | side;
+        }
+        memory[7] = 0xe0200000 | subset << 19;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        uint32_t expected;
+        if (op == 0) expected = count >= 32 ? 0 : compact_shift_source << count;
+        else if (op == 2) expected = count >= 32 ? 0 : compact_shift_source >> count;
+        else expected = count >= 32 ? UINT32_MAX : count == 0 ? compact_shift_source :
+                        (compact_shift_source >> count) | (UINT32_MAX << (32 - count));
+        assert(c.r[side][srcdst] == expected);
+    }
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][4] = 1; memory[0] = 4u << 7 | 2u << 5 | 0x402;
+    memory[7] = 0xe0204000;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.r[0][4] == 1);
     /* Signed comparison at both extremes, and a negative immediate. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.r[0][1] = 0x7fffffff; c.r[1][2] = 0x80000000;
