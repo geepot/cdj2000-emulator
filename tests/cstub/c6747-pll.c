@@ -61,6 +61,7 @@ int main(void)
      * changes merely because the conservative lock-wait bound elapses. */
     assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c0, 4, true));
     assert(cdj_c6747_pll_write(&s, 0x01c11110, 22, 4, true));
+    assert(cdj_c6747_pll_write(&s, 0x01c11128, 0x8000, 4, true));
     for (unsigned i = 0; i < 16; ++i) cdj_c6747_pll_tick(&s);
     before = s;
     assert(!cdj_c6747_pll_write(&s, 0x01c11100, 0x1c8, 4, true));
@@ -74,12 +75,17 @@ int main(void)
     assert(!cdj_c6747_pll_write(&s, 0x01c11110, 23, 4, true));
     for (unsigned i = 0; i < 417; ++i) cdj_c6747_pll_tick(&s);
     assert(s.lock_wait_remaining == 1);
-    assert(!cdj_c6747_pll_write(&s, 0x01c11100, 0x1c9, 4, true));
-    assert(cdj_c6747_pll_read(&s, 0x01c1113c, &v) && v == 4);
     cdj_c6747_pll_tick(&s);
     assert(!s.lock_wait_remaining && s.oscin_cycles == 435);
     assert(cdj_c6747_pll_read(&s, 0x01c1113c, &v) && v == 4);
-    assert(!cdj_c6747_pll_write(&s, 0x01c11100, 0x1c9, 4, true));
+    assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c9, 4, true));
+    assert(!s.early_enable);
+    for (unsigned i = 0; i < 22; ++i) cdj_c6747_pll_tick(&s);
+    assert(s.oscin_cycles == 435 && s.oscin_phase == 22);
+    cdj_c6747_pll_tick(&s);
+    assert(s.oscin_cycles == 436 && !s.oscin_phase);
+    assert(cdj_c6747_pll_read(&s, 0x01c1113c, &v) && v == 4);
+    assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c9, 4, true));
     assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c0, 4, true));
     assert(!s.reset_age && !s.lock_wait_remaining);
     /* PREDIV=2 violates this board's minimum PLL reference frequency. */
@@ -98,6 +104,7 @@ int main(void)
         cdj_c6747_pll_reset(&s);
         assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c0, 4, true));
         assert(cdj_c6747_pll_write(&s, 0x01c11110, m - 1, 4, true));
+        assert(cdj_c6747_pll_write(&s, 0x01c11128, 0x8000, 4, true));
         for (unsigned i = 0; i < 17; ++i) cdj_c6747_pll_tick(&s);
         before = s;
         assert(!cdj_c6747_pll_write(&s, 0x01c11100, 0x1e8, 4, true)); /* PLLENSRC */
@@ -115,6 +122,15 @@ int main(void)
             for (unsigned i = 0; i < 5; ++i) cdj_c6747_pll_tick(&s);
             assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c8, 4, true));
             assert(s.lock_wait_remaining == w - 5); /* readback write doesn't restart */
+            assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c9, 4, true));
+            assert(s.early_enable && s.oscin_phase == 0);
+            unsigned remaining = w - 5;
+            for (unsigned i = 0; i < m * remaining - 1; ++i) cdj_c6747_pll_tick(&s);
+            assert(s.lock_wait_remaining == 1);
+            cdj_c6747_pll_tick(&s);
+            assert(!s.lock_wait_remaining && !s.oscin_phase);
+            assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c8, 4, true));
+            assert(s.early_enable); /* Diagnostic remains sticky. */
             assert(cdj_c6747_pll_write(&s, 0x01c11100, 0x1c2, 4, true));
             assert(!s.lock_wait_remaining && !s.reset_age);
         }

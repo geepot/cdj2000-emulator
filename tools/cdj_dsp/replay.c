@@ -107,9 +107,10 @@ int main(int argc, char **argv)
         printf("]");
     }
     printf("],\"pending_stores\":%u,\"pending_loads\":%u,\"syscfg_unlocked\":%s,\"pll_legacy_bit4_used\":%s,"
-           "\"pll_oscin_cycles\":%" PRIu64 ",\"pll_reset_age\":%u,\"pll_lock_wait_remaining\":%u}\n",
+           "\"pll_oscin_cycles\":%" PRIu64 ",\"pll_reset_age\":%u,\"pll_lock_wait_remaining\":%u,"
+           "\"pll_early_enable\":%s}\n",
            c.store_count, c.load_count, syscfg.unlocked ? "true" : "false",
            pll.legacy_bit4_used ? "true" : "false", pll.oscin_cycles,
-           pll.reset_age, pll.lock_wait_remaining);
+           pll.reset_age, pll.lock_wait_remaining, pll.early_enable ? "true" : "false");
     return ferror(stdout) ? 2 : 0;
 }

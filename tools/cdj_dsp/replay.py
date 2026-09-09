@@ -64,6 +64,7 @@ def main():
                         pll_assumptions=['POR configuration at ROM handoff',
                                          'initial bypass; NXS OSCIN 16934400 Hz, active SYSCLK1 division',
                                          'catalog PLL reset/lock bounds applied to custom DSP; not measured lock',
+                                         'early PLL enable latches and is flagged; analog acquisition not simulated',
                                          'oscillator counter complete at handoff, not PLL lock',
                                          'legacy PLLCTL bit 4 writable latch; C6747 effect unverified',
                                          'divider GO completes after eight subsequent DSP cycles; not physical clock timing'],

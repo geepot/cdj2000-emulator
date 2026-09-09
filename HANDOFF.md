@@ -8,6 +8,41 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+PLLEN now latches when source, power, reset and operating-point fields are
+valid. TI describes the lock delay as an application wait before PLLEN, not a
+write rejection, and PLLSTAT exposes no lock bit. Firmware sets PLLEN only four
+modeled OSCIN periods after reset release. The model therefore records sticky
+`early_enable` and keeps the conservative lock countdown running without
+claiming analog lock. In PLL mode, OSCIN time advances rationally as
+`N*POSTDIV*SYSCLK1/M` per DSP cycle; the remainder is retained exactly and
+clock-mux changes reset that phase. PLLDIV1-7 latches remain writable after
+release for the documented GO flow; PLLM/PREDIV/POSTDIV remain guarded.
+
+This is an explicit fidelity boundary: DSP instructions continue during the
+catalog lock window, matching observed genuine firmware, but unstable analog
+clock behavior and downstream physical clock consumers are not simulated.
+`early_enable` is evidence of that approximation, not success or lock. The
+custom D810K013 may differ from catalog C6747 timing; no such difference is
+claimed without measurement.
+
+`runs/dsp-pll-enable-1 --verify-repeat`: 1,179 packets / 1,450 cycles,
+PC `0x11802fac`, compact `0x117d` (`LDW *B6,B7`) from SYSCFG1 CFGCHIP1 at
+`0x01c14180`. Trace SHA-256:
+`51c7b92af18570445973ea76e14d4b5883547db6ff91795eb88680ab9a2d1047`.
+Final diagnostics: OSCIN=1430, reset-age=17, lock-wait=411, early-enable=true.
+Rebuilt connected `runs/nxs-pll-enable-connected` agrees exactly; GUI exits 0
+with a frame at the 15-second bound. Suite: 171 passed / 43 skipped; PLL
+address/undefined sanitizer passes. Full boot/audio remain incomplete.
+
+Next implement the coherent SYSCFG CFGCHIP0-4 family from SPRUH91D 10.5.14-18,
+including reset values, masks, kicker protection and PLL_MASTER_LOCK coupling.
+The current code has already written both documented KICK keys. Inventory
+`runs/pll-enable-next-inventory.json` covers discovery candidates around the
+new point (206 candidates / 21 format families); candidates are not proof of
+executable code or missing implementation.
+
+### Previous guarded reset-release checkpoint
+
 PLL reset release is modeled in oscillator periods while still in bypass:
 NXS OSCIN=16.9344 MHz, one CPU cycle spans the active SYSCLK1 divider ratio.
 Time uses the old divider through a GO completion edge. Reset release requires
@@ -37,7 +72,8 @@ catalog PLL register behavior may differ from this custom DSP. Observed bytes
 0x11802ecc..2ed8 are STW; LDW; NOP 4; OR-immediate 1; STW, with no explicit
 long wait. Parent compact decoder corroborates the memory forms but incorrectly
 labels nearby compact NOP 0x0c6e; it is not an independent timing oracle.
-Once resolved, implement PLLEN with clock ratios/consumers, not just a latch.
+This discrepancy is superseded by the register-semantic resolution above;
+physical clock consumers remain future work.
 
 ### Previous cycle-edge clock checkpoint
 

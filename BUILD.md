@@ -863,3 +863,31 @@ commit two cycles after E1 validation if accepted. This short wait is an
 unresolved firmware/model/catalog discrepancy, not permission to bypass timing
 or invent lock status. See HANDOFF.md for investigation priorities. Connected
 GUI exits 0/frame exists; full boot and audio remain incomplete.
+
+### PLL enable latch and fractional oscillator time
+
+PLLEN is a control latch, not a lock-status transaction. The model accepts it
+only with valid source/power/reset and operating-point fields. If software sets
+it before the conservative catalog wait expires, sticky `early_enable` records
+the timing violation while the countdown continues. No lock bit or successful
+analog acquisition is fabricated. PLL-mode DSP cycles advance oscillator time
+by the exact rational `N*POSTDIV*SYSCLK1/M`; phase remainder survives across
+cycles and clears on a clock-mux transition. PLLDIV1-7 can be staged for GO
+after reset release; multiplier/reference/post-divider writes remain guarded.
+
+```sh
+.venv/bin/pytest -q
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-pll.c emulator/qemu/cdj_c6747_pll.c -o /tmp/cdj-pll-enable-san
+/tmp/cdj-pll-enable-san
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-pll-release-connected/dsp-l2.bin runs/dsp-pll-enable-1 --verify-repeat
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-pll-enable-connected --seconds 15 --qemu build/qemu/build/qemu-system-sh4
+```
+
+Suite: 171 passed / 43 skipped; sanitizer passes. Repeat trace hash is
+`51c7b92af18570445973ea76e14d4b5883547db6ff91795eb88680ab9a2d1047`.
+Replay and connected execution agree at 1,179 packets / 1,450 cycles,
+`0x11802fac` / compact `0x117d`, a read of CFGCHIP1 (`0x01c14180`). PLL
+diagnostics agree at OSCIN=1430, reset-age=17, lock-wait=411,
+early-enable=true. The 15-second connected GUI exits 0 and has a frame; this is
+not full boot. Analog lock, physical clocks and working audio remain unverified.

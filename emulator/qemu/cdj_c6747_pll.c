@@ -40,9 +40,21 @@ void cdj_c6747_pll_reset(CdjC6747Pll *s)
 }
 void cdj_c6747_pll_tick(CdjC6747Pll *s)
 {
-    /* PLLEN remains rejected, so the bypass clock is still selected.
-     * Measure the completed period using the divider BEFORE a GO edge. */
-    unsigned elapsed = ratio(s->active_dividers[0]);
+    /* Measure elapsed input periods using the clock state before this edge.
+     * In PLL mode one DSP period is N*POSTDIV*SYSCLK1/M input periods.
+     * Preserve the remainder so x23 advances OSCIN once per 23 DSP cycles. */
+    unsigned elapsed;
+    if (s->config[0] & 1) {
+        unsigned numerator = ratio(s->config[3]) * ratio(s->config[8]) *
+                             ratio(s->active_dividers[0]);
+        unsigned denominator = s->config[2] + 1;
+        s->oscin_phase += numerator;
+        elapsed = s->oscin_phase / denominator;
+        s->oscin_phase %= denominator;
+    } else {
+        elapsed = ratio(s->active_dividers[0]);
+        s->oscin_phase = 0;
+    }
     s->oscin_cycles += elapsed;
     if ((s->config[0] & 0x12b) == 0x100) {
         /* Powered, square-wave input, software-selected bypass, reset held.
@@ -92,19 +104,23 @@ bool cdj_c6747_pll_write(CdjC6747Pll *s, uint32_t address,
     if (s->go_remaining) return false;
     uint32_t mask = i == 0 ? 0x1fb : i <= 2 ? 31 : 0x801f;
     if (value & ~mask) return false;
-    if (i != 0 && (s->config[0] & 8)) return false;
+    if (i != 0 && (s->config[0] & 8) &&
+        i != 4 && i != 5 && i != 6 && i != 9 && i != 10 && i != 11 && i != 12)
+        return false;
     if (i == 0) {
         /* TI marks bit 4 reserved-one, but legacy DaVinci PLL code clears
          * it as PLLDIS (Linux v6.1 drivers/clk/davinci/pll.c). Preserve the
          * writable latch as a flagged compatibility assumption, NOT proof
-         * of C6747 physical clock semantics. PLLEN still stops. */
-        if (value & 1) return false;
+         * of C6747 physical clock semantics. */
         value |= 0xc0;
+        if ((value & 1) && ((value & 0x129) != 0x109 ||
+                            s->reset_age < 17 || !valid_operating_point(s)))
+            return false;
         if (value & 8) {
-            if ((value & 0x123) != 0x100 || s->reset_age < 17 ||
+            if ((value & 0x122) != 0x100 || s->reset_age < 17 ||
                 !valid_operating_point(s)) return false;
             /* While out of reset, source/power changes are not supported. */
-            if ((s->config[0] & 8) && value != s->config[0]) return false;
+            if ((s->config[0] & 8) && ((value ^ s->config[0]) & ~1u)) return false;
         }
     }
     if (i == 1 && value != 0x14 && value != 0x1f && (value < 0x17 || value > 0x1d))
@@ -113,11 +129,14 @@ bool cdj_c6747_pll_write(CdjC6747Pll *s, uint32_t address,
      * unsupported there. Physical clock outputs remain unconnected. */
     if (commit) {
         if (i == 0) {
+            bool enable = (value & 1) && !(s->config[0] & 1);
             if ((value & 8) && !(s->config[0] & 8))
                 s->lock_wait_remaining = lock_wait(s);
             if (!(value & 8)) s->lock_wait_remaining = 0;
-            if ((value & 0x123) != 0x100 ||
+            if ((value & 0x122) != 0x100 ||
                 (!(value & 8) && (s->config[0] & 8))) s->reset_age = 0;
+            if ((value ^ s->config[0]) & 1) s->oscin_phase = 0;
+            if (enable && s->lock_wait_remaining) s->early_enable = true;
         }
         s->config[i] = value;
         if (i == 0 && !(value & 16)) s->legacy_bit4_used = true;

@@ -5,8 +5,8 @@
 #include <stdint.h>
 /* SPRUH91D 7.4.3-17, SPRS377F Table 6-4. NXS-specific input-clock/reset
  * timing plus synthetic divider GO. POR defaults substitute for ROM handoff;
- * PLLEN and physical output clocks remain unsupported. Lock wait is a
- * catalog bound applied to the custom chip, not measured lock status. */
+ * Physical output-clock consumers remain unsupported. Lock wait is a catalog
+ * bound applied to the custom chip, not measured lock status. */
 typedef struct {
     uint32_t config[13];
     bool legacy_bit4_used; /* Explicit unverified C6747 readback assumption. */
@@ -16,7 +16,8 @@ typedef struct {
      * SYSCLK1/core cycle spans the active PLLDIV1 ratio in OSCIN periods.
      * Initial bypass is a missing-ROM handoff assumption. */
     uint64_t oscin_cycles;
-    unsigned reset_age, lock_wait_remaining;
+    unsigned reset_age, lock_wait_remaining, oscin_phase;
+    bool early_enable; /* Sticky: PLLEN set before conservative wait elapsed. */
 } CdjC6747Pll;
 /* One DSP-cycle edge before bus commits. GO lasts eight subsequent cycles;
  * still synthetic latency, not physical OSCIN/PLL alignment timing. */
