@@ -8,9 +8,10 @@
 #include <string.h>
 
 #define CHECKPOINT_ENDIAN 0x01020304u
-#define CHECKPOINT_MAGIC "CDJDSP3\0"
+#define CHECKPOINT_MAGIC "CDJDSP4\0"
 #define CHECKPOINT_SCHEMA1_MAGIC "CDJDSP1\0"
 #define CHECKPOINT_SCHEMA2_MAGIC "CDJDSP2\0"
+#define CHECKPOINT_SCHEMA3_MAGIC "CDJDSP3\0"
 #define CHECKPOINT_COMPONENTS 9u
 
 typedef struct {
@@ -46,14 +47,21 @@ static void component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
     sizes[5] = sizeof(CdjC6747I2c);
     sizes[6] = sizeof(CdjC6747Pll);
     sizes[7] = sizeof(CdjC6747Hpi);
-    /* Preserve the fixed nine-component header used by schemas 1/2. The
+    /* Preserve the fixed nine-component header used by schemas 1-3. The
      * final component now describes the complete peripheral-state tail. */
+    sizes[8] = sizeof(CdjC6747Emifb) + sizeof(CdjC6747Intc) +
+               sizeof(CdjC6747Timer) * CDJ_C6747_TIMER_COUNT;
+}
+
+static void schema3_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
+{
+    component_sizes(sizes);
     sizes[8] = sizeof(CdjC6747Emifb) + sizeof(CdjC6747Intc);
 }
 
 static void legacy_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
 {
-    component_sizes(sizes);
+    schema3_component_sizes(sizes);
     sizes[8] = sizeof(CdjC6747Emifb);
 }
 
@@ -72,7 +80,19 @@ void cdj_dsp_checkpoint_prepare(CdjDspCheckpointState *state,
 
 static bool state_valid(const CdjDspCheckpointState *state)
 {
-    return state->boot_phase <= 7 && state->reset_released <= 1 &&
+    bool timers_valid = true;
+    for (unsigned i = 0; i < CDJ_C6747_TIMER_COUNT; ++i) {
+        const CdjC6747Timer *timer = &state->timers[i];
+        timers_valid = timers_valid && timer->tim34_shadow_valid <= 1 &&
+                       !(timer->emumgt & ~3u) &&
+                       !(timer->gpintgpen & ~0x00030033u) &&
+                       !(timer->gpdatgpdir & ~0x00030003u) &&
+                       !(timer->tcr & ~0x04c03ffeu) &&
+                       !(timer->tgcr & ~0x0000ff1fu) &&
+                       !(timer->wdtcr & ~0xffffc000u) &&
+                       !(timer->intctlstat & ~0x000f000fu);
+    }
+    return timers_valid && state->boot_phase <= 7 && state->reset_released <= 1 &&
            state->dsp_started <= 1 && state->dsp_halted <= 1 &&
            state->had_fault <= 1 && state->cpu.cycle_tick == NULL &&
            state->cpu.cycle_opaque == NULL && state->cpu.fault == NULL &&
@@ -193,8 +213,10 @@ bool cdj_dsp_checkpoint_read(const char *path,
         return false;
     }
     CheckpointHeader header = {0};
-    uint32_t expected[CHECKPOINT_COMPONENTS], legacy_expected[CHECKPOINT_COMPONENTS];
+    uint32_t expected[CHECKPOINT_COMPONENTS], schema3_expected[CHECKPOINT_COMPONENTS];
+    uint32_t legacy_expected[CHECKPOINT_COMPONENTS];
     component_sizes(expected);
+    schema3_component_sizes(schema3_expected);
     legacy_component_sizes(legacy_expected);
     bool header_read = fread(&header, 1, sizeof(header), file) == sizeof(header);
     bool schema1 = header_read &&
@@ -203,6 +225,9 @@ bool cdj_dsp_checkpoint_read(const char *path,
     bool schema2 = header_read &&
                    memcmp(header.magic, CHECKPOINT_SCHEMA2_MAGIC,
                           sizeof(header.magic)) == 0 && header.schema == 2;
+    bool schema3 = header_read &&
+                   memcmp(header.magic, CHECKPOINT_SCHEMA3_MAGIC,
+                          sizeof(header.magic)) == 0 && header.schema == 3;
     bool current = header_read &&
                    memcmp(header.magic, CHECKPOINT_MAGIC,
                           sizeof(header.magic)) == 0 &&
@@ -210,11 +235,18 @@ bool cdj_dsp_checkpoint_read(const char *path,
     /* Appending INTC reused four bytes of the schema-2 structure's trailing
      * alignment padding, so round the prefix back to the old ABI size. */
     size_t alignment = _Alignof(CdjDspCheckpointState);
-    size_t old_state_size = (offsetof(CdjDspCheckpointState, intc) +
-                             alignment - 1) / alignment * alignment;
-    bool old = (schema1 || schema2) && header.state_size == old_state_size &&
-               memcmp(header.component_size, legacy_expected,
-                      sizeof(legacy_expected)) == 0;
+    size_t legacy_state_size = (offsetof(CdjDspCheckpointState, intc) +
+                                alignment - 1) / alignment * alignment;
+    size_t schema3_state_size = (offsetof(CdjDspCheckpointState, timers) +
+                                 alignment - 1) / alignment * alignment;
+    bool legacy = (schema1 || schema2) &&
+                  header.state_size == legacy_state_size &&
+                  memcmp(header.component_size, legacy_expected,
+                         sizeof(legacy_expected)) == 0;
+    bool old_schema3 = schema3 && header.state_size == schema3_state_size &&
+                       memcmp(header.component_size, schema3_expected,
+                              sizeof(schema3_expected)) == 0;
+    bool old = legacy || old_schema3;
     bool ok = (old || current) &&
               header.endian == CHECKPOINT_ENDIAN &&
               header.header_size == sizeof(header) &&
@@ -256,10 +288,11 @@ bool cdj_dsp_checkpoint_read(const char *path,
     }
     ok = ok && present == header.present_pages && hash == header.payload_checksum &&
          fgetc(file) == EOF && !ferror(file);
-    /* Validate the legacy payload exactly as captured before initializing the
-     * appended schema-3 state. This also avoids relying on old tail padding
+    /* Validate the old payload exactly as captured before initializing
+     * appended state. This also avoids relying on old tail padding
      * having happened to contain zero bytes. */
-    if (ok && old) cdj_c6747_intc_reset(&state->intc);
+    if (ok && legacy) cdj_c6747_intc_reset(&state->intc);
+    if (ok && old) cdj_c6747_timers_reset(state->timers);
     ok = ok && state_valid(state);
     fclose(file);
     free(bitmap);

@@ -80,6 +80,10 @@ int main(int argc, char **argv)
     before.emifb.sdcfg = 0x12345678;
     cdj_c6747_intc_reset(&before.intc);
     assert(cdj_c6747_intc_event(&before.intc, 34));
+    cdj_c6747_timers_reset(before.timers);
+    before.timers[0].tgcr = 0x17;
+    before.timers[0].intctlstat = 1;
+    before.timers[1].prd12 = UINT32_MAX;
     l2[0] = 0x68;
     l2[sizeof(l2) - 1] = 0xa5;
     shared_ram[0] = 0x56;
@@ -113,6 +117,9 @@ int main(int argc, char **argv)
     assert(after.cpu.loop_instructions[91].word == 0xfeedbeef);
     assert(after.intc.event_flag[1] == 4 &&
            after.intc.exception_mask[0] == UINT32_MAX);
+    assert(after.timers[0].tgcr == 0x17 &&
+           after.timers[0].intctlstat == 1 &&
+           after.timers[1].prd12 == UINT32_MAX);
 
     FILE *file = fopen(argv[1], "r+b");
     assert(file && fputc('X', file) != EOF && fclose(file) == 0);

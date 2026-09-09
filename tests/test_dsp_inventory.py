@@ -64,7 +64,7 @@ def test_balanced_format_parser_preserves_fields_and_specific_decode():
     assert row['families'] == ['specific'] and row['next_pc'] == BASE + 4
 
 
-def test_schema3_checkpoint_shared_ram_sparse_sdram_inventory_and_corruption_rejection():
+def test_schema4_checkpoint_shared_ram_sparse_sdram_inventory_and_corruption_rejection():
     state = bytes(16)
     l2 = bytes(0x40000)
     shared = bytearray(SHARED_RAM_SIZE)
@@ -75,12 +75,12 @@ def test_schema3_checkpoint_shared_ram_sparse_sdram_inventory_and_corruption_rej
     struct.pack_into('<I', page, 0, 0x12345678)
     payload = state + l2 + shared + bitmap + page
     header = CHECKPOINT_HEADER.pack(
-        b'CDJDSP3\0', 3, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        b'CDJDSP4\0', 4, 0x01020304, CHECKPOINT_HEADER.size, len(state),
         *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 1,
         len(payload), _fnv1a(payload),
     )
     memories, info = read_input(header + payload)
-    assert info['kind'] == 'checkpoint' and info['schema'] == 3
+    assert info['kind'] == 'checkpoint' and info['schema'] == 4
     assert info['shared_ram_captured'] and info['present_sdram_pages'] == 1
     formats = read_formats('FMT(test, 32, 0x12345678, 0xffffffff, ignored)')
     start = SDRAM_BASE + 2 * 4096

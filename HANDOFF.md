@@ -120,7 +120,37 @@ firmware clears EVTCLR0-3, programs EVTMASK0-3 and INTMUX3, then reaches
 decodes word `0x020c0264` as `LDW .D1T1 *+A3(0),A4 || NOP 5`, with A3
 `0x01c20024`; SPRS377F section 6.22 identifies this as Timer64P0 TGCR. This is
 downstream inventory only, not validation of SPLOOPD timing, INTC execution, or
-the exploratory packet count. The next coherent peripheral batch is Timer64P0/1.
+the exploratory packet count.
+
+Both C6747 Timer64P instances are now modeled as the complete documented
+register family from SPRUH91D chapter 28: revision ID, emulation/GPIO control,
+counter/period/control/global control, watchdog control, reload/capture,
+interrupt status/enable, and eight compare registers. Tests cover reset and
+reserved-bit masks, 64-bit TIM12/TIM34 shadow reads, Plus-mode read-reset,
+counter reset controls, status W1C, atomic check-phase access, and fail-closed
+reserved offsets. Timer clock progression, external pins, output pulses,
+watchdog reset, DMA events, and INTC delivery are explicitly not implemented.
+
+Checkpoint schema 4 appends both timer states. Schema-3 migration replay passes
+repeat/state/memory gates and produces an 8,280-byte state with final component
+size 288 and checkpoint SHA-256
+`9593afb2207aaedb23d7370de148207a66391c9b3c0ecfd6a5c397827b74c7c3`.
+The complete suite reports 187 passed / 43 skipped, and Timer64P, checkpoint,
+and replay ASan/UBSan harnesses pass. The rebuilt connected run
+`runs/nxs-timer-connected-1` has 65 schema-4 checkpoints, 110,208 events and 39
+DSP stops, reproducing the unchanged validated conflict. Its repeat gate is
+`runs/dsp-timer-connected-replay-1`: trace SHA-256
+`e87f6d32b6cadc3760cd733776071dbf7b41a8f73ba8e0216b9dc2cf87c1eab3`,
+coverage SHA-256
+`f9f2014e4f1fe7bf200a7fc9148d9c5a5a190df96823891f4af67a4a95058e38`,
+and final checkpoint SHA-256
+`dfa2a229fd3b6b26ffe4802f5d788c5b825391888cab1e1fdc6017ed73440b81`.
+
+A second explicitly non-validating run-ahead completed the observed Timer64P0/1
+initialization writes and reached 25,364,997 packets / 60,780,156 cycles at PC
+`0xc004f4d0`, `STW A4,*A3`, A3=`0x01e12000`. SPRS377F section 6.17 identifies
+that address as SPI1 SPIGCR0. The exploratory SPLOOPD/transcript edits were
+removed; SPI0/1 are the next coherent peripheral family.
 
 ### Previous stable-wait checkpoint
 

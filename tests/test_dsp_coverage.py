@@ -23,7 +23,7 @@ def checkpoint(words=()):
         struct.pack_into('<I', l2, offset, word)
     payload = state + l2 + bytes(SHARED_RAM_SIZE) + bytes(1024)
     header = CHECKPOINT_HEADER.pack(
-        b'CDJDSP3\0', 3, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        b'CDJDSP4\0', 4, 0x01020304, CHECKPOINT_HEADER.size, len(state),
         *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 0,
         len(payload), _fnv1a(payload),
     )

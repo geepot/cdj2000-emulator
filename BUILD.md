@@ -1124,6 +1124,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_c6747_timer.c \
   -o /tmp/cdj-checkpoint-v3-san
 /tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
 .venv/bin/python -m pytest -q
@@ -1204,6 +1205,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_c6747_timer.c \
   -o /tmp/cdj-checkpoint-coverage-san
 /tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1213,6 +1215,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   emulator/qemu/cdj_c6747_gpio.c emulator/qemu/cdj_c6747_i2c.c \
   emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c6747_hpi.c \
   emulator/qemu/cdj_c6747_emifb.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_c6747_timer.c \
   emulator/qemu/cdj_dsp_checkpoint.c \
   -o /tmp/cdj-replay-coverage-san
 /tmp/cdj-replay-coverage-san \
@@ -1268,6 +1271,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_c6747_timer.c \
   -o /tmp/cdj-checkpoint-v3-san
 /tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
 ```
@@ -1292,3 +1296,56 @@ checkpoints, 110,208 events and 39 DSP stops, ending at the unchanged
 trace, coverage, state, L2, shared RAM, SDRAM and the appended INTC state. The
 suite reports 186 passed / 43 skipped. A non-validating run-ahead reaches
 Timer64P0 TGCR at `0x01c20024`; Timer64P0/1 are the next peripheral family.
+
+### C6747 Timer64P and schema-4 gate
+
+SPRUH91D chapter 28 backs the complete register-level Timer64P0/1 model.
+Implemented semantics include documented reset/masks, coherent 64-bit counter
+reads, Plus-mode counter read-reset, reset controls, interrupt-status W1C,
+reload/capture and compare storage. Internal/external clock progression,
+physical pins/output, watchdog reset, DMA events, and INTC delivery remain
+unimplemented rather than assigned an invented timing ratio.
+
+Reproduce focused and sanitizer validation:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_c674x.py \
+  tests/test_dsp_inventory.py tests/test_dsp_coverage.py \
+  tests/test_dsp_event_replay.py tests/test_dsp_checkpoint_replay.py
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/c6747-timer.c \
+  emulator/qemu/cdj_c6747_timer.c -o /tmp/cdj-c6747-timer-san
+/tmp/cdj-c6747-timer-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/dsp-checkpoint.c \
+  emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_c6747_timer.c -o /tmp/cdj-checkpoint-v4-san
+/tmp/cdj-checkpoint-v4-san /tmp/cdj-checkpoint-v4-san.cdjdsp
+.venv/bin/python -m pytest -q
+```
+
+Schema-3 migration and the rebuilt connected/repeat gate:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-intc-connected-1/dsp-checkpoints/00000000000000000064.cdjdsp \
+  /tmp/dsp-timer-schema4-migration --steps 1000000 \
+  --events runs/nxs-intc-connected-1/dsp-events.jsonl --verify-repeat
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_TIMER_CONNECTED --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_TIMER_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_TIMER_REPLAY --steps 100000000 \
+  --events runs/NEW_TIMER_CONNECTED/dsp-events.jsonl --verify-repeat
+```
+
+Recorded evidence is `runs/nxs-timer-connected-1` and
+`runs/dsp-timer-connected-replay-1`. The latter gates 1,504 confirmed source
+packets, 1,943 instruction addresses, 1,705 encodings, 1,556 dynamic edges,
+five probable addresses, zero unsupported faults, and byte-identical CPU,
+peripheral, Timer64P, L2/shared/SDRAM state. It ends at the unchanged validated
+25,364,865-packet conflict. Exploratory run-ahead reaches SPI1 SPIGCR0 at
+`0x01e12000`; SPI0/1 are the next peripheral family. Neither the exploratory
+path nor a GUI frame proves boot or audio.

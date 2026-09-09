@@ -16,6 +16,7 @@
 #include "cdj_c6747_i2c.h"
 #include "cdj_c6747_intc.h"
 #include "cdj_c6747_pll.h"
+#include "cdj_c6747_timer.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
 #include "cdj_dsp_checkpoint.h"
@@ -48,6 +49,7 @@ typedef struct {
     CdjC6747Gpio gpio;
     CdjC6747I2c i2c;
     CdjC6747Intc intc;
+    CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
     CdjC6747Pll pll;
     CdjC6747Emifb emifb;
     uint8_t *shared_ram;
@@ -112,6 +114,7 @@ static void capture_checkpoint(NxsHpi *s, const char *reason)
     state.hpi = s->hpi;
     state.emifb = s->emifb;
     state.intc = s->intc;
+    memcpy(state.timers, s->timers, sizeof(state.timers));
     cdj_dsp_checkpoint_prepare(&state, reason);
     g_autofree char *name = g_strdup_printf("%020" PRIu64 ".cdjdsp",
                                              state.checkpoint_sequence);
@@ -138,11 +141,12 @@ void cdj_nxs_hpi_reset_line(bool released)
     if (!s || released == s->reset_released) return;
     s->reset_released = released;
     if (!released) {
-        /* External DSP reset covers the HPI boot contract, the C674x
-         * megamodule interrupt controller, and the interpreter lifecycle.
-         * Device peripheral reset domains remain explicit models. */
+        /* External DSP reset covers the HPI boot contract, C674x megamodule
+         * INTC, Timer64P blocks, and interpreter lifecycle. Other device
+         * peripheral reset domains remain explicit models. */
         cdj_c6747_hpi_reset(&s->hpi);
         cdj_c6747_intc_reset(&s->intc);
+        cdj_c6747_timers_reset(s->timers);
         s->dsp_started = s->dsp_halted = s->dsp_running = false;
         if (s->hint) s->hint(s->opaque, true);
         record_event(s, "reset_assert", 0, 0, 0, 0);
@@ -211,6 +215,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     if (cdj_c6747_gpio_read(&s->gpio, address, value)) return true;
     if (cdj_c6747_i2c_read(&s->i2c, address, value)) return true;
     if (cdj_c6747_intc_read(&s->intc, address, value)) return true;
+    if (cdj_c6747_timers_read(s->timers, address, value)) return true;
     if (cdj_c6747_pll_read(&s->pll, address, value)) return true;
     if (cdj_c6747_emifb_read(&s->emifb, address, value)) return true;
     if ((s->syscfg.cfgchip[1] & 0x8000) &&
@@ -252,6 +257,11 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
     }
     if (cdj_c6747_intc_write(&s->intc, address, value, size, commit)) {
         if (commit) info_report("nxs-intc: write address=%#x value=%#x",
+                                address, (uint32_t)value);
+        return true;
+    }
+    if (cdj_c6747_timers_write(s->timers, address, value, size, commit)) {
+        if (commit) info_report("nxs-timer: write address=%#x value=%#x",
                                 address, (uint32_t)value);
         return true;
     }
@@ -467,6 +477,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c6747_gpio_reset(&s->gpio);
     cdj_c6747_i2c_reset(&s->i2c);
     cdj_c6747_intc_reset(&s->intc);
+    cdj_c6747_timers_reset(s->timers);
     cdj_c6747_pll_reset(&s->pll);
     cdj_c6747_hpi_reset(&s->hpi);
     cdj_c6747_emifb_reset(&s->emifb);
