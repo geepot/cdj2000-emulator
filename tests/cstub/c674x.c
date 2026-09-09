@@ -381,12 +381,14 @@ int main(void)
         memory[7] = 0xe0200000;
         assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
         assert(c.loop_active && c.loop.delayed_count && c.loop.ii == ii &&
-               c.loop.iterations == minimum && c.control[13] == 0);
+               c.loop.iterations == minimum && c.control[13] == 0 &&
+               (c.control[26] & (1u << 14)));
         unsigned steps = 0;
         while (c.loop_active) {
             assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
             assert(++steps < 80);
         }
+        assert(!(c.control[26] & (1u << 14)));
     }
     /* Full SPLOOPD can load ILC in its own execute packet.  The scheduler
      * observes that E1 value after setup and adds the documented minimum;
@@ -2335,6 +2337,44 @@ int main(void)
     for (unsigned i = 0; i < 5; ++i)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.cycles == 6 && c.pc == 0x1040 && !c.branch_due);
+
+    /* The sole idle SPLX state is an interrupt return.  B IRP preserves the
+     * restored bit through redirect; a return SPLOOPD then has ordinary
+     * SPLOOP counting and suppresses its parallel setup operation (7.13.2). */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[27] = 1u << 14; c.control[6] = 0x1040; c.control[13] = 2;
+    c.r[0][4] = 11;
+    memory[0] = 0x001800e2;                  /* B .S2 IRP. */
+    memory[16] = 0x0003a001;                 /* SPLOOPD 1 || */
+    memory[17] = mvk(0, 4, 77);              /* suppressed on return */
+    memory[18] = 0; memory[19] = 0x00034000; /* NOP; SPKERNEL 0,0 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.loop_active && (c.control[26] & (1u << 14)));
+    for (unsigned i = 0; i < 5; ++i)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1040 && !c.loop_active &&
+           (c.control[26] & (1u << 14)));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop_active && !c.loop.delayed_count &&
+           c.loop.iterations == 2 && c.control[13] == 1 &&
+           c.r[0][4] == 11 && (c.control[26] & (1u << 14)));
+    unsigned return_steps = 0;
+    while (c.loop_active) {
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(++return_steps < 20);
+    }
+    assert(!(c.control[26] & (1u << 14)) && c.r[0][4] == 11);
+
+    /* Retained-buffer SPMASK reversal needs state absent from legacy
+     * checkpoints, so this still fails closed instead of inventing replay. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[26] = 1u << 14; c.control[13] = 2;
+    memory[0] = 0x0003a000; memory[1] = 0x00030000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.loop_active && !c.loop.delayed_count && c.cycles == 1);
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 1 &&
+           !strcmp(c.fault, "SPLOOP interrupt-return SPMASK not implemented"));
 
     /* In-flight results were issued by older, non-annulled execute packets;
      * vectoring preserves them and the handler's first cycle publishes them. */

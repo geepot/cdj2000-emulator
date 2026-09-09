@@ -2,6 +2,18 @@
 #include <string.h>
 #include "cdj_c674x.h"
 
+#define CDJ_C674X_TSR_SPLX (1u << 14)
+#define CDJ_C674X_LOOP_RETURNING (1u << 3)
+
+/* SPRUFE8B 7.7.3.2 makes TSR.SPLX hardware-owned loop-buffer state.  Keep
+ * it synchronized here instead of adding a second checkpointed state bit. */
+static void loop_set_active(CdjC674x *cpu, bool active)
+{
+    cpu->loop_active = active;
+    if (active) cpu->control[26] |= CDJ_C674X_TSR_SPLX;
+    else cpu->control[26] &= ~CDJ_C674X_TSR_SPLX;
+}
+
 static int32_t sx(uint32_t value, unsigned bits)
 {
     uint32_t sign = 1u << (bits - 1);
@@ -2032,7 +2044,10 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
         if (out.branch_due && out.cycles == out.branch_due) {
             out.pc = out.branch_target;
-            out.loop_active = false; /* SPRUFE8B 7.14: taken branch idles the loop buffer. */
+            /* SPRUFE8B 7.14: a taken branch idles an active loop buffer.
+             * Do not clear the special idle SPLX state restored by B IRP;
+             * section 7.7.3.2 requires it until the return SPLOOP starts. */
+            if (out.loop_active) loop_set_active(&out, false);
             if (out.branch_count) {
                 out.branch_due = out.branch_queue[0].due;
                 out.branch_target = out.branch_queue[0].target;
@@ -2051,6 +2066,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
 static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     CdjC674x out = *cpu;
+    /* Also reconciles legacy checkpoints written before SPLX tracking. */
+    out.control[26] |= CDJ_C674X_TSR_SPLX;
     CdjC674xPacket combined = {.next_pc = cpu->pc, .single_cycle = true};
     CdjC674xPacket direct = {0};
     LoopMask masking = {.cpu = &out};
@@ -2068,6 +2085,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         unsigned delay = 0, count = 0;
         uint32_t tags[8];
         bool has_mask = spmask_decode(&source.instructions[0], &masking.mask);
+        if ((out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) && has_mask)
+            return stop(cpu, source.instructions[0].pc,
+                        source.instructions[0].word,
+                        "SPLOOP interrupt-return SPMASK not implemented");
         for (unsigned i = 0; i < source.count; ++i) {
             CdjC674xInstruction insn = source.instructions[i];
             uint32_t w = insn.word;
@@ -2184,7 +2205,9 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     if (end_while && !out.loop.sealed)
         return stop(cpu, cpu->pc, 0, "SPLOOPW termination during loading not implemented");
     bool condition = (cpu->r[out.loop_pred_bank][out.loop_pred_reg] != 0) ^ out.loop_pred_invert;
-    out.loop_pred_history = ((out.loop_pred_history << 1) | condition) & 7;
+    out.loop_pred_history =
+        (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
+        ((((out.loop_pred_history & 7) << 1) | condition) & 7);
     if (!cdj_c674x_execute(&out, &combined, read, write, opaque))
         return stop(cpu, out.fault_pc, out.fault_word, out.fault);
     uint64_t launched = 1 + out.loop.cycle / out.loop.ii;
@@ -2197,8 +2220,8 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
             --out.control[13];
     } else if (!out.loop.predicate_loop)
         out.control[13] = launched < out.loop.iterations ? out.loop.iterations - launched : 0;
-    if (end_while) out.loop_active = false;
-    if (drained && scheduler_post) out.loop_active = false;
+    if (end_while) loop_set_active(&out, false);
+    if (drained && scheduler_post) loop_set_active(&out, false);
     *cpu = out;
     return true;
 }
@@ -2235,8 +2258,19 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
     if (full_sploop || compact_sploop || full_sploopd ||
         compact_sploopd || while_loop) {
         uint32_t w = first.word;
-        bool delayed_loop = full_sploopd || compact_sploopd;
+        /* There is one currently implemented architectural idle/SPLX=1
+         * state: B IRP has
+         * restored a task interrupted in SPLOOP.  This partial interpreter
+         * uses that hardware-only bit as its return-window proxy because it
+         * has no separate pipeline provenance in the checkpoint ABI.  MVC
+         * cannot write TSR.SPLX, and all normal loop-idle paths clear it.
+         * Full retained-buffer reload is intentionally not claimed here. */
+        bool returning = (cpu->control[26] & CDJ_C674X_TSR_SPLX) != 0;
+        bool delayed_loop = (full_sploopd || compact_sploopd) && !returning;
         unsigned pred = first.compact ? 0 : w >> 29;
+        if (returning && while_loop)
+            return stop(cpu, cpu->pc, w,
+                        "SPLOOPW interrupt return not implemented");
         if (while_loop ? (!pred || pred == 7) : (!first.compact && (w >> 28) != 0))
             return stop(cpu, cpu->pc, w, "unsupported loop predicate");
         if (!while_loop && !delayed_loop &&
@@ -2251,6 +2285,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
             return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
         out.loop.predicate_loop = while_loop;
         out.loop.delayed_count = delayed_loop;
+        out.loop_pred_history = returning ? CDJ_C674X_LOOP_RETURNING : 0;
         if (while_loop) {
             static const unsigned banks[] = {0,1,1,1,0,0,0};
             static const unsigned regs[] = {0,0,1,2,1,2,0};
@@ -2275,6 +2310,10 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 return stop(cpu, other.pc, v, "multicycle loop setup packet not implemented");
         }
         memmove(packet.instructions, packet.instructions + 1, (--packet.count) * sizeof(packet.instructions[0]));
+        /* Section 7.13.2: operations parallel with the return SPLOOP(D/W)
+         * are NOPs.  Executing an empty packet still advances its one cycle
+         * and keeps all older delayed effects architectural. */
+        if (returning) packet.count = 0;
         if (!cdj_c674x_execute(&out, &packet, read, write, opaque))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
         if (delayed_loop) {
@@ -2283,7 +2322,13 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
                 return stop(cpu, cpu->pc, w, "SPLOOPD iteration count overflow");
             out.loop.iterations = out.control[13] + minimum;
         }
-        out.loop_active = !(cpu->branch_due && out.cycles >= cpu->branch_due); out.loop_wait = out.loop_tags = out.loop_packets = 0;
+        bool active = !(cpu->branch_due && out.cycles >= cpu->branch_due);
+        if (active) loop_set_active(&out, true);
+        else {
+            out.loop_active = false;
+            if (!returning) out.control[26] &= ~CDJ_C674X_TSR_SPLX;
+        }
+        out.loop_wait = out.loop_tags = out.loop_packets = 0;
         if (!while_loop && !delayed_loop && out.control[13]) --out.control[13];
         *cpu = out;
         return true;
