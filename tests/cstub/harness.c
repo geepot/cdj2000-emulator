@@ -17,6 +17,7 @@
  */
 #include "qemu/osdep.h"
 #include "qemu/timer.h"
+#include <assert.h>
 
 #include "cdj2000_input.c"
 
@@ -91,6 +92,10 @@ int socket_set_nodelay(int fd)
 
 static int harness_frame;
 static int harness_client = -1;
+static unsigned harness_replies;
+static char harness_reply_line[4096];
+static size_t harness_reply_fill;
+static bool harness_defer_frame_replies;
 
 static void harness_sleep_ms(int milliseconds)
 {
@@ -113,6 +118,30 @@ static void harness_sleep_ms(int milliseconds)
  * separates them, and it is the only way to check a line the harness did not
  * write itself.
  */
+static void harness_reply_bytes(const char *bytes, size_t length)
+{
+    for (size_t i = 0; i < length; ++i) {
+        char ch = bytes[i];
+
+        if (ch == '\r' || ch == '\n') {
+            if (harness_reply_fill) {
+                harness_reply_line[harness_reply_fill] = 0;
+                printf("# reply %s\n", harness_reply_line);
+                if (strcmp(harness_reply_line, "ok cdj2000-input")) {
+                    ++harness_replies;
+                }
+                harness_reply_fill = 0;
+            }
+        } else {
+            if (harness_reply_fill == sizeof(harness_reply_line) - 1) {
+                fprintf(stderr, "# harness: reply line too long\n");
+                exit(2);
+            }
+            harness_reply_line[harness_reply_fill++] = ch;
+        }
+    }
+}
+
 static void harness_drain(void)
 {
     char buffer[512];
@@ -122,23 +151,29 @@ static void harness_drain(void)
         return;
     }
     while ((got = recv(harness_client, buffer, sizeof(buffer) - 1, 0)) > 0) {
-        char *cursor = buffer;
+        harness_reply_bytes(buffer, got);
+    }
+}
 
-        buffer[got] = 0;
-        while (*cursor) {
-            char *end = strpbrk(cursor, "\r\n");
+/* A simulated frame is not a TCP delivery deadline. Keep the next command's
+ * marker behind this command's complete reply, without adding guest frames
+ * or advancing virtual time. Greeting lines are not command acknowledgments. */
+static void harness_wait_reply(unsigned expected)
+{
+    gint64 deadline = g_get_monotonic_time() + G_USEC_PER_SEC;
 
-            if (end) {
-                *end = 0;
-            }
-            if (*cursor) {
-                printf("# reply %s\n", cursor);
-            }
-            if (!end) {
-                break;
-            }
-            cursor = end + 1;
+    while (harness_replies < expected) {
+        cdj_input_poll();
+        harness_drain();
+        if (harness_replies >= expected) {
+            return;
         }
+        if (g_get_monotonic_time() >= deadline) {
+            fprintf(stderr, "# harness: timed out waiting for reply %u\n",
+                    expected);
+            exit(2);
+        }
+        harness_sleep_ms(1);
     }
 }
 
@@ -160,7 +195,9 @@ static void frame(void)
         printf("%02x", payload[i]);
     }
     printf("\n");
-    harness_drain();
+    if (!harness_defer_frame_replies) {
+        harness_drain();
+    }
     fflush(stdout);
     cdj_stub_clock_ns += FRAME_NS;
 }
@@ -196,9 +233,9 @@ static int harness_connect(int port)
 }
 
 /*
- * Send a command and give the server a frame to read it in.  The extra frame
- * costs one exchange and buys determinism: without it the trace would depend on
- * how quickly the loopback delivered.
+ * Send a command, allowing loopback delivery before the caller's panel frames.
+ * This delay is not a reply deadline: script segments additionally wait for a
+ * complete acknowledgment without advancing the simulated clock.
  */
 static void command(const char *line)
 {
@@ -353,7 +390,18 @@ int main(int argc, char **argv)
         command("press 19 08");
         frames(8);
         close(abandoned);
-    } else if (!strcmp(scenario, "script")) {
+    } else if (!strcmp(scenario, "reply-timeout")) {
+        harness_wait_reply(1);  /* no command was sent; must fail, not pass */
+    } else if (!strcmp(scenario, "reply-fragments")) {
+        harness_reply_bytes("ok po", 5);
+        assert(harness_replies == 0);
+        harness_reply_bytes("ng\nok cl", 8);
+        assert(harness_replies == 1);
+        harness_reply_bytes("ear\r\nok cdj2000-input\n", 22);
+        assert(harness_replies == 2);
+        assert(harness_reply_fill == 0);
+    } else if (!strcmp(scenario, "script")
+               || !strcmp(scenario, "script-deferred-replies")) {
         /*
          * Replay a file of commands, so that a caller can drive lines it did
          * not write into this harness -- specifically the ones the operator
@@ -369,6 +417,10 @@ int main(int argc, char **argv)
          */
         FILE *script = fopen(argc > 2 ? argv[2] : "", "r");
         char line[CDJ_INPUT_LINE];
+        unsigned expected = harness_replies;
+
+        harness_defer_frame_replies =
+            !strcmp(scenario, "script-deferred-replies");
 
         if (!script) {
             fprintf(stderr, "# harness: cannot open the script\n");
@@ -386,10 +438,14 @@ int main(int argc, char **argv)
             }
             if (!strncmp(line, "frames ", 7)) {
                 frames(atoi(line + 7));
+                harness_wait_reply(expected);
                 continue;
             }
+            harness_wait_reply(expected);
             command(line);
+            ++expected;
         }
+        harness_wait_reply(expected);
         fclose(script);
         frames(4);
     } else if (!strcmp(scenario, "bad")) {

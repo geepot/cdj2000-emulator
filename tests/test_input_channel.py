@@ -144,7 +144,8 @@ class Segment(NamedTuple):
 
 
 def script(harness: Path, steps: list[tuple[str, int]],
-           where: Path | None = None) -> list[Segment]:
+           where: Path | None = None, *,
+           defer_replies: bool = False) -> list[Segment]:
     """Drive a list of (command, exchanges-afterwards) and cut the trace up.
 
     The harness echoes `# command` before sending and `# reply` for everything
@@ -160,7 +161,8 @@ def script(harness: Path, steps: list[tuple[str, int]],
 
     settings = environment()
     settings["CDJ_INPUT_PORT"] = str(free_port())
-    finished = subprocess.run([str(harness), "script", str(path)],
+    scenario = 'script-deferred-replies' if defer_replies else 'script'
+    finished = subprocess.run([str(harness), scenario, str(path)],
                               capture_output=True, text=True, timeout=300,
                               env=settings)
     assert finished.returncode == 0, finished.stderr
@@ -178,6 +180,38 @@ def script(harness: Path, steps: list[tuple[str, int]],
     assert [segment.command for segment in segments] == \
         [command for command, _ in steps], "the harness lost a command"
     return segments
+
+
+def test_script_waits_for_replies_before_starting_the_next_segment(harness, tmp_path):
+    # Deliberately collect nothing during the simulated frames: replies must
+    # still belong to their own command, not whichever command is printed next.
+    segments = script(harness, [('ping', 1), ('clear', 1), ('ping', 1)],
+                      tmp_path, defer_replies=True)
+    assert [[reply for reply in segment.replies
+             if reply != 'ok cdj2000-input'] for segment in segments] == [
+                 ['ok pong'], ['ok clear'], ['ok pong']]
+    assert all(len(segment.frames) == 1 for segment in segments[:-1])
+    assert len(segments[-1].frames) == 5  # existing final four-frame drain
+
+
+def test_harness_reassembles_fragmented_reply_lines(harness):
+    settings = environment()
+    settings.pop('CDJ_INPUT_PORT', None)
+    completed = subprocess.run([str(harness), 'reply-fragments'], env=settings,
+                               capture_output=True, text=True, timeout=10)
+    assert completed.returncode == 0, completed.stderr
+    replies = [line for line in completed.stdout.splitlines()
+               if line.startswith('# reply ') and line != '# reply ok cdj2000-input']
+    assert replies == ['# reply ok pong', '# reply ok clear']
+
+
+def test_harness_missing_reply_is_a_bounded_failure(harness):
+    settings = environment()
+    settings.pop('CDJ_INPUT_PORT', None)
+    completed = subprocess.run([str(harness), 'reply-timeout'], env=settings,
+                               capture_output=True, text=True, timeout=10)
+    assert completed.returncode == 2
+    assert 'timed out waiting for reply 1' in completed.stderr
 
 
 def runs_of(frames: list[bytes], byte: int, mask: int) -> list[tuple[int, int]]:
