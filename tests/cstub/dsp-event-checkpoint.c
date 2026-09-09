@@ -4,6 +4,7 @@
 #include "cdj_dsp_checkpoint.h"
 
 static uint8_t l2[CDJ_DSP_L2_SIZE];
+static uint8_t shared_ram[CDJ_DSP_SHARED_RAM_SIZE];
 static uint8_t sdram[CDJ_DSP_SDRAM_SIZE];
 
 int main(int argc, char **argv)
@@ -25,6 +26,7 @@ int main(int argc, char **argv)
 
     char error[160] = {0};
     assert(cdj_dsp_checkpoint_write(argv[1], &state, l2, sizeof(l2),
+                                    shared_ram, sizeof(shared_ram),
                                     sdram, sizeof(sdram), error, sizeof(error)));
     return 0;
 }

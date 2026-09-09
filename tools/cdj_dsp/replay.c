@@ -17,6 +17,7 @@
 #include "cdj_c6747_emifb.h"
 #include "cdj_dsp_checkpoint.h"
 static uint8_t ram[0x40000];
+static uint8_t shared_ram[CDJ_DSP_SHARED_RAM_SIZE];
 static uint8_t sdram[0x2000000];
 static CdjC6747Syscfg syscfg;
 static CdjC6747Psc psc;
@@ -74,6 +75,15 @@ static void cycle_tick(void *unused)
 }
 static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }
+static uint8_t *host_memory(uint32_t a)
+{
+    if (a >= 0x11800000 && a <= 0x1183fffc) return ram + a - 0x11800000;
+    if (a >= 0x80000000 && a <= 0x8001fffc) return shared_ram + a - 0x80000000;
+    if (cdj_c6747_emifb_sdram_enabled(&emifb) &&
+        a >= 0xc0000000 && a <= 0xc1fffffc)
+        return sdram + a - 0xc0000000;
+    return NULL;
+}
 static bool read_bus(void *unused, uint32_t a, uint32_t *v)
 {
     (void)unused;
@@ -85,6 +95,13 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
     if (cdj_c6747_pll_read(&pll, a, v)) return true;
     if (cdj_c6747_emifb_read(&emifb, a, v)) return true;
     if ((syscfg.cfgchip[1] & 0x8000) && cdj_c6747_hpi_cpu_read(&hpi, a, v)) return true;
+    if (!(a & 3) && a >= 0x80000000 && a <= 0x8001fffc) {
+        unsigned offset = a - 0x80000000;
+        *v = shared_ram[offset] | (uint32_t)shared_ram[offset + 1] << 8 |
+             (uint32_t)shared_ram[offset + 2] << 16 |
+             (uint32_t)shared_ram[offset + 3] << 24;
+        return true;
+    }
     if (cdj_c6747_emifb_sdram_enabled(&emifb) && !(a & 3) &&
         a >= 0xc0000000 && a <= 0xc1fffffc) {
         unsigned offset = a - 0xc0000000;
@@ -124,6 +141,12 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
                 };
             }
         }
+    }
+    if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
+        a >= 0x80000000 && a <= 0x80020000 - size) {
+        ok = true;
+        if (commit) for (unsigned i = 0; i < size; ++i)
+            shared_ram[a - 0x80000000 + i] = v >> (8 * i);
     }
     if (!ok && cdj_c6747_emifb_sdram_enabled(&emifb) &&
         (size == 1 || size == 2 || size == 4 || size == 8) &&
@@ -177,7 +200,8 @@ static bool parse_event(const char *line, RecordedEvent *event)
 static const char *run_budget(unsigned long long *remaining, uint32_t breakpoint)
 {
     const char *reason = "phase budget exhausted";
-    for (unsigned step = 0; step < 100000 && *remaining; ++step, --*remaining) {
+    for (unsigned step = 0; step < CDJ_DSP_COOPERATIVE_BUDGET && *remaining;
+         ++step, --*remaining) {
         if (breakpoint && cpu.pc == breakpoint) return "breakpoint";
         if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL))
             return cpu.fault ? cpu.fault : "CPU stopped";
@@ -237,24 +261,24 @@ static bool replay_external_events(const char *path, unsigned long long limit,
             uint32_t address = checkpoint_state.hpi_address;
             bool autoincrement = !strcmp(event.type, "hpi_host_data_autoincrement_write");
             uint64_t expected_offset = autoincrement ? 0x80000 : 0xc0000;
+            uint8_t *target = host_memory(address);
             if (event.offset != expected_offset || event.address != address ||
                 event.size != 4 || event.value > UINT32_MAX || address & 3 ||
-                address < 0x11800000 || address > 0x1183fffc) goto mismatch;
+                !target) goto mismatch;
             for (unsigned i = 0; i < 4; ++i)
-                ram[address - 0x11800000 + i] = event.value >> (8 * i);
+                target[i] = event.value >> (8 * i);
             ++checkpoint_state.words;
             if (autoincrement)
                 checkpoint_state.hpi_address += 4;
         } else if (!strcmp(event.type, "hpi_host_data_read")) {
             uint32_t address = checkpoint_state.hpi_address;
+            uint8_t *source = host_memory(address);
             if ((event.offset != 0x80000 && event.offset != 0xc0000) ||
                 event.address != address || event.size != 4 ||
                 event.value > UINT32_MAX || address & 3 ||
-                address < 0x11800000 || address > 0x1183fffc) goto mismatch;
-            uint32_t value = ram[address - 0x11800000] |
-                (uint32_t)ram[address - 0x11800000 + 1] << 8 |
-                (uint32_t)ram[address - 0x11800000 + 2] << 16 |
-                (uint32_t)ram[address - 0x11800000 + 3] << 24;
+                !source) goto mismatch;
+            uint32_t value = source[0] | (uint32_t)source[1] << 8 |
+                (uint32_t)source[2] << 16 | (uint32_t)source[3] << 24;
             if (event.value != value) goto mismatch;
             if (event.offset == 0x80000) checkpoint_state.hpi_address += 4;
         } else if (!strcmp(event.type, "dsp_hpic_write")) {
@@ -323,7 +347,8 @@ int main(int argc, char **argv)
     if (!f) { perror("dump"); return 2; }
     char magic[8];
     bool checkpoint = fread(magic, 1, sizeof(magic), f) == sizeof(magic) &&
-                      memcmp(magic, "CDJDSP1\0", sizeof(magic)) == 0;
+                      (!memcmp(magic, "CDJDSP1\0", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP2\0", sizeof(magic)));
     rewind(f);
     bool valid = false;
     if (!checkpoint)
@@ -333,7 +358,8 @@ int main(int argc, char **argv)
     if (checkpoint) {
         char error[160] = {0};
         if (!cdj_dsp_checkpoint_read(argv[1], &checkpoint_state, ram, sizeof(ram),
-                                     sdram, sizeof(sdram), error, sizeof(error))) {
+                                     shared_ram, sizeof(shared_ram), sdram,
+                                     sizeof(sdram), error, sizeof(error))) {
             fprintf(stderr, "%s\n", error);
             return 2;
         }
@@ -417,7 +443,8 @@ int main(int argc, char **argv)
         char error[160] = {0};
         capture_devices(&checkpoint_state, reason);
         if (!cdj_dsp_checkpoint_write(argv[5], &checkpoint_state, ram, sizeof(ram),
-                                      sdram, sizeof(sdram), error, sizeof(error))) {
+                                      shared_ram, sizeof(shared_ram), sdram,
+                                      sizeof(sdram), error, sizeof(error))) {
             fprintf(stderr, "%s\n", error);
             return 2;
         }

@@ -7,7 +7,9 @@
 #include <string.h>
 
 #define CHECKPOINT_ENDIAN 0x01020304u
-#define CHECKPOINT_MAGIC "CDJDSP1\0"
+#define CHECKPOINT_MAGIC "CDJDSP2\0"
+#define CHECKPOINT_LEGACY_MAGIC "CDJDSP1\0"
+#define CHECKPOINT_LEGACY_SCHEMA 1u
 #define CHECKPOINT_COMPONENTS 9u
 
 typedef struct {
@@ -74,11 +76,14 @@ static bool state_valid(const CdjDspCheckpointState *state)
 bool cdj_dsp_checkpoint_write(const char *path,
                               const CdjDspCheckpointState *input,
                               const uint8_t *l2, size_t l2_size,
+                              const uint8_t *shared_ram, size_t shared_ram_size,
                               const uint8_t *sdram, size_t sdram_size,
                               char *error, size_t error_size)
 {
     CdjDspCheckpointState state = *input;
-    if (!path || !l2 || !sdram || l2_size != CDJ_DSP_L2_SIZE ||
+    if (!path || !l2 || !shared_ram || !sdram ||
+        l2_size != CDJ_DSP_L2_SIZE ||
+        shared_ram_size != CDJ_DSP_SHARED_RAM_SIZE ||
         sdram_size != CDJ_DSP_SDRAM_SIZE || !state_valid(&state)) {
         fail(error, error_size, "invalid checkpoint state or memory size");
         return false;
@@ -112,11 +117,12 @@ bool cdj_dsp_checkpoint_write(const char *path,
     header.page_size = CDJ_DSP_CHECKPOINT_PAGE_SIZE;
     header.page_count = page_count;
     header.present_pages = present;
-    header.payload_size = sizeof(state) + l2_size + bitmap_size +
+    header.payload_size = sizeof(state) + l2_size + shared_ram_size + bitmap_size +
                           (uint64_t)present * CDJ_DSP_CHECKPOINT_PAGE_SIZE;
     uint64_t hash = UINT64_C(14695981039346656037);
     hash = checksum(hash, &state, sizeof(state));
     hash = checksum(hash, l2, l2_size);
+    hash = checksum(hash, shared_ram, shared_ram_size);
     hash = checksum(hash, bitmap, bitmap_size);
     for (uint32_t page = 0; page < page_count; ++page) {
         if (bitmap[page / 8] & (1u << (page % 8)))
@@ -134,6 +140,7 @@ bool cdj_dsp_checkpoint_write(const char *path,
     bool ok = fwrite(&header, 1, sizeof(header), file) == sizeof(header) &&
               fwrite(&state, 1, sizeof(state), file) == sizeof(state) &&
               fwrite(l2, 1, l2_size, file) == l2_size &&
+              fwrite(shared_ram, 1, shared_ram_size, file) == shared_ram_size &&
               fwrite(bitmap, 1, bitmap_size, file) == bitmap_size;
     for (uint32_t page = 0; ok && page < page_count; ++page) {
         if (bitmap[page / 8] & (1u << (page % 8))) {
@@ -153,10 +160,14 @@ bool cdj_dsp_checkpoint_write(const char *path,
 bool cdj_dsp_checkpoint_read(const char *path,
                              CdjDspCheckpointState *state,
                              uint8_t *l2, size_t l2_size,
+                             uint8_t *shared_ram, size_t shared_ram_size,
                              uint8_t *sdram, size_t sdram_size,
                              char *error, size_t error_size)
 {
-    if (!path || !state || !l2 || !sdram) {
+    if (!path || !state || !l2 || !shared_ram || !sdram ||
+        l2_size != CDJ_DSP_L2_SIZE ||
+        shared_ram_size != CDJ_DSP_SHARED_RAM_SIZE ||
+        sdram_size != CDJ_DSP_SDRAM_SIZE) {
         fail(error, error_size, "missing checkpoint destination");
         return false;
     }
@@ -169,9 +180,16 @@ bool cdj_dsp_checkpoint_read(const char *path,
     CheckpointHeader header;
     uint32_t expected[CHECKPOINT_COMPONENTS];
     component_sizes(expected);
-    bool ok = fread(&header, 1, sizeof(header), file) == sizeof(header) &&
-              memcmp(header.magic, CHECKPOINT_MAGIC, sizeof(header.magic)) == 0 &&
-              header.schema == CDJ_DSP_CHECKPOINT_SCHEMA &&
+    bool header_read = fread(&header, 1, sizeof(header), file) == sizeof(header);
+    bool legacy = header_read &&
+                  memcmp(header.magic, CHECKPOINT_LEGACY_MAGIC,
+                         sizeof(header.magic)) == 0 &&
+                  header.schema == CHECKPOINT_LEGACY_SCHEMA;
+    bool current = header_read &&
+                   memcmp(header.magic, CHECKPOINT_MAGIC,
+                          sizeof(header.magic)) == 0 &&
+                   header.schema == CDJ_DSP_CHECKPOINT_SCHEMA;
+    bool ok = (legacy || current) &&
               header.endian == CHECKPOINT_ENDIAN &&
               header.header_size == sizeof(header) &&
               header.state_size == sizeof(*state) &&
@@ -180,20 +198,24 @@ bool cdj_dsp_checkpoint_read(const char *path,
               header.page_size == CDJ_DSP_CHECKPOINT_PAGE_SIZE &&
               header.page_count == sdram_size / header.page_size;
     const size_t bitmap_size = ok ? (header.page_count + 7u) / 8u : 0;
-    uint64_t expected_payload = sizeof(*state) + l2_size + bitmap_size +
+    uint64_t expected_payload = sizeof(*state) + l2_size +
+        (legacy ? 0 : shared_ram_size) + bitmap_size +
         (uint64_t)header.present_pages * CDJ_DSP_CHECKPOINT_PAGE_SIZE;
     ok = ok && header.present_pages <= header.page_count &&
          header.payload_size == expected_payload;
     uint8_t *bitmap = ok ? malloc(bitmap_size) : NULL;
     ok = ok && bitmap && fread(state, 1, sizeof(*state), file) == sizeof(*state) &&
-         fread(l2, 1, l2_size, file) == l2_size &&
-         fread(bitmap, 1, bitmap_size, file) == bitmap_size;
+         fread(l2, 1, l2_size, file) == l2_size;
+    if (ok && legacy) memset(shared_ram, 0, shared_ram_size);
+    else if (ok) ok = fread(shared_ram, 1, shared_ram_size, file) == shared_ram_size;
+    ok = ok && fread(bitmap, 1, bitmap_size, file) == bitmap_size;
     if (ok) memset(sdram, 0, sdram_size);
     uint32_t present = 0;
     uint64_t hash = UINT64_C(14695981039346656037);
     if (ok) {
         hash = checksum(hash, state, sizeof(*state));
         hash = checksum(hash, l2, l2_size);
+        if (!legacy) hash = checksum(hash, shared_ram, shared_ram_size);
         hash = checksum(hash, bitmap, bitmap_size);
     }
     for (uint32_t page = 0; ok && page < header.page_count; ++page) {

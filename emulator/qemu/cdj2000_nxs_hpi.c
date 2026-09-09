@@ -22,11 +22,14 @@
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
 #define L2_SIZE 0x40000u
+#define SHARED_RAM_BASE 0x80000000u
+#define SHARED_RAM_SIZE 0x20000u
 #define SDRAM_BASE 0xc0000000u
 #define SDRAM_SIZE 0x02000000u
-/* Cooperative QEMU scheduling quantum, not a C6747 timing property. The
- * observed 32 KiB CPU-copy handshake completes in fewer than 9k packets. */
-#define DSP_RUN_BUDGET 100000u
+/* Cooperative QEMU scheduling quantum, not a C6747 timing property. HINT
+ * still yields immediately. One million packets lets initialization reach
+ * its genuine wait loop after the final MAIN event instead of stranding the
+ * DSP merely because no later host transition happens to resume it. */
 
 typedef struct {
     MemoryRegion registers;
@@ -45,6 +48,7 @@ typedef struct {
     CdjC6747I2c i2c;
     CdjC6747Pll pll;
     CdjC6747Emifb emifb;
+    uint8_t *shared_ram;
     uint8_t *sdram;
     void (*hint)(void *, bool);
     void *opaque;
@@ -82,7 +86,7 @@ static void record_event(NxsHpi *s, const char *type, uint64_t offset,
 static void capture_checkpoint(NxsHpi *s, const char *reason)
 {
     const char *directory = getenv("CDJ_NXS_DSP_CHECKPOINT_DIR");
-    if (!directory || !*directory || !s->sdram) return;
+    if (!directory || !*directory || !s->shared_ram || !s->sdram) return;
     if (g_mkdir_with_parents(directory, 0700)) {
         error_report("nxs-hpi: cannot create DSP checkpoint directory %s", directory);
         return;
@@ -111,6 +115,7 @@ static void capture_checkpoint(NxsHpi *s, const char *reason)
     g_autofree char *path = g_build_filename(directory, name, NULL);
     char error[160] = {0};
     if (!cdj_dsp_checkpoint_write(path, &state, s->l2, sizeof(s->l2),
+                                  s->shared_ram, SHARED_RAM_SIZE,
                                   s->sdram, SDRAM_SIZE, error, sizeof(error)))
         error_report("nxs-hpi: checkpoint failed: %s", error);
     else
@@ -174,10 +179,23 @@ void cdj_nxs_hpi_boot_phase(unsigned phase)
     }
 }
 
+static uint8_t *host_memory(NxsHpi *s, uint32_t address)
+{
+    if (address >= L2_BASE && address <= L2_BASE + L2_SIZE - 4)
+        return s->l2 + address - L2_BASE;
+    if (address >= SHARED_RAM_BASE &&
+        address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4)
+        return s->shared_ram + address - SHARED_RAM_BASE;
+    if (cdj_c6747_emifb_sdram_enabled(&s->emifb) && address >= SDRAM_BASE &&
+        address <= SDRAM_BASE + SDRAM_SIZE - 4)
+        return s->sdram + address - SDRAM_BASE;
+    return NULL;
+}
+
 static bool valid_data(NxsHpi *s)
 {
-    return s->hpi.hwob && !s->hpi.hpirst && !(s->address & 3) && s->address >= L2_BASE &&
-           s->address <= L2_BASE + L2_SIZE - 4;
+    return s->hpi.hwob && !s->hpi.hpirst && !(s->address & 3) &&
+           host_memory(s, s->address) != NULL;
 }
 
 static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
@@ -192,6 +210,11 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     if (cdj_c6747_emifb_read(&s->emifb, address, value)) return true;
     if ((s->syscfg.cfgchip[1] & 0x8000) &&
         cdj_c6747_hpi_cpu_read(&s->hpi, address, value)) return true;
+    if (!(address & 3) && address >= SHARED_RAM_BASE &&
+        address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4) {
+        *value = ldl_le_p(s->shared_ram + address - SHARED_RAM_BASE);
+        return true;
+    }
     if (cdj_c6747_emifb_sdram_enabled(&s->emifb) && !(address & 3) &&
         address >= SDRAM_BASE && address <= SDRAM_BASE + SDRAM_SIZE - 4) {
         *value = ldl_le_p(s->sdram + address - SDRAM_BASE);
@@ -256,6 +279,18 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
             return true;
         }
     }
+    if ((size == 1 || size == 2 || size == 4 || size == 8) &&
+        address >= SHARED_RAM_BASE &&
+        address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - size) {
+        if (commit) {
+            uint8_t *target = s->shared_ram + address - SHARED_RAM_BASE;
+            if (size == 8) stq_le_p(target, value);
+            else if (size == 1) *target = value;
+            else if (size == 2) stw_le_p(target, value);
+            else stl_le_p(target, value);
+        }
+        return true;
+    }
     if (cdj_c6747_emifb_sdram_enabled(&s->emifb) &&
         (size == 1 || size == 2 || size == 4 || size == 8) &&
         address >= SDRAM_BASE && address <= SDRAM_BASE + SDRAM_SIZE - size) {
@@ -302,7 +337,7 @@ static void run_dsp(NxsHpi *s)
     s->dsp_running = true;
     const char *reason = "phase budget exhausted";
     unsigned steps = 0;
-    for (; steps < DSP_RUN_BUDGET; ++steps) {
+    for (; steps < CDJ_DSP_COOPERATIVE_BUDGET; ++steps) {
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
             s->dsp_halted = true;
@@ -344,7 +379,7 @@ static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)
     if (offset == 0) result = cdj_c6747_hpi_host_read(&s->hpi);
     else if (offset == 0x40000) result = s->address;
     if (data_valid) {
-        result = ldl_le_p(s->l2 + s->address - L2_BASE);
+        result = ldl_le_p(host_memory(s, s->address));
         if (offset == 0x80000) s->address += 4;
     } else if (offset != 0 && offset != 0x40000) {
         qemu_log_mask(LOG_GUEST_ERROR, "nxs-hpi: unsupported read offset=%" HWADDR_PRIx " address=%#x HWOB=%d reset=%d\n",
@@ -393,7 +428,7 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
         return;
     }
     if ((offset == 0x80000 || offset == 0xc0000) && valid_data(s)) {
-        stl_le_p(s->l2 + s->address - L2_BASE, value);
+        stl_le_p(host_memory(s, s->address), value);
         ++s->words;
         if (offset == 0x80000) s->address += 4;
         record_event(s, offset == 0x80000 ? "hpi_host_data_autoincrement_write" :
@@ -422,6 +457,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c6747_pll_reset(&s->pll);
     cdj_c6747_hpi_reset(&s->hpi);
     cdj_c6747_emifb_reset(&s->emifb);
+    s->shared_ram = g_malloc0(SHARED_RAM_SIZE);
     s->sdram = g_malloc0(SDRAM_SIZE);
     s->hint = hint;
     s->opaque = opaque;

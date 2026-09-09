@@ -22,6 +22,15 @@ SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
      'cdj_c6747_hpi.c', 'cdj_c6747_emifb.c', 'cdj_dsp_checkpoint.c')]]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
+CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0'}
+SHARED_RAM_SIZE = 0x20000
+
+
+def _fnv1a(data):
+    value = 14695981039346656037
+    for byte in data:
+        value = ((value ^ byte) * 1099511628211) & 0xffffffffffffffff
+    return value
 
 
 def checkpoint_info(data: bytes) -> dict:
@@ -30,16 +39,20 @@ def checkpoint_info(data: bytes) -> dict:
     fields = CHECKPOINT_HEADER.unpack_from(data)
     magic, schema, endian, header_size, state_size = fields[:5]
     l2_size, sdram_size, page_size, page_count, present_pages = fields[14:19]
-    payload_size = fields[19]
-    if (magic != b'CDJDSP1\0' or schema != 1 or endian != 0x01020304 or
+    payload_size, payload_checksum = fields[19:21]
+    if (CHECKPOINT_MAGIC.get(schema) != magic or endian != 0x01020304 or
             header_size != CHECKPOINT_HEADER.size or len(data) != header_size + payload_size or
             l2_size != 0x40000 or sdram_size != 0x2000000 or page_size != 4096 or
-            page_count != sdram_size // page_size):
+            page_count != sdram_size // page_size or present_pages > page_count or
+            _fnv1a(memoryview(data)[header_size:]) != payload_checksum):
         raise ValueError('checkpoint is incompatible or incomplete')
     l2_start = header_size + state_size
     l2 = data[l2_start:l2_start + l2_size]
+    shared_size = SHARED_RAM_SIZE if schema >= 2 else 0
+    shared_start = l2_start + l2_size
+    shared = data[shared_start:shared_start + shared_size]
     bitmap_size = (page_count + 7) // 8
-    bitmap_start = l2_start + l2_size
+    bitmap_start = shared_start + shared_size
     bitmap = data[bitmap_start:bitmap_start + bitmap_size]
     pages = memoryview(data)[bitmap_start + bitmap_size:]
     sdram_hash = hashlib.sha256()
@@ -59,6 +72,9 @@ def checkpoint_info(data: bytes) -> dict:
                 component_sizes=list(fields[5:14]),
                 checkpoint_sha256=hashlib.sha256(data).hexdigest(),
                 l2_sha256=hashlib.sha256(l2).hexdigest(),
+                shared_ram_captured=schema >= 2,
+                shared_ram_sha256=(hashlib.sha256(shared).hexdigest()
+                                   if schema >= 2 else None),
                 sdram_sha256=sdram_hash.hexdigest(), present_pages=present_pages)
 
 
@@ -92,7 +108,7 @@ def main():
         parser.error('C compiler required (install Xcode command line tools)')
     # Snapshot input so hashing and execution always describe the same bytes.
     data = args.dump.read_bytes()
-    checkpoint = data.startswith(b'CDJDSP1\0')
+    checkpoint = data.startswith((b'CDJDSP1\0', b'CDJDSP2\0'))
     capture_manifest = None
     input_checkpoint = None
     checkpoint_origin = None
@@ -183,6 +199,9 @@ def main():
                                          'catalog PLL reset/lock bounds applied to custom DSP; not measured lock',
                                          'early PLL enable latches and is flagged; analog acquisition not simulated',
                                          external_event_assumption,
+                                         ('schema-1 input did not capture shared RAM; restored zero before its first observed use'
+                                          if checkpoint and input_checkpoint['schema'] == 1 else
+                                          '128 KiB shared RAM captured losslessly in schema-2 checkpoints'),
                                          'EMIFB register readback and 32 MiB storage modeled; SDRAM command timing and arbitration omitted',
                                          f'MAIN-to-DSP GPIO boot phase fixed at {args.boot_phase}; other external GPIO inputs default low',
                                          'oscillator counter complete at handoff, not PLL lock',

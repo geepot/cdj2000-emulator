@@ -1089,3 +1089,86 @@ The current blocker is an `.L2X` `ADDU` extended-result form, not another
 floating-point instruction. Implement its associated extended integer family
 as the next batch. Exact replay does not prove full boot, working audio or all
 floating-point semantics; those remain incomplete.
+
+### Reachable DSP path through SPLOOPD and shared RAM
+
+The earlier `0x020c9572` classification above is superseded: it is a compound
+MPYLI/MPYIL packet, not scalar `ADDU`. The current batch covers its compound
+multiply family, scalar floating add/subtract, extended 40-bit integer
+arithmetic, ANDN, and the reachable compact compare, LSDx1, non-saturating
+arithmetic, and shift families. Unsupported saturating compact operations
+remain fail-closed because their CSR.SAT update is delayed.
+
+Full and compact `SPLOOPD` implement SPRUFE8B's delayed initial testing rule.
+The first three loop cycles neither terminate nor decrement ILC, so the
+scheduler launches `ILC + ceil(4/II)` iterations. Full setup packets may load
+ILC in parallel. Compact II 1..16 is accepted. Figure H-6 conditional reload,
+interrupt return, and termination while loading remain unsupported where
+applicable.
+
+SPRS377F Table 3-4 maps 128 KiB shared RAM at
+`0x80000000..0x8001ffff`. Both connected and standalone DSP buses now preserve
+that storage, and UHPI fixed/auto-increment data ports can address it. Schema-2
+checkpoints contain complete L2 and shared RAM plus lossless sparse EMIFB
+SDRAM. A schema-1 input remains readable, but its previously uncaptured shared
+RAM is explicitly restored as zero; use a schema-2 checkpoint after the first
+shared-RAM access.
+
+Reproduce the focused and complete checks:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c \
+  emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-batch-san
+/tmp/cdj-c674x-batch-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/dsp-checkpoint.c \
+  emulator/qemu/cdj_dsp_checkpoint.c -o /tmp/cdj-checkpoint-v2-san
+/tmp/cdj-checkpoint-v2-san /tmp/cdj-checkpoint-v2-san.cdjdsp
+.venv/bin/python -m pytest -q
+```
+
+The full suite reports 181 passed / 43 skipped; both sanitizer harnesses pass.
+The tests requiring localhost/qtest sockets need an environment which permits
+local socket binds.
+
+Deterministic first-arrival replay:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-compact-shifts-1/final.cdjdsp \
+  runs/NEW_SHARED_WAIT_BOUNDARY --steps 1000000 \
+  --break-pc 0x11804904 --verify-repeat
+```
+
+The recorded run is `runs/dsp-shared-wait-boundary-1`: PC `0x11804904`,
+2,864,814 packets / 6,486,387 cycles, exact-repeat trace SHA-256
+`62e8d267bac31019d1d03412fb0c092a4321b8938662d70099fb129438f12477`.
+The instruction there is `0x0001a120`, an unconditional self-branch. It is a
+stable non-ISA boundary, not proof of full boot or an identified application
+wait.
+
+Rebuild and collect connected evidence:
+
+```sh
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_SPLOOPD_SHARED_CONNECTED --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_SPLOOPD_SHARED_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_SPLOOPD_SHARED_EVENTS --steps 100000000 \
+  --events runs/NEW_SPLOOPD_SHARED_CONNECTED/dsp-events.jsonl --verify-repeat
+```
+
+The recorded connected run is `runs/nxs-sploopd-shared-connected-3`. It has 67
+schema-2 checkpoints, 110,209 ordered events, 40 DSP stops, a status-zero GUI
+exit and a frame. The shared cooperative quantum is one million DSP packets;
+that is a host scheduling setting and does not model wall-clock concurrency.
+`runs/dsp-sploopd-shared-connected-events-1` verifies all 40 stops and repeats
+trace/state/L2/shared-RAM/SDRAM exactly. Its trace SHA-256 is
+`92ea9014bcec73588b3477f43927b2b51401225b2a53de912d2db10585314639`.
+
+Full boot and working audio are still unproven. The next engineering boundary
+is the control-flow-aware confirmed-code coverage report, followed by DSP
+interrupt-controller/delivery work if the stable branch is an interrupt wait.

@@ -16,8 +16,11 @@ import re
 import struct
 
 BASE = 0x11800000
+SHARED_RAM_BASE = 0x80000000
+SHARED_RAM_SIZE = 0x20000
 SDRAM_BASE = 0xc0000000
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
+CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0'}
 
 
 def _fnv1a(data):
@@ -29,7 +32,7 @@ def _fnv1a(data):
 
 def read_input(data):
     """Return address-keyed memory images from raw L2 or a schema-1 checkpoint."""
-    if len(data) == 0x40000 and not data.startswith(b'CDJDSP1\0'):
+    if len(data) == 0x40000 and not data.startswith((b'CDJDSP1\0', b'CDJDSP2\0')):
         return {BASE: data}, dict(kind='raw_l2', schema=None)
     if len(data) < CHECKPOINT_HEADER.size:
         raise ValueError('input must be 256 KiB of L2 or a complete checkpoint')
@@ -38,7 +41,7 @@ def read_input(data):
     component_sizes = fields[5:14]
     l2_size, sdram_size, page_size, page_count, present_pages = fields[14:19]
     payload_size, payload_checksum = fields[19:21]
-    if (magic != b'CDJDSP1\0' or schema != 1 or endian != 0x01020304 or
+    if (CHECKPOINT_MAGIC.get(schema) != magic or endian != 0x01020304 or
             header_size != CHECKPOINT_HEADER.size or not state_size or
             not all(component_sizes) or l2_size != 0x40000 or
             sdram_size != 0x2000000 or page_size != 4096 or
@@ -49,13 +52,20 @@ def read_input(data):
     if _fnv1a(payload) != payload_checksum:
         raise ValueError('checkpoint payload checksum does not match')
     l2_start = state_size
+    shared_size = SHARED_RAM_SIZE if schema >= 2 else 0
+    shared_start = l2_start + l2_size
     bitmap_size = (page_count + 7) // 8
-    bitmap_start = l2_start + l2_size
+    bitmap_start = shared_start + shared_size
     pages_start = bitmap_start + bitmap_size
     expected_size = pages_start + present_pages * page_size
     if len(payload) != expected_size:
         raise ValueError('checkpoint sparse memory layout is incomplete')
     l2 = bytes(payload[l2_start:bitmap_start])
+    if shared_size:
+        l2 = bytes(payload[l2_start:shared_start])
+        shared_ram = bytes(payload[shared_start:bitmap_start])
+    else:
+        shared_ram = None
     bitmap = payload[bitmap_start:pages_start]
     sdram = bytearray(sdram_size)
     offset = pages_start
@@ -68,9 +78,13 @@ def read_input(data):
             count += 1
     if count != present_pages or offset != len(payload):
         raise ValueError('checkpoint sparse page count does not match')
-    return {BASE: l2, SDRAM_BASE: sdram}, dict(
+    memories = {BASE: l2, SDRAM_BASE: sdram}
+    if shared_ram is not None: memories[SHARED_RAM_BASE] = shared_ram
+    return memories, dict(
         kind='checkpoint', schema=schema, state_size=state_size,
-        component_sizes=list(component_sizes), present_sdram_pages=present_pages)
+        component_sizes=list(component_sizes),
+        shared_ram_captured=shared_ram is not None,
+        present_sdram_pages=present_pages)
 
 
 def expression(text):

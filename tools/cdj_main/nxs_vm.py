@@ -18,6 +18,15 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
+CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0'}
+SHARED_RAM_SIZE = 0x20000
+
+
+def fnv1a(data) -> int:
+    value = 14695981039346656037
+    for byte in data:
+        value = ((value ^ byte) * 1099511628211) & 0xffffffffffffffff
+    return value
 
 
 def sha256(path: Path) -> str:
@@ -37,12 +46,20 @@ def checkpoint_metadata(path: Path) -> dict:
     component_sizes = list(fields[5:14])
     l2_size, sdram_size, page_size, page_count, present_pages = fields[14:19]
     payload_size, payload_checksum = fields[19:21]
-    if (magic != b'CDJDSP1\0' or schema != 1 or endian != 0x01020304 or
-            header_size != CHECKPOINT_HEADER.size or len(raw) != header_size + payload_size):
+    if (CHECKPOINT_MAGIC.get(schema) != magic or endian != 0x01020304 or
+            header_size != CHECKPOINT_HEADER.size or
+            len(raw) != header_size + payload_size or
+            fnv1a(memoryview(raw)[header_size:]) != payload_checksum):
         raise RuntimeError(f'incompatible or incomplete DSP checkpoint: {path}')
+    shared_size = SHARED_RAM_SIZE if schema >= 2 else 0
+    shared_start = header_size + state_size + l2_size
+    shared = raw[shared_start:shared_start + shared_size]
     return dict(file=path.name, sha256=hashlib.sha256(raw).hexdigest(),
                 size=len(raw), schema=schema, endian='little', state_size=state_size,
                 component_sizes=component_sizes, l2_size=l2_size,
+                shared_ram_size=shared_size,
+                shared_ram_sha256=(hashlib.sha256(shared).hexdigest()
+                                   if shared_size else None),
                 sdram_size=sdram_size, page_size=page_size,
                 page_count=page_count, present_pages=present_pages,
                 payload_checksum=f'{payload_checksum:016x}')
@@ -70,7 +87,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
               [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
                ROOT / 'emulator/qemu/cdj_dsp_checkpoint.h',
                ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
-    manifest = dict(schema=1, format='ABI-bound native state plus sparse zero-default SDRAM pages',
+    manifest = dict(schema=2, format='ABI-bound native state, L2 and shared RAM plus sparse zero-default SDRAM pages',
         byte_order=sys.byteorder, complete=bool(checkpoints and events.is_file()),
         checkpoints=checkpoints, latest=checkpoints[-1]['file'] if checkpoints else None,
         event_transcript=dict(file=events.name, sha256=sha256(events) if events.is_file() else None,
@@ -82,7 +99,8 @@ def finalize_dsp_artifacts(run: Path, firmware: Path) -> None:
         source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
         approximations=[
             'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
-            'checkpoint schema 1 is ABI-bound and rejects structure-size or endianness changes',
+            'checkpoint schema 2 is ABI-bound and rejects structure-size or endianness changes',
+            '128 KiB C6747 shared RAM is captured losslessly',
             'sparse SDRAM pages are lossless because omitted pages restore as zero',
             'SDRAM command timing, arbitration and retention are not modeled',
             'PSC transition ticks and PLL divider GO latency remain deterministic approximations',

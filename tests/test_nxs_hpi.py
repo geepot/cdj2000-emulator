@@ -64,6 +64,12 @@ def test_host_addressing_and_fixed_port_dma():
             assert read(address) == 0x11801da0
             assert read(auto) == 0x12345678
             assert read(auto) == 0x90abcdef
+            # SPRS377F Table 3-4 maps the C6747's 128 KiB shared RAM at
+            # 0x80000000. It is reachable through the same UHPI data ports.
+            write(address, 0x80000020)
+            write(fixed, 0xa5c33c5a)
+            assert read(fixed) == 0xa5c33c5a
+            assert read(address) == 0x80000020
             # Real SH DMAC channel 5, incrementing RAM source / fixed HPID.
             write(0x04001000, 0x11223344)
             write(0x04001004, 0x55667788)

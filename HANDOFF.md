@@ -8,112 +8,81 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
-The versioned DSP checkpoint/replay workflow is operational. Schema 1 records
-the complete C674x state (including branch queues, pending E3/E5 memory
-transactions and software-loop buffers), every modeled C6747 peripheral, MAIN
-boot phase/HPI counters, 256 KiB L2 and lossless sparse pages for the zero-based
-32 MiB SDRAM. Process-local pointers are removed and rebound on restore. The
-format records native byte order and all component sizes and rejects corrupt,
-truncated or ABI-incompatible files. It is deliberately ABI-bound; run
-manifests add firmware/source SHA-256 provenance and document approximations.
+The confirmed connected/replay DSP path no longer stops on an unsupported
+instruction. It reaches PC `0x11804904`, word `0x0001a120`, an unconditional
+self-branch. This is a stable non-ISA boundary after DSP initialization, not
+proof of full firmware boot or audio. Its purpose is not symbolized; it is
+consistent with a terminal/interrupt wait, and DSP interrupt delivery remains
+unimplemented.
 
-Connected runs now checkpoint DSP start, boot-phase transitions, cooperative
-budget stops, HINT yields and faults. `runs/nxs-checkpoint-connected-2`
-produced 65 checkpoints (28 MiB total) and a SHA-256-bound ordered transcript
-of 110,210 state-changing HPI events. Transport replay reproduces 104,093
-uploaded words in 14 contiguous chunks, 14 HINT acknowledgements, 13 DSP HINT
-edges and one DSPINT edge, and proves that the initial upload exactly matches
-the DSP-start checkpoint. `runs/dsp-event-replay-1 --verify-repeat` is exact.
+The batch which reached that boundary implements the reachable families as
+families rather than one encountered word at a time:
 
-Standalone replay now injects the SHA-256-bound post-checkpoint transcript,
-runs the real interpreter at the same 100,000-step cooperative boundaries and
-gates every connected stop. It checks host offset/address/value/size and
-post-event phase/HPI state; DSP-side HPIC writes additionally preserve their
-issue-time packet/cycle counts. Unexpected, missing, reordered, overflowing or
-state-divergent events fail closed. Starting from checkpoint 1,
-`runs/dsp-checkpoint-full-events-5 --verify-repeat` reproduces all 39 connected
-DSP stops through every HPI chunk in about 2.3 seconds. Its trace and final
-checkpoint repeat byte-for-byte; final L2 and logical SDRAM hashes also agree.
+- compound `.M` `MPYIH`/`MPYIL` and rounded forms, `ABSSP`, scalar
+  `ADDSP`/`SUBSP`, and compact/full scalar comparisons;
+- reverse-cross `.L` subtraction plus the signed/unsigned 40-bit
+  `ADD`/`ADDU`/`SUB`/`SUBU` register-pair family;
+- `.L/.S/.D` `ANDN`, compact LSDx1 zero/one/negate/decrement/increment/XOR-one,
+  compact non-saturating `.S/.D` add/subtract, and compact immediate/register
+  shifts; and
+- compact/full `SPLOOPD`, including all compact II values 1..16 and the TI
+  four-cycle delayed initial test/decrement rule. Full `SPLOOPD` may load ILC
+  in parallel with setup. Conditional reload (Figure H-6), interrupt return,
+  and saturating compact operations with delayed CSR.SAT remain fail-closed.
 
-The preceding instruction batch resolves compact `0x0c66` as SPLOOP (SPRUFE8B Figure H-5 and
-GNU `nfu_uspl`), decodes all II values 1..14, and reuses the existing software
-loop scheduler. Compact SPLOOPD encodings are recognized but still stop
-explicitly because delayed testing is not implemented. Compact SPKERNEL
-(Figure H-7) now reconstructs its scattered stage/cycle field and shares the
-full-width scheduling path. The existing SPLOOPW predicate timing remains a
-model based on TI's three-cycle delayed boundary test; termination during
-loading, interrupt/reload behavior and broader multistage schedules still need
-verification and are not claimed complete.
+The earlier `0x020c9572` was not scalar `ADDU`; complete format/field decoding
+showed a compound MPYLI/MPYIL packet. The stale historical description remains
+below only as superseded checkpoint history. Table-driven tests cover unit,
+side, cross path, register-pair validity, predicates, parallel conflicts,
+rounding/status behavior, shift bounds, software-loop intervals, and fault
+atomicity. AddressSanitizer/UndefinedBehaviorSanitizer passes.
 
-Compact .D Figures C-8 through C-15 now share the scalar E1/E3/E5 memory
-pipeline. The batch covers immediate/register offsets, scaled postincrement
-and predecrement, RS selection, fixed A/B4-7 pointers, all scalar DSZ forms and
-aligned/nonaligned doublewords. Nonaligned doubleword offsets follow the
-figure-specific unscaled C-9/C-11 and scaled C-13/C-15 rules. The genuine
-`0x3d45` executes as `STDW .D2 B5:B4,*B6[2]++`. Full scalar .L CMPEQ, CMPGT,
-CMPGTU, CMPLT and CMPLTU register/immediate forms are covered as one family.
+SPRUFE8B sections 7.5.1.2 and 7.9 establish that `SPLOOPD` begins observing ILC
+after setup while forcing loop termination false and suppressing ILC decrement
+for the first three loop cycles. The implementation schedules
+`loaded ILC + ceil(4/II)` iterations and begins decrementing ILC only at later
+II boundaries. Focused tests exercise ILC=0 and parallel ILC loads for every
+supported II. `runs/dsp-shared-wait-boundary-1 --verify-repeat` starts at the
+2,854,320-packet compact-shift checkpoint and first reaches the stable branch
+at 2,864,814 packets / 6,486,387 cycles. Trace SHA-256 is
+`62e8d267bac31019d1d03412fb0c092a4321b8938662d70099fb129438f12477`.
 
-Replay outputs are now first-class resume checkpoints only after an exact
-repeat gate proves byte-identical traces and final architectural/memory state.
-Their manifests chain the prior manifest/gate SHA-256 values and carry the
-connected firmware/source provenance. The inventory tool accepts schema-1
-checkpoints, verifies their structure/checksum and scans both L2 and losslessly
-reconstructed sparse SDRAM; its results remain discovery-only.
+The first post-`SPLOOPD` integration boundary was a genuine `STDW` to
+`0x80002000`, inside the C6747 128 KiB shared RAM documented by SPRS377F Table
+3-4. Connected and standalone buses now map `0x80000000..0x8001ffff`; UHPI can
+also address this region. Checkpoint schema 2 losslessly records shared RAM
+between L2 and sparse EMIFB SDRAM. Schema-1 checkpoints remain readable and
+restore the previously uncaptured region as zero; manifests label this legacy
+assumption. The checkpoint remains native-ABI-bound and checks magic, schema,
+endianness, component sizes, payload size/checksum, sparse page counts,
+truncation, and trailing data.
 
-`runs/dsp-compact-loop-connected-events-1 --verify-repeat` starts at the new
-connected run's DSP-start checkpoint, gates all 39 connected stops and ends at
-the then-current fail-closed boundary: `INTSP .L1 A3,A3`, PC `0xc000ea94`, word
-`0x018c0958`, after 2,600,603 packets / 6,133,200 cycles. Trace SHA-256 is
-`e9e265bbda0b8ac8217b2b813bcfaa47adc970aafbc3fa3b0f354fbf7a4f9df6`;
-the repeated final checkpoint SHA-256 is
-`fe9843643e340426fa0e7593daf9d6212db680606948a7b94b8f3ff4f6d5568a`.
-The rebuilt 15-second connected MAIN/Blackfin run
-`runs/nxs-compact-loop-connected` independently records that same PC, word,
-packet count and cycle count, exits the GUI with status zero and publishes a
-frame. This is connected execution evidence, not full boot or working audio.
+`runs/dsp-shared-ram-1 --verify-repeat` executes a full one-million-step budget
+without a fault and ends at 3,854,320 packets / 12,423,423 cycles, spinning at
+the same branch. Its schema-2 repeat files match byte-for-byte across CPU,
+peripherals, L2, shared RAM, and logical 32 MiB SDRAM. The shorter breakpoint
+run above records the first arrival instead of inflating progress with wait-loop
+iterations.
 
-The current scalar floating-point batch implements `INTSP`, `INTSPU`, `SPINT`,
-`SPTRUNC` and `MPYSP`. Conversion and multiplication are performed directly on
-integer bit patterns, independently of the host floating-point environment.
-They implement all four FADCR/FMCR rounding modes, TI's denormal-as-zero and
-underflow-flush rules, signed zero, infinity, quiet/signaling NaNs, saturation,
-and sticky status flags. Operands are sampled in E1 and results plus status are
-published in E4. An ABI-neutral `size == 0` entry in the existing delayed-load
-queue preserves in-flight computed results in schema-1 checkpoints without
-changing `CdjC674x` size. `ADDSP`/`SUBSP` and the remaining floating-point ISA
-are still unsupported and are not implied by this batch.
+The rebuilt connected MAIN/Blackfin/C674x run is
+`runs/nxs-sploopd-shared-connected-3`. It exits the bounded GUI run with status
+zero and publishes a frame. Its one-million-packet cooperative DSP quantum is
+a host scheduling choice, not C6747 timing evidence; HINT still yields
+immediately. The run records 67 schema-2 checkpoints and 110,209 ordered events,
+and reaches the same `0x11804904` branch with no DSP fault. Starting from its
+DSP-start checkpoint, `runs/dsp-sploopd-shared-connected-events-1
+--verify-repeat` gates all 40 connected DSP stops, exact packet/cycle counts,
+HPI/phase state, and byte-identical repeat state/memory. Trace SHA-256 is
+`92ea9014bcec73588b3477f43927b2b51401225b2a53de912d2db10585314639`.
 
-Table-driven tests cover both units and cross paths, rounding boundaries,
-exception/status behavior, predicates, fault atomicity, delayed write hazards,
-and a checkpoint containing an in-flight E4 result. The complete suite remains
-180 passed / 43 skipped, and the C674x harness passes
-AddressSanitizer/UndefinedBehaviorSanitizer. Source SHA-256 values for the
-connected/replay evidence are `647c9a7caf4b3016f91168e21e0a9a59db9037871ed8a06ff002befeda774c57`
-for `cdj_c674x.c` and
-`148b31568d2745ccabb202946bcaa5b3bb075b6f81579ec3639a0230621187f5`
-for `cdj_c674x.h`.
-
-Chained deterministic replays advanced from `INTSP` to `MPYSP`, then
-`SPTRUNC`, and finally through 20 additional packets to a different integer
-family. `runs/dsp-fp-connected-events-1 --verify-repeat` gates all 39 stops in
-the newest connected transcript and repeats exact trace, serialized state, L2
-and SDRAM. It stops at PC `0xc0012644`, word `0x020c9572`, after 2,600,629
-packets / 6,133,250 cycles with one legitimate pending E4 result. Trace
-SHA-256 is `9f75a60dbe1d4e094ae0fef9ec078219a5662b751e75c8cba0550c0a59497613`;
-the final checkpoint SHA-256 is
-`6787287c81eafa09bf86eb32b283d16a19f0261cd0a0719fd4db61fdd6a27e10`.
-The rebuilt connected run `runs/nxs-fp-convert-connected` independently agrees
-at the same PC, word and counts; its bounded GUI exits zero and publishes a
-frame. This is exact replay and connected execution evidence, not full boot or
-working audio.
-
-The current word is the full-width `.L2X` `ADDU` extended-result form (GNU
-format `l_1_or_2_src`, operation field `0x2b`) and writes a register pair. Next
-implement the useful TI-documented extended integer add/subtract family as one
-batch, including 40-bit/register-pair semantics, operand-extension rules,
-cross paths, predicates, timing, parallel hazards and checkpoint preservation.
-Then continue automatically to the next genuinely different family. Do not
-relax checkpoint gates or infer correctness from packet count alone.
+The complete suite is 181 passed / 43 skipped. Full boot remains incomplete:
+the DSP interrupt controller and interrupt delivery, DMA/EDMA activity, broader
+static ISA coverage, physical peripheral timing, storage/control interaction,
+and audio generation are not established. Next build the control-flow-aware
+confirmed-code inventory and instruction-family coverage report from this
+connected transcript, then use it to distinguish unreachable missing ISA from
+the next interrupt/peripheral work. Do not infer readiness from the large
+packet count accumulated in the stable branch.
 
 ### Previous SYSCFG checkpoint
 
