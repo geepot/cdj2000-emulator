@@ -25,21 +25,28 @@ uploaded words in 14 contiguous chunks, 14 HINT acknowledgements, 13 DSP HINT
 edges and one DSPINT edge, and proves that the initial upload exactly matches
 the DSP-start checkpoint. `runs/dsp-event-replay-1 --verify-repeat` is exact.
 
-Standalone checkpoint restore/repeat proves byte-identical final CPU and
-peripheral state plus L2 and logical SDRAM hashes. It reduced the phase-3
-blocker loop to about 0.6 seconds. From the connected `0xc09868c0` checkpoint,
-the TI-documented scalar ADD/SUB .D and CMPLTU forms advance nine packets to
-PC `0x118044c0`, compact word `0x0c66`; rebuilt connected execution agrees at
-2,599,589 packets / 6,132,090 cycles. The compact word's classification still
-needs primary-reference reconciliation: the parent decoder calls it
-`[A0] MVK.L 0,A0`, while the visible SPRUFE8B G-3 fixed-field layout appears
-inconsistent. Keep it fail-closed until corroborated. Suite: 176 passed / 43
-skipped. The bounded GUI exit/frame is not full boot or working audio.
+Standalone replay now injects the SHA-256-bound post-checkpoint transcript,
+runs the real interpreter at the same 100,000-step cooperative boundaries and
+gates every connected stop. It checks host offset/address/value/size and
+post-event phase/HPI state; DSP-side HPIC writes additionally preserve their
+issue-time packet/cycle counts. Unexpected, missing, reordered, overflowing or
+state-divergent events fail closed. Starting from checkpoint 1,
+`runs/dsp-checkpoint-full-events-5 --verify-repeat` reproduces all 39 connected
+DSP stops through every HPI chunk in about 2.3 seconds. Its trace and final
+checkpoint repeat byte-for-byte; final L2 and logical SDRAM hashes also agree.
 
-Next finish checkpoint-driven external-event injection beyond a HINT yield,
-then reconcile `0x0c66` against TI/GNU encoding sources and implement its whole
-valid compact family. Do not relax compatibility checks or infer correctness
-from packet count alone.
+From the connected `0xc09868c0` checkpoint, the TI-documented scalar ADD/SUB
+.D and CMPLTU forms advance nine packets to PC `0x118044c0`, compact word
+`0x0c66`; rebuilt connected execution agrees at 2,599,589 packets / 6,132,090
+cycles. The compact word's classification still needs primary-reference
+reconciliation: the parent decoder calls it `[A0] MVK.L 0,A0`, while the
+visible SPRUFE8B G-3 fixed-field layout appears inconsistent. Keep it
+fail-closed until corroborated. The bounded GUI exit/frame is not full boot or
+working audio.
+
+Next reconcile `0x0c66` against TI/GNU encoding sources, inventory the nearby
+reachable compact family and implement it as a tested batch. Do not relax
+compatibility checks or infer correctness from packet count alone.
 
 ### Previous SYSCFG checkpoint
 

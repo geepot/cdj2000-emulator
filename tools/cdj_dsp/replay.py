@@ -75,6 +75,8 @@ def main():
                         help='run the same compiled binary twice and gate on identical traces')
     parser.add_argument('--expect-trace', type=Path,
                         help='also require byte-identical output to this saved trace; not a boot test')
+    parser.add_argument('--events', type=Path,
+                        help='inject later events from the checkpoint connected-run transcript')
     args = parser.parse_args()
     if (not 0 < args.steps <= 100000000 or not 0 <= args.break_pc <= 0xffffffff or
             not 0 <= args.boot_phase <= 7):
@@ -83,6 +85,8 @@ def main():
         parser.error('input dump/checkpoint must be an existing file')
     if args.expect_trace is not None and not args.expect_trace.is_file():
         parser.error('expected trace must be an existing file')
+    if args.events is not None and not args.events.is_file():
+        parser.error('event transcript must be an existing file')
     cc = shutil.which('cc')
     if not cc:
         parser.error('C compiler required (install Xcode command line tools)')
@@ -107,6 +111,16 @@ def main():
             parser.error('checkpoint is absent from, or does not match, its complete manifest')
     elif len(data) != 0x40000:
         parser.error('legacy dump must be exactly 256 KiB')
+    event_data = args.events.read_bytes() if args.events is not None else None
+    if event_data is not None:
+        if not checkpoint:
+            parser.error('event injection requires a connected checkpoint')
+        transcript = capture_manifest.get('event_transcript')
+        if not isinstance(transcript, dict) or not isinstance(transcript.get('sha256'), str):
+            parser.error('checkpoint manifest has no complete event-transcript provenance')
+        expected_event_hash = transcript['sha256']
+        if hashlib.sha256(event_data).hexdigest() != expected_event_hash:
+            parser.error('event transcript does not match the checkpoint manifest')
     expected = args.expect_trace.read_bytes() if args.expect_trace is not None else None
     # Compile the exact source/header bytes whose hashes are recorded. A later
     # worktree edit must not make the manifest describe a different binary.
@@ -116,17 +130,26 @@ def main():
         binary = Path(temp) / 'replay'
         snapshot = Path(temp) / 'l2.bin'
         snapshot.write_bytes(data)
+        event_snapshot = Path(temp) / 'events.jsonl'
+        if event_data is not None:
+            event_snapshot.write_bytes(event_data)
         for path, content in source_data.items():
             (Path(temp) / path.name).write_bytes(content)
         subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
                         '-I', temp, *[str(Path(temp) / p.name) for p in SOURCES],
                         '-o', str(binary)], check=True)
         args.output.mkdir(parents=True, exist_ok=False)
+        external_event_assumption = (
+            'ordered post-checkpoint MAIN/HPI events injected and gated against every connected DSP stop'
+            if event_data is not None else
+            'no later MAIN/HPI events injected; replay stops when an external event is required')
         manifest = dict(dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
                         break_pc=args.break_pc, boot_phase=args.boot_phase,
                         input_kind='connected_checkpoint' if checkpoint else 'legacy_l2_dump',
                         input_checkpoint=input_checkpoint,
+                        event_transcript_sha256=(hashlib.sha256(event_data).hexdigest()
+                                                 if event_data is not None else None),
                         capture_source_sha256=capture_manifest.get('source_sha256') if capture_manifest else None,
                         capture_firmware_sha256=capture_manifest.get('firmware_sha256') if capture_manifest else None,
                         boot_rom_executed=False,
@@ -134,7 +157,7 @@ def main():
                                          'initial bypass; NXS OSCIN 16934400 Hz, active SYSCLK1 division',
                                          'catalog PLL reset/lock bounds applied to custom DSP; not measured lock',
                                          'early PLL enable latches and is flagged; analog acquisition not simulated',
-                                         'HPIC begins after MAIN HWOB setup and DSPINT; no later host events replayed',
+                                         external_event_assumption,
                                          'EMIFB register readback and 32 MiB storage modeled; SDRAM command timing and arbitration omitted',
                                          f'MAIN-to-DSP GPIO boot phase fixed at {args.boot_phase}; other external GPIO inputs default low',
                                          'oscillator counter complete at handoff, not PLL lock',
@@ -143,15 +166,17 @@ def main():
                         sources={str(p.relative_to(ROOT)): hashlib.sha256(content).hexdigest()
                                  for p, content in source_data.items()})
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        command = [str(binary), str(snapshot), str(args.steps), str(args.break_pc),
+                   str(args.boot_phase), str(args.output / 'final.cdjdsp')]
+        if event_data is not None:
+            command.append(str(event_snapshot))
         with (args.output / 'trace.jsonl').open('w') as trace:
-            subprocess.run([str(binary), str(snapshot), str(args.steps), str(args.break_pc),
-                            str(args.boot_phase), str(args.output / 'final.cdjdsp')],
-                           stdout=trace, check=True)
+            subprocess.run(command, stdout=trace, check=True)
         if args.verify_repeat:
+            repeat_command = command.copy()
+            repeat_command[5] = str(args.output / 'repeat-final.cdjdsp')
             with (args.output / 'repeat.jsonl').open('w') as trace:
-                subprocess.run([str(binary), str(snapshot), str(args.steps), str(args.break_pc),
-                                str(args.boot_phase), str(args.output / 'repeat-final.cdjdsp')],
-                               stdout=trace, check=True)
+                subprocess.run(repeat_command, stdout=trace, check=True)
     with (args.output / 'trace.jsonl').open() as trace:
         last = None
         for line in trace:
@@ -161,6 +186,12 @@ def main():
         actual = (args.output / 'trace.jsonl').read_bytes()
         gate = dict(scope='trace equivalence only; not architectural correctness or boot',
                     trace_sha256=hashlib.sha256(actual).hexdigest(), passed=True)
+        if event_data is not None:
+            verified_stops = sum(
+                json.loads(line).get('event') == 'verified_connected_stop'
+                for line in actual.decode().splitlines())
+            gate['verified_connected_stops'] = verified_stops
+            gate['passed'] &= verified_stops > 0
         if args.verify_repeat:
             repeated = (args.output / 'repeat.jsonl').read_bytes()
             gate['repeat_matches'] = actual == repeated

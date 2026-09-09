@@ -960,9 +960,10 @@ sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
 .venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-checkpoint-connected-2 --seconds 15 --qemu build/qemu/build/qemu-system-sh4
 .venv/bin/python -m tools.cdj_dsp.event_replay runs/nxs-checkpoint-connected-2 runs/dsp-event-replay-1 --verify-repeat
 .venv/bin/python -m tools.cdj_dsp.replay runs/nxs-checkpoint-connected-2/dsp-checkpoints/00000000000000000065.cdjdsp runs/dsp-checkpoint-next --steps 100000 --verify-repeat
+.venv/bin/python -m tools.cdj_dsp.replay runs/nxs-checkpoint-connected-2/dsp-checkpoints/00000000000000000001.cdjdsp runs/dsp-checkpoint-full-events-5 --steps 10000000 --events runs/nxs-checkpoint-connected-2/dsp-events.jsonl --verify-repeat
 ```
 
-Suite: 176 passed / 43 skipped. The connected run creates 65 checkpoints in
+Suite: 179 passed / 43 skipped. The connected run creates 65 checkpoints in
 28 MiB. Event replay gates 110,210 ordered state-changing events, 104,093 HPI
 words in 14 chunks, 14 host HINT acknowledgements, 13 DSP HINT edges, one
 DSPINT edge and exact initial-L2 equivalence. Checkpoint replay gates identical
@@ -972,8 +973,20 @@ logical 32 MiB SDRAM SHA-256.
 The first checkpoint-driven ISA batch implements scalar ADD/SUB .D register,
 constant and cross-path forms plus scalar CMPLTU. Replay and rebuilt connected
 execution agree on the next fail-closed stop at 2,599,589 packets / 6,132,090
-cycles, `0x118044c0` / compact `0x0c66`. Full boot/audio remain incomplete.
-Schema 1 is not cross-ABI portable, DSP interrupt delivery remains absent, and
-the event replayer currently validates/reconstructs captured external HPI
-transport while CPU continuation begins from an exact connected checkpoint; it
-does not yet inject future events into a yielded standalone CPU.
+cycles, `0x118044c0` / compact `0x0c66`.
+
+With `--events`, standalone replay can now start at any pre-fault connected
+checkpoint and inject the remaining captured MAIN/HPI transcript. From the
+DSP-start checkpoint it reproduces all 39 connected stops through the 14 HPI
+chunks in about 2.3 seconds. Every host transaction is checked for ordered
+offset/address/value/size and resulting boot-phase/HPI state. DSP-side HPIC
+writes are checked at their original packet/cycle count, and every connected
+stop must match PC, fault word, packet/cycle counts and HPI state. The exact
+repeat gate additionally compares trace bytes, final serialized state, L2 and
+logical SDRAM. `runs/dsp-checkpoint-full-events-5` passes with trace SHA-256
+`da4f1ba46e3d27949a7c124b7521c1689aa76f4da3925dc4b82abc1d318b6ac5`.
+
+Full boot/audio remain incomplete. Schema 1 is not cross-ABI portable and DSP
+interrupt delivery remains absent. Event replay only injects the captured
+transcript; it neither predicts new MAIN behavior nor validates physical HPI
+timing, HRDY/FIFO behavior or pin-level effects.
