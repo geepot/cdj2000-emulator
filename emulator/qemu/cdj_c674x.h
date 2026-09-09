@@ -15,6 +15,8 @@ typedef struct {
     uint64_t due, value;
     /* size 1/2/4/8 is a memory load; size 0 is an already-computed delayed
      * scalar result and size 16 an already-computed register-pair result.
+     * Sizes 32/33 are delayed IFR set/clear effects; their address field is
+     * the interrupt mask and they never write a general register.
      * For size 0, address may be a floating-point status-bit OR mask and
      * sign_extend selects FADCR (false) or FMCR (true).  These sentinels reuse
      * the ABI-stable writeback queue so schema-1 checkpoints retain every
@@ -23,6 +25,8 @@ typedef struct {
     unsigned bank, dst, size;
     bool sign_extend;
 } CdjC674xLoad;
+#define CDJ_C674X_DELAYED_IFR_SET 32u
+#define CDJ_C674X_DELAYED_IFR_CLEAR 33u
 typedef struct {
     uint32_t word, pc, header;
     bool compact;

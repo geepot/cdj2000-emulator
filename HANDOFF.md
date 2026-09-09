@@ -58,6 +58,42 @@ python -m tools.cdj_dsp.event_replay \
   --verify-repeat
 ```
 
+The full-width MVC interrupt/control batch is now reference-backed rather than
+accepting only the previously reached ILC/RILC and floating-point controls. It
+implements CSR, IFR/ISR, ICR, IER, ISTP, IRP and NRP reads/writes with register
+masks, IER's fixed reset-enable and set-only NMIE, synthesized ISTP.HPEINT, and
+the documented one-delay-slot visibility of ISR/ICR changes. Delayed IFR set
+and clear effects reuse the existing checkpointed result queue without changing
+the CPU structure ABI; simultaneous set wins over clear. Reset now exposes
+C674x CPU ID `0x14`, little-endian mode, IER `1`, and the C6747 HOST1CFG ROM
+ISTP default `0x00700000`. CPU interrupt recognition/vectoring is still absent.
+
+PCC/DCC are architecturally ignored on C674x. PWRD behavior is device-specific;
+the current core explicitly ignores MVC writes to CSR.PWRD because physical CPU
+power-down is not modeled. This is an approximation, not evidence of sleep-mode
+support. Focused tests and the standalone ASan/UBSan harness pass. The full suite
+passes 185 tests with 43 optional skips. Exact replay on the unmodified loop
+scheduler still reproduces the connected 25,364,865-packet conflict and passes
+repeat verification:
+
+```sh
+python -m tools.cdj_dsp.replay \
+  runs/nxs-prot-connected-2/dsp-checkpoints/00000000000000000064.cdjdsp \
+  /tmp/dsp-control-validation --steps 1000000 \
+  --events runs/nxs-prot-connected-2/dsp-events.jsonl --verify-repeat
+```
+
+One explicitly non-validating run-ahead temporarily added the still-unproven
+two-cycle SPLOOPD drain adjustment and relaxed only the captured terminal-stop
+comparison. Those edits were removed immediately after the run. With the MVC
+batch in place, genuine execution reached 25,364,931 packets / 60,780,038 cycles
+and stopped on a mapped-instruction `STW A3,*A4[0]` at PC `0xc004f37a`, compact
+word `0x0034`, targeting `0x01800040` (C674x INTC `EVTCLR0`). This is useful
+downstream inventory only, not validation of the loop timing, control sequence,
+or packet count. SPRUFK5A confirms that `0x01800040` through `0x0180004c` are
+the four event-clear command registers; the next coherent peripheral boundary
+is the C674x megamodule interrupt controller.
+
 ### Previous stable-wait checkpoint
 
 The confirmed connected/replay DSP path no longer stops on an unsupported
@@ -618,7 +654,7 @@ an exact supported-opcode coverage report remain to be built.
 
 ## Validation and tools
 
-Latest full fork suite: 170 passed, 43 skipped. The CPU standalone harness
+Latest full fork suite: 185 passed, 43 skipped. The CPU standalone harness
 passes AddressSanitizer/UndefinedBehaviorSanitizer. The extra skip relative to
 the old machine is the optional Blackfin assembler/linker regression. Tests run with:
 

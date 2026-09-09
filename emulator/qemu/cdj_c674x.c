@@ -16,7 +16,48 @@ static bool queued_memory_load(const CdjC674xLoad *load)
 
 static unsigned queued_result_registers(const CdjC674xLoad *load)
 {
+    if (load->size == CDJ_C674X_DELAYED_IFR_SET ||
+        load->size == CDJ_C674X_DELAYED_IFR_CLEAR) return 0;
     return load->size == 8 || load->size == 16 ? 2 : 1;
+}
+
+static uint32_t control_read(const CdjC674x *cpu, unsigned id)
+{
+    switch (id) {
+    case 1:                         /* CSR */
+        return cpu->control[id] & 0xffff03ffu;
+    case 2:                         /* IFR */
+        return cpu->control[id] & 0xfff2u;
+    case 4:                         /* IER */
+        return (cpu->control[id] & 0xfff2u) | 1u;
+    case 5: {                       /* ISTP */
+        uint32_t pending = cpu->control[2] & cpu->control[4] & 0xfff2u;
+        unsigned highest = 0;
+        while (pending && !(pending & 1)) {
+            ++highest;
+            pending >>= 1;
+        }
+        return (cpu->control[id] & 0xfffffc00u) | highest << 5;
+    }
+    case 6: case 7:                 /* IRP, NRP */
+    case 13: case 14:               /* ILC, RILC */
+    case 18: case 19: case 20:      /* FADCR, FAUCR, FMCR */
+        return cpu->control[id];
+    default:
+        return 0;
+    }
+}
+
+static bool control_read_supported(unsigned id)
+{
+    return id == 1 || id == 2 || id == 4 || id == 5 || id == 6 || id == 7 ||
+           id == 13 || id == 14 || (id >= 18 && id <= 20);
+}
+
+static bool control_write_supported(unsigned id)
+{
+    return (id >= 1 && id <= 7) || id == 13 || id == 14 ||
+           (id >= 18 && id <= 20);
 }
 
 static uint64_t arithmetic_shift_right64(uint64_t value, unsigned count)
@@ -465,6 +506,11 @@ static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
 void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry)
 {
     memset(cpu, 0, sizeof(*cpu));
+    /* C674x CPU ID 0x14, little endian, and reset interrupt enabled.
+     * C6747 HOST1CFG resets the interrupt table base to DSP ROM 0x00700000. */
+    cpu->control[1] = 0x14000100;
+    cpu->control[4] = 1;
+    cpu->control[5] = 0x00700000;
     cpu->pc = entry;
 }
 
@@ -1446,9 +1492,19 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             uint32_t source = cpu->r[cross][b];
             unsigned op = w & 0xfbc;
             value = shift_32(source, n, op == 0xca0 ? 0 : op == 0x9a0 ? 2 : 1);
+        } else if ((w & 0xffe) == 0x3e2 && a == 0) {
+            /* MVC control-register to B-register.  The crhi field is zero
+             * for every implemented C674x control register ID. */
+            if (!control_read_supported(b))
+                return stop(cpu, pc, insn->word,
+                            "control register read not implemented");
+            value = control_read(cpu, b);
         } else if ((w & 0xffe) == 0x3a2 && a == 0) {
-            /* FADCR/FAUCR/FMCR storage only; FP operations are not decoded yet. */
-            if (dst != 13 && dst != 14 && (dst < 18 || dst > 20)) return stop(cpu, pc, insn->word, "control register write not implemented");
+            /* MVC register to control-register.  Interrupt-control writes
+             * below apply architectural masks rather than acting as storage. */
+            if (!control_write_supported(dst))
+                return stop(cpu, pc, insn->word,
+                            "control register write not implemented");
             control_write = true; reg_write = false; value = cpu->r[cross][b];
         } else if ((w & 0x7c) == 0x10) {
             reg_write = false;
@@ -1498,7 +1554,38 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
         if (enabled && control_write) {
             if (controls[dst]) return stop(cpu, pc, insn->word, "parallel control write conflict");
-            out.control[dst] = value; controls[dst] = true;
+            if (dst == 2 || dst == 3) {
+                /* ISR/ICR update IFR after one intervening execute packet.
+                 * Reuse the ABI-stable delayed-result queue so old checkpoint
+                 * layouts retain the in-flight effect. */
+                if (out.load_count == 40)
+                    return stop(cpu, pc, insn->word, "load queue full");
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = cpu->cycles + 2, .address = value & 0xfff0u,
+                    .size = dst == 2 ? CDJ_C674X_DELAYED_IFR_SET
+                                     : CDJ_C674X_DELAYED_IFR_CLEAR
+                };
+            } else if (dst == 1) {
+                /* PCC/DCC are documented as ignored on C674x. PWRD support is
+                 * device-specific; actual C6747 CPU power-down is not yet
+                 * modeled, so ignoring that field is an explicit approximation.
+                 * SAT is clear-only through MVC; CPU ID, revision and endian
+                 * mode are read-only. */
+                out.control[1] = (out.control[1] & 0xffff0100u) |
+                                 (out.control[1] & value & 0x200u) |
+                                 (value & 3u);
+            } else if (dst == 4) {
+                /* Reset remains enabled. NMIE can be set by MVC but not
+                 * manually cleared; maskable enables are ordinary RW bits. */
+                out.control[4] = (value & 0xfff0u) |
+                                 ((out.control[4] | value) & 2u) | 1u;
+            } else if (dst == 5) {
+                /* HPEINT is derived on read; only the aligned IST base writes. */
+                out.control[5] = value & 0xfffffc00u;
+            } else {
+                out.control[dst] = value;
+            }
+            controls[dst] = true;
             if (dst == 13 || dst == 14) out.control_ready[dst] = cpu->cycles + 4;
         }
     }
@@ -1517,7 +1604,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     /* Reject E5/E1 register collisions before any RAM transaction commits. */
     for (unsigned j = 0; j < out.load_count; ++j) {
         unsigned count = queued_result_registers(&out.loads[j]);
-        if (out.loads[j].due == cpu->cycles + 1 &&
+        if (count && out.loads[j].due == cpu->cycles + 1 &&
             (written[out.loads[j].bank][out.loads[j].dst] ||
              (count == 2 && written[out.loads[j].bank][out.loads[j].dst + 1])))
             return stop(cpu, cpu->pc, 0, "delayed-result write conflict");
@@ -1551,6 +1638,31 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 load->value = data;
             }
             if (load->due > out.cycles) { ++j; continue; }
+            if (load->size == CDJ_C674X_DELAYED_IFR_SET ||
+                load->size == CDJ_C674X_DELAYED_IFR_CLEAR) {
+                uint32_t sets = 0, clears = 0;
+                for (unsigned k = j; k < out.load_count; ++k) {
+                    CdjC674xLoad *effect = &out.loads[k];
+                    if (effect->due > out.cycles) continue;
+                    if (effect->size == CDJ_C674X_DELAYED_IFR_SET)
+                        sets |= effect->address;
+                    else if (effect->size == CDJ_C674X_DELAYED_IFR_CLEAR)
+                        clears |= effect->address;
+                }
+                /* Incoming/set requests win over a simultaneous clear. */
+                out.control[2] = ((out.control[2] & ~clears) | sets) & 0xfff2u;
+                for (unsigned k = 0; k < out.load_count;) {
+                    CdjC674xLoad *effect = &out.loads[k];
+                    if (effect->due <= out.cycles &&
+                        (effect->size == CDJ_C674X_DELAYED_IFR_SET ||
+                         effect->size == CDJ_C674X_DELAYED_IFR_CLEAR)) {
+                        memmove(effect, effect + 1,
+                                (--out.load_count - k) * sizeof(*effect));
+                    } else ++k;
+                }
+                j = 0;
+                continue;
+            }
             out.r[load->bank][load->dst] = load->value;
             if (queued_result_registers(load) == 2)
                 out.r[load->bank][load->dst + 1] = load->value >> 32;

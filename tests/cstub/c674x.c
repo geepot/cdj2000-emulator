@@ -1864,6 +1864,112 @@ int main(void)
     memory[1] = 0xd86f; memory[7] = 0xe0400000;
     assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(!c.cycles && !c.control_ready[13]);
+
+    /* C674x interrupt/control MVC family. Reset exposes the architectural
+     * CPU/endian identity, reset interrupt enable, and C6747 ROM IST base. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    assert(c.control[1] == 0x14000100 && c.control[4] == 1 &&
+           c.control[5] == 0x00700000);
+
+    /* IER maskable bits are RW, reset is fixed one, and NMIE is set-only. */
+    c.r[1][4] = 0xfff2;
+    memory[0] = 4u << 23 | 4u << 18 | 0x3a2; /* MVC B4,IER */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[4] == 0xfff3);
+    c.r[1][4] = 0;
+    memory[1] = 4u << 23 | 4u << 18 | 0x3a2;
+    memory[2] = 5u << 23 | 4u << 18 | 0x3e2; /* MVC IER,B5 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[4] == 3);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][5] == 3);
+
+    /* ISTP writes only its aligned base. HPEINT is the lowest-numbered
+     * pending interrupt enabled in IER and is synthesized on each read. */
+    c.r[1][4] = 0x008003ff;
+    memory[3] = 5u << 23 | 4u << 18 | 0x3a2; /* MVC B4,ISTP */
+    memory[4] = 6u << 23 | 5u << 18 | 0x3e2; /* MVC ISTP,B6 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[5] == 0x00800000);
+    c.control[2] = (1u << 7) | (1u << 4);
+    c.control[4] = (1u << 7) | (1u << 4) | 1;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][6] == 0x00800080);
+
+    /* ISR and ICR have one delay slot: the following MVC IFR still sees the
+     * old flags, while the next one sees the set or clear. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][4] = 0x90;
+    memory[0] = 2u << 23 | 4u << 18 | 0x3a2; /* MVC B4,ISR */
+    memory[1] = 5u << 23 | 2u << 18 | 0x3e2; /* MVC IFR,B5 */
+    memory[2] = 6u << 23 | 2u << 18 | 0x3e2; /* MVC IFR,B6 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.control[2] && c.load_count == 1 &&
+           c.loads[0].due == 2 &&
+           c.loads[0].size == CDJ_C674X_DELAYED_IFR_SET);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][5] == 0 && c.control[2] == 0x90 && !c.load_count);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][6] == 0x90);
+    c.r[1][4] = 0x10;
+    memory[3] = 3u << 23 | 4u << 18 | 0x3a2; /* MVC B4,ICR */
+    memory[4] = 7u << 23 | 2u << 18 | 0x3e2; /* MVC IFR,B7 */
+    memory[5] = 8u << 23 | 2u << 18 | 0x3e2; /* MVC IFR,B8 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[2] == 0x90 && c.load_count == 1 &&
+           c.loads[0].size == CDJ_C674X_DELAYED_IFR_CLEAR);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][7] == 0x90 && c.control[2] == 0x80);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][8] == 0x80);
+
+    /* A simultaneous interrupt set wins over clear. This also checks that
+     * control-effect queue entries never collide with or write A0. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][0] = 0x12345678; c.control[2] = 0x10;
+    c.loads[0] = (CdjC674xLoad){.due = 1, .address = 0x10,
+                               .size = CDJ_C674X_DELAYED_IFR_CLEAR};
+    c.loads[1] = (CdjC674xLoad){.due = 1, .address = 0x10,
+                               .size = CDJ_C674X_DELAYED_IFR_SET};
+    c.load_count = 2;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[2] == 0x10 && c.r[0][0] == 0x12345678 && !c.load_count);
+
+    /* The genuine reset code writes -4 to CSR: fixed CPU/endian fields and
+     * SAT survive, ignored cache/power fields do not, and GIE/PGIE clear.
+     * A later MVC with low bits set updates GIE/PGIE and clears SAT. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[1] |= 0x200; c.r[0][3] = 0xfffffffc;
+    memory[0] = 1u << 23 | 3u << 18 | 1u << 12 | 0x3a2; /* MVC A3,CSR */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[1] == 0x14000300);
+    c.r[0][3] = 3; memory[1] = memory[0];
+    memory[2] = 4u << 23 | 1u << 18 | 0x3e2; /* MVC CSR,B4 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[1] == 0x14000103);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][4] == 0x14000103);
+
+    /* IRP/NRP are full-width storage. Write-only ICR and unsupported control
+     * IDs remain fail-closed without advancing architectural time. */
+    for (unsigned id = 6; id <= 7; ++id) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[1][4] = 0x12345678 + id;
+        memory[0] = id << 23 | 4u << 18 | 0x3a2;
+        memory[1] = 5u << 23 | id << 18 | 0x3e2;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.control[id] == 0x12345678 + id);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[1][5] == 0x12345678 + id);
+    }
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 4u << 23 | 3u << 18 | 0x3e2; /* MVC ICR,B4 */
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.control[1] == 0x14000100);
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 8u << 23 | 4u << 18 | 0x3a2;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.cycles && c.control[8] == 0);
     /* Execute TI's copy-loop schedule with the real instruction core. The
      * replayed load, move and store share the same pre-cycle register state. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
