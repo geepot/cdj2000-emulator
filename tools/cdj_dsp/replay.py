@@ -129,7 +129,8 @@ def checkpoint_provenance(path: Path, data: bytes, info: dict) -> dict:
     raise ValueError('checkpoint is absent from a complete connected manifest or replay provenance')
 
 
-def newest_checkpoint(directory: Path):
+def newest_checkpoint(directory: Path, *, timing_mode=None, audio_mode=None,
+                      event_hash=None):
     """Return newest structurally valid, provenance-bearing checkpoint below a directory."""
     candidates = sorted((path for path in directory.rglob('*.cdjdsp')
                          if path.name != 'repeat-final.cdjdsp'),
@@ -140,6 +141,17 @@ def newest_checkpoint(directory: Path):
             data = path.read_bytes()
             info = checkpoint_info(data)
             provenance = checkpoint_provenance(path, data, info)
+            manifest = provenance['capture_manifest']
+            for field, requested, default in (
+                    ('dsp_timing_mode', timing_mode, 'strict'),
+                    ('dsp_audio_mode', audio_mode, 'stopped-clock')):
+                if requested is not None and manifest.get(field, default) != requested:
+                    raise ValueError(f'{field} is incompatible with requested {requested}')
+            transcript = manifest.get('event_transcript')
+            recorded_hash = (transcript.get('sha256') if isinstance(transcript, dict)
+                             else manifest.get('event_transcript_sha256'))
+            if event_hash is not None and recorded_hash != event_hash:
+                raise ValueError('event transcript is incompatible')
             return path, data, info, provenance
         except (OSError, ValueError, json.JSONDecodeError) as error:
             if len(failures) < 3:
@@ -191,8 +203,13 @@ def main():
     selected_provenance = None
     if args.dump.is_dir():
         try:
-            selected_path, data, selected_checkpoint, selected_provenance = newest_checkpoint(args.dump)
-        except ValueError as error:
+            selected_path, data, selected_checkpoint, selected_provenance = newest_checkpoint(
+                args.dump,
+                timing_mode='functional-runahead' if args.functional_dsp_timing else 'strict',
+                audio_mode='coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock',
+                event_hash=hashlib.sha256(args.events.read_bytes()).hexdigest()
+                if args.events is not None else None)
+        except (OSError, ValueError) as error:
             parser.error(str(error))
         args.dump = selected_path
         print(f'Selected newest compatible checkpoint: {args.dump}', file=sys.stderr)

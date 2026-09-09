@@ -8,6 +8,12 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Directory-based replay selection now filters candidates by requested timing
+and audio modes and event-transcript hash, in addition to checksum/provenance.
+This prevents a newer exploratory checkpoint from displacing the strict
+candidate during automatic selection. Explicit paths still permit deliberate
+mode transitions and need separate consideration of inherited approximations.
+
 Coverage fault classification now separates `faults`/`execution_faults` from
 decoder-only `unsupported`/`unsupported_faults`. A nonempty terminal fault is
 recognized regardless of the stop reason: connected traces use the fault text

@@ -1662,6 +1662,19 @@ functional run as full DSP parity, full boot, or working audio.
 
 ## Schema-9 SPI1, SPLOOPW and interrupt-return batch
 
+For automatic checkpoint selection, pass a run directory as the first replay
+argument. Candidates are ordered by modification time, then path. Selection
+validates checkpoint checksum/provenance and matches the requested DSP timing,
+audio mode, and (when supplied) event-transcript hash before accepting a
+candidate. Newer incompatible candidates are skipped. An explicit checkpoint
+path remains available for deliberate mode-transition investigations.
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-dsp-wm8740-sploopw-functional-3 runs/NEW_AUTO_CONTINUATION \
+  --steps 1000000 --functional-dsp-timing --functional-dsp-audio --verify-repeat
+```
+
 Coverage reporting distinguishes decoder rejections from other execution
 faults. Reanalyze existing traces without rerunning firmware:
 

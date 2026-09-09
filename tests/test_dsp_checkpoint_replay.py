@@ -1,6 +1,7 @@
 """End-to-end gates for connected-event injection into DSP checkpoints."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -9,6 +10,39 @@ import sys
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_newest_checkpoint_filters_modes_and_transcript(tmp_path):
+    from tools.cdj_dsp.replay import newest_checkpoint
+
+    _, original = make_checkpoint(tmp_path)
+    payload = original.read_bytes()
+    candidates = tmp_path / 'candidates'
+    for index, (name, timing, audio, transcript) in enumerate([
+            ('strict', 'strict', 'stopped-clock', 'wanted'),
+            ('other_events', 'strict', 'stopped-clock', 'other'),
+            ('audio', 'strict', 'coarse-packet-slots', 'wanted'),
+            ('exploratory', 'functional-runahead', 'stopped-clock', 'wanted')]):
+        directory = candidates / name
+        directory.mkdir(parents=True)
+        path = directory / 'state.cdjdsp'
+        path.write_bytes(payload)
+        os.utime(path, ns=(index + 1, index + 1))
+        (directory / 'manifest.json').write_text(json.dumps({
+            'complete': True,
+            'checkpoints': [{'file': path.name,
+                             'sha256': hashlib.sha256(payload).hexdigest()}],
+            'dsp_timing_mode': timing, 'dsp_audio_mode': audio,
+            'event_transcript': {'sha256': transcript},
+        }))
+    selected, *_ = newest_checkpoint(candidates, timing_mode='strict',
+                                     audio_mode='stopped-clock', event_hash='wanted')
+    assert selected.parent.name == 'strict'
+    selected, *_ = newest_checkpoint(candidates, timing_mode='functional-runahead',
+                                     audio_mode='stopped-clock', event_hash='wanted')
+    assert selected.parent.name == 'exploratory'
+    with pytest.raises(ValueError, match='no compatible'):
+        newest_checkpoint(candidates, event_hash='absent')
 
 
 def encoded_event(sequence, kind, *, offset=0, address=0, value=0, size=0,
