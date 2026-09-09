@@ -13,7 +13,7 @@ typedef struct {
     unsigned count[48], ii, length;
     uint32_t iterations;
     uint64_t cycle, post_cycle, end_cycle;
-    bool sealed;
+    bool sealed, predicate_loop;
 } CdjC674xLoop;
 bool cdj_c674x_loop_init(CdjC674xLoop *, unsigned ii, uint32_t iterations);
 /* Add the current cycle's instructions; finish marks SPKERNEL. delay is the

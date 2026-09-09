@@ -549,6 +549,8 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 unsigned cycle = field & ((1u << cbits) - 1);
                 if (cycle >= out.loop.ii) return stop(cpu, insn.pc, w, "invalid SPKERNEL cycle");
                 delay = stage * out.loop.ii + cycle;
+                if (out.loop.predicate_loop && delay)
+                    return stop(cpu, insn.pc, w, "SPLOOPW requires zero SPKERNEL fetch delay");
                 finish = true;
                 continue;
             }
@@ -595,10 +597,21 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     } else if (out.idle_cycles) {
         --out.idle_cycles;
     }
+    /* SPRUFE8B 7.10: sample the selected condition each cycle. At the end
+     * of a stage, use its value three cycles earlier; the first three loop
+     * cycles cannot terminate. No ILC/RILC access and no epilog. */
+    bool end_while = out.loop.predicate_loop && out.loop.cycle >= 4 &&
+        out.loop.cycle % out.loop.ii == 0 && !(out.loop_pred_history & 4);
+    if (end_while && !out.loop.sealed)
+        return stop(cpu, cpu->pc, 0, "SPLOOPW termination during loading not implemented");
+    bool condition = (cpu->r[out.loop_pred_bank][out.loop_pred_reg] != 0) ^ out.loop_pred_invert;
+    out.loop_pred_history = ((out.loop_pred_history << 1) | condition) & 7;
     if (!cdj_c674x_execute(&out, &combined, read, write, opaque))
         return stop(cpu, out.fault_pc, out.fault_word, out.fault);
     uint64_t launched = 1 + out.loop.cycle / out.loop.ii;
-    out.control[13] = launched < out.loop.iterations ? out.loop.iterations - launched : 0;
+    if (!out.loop.predicate_loop)
+        out.control[13] = launched < out.loop.iterations ? out.loop.iterations - launched : 0;
+    if (end_while) out.loop_active = false;
     if (drained && scheduler_post) out.loop_active = false;
     *cpu = out;
     return true;
@@ -619,18 +632,40 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
     }
     CdjC674xPacket packet;
     if (!cdj_c674x_fetch(cpu, read, opaque, &packet)) return false;
-    if (!packet.instructions[0].compact && (packet.instructions[0].word & 0x007ffffc) == 0x38000) {
+    bool while_loop = (packet.instructions[0].word & 0x007ffffe) == 0x3e000;
+    if (!packet.instructions[0].compact &&
+        ((packet.instructions[0].word & 0x007ffffc) == 0x38000 || while_loop)) {
         uint32_t w = packet.instructions[0].word;
-        if (w >> 28) return stop(cpu, cpu->pc, w, "nested SPLOOP not implemented");
-        if (cpu->cycles < cpu->control_ready[13]) return stop(cpu, cpu->pc, w, "ILC not yet available");
+        unsigned pred = w >> 29;
+        if (while_loop ? (!pred || pred == 7) : (w >> 28) != 0)
+            return stop(cpu, cpu->pc, w, "unsupported loop predicate");
+        if (!while_loop && cpu->cycles < cpu->control_ready[13]) return stop(cpu, cpu->pc, w, "ILC not yet available");
         CdjC674x out = *cpu;
         if (!cdj_c674x_loop_init(&out.loop, ((w >> 23) & 31) + 1, cpu->control[13]))
             return stop(cpu, cpu->pc, w, "invalid SPLOOP interval");
+        out.loop.predicate_loop = while_loop;
+        if (while_loop) {
+            static const unsigned banks[] = {0,1,1,1,0,0,0};
+            static const unsigned regs[] = {0,0,1,2,1,2,0};
+            out.loop_pred_bank = banks[pred]; out.loop_pred_reg = regs[pred];
+            out.loop_pred_invert = (w >> 28) & 1;
+            out.loop_pred_history = 7;
+        }
+        /* Loop setup cannot share a packet with multicycle operations. */
+        for (unsigned j = 1; j < packet.count; ++j) {
+            CdjC674xInstruction other = packet.instructions[j];
+            uint32_t v = other.word;
+            if ((other.header & (1u << 20)) ||
+                (!other.compact && ((v & 0xfffe1ffeu) == 0 && ((v >> 13) & 15))) ||
+                (!other.compact && ((v & 0xffe) == 0x362 || (v & 0x7c) == 0x10)) ||
+                (other.compact && ((other.header & 0x8000) || (v & 0x187f) == 0x006f)))
+                return stop(cpu, other.pc, v, "multicycle loop setup packet not implemented");
+        }
         memmove(packet.instructions, packet.instructions + 1, (--packet.count) * sizeof(packet.instructions[0]));
         if (!cdj_c674x_execute(&out, &packet, read, write, opaque))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
         out.loop_active = !(cpu->branch_due && out.cycles >= cpu->branch_due); out.loop_wait = out.loop_tags = out.loop_packets = 0;
-        if (out.control[13]) --out.control[13];
+        if (!while_loop && out.control[13]) --out.control[13];
         *cpu = out;
         return true;
     }

@@ -600,6 +600,36 @@ int main(void)
     composite.instructions[1] = (CdjC674xInstruction){.word = 0xffffffff, .pc = 0x1010};
     assert(!cdj_c674x_execute(&c, &composite, read_word, write_memory, NULL));
     assert(c.fault_pc == 0x1010 && c.pc == 0x1040 && c.r[0][0] == 0 && !c.cycles);
+    /* SPLOOPW records its predicate even if initially false, then checks
+     * the value three cycles before an end-of-stage boundary. ILC is unused. */
+    for (unsigned ii = 1; ii <= 14; ++ii)
+        for (unsigned invert = 0; invert < 2; ++invert) {
+            memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+            c.control[13] = 91; c.control[14] = 27; c.control_ready[13] = 999;
+            c.r[1][1] = invert; /* false condition for both polarities */
+            memory[0] = 0x4003e000 | (ii - 1) << 23 | invert << 28;
+            memory[1] = 0x34000; /* empty body ending in SPKERNEL 0,0 */
+            memory[2] = mvk(0, 10, 42);
+            unsigned steps = 0;
+            do {
+                assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+                assert(++steps < 20);
+            } while (c.loop_active);
+            assert(c.cycles == 1 + ((4 + ii - 1) / ii) * ii);
+            assert(c.control[13] == 91 && c.control[14] == 27 && c.r[0][10] == 0);
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(c.r[0][10] == 42);
+        }
+    /* A late predicate update is not visible at the imminent boundary. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[1][1] = 1;
+    memory[0] = 0x4183e000; /* [B1] SPLOOPW 4 */
+    memory[1] = 0; memory[2] = 0;
+    memory[3] = mvk(1, 1, 0); memory[4] = 0x34000;
+    for (unsigned j = 0; j < 5; ++j) assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.loop_active && c.cycles == 5);
+    for (unsigned j = 0; j < 4; ++j) assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!c.loop_active && c.cycles == 9);
     /* Decode SPLOOP/SPKERNEL from RAM and execute the complete copy loop,
      * without manually feeding the scheduler. Also exercise zero iterations. */
     for (unsigned iterations = 0; iterations <= 8; iterations += 8) {

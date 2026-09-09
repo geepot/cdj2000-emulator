@@ -442,3 +442,9 @@ byte-identical repeat traces, local L2 aliases, breakpoint/limit semantics, and
 malformed-input rejection. This replaces the untracked development probe as
 the repeatable diagnostic entry point; interactive stepping/resume and general
 memory inspection remain future work.
+
+Latest development checkpoint: partial SPLOOPW scheduling is now implemented
+and synthetically tested. Standalone firmware replay advances to 598 packets /
+700 cycles, stopping at compact instruction `0xec6e` at `0x11801f24`. The last
+connected-firmware result above predates this change. See `HANDOFF.md` for
+verification gaps, reproducible commands and migration details.

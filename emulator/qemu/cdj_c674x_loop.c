@@ -22,6 +22,10 @@ bool cdj_c674x_loop_load(CdjC674xLoop *loop, const uint32_t *tags,
     loop->length = index + 1;
     if (finish) {
         loop->sealed = true;
+        if (loop->predicate_loop) {
+            loop->post_cycle = loop->end_cycle = UINT64_MAX;
+            return true;
+        }
         /* Post-loop fetching cannot precede the final loading boundary. */
         uint64_t loading_end = ((loop->length + loop->ii - 1) / loop->ii) * loop->ii;
         loop->post_cycle = (uint64_t)loop->iterations * loop->ii + delay;
@@ -42,7 +46,7 @@ bool cdj_c674x_loop_issue(CdjC674xLoop *loop, uint32_t tags[8], unsigned *count,
     for (unsigned origin = 0; origin < loop->length; ++origin) {
         if (origin > loop->cycle) continue;
         uint64_t age = loop->cycle - origin;
-        if (age % loop->ii || age / loop->ii >= loop->iterations) continue;
+        if (age % loop->ii || (!loop->predicate_loop && age / loop->ii >= loop->iterations)) continue;
         if (n + loop->count[origin] > 8) return false;
         memcpy(result + n, loop->tags[origin], loop->count[origin] * sizeof(*result));
         n += loop->count[origin];

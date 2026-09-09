@@ -41,6 +41,8 @@ typedef struct {
     unsigned load_count;
     bool loop_active;
     unsigned idle_cycles, loop_wait, loop_tags, loop_packets;
+    unsigned loop_pred_bank, loop_pred_reg, loop_pred_history;
+    bool loop_pred_invert;
     CdjC674xLoop loop;
     CdjC674xInstruction loop_instructions[112];
 } CdjC674x;

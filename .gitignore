@@ -31,3 +31,6 @@ venv/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Local MAIN stderr capture
+/vm-main-stderr.log

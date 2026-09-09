@@ -58,5 +58,15 @@ int main(void)
     CdjC674xLoop before = loop;
     assert(!cdj_c674x_loop_issue(&loop, out, &n, &post, &drained));
     assert(!memcmp(&loop, &before, sizeof(loop)));
+    /* A predicate loop has no finite iteration count or count-driven epilog. */
+    assert(cdj_c674x_loop_init(&loop, 2, 0));
+    loop.predicate_loop = true;
+    tag = 99;
+    assert(cdj_c674x_loop_load(&loop, &tag, 1, true, 0));
+    for (unsigned t = 0; t < 100; ++t) {
+        assert(cdj_c674x_loop_issue(&loop, out, &n, &post, &drained));
+        assert(n == (t % 2 ? 0u : 1u) && !post && !drained);
+        if (n) assert(out[0] == 99);
+    }
     return 0;
 }
