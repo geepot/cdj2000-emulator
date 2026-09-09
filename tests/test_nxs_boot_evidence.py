@@ -168,8 +168,9 @@ def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
 @pytest.mark.parametrize('interval,deferred,profile', [
     (0, False, False), (0.5, False, False), (0, True, False), (0, True, True),
 ])
+@pytest.mark.parametrize('fresh_link,trace_link', [(False, False), (True, True)])
 def test_run_manifest_records_launched_inputs_and_optional_observations(
-        tmp_path, monkeypatch, interval, deferred, profile):
+        tmp_path, monkeypatch, interval, deferred, profile, fresh_link, trace_link):
     paths = ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
              'firmware/nxs/main-firmware.bin', 'firmware/nxs/gui-boot-memory.elf',
              'firmware/nxs/gui-flash-image.bin')
@@ -184,8 +185,14 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
         argv.append('--deferred-dsp-scheduling')
     if profile:
         argv.append('--qemu-sync-profile')
+    if fresh_link:
+        argv.append('--fresh-link')
+    if trace_link:
+        argv.append('--trace-link-tx')
     monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
     monkeypatch.setenv('CDJ_NXS_DSP_SCHEDULER', 'inherited-must-not-win')
+    monkeypatch.setenv('BFIN_LINK_FRESH_ONLY', 'inherited-must-not-win')
+    monkeypatch.setenv('BFIN_SPORT_TX_OUTPUT', '/must/not/be/written')
     clock = [0.0]
     monkeypatch.setattr(nxs_vm.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(nxs_vm.time, 'sleep', lambda duration: clock.__setitem__(0, clock[0] + duration))
@@ -213,6 +220,9 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
             assert kwargs['env']['CDJ_NXS_DSP_SCHEDULER'] == (
                 'deferred-v1' if deferred else 'legacy')
         if gui:
+            assert kwargs['env'].get('BFIN_LINK_FRESH_ONLY') == ('1' if fresh_link else None)
+            assert kwargs['env'].get('BFIN_SPORT_TX_OUTPUT') == (
+                str(tmp_path / 'run/gui-link-tx.bin') if trace_link else None)
             (tmp_path / 'run/screen.ppm').write_bytes(FRAME)
             (tmp_path / paths[0]).write_bytes(b'rebuilt after GUI launch')
         return Process(gui)
@@ -220,6 +230,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     assert nxs_vm.main() == 0
     manifest = json.loads((tmp_path / 'run/run.json').read_text())
     assert manifest['main_environment']['CDJ_LINK_LINK_ROWS'] == 'off'
+    assert manifest['link_delivery'] == ('fresh-only diagnostic' if fresh_link
+                                         else 'legacy cached repeats')
     expected_scheduler = 'deferred-v1' if deferred else 'legacy'
     assert manifest['main_environment']['CDJ_NXS_DSP_SCHEDULER'] == expected_scheduler
     assert manifest['dsp_scheduler_mode'] == expected_scheduler

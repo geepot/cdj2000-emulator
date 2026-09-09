@@ -360,6 +360,10 @@ def main():
                         help='raw FAT32 USB image; writes go to a temporary overlay')
     parser.add_argument('--trace-media', action='store_true',
                         help='log SD/USB host activity for media diagnosis (changes host timing)')
+    parser.add_argument('--fresh-link', action='store_true',
+                        help='diagnostic: deliver each real MAIN frame once, without cached repeats')
+    parser.add_argument('--trace-link-tx', action='store_true',
+                        help='record actual GUI SPORT transmit frames for loss/queue diagnosis')
     parser.add_argument('--sd-insert-seconds', type=int,
                         help='SD insertion time after reset in virtual seconds (0 keeps slot empty)')
     parser.add_argument('--port', type=int, default=5980)
@@ -416,6 +420,10 @@ def main():
         BFIN_GUI_OUTPUT=str(run / 'screen.ppm'), BFIN_MAIN_LINK=f'127.0.0.1:{args.port}',
         BFIN_MAIN_LINK_DUMP=str(run / 'main-link.bin'), BFIN_GPIO5_READY_TOGGLE='1',
         BFIN_STATS='5', BFIN_EXCEPTION_TRACE='1', BFIN_EXIT_AFTER_WALL=str(args.seconds))
+    if args.fresh_link:
+        overrides['BFIN_LINK_FRESH_ONLY'] = '1'
+    if args.trace_link_tx:
+        overrides['BFIN_SPORT_TX_OUTPUT'] = str(run / 'gui-link-tx.bin')
     # Do not inherit replay/proxy data or a firmware shortcut from the shell.
     gui_env = {k:v for k,v in os.environ.items() if not k.startswith('BFIN_')}
     gui_env.update(overrides)
@@ -453,6 +461,7 @@ def main():
                        limitations='START/STOP and pin timing approximate; 53.930MHz board reference discrepancy; '
                                    'no IRQ, arbitration, double buffering, repeated START or certificates'),
         input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
+        link_delivery='fresh-only diagnostic' if args.fresh_link else 'legacy cached repeats',
         media=dict(images={name: str(path) for name, path in media_inputs.items()},
                    sd_lid_initial='closed; persistent physical panel contact 17/04',
                    writes='temporary QEMU snapshot overlays; discarded at exit',
