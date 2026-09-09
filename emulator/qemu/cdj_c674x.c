@@ -130,9 +130,16 @@ static void loop_clear_interrupt_phase(CdjC674x *cpu)
     loop_set_interrupt_phase(cpu, 0, 0);
 }
 
-static bool functional_interrupt_pipe_down(CdjC674x *cpu)
+static bool interrupt_pipe_down(CdjC674x *cpu)
 {
-    if (!cdj_c674x_loop_functional_timing()) return true;
+    if (!cdj_c674x_loop_functional_timing()) {
+        /* SPRUFE8B Figure 5-4: current PC denotes the first annulled E1
+         * (cycle 6), and ISR E1 is cycle 15. Issue nothing in cycles 6..14;
+         * normal empty steps still retire older E-stages and clock devices.
+         * This fixed architectural interval is not an unbounded queue drain. */
+        cpu->idle_cycles = 9;
+        return true;
+    }
     uint64_t latest = cpu->cycles;
     for (unsigned i = 0; i < cpu->load_count; ++i)
         if (cpu->loads[i].due > latest) latest = cpu->loads[i].due;
@@ -932,7 +939,7 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
      * speculative fetch pipeline, so the current PC is exactly the first
      * execute packet annulled by the interrupt and therefore the IRP value.
      * Existing delayed E2..E5 effects belong to older, non-annulled packets
-     * and remain queued to mature while the handler executes (5.4.4). */
+     * and remain queued to mature during the entry interval (5.4.4). */
     if (!interrupted_loop) {
         interrupt = 4;
         while (!(eligible & (1u << interrupt))) ++interrupt;
@@ -956,10 +963,9 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
                        (1u << 15) | (1u << 9);
     cpu->pc = (cpu->control[5] & 0xfffffc00u) + interrupt * 32u;
     /* Figure 5-4 keeps older, non-annulled E-stages ahead of the forced ISR
-     * branch. Breadth mode collapses the unspecified entry pipeline to the
-     * minimum empty cycles that retire every already-issued result. Strict
-     * mode retains its fail-closed collision behavior pending exact timing. */
-    if (!functional_interrupt_pipe_down(cpu))
+     * branch. Strict mode inserts the nine empty issue cycles before ISR E1.
+     * Breadth mode retains its historical minimum-drain approximation. */
+    if (!interrupt_pipe_down(cpu))
         return stop(cpu, cpu->pc, 0,
                     "interrupt pipe-down interval overflow");
     return true;

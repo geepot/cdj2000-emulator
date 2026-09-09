@@ -33,6 +33,17 @@ static void test_cycle_tick(void *opaque)
     unsigned *ticks = opaque;
     memory[48] = ++*ticks;
 }
+static void finish_interrupt_entry(CdjC674x *c)
+{
+    assert(c->idle_cycles == 9);
+    uint32_t pc = c->pc;
+    uint64_t cycles = c->cycles;
+    for (unsigned i = 0; i < 9; ++i) {
+        assert(cdj_c674x_step(c, read_word, write_memory, NULL));
+        assert(c->pc == pc && c->cycles == cycles + i + 1);
+        assert(c->idle_cycles == 8 - i);
+    }
+}
 int main(void)
 {
     CdjC674x c;
@@ -2332,12 +2343,13 @@ int main(void)
     /* B IRP restores ITSR in E1, leaves PGIE set, and reaches the saved IRP
      * after five delay slots. The zero words are architectural NOP 1s. */
     memory[32] = 0x001800e2;                  /* B .S2 IRP at IST+0x80. */
+    finish_interrupt_entry(&c);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(c.cycles == 1 && c.pc == 0x1084 && c.branch_due == 6);
+    assert(c.cycles == 10 && c.pc == 0x1084 && c.branch_due == 15);
     assert(c.control[26] == 0x45f && (c.control[1] & 3) == 3);
     for (unsigned i = 0; i < 5; ++i)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(c.cycles == 6 && c.pc == 0x1040 && !c.branch_due);
+    assert(c.cycles == 15 && c.pc == 0x1040 && !c.branch_due);
 
     /* The sole idle SPLX state is an interrupt return.  B IRP preserves the
      * restored bit through redirect; a return SPLOOPD then has ordinary
@@ -2462,8 +2474,7 @@ int main(void)
     assert(c.loop.sealed && !c.fault && !(c.loop_pred_history & 8));
     cdj_c674x_loop_set_functional_timing(false);
 
-    /* In-flight results were issued by older, non-annulled execute packets;
-     * vectoring preserves them and the handler's first cycle publishes them. */
+    /* In-flight results retire during entry, before handler instructions. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.control[5] = 0x1000;
     c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
@@ -2475,10 +2486,67 @@ int main(void)
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][9] == 0xfeedface && !c.load_count);
 
+    /* Figure 5-4 has nine empty E1 slots even with an empty pipeline. Older
+     * results through the final slot retire, board clocks tick, and no ISR
+     * instruction is fetched until the tenth step. Pending IRQs still latch
+     * but cannot restart entry or replace IRP while GIE is cleared. */
+    for (unsigned due = 0; due <= 9; ++due) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[5] = 0x1000;
+        c.control[1] |= 1; c.control[4] = (1u << 4) | (1u << 7) | 3u;
+        ticks = 0; c.cycle_tick = test_cycle_tick; c.cycle_opaque = &ticks;
+        if (due) {
+            c.loads[0] = (CdjC674xLoad){.due = due, .value = 0xfeedface,
+                .bank = 1, .dst = 0, .size = 0};
+            c.load_count = 1;
+        }
+        memory[32] = 0x0008c06a;             /* MVKH .S2 0x1180,B0 */
+        assert(cdj_c674x_interrupt(&c, 1u << 4));
+        assert(c.idle_cycles == 9 && c.control[6] == 0x1000);
+        for (unsigned i = 1; i <= 9; ++i) {
+            assert(cdj_c674x_interrupt(&c, 1u << 7));
+            assert(c.idle_cycles == 10 - i && c.control[6] == 0x1000);
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(c.pc == 0x1080 && c.cycles == i && ticks == i);
+            assert(c.load_count == (due > i));
+            assert(c.r[1][0] == (due && due <= i ? 0xfeedface : 0));
+        }
+        assert(c.control[2] == (1u << 7));
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 10 && c.pc == 0x1084 && ticks == 10);
+        assert(c.r[1][0] == (due ? 0x1180face : 0x11800000));
+    }
+
+    /* Older stores also retire without issuing a handler packet. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
+    c.stores[0] = (CdjC674xStore){.due = 3, .address = 0x10c0,
+        .value = 0x12345678, .size = 4};
+    c.store_count = 1;
+    assert(cdj_c674x_interrupt(&c, 1u << 4));
+    finish_interrupt_entry(&c);
+    assert(!c.store_count && memory[48] == 0x12345678);
+
+    /* Do not replace the fixed interval with "drain until safe": an invalid
+     * later result colliding with ISR E1 must still fail closed. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
+    c.loads[0] = (CdjC674xLoad){.due = 10, .value = 0xfeedface,
+        .bank = 1, .dst = 0, .size = 0};
+    c.load_count = 1;
+    memory[32] = 0x0008c06a;
+    assert(cdj_c674x_interrupt(&c, 1u << 4));
+    finish_interrupt_entry(&c);
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!strcmp(c.fault, "delayed-result write conflict"));
+    assert(c.cycles == 9 && c.pc == 0x1080 && c.load_count == 1 && !c.r[1][0]);
+
     /* Breadth mode preserves the same older writeback but inserts the
      * minimum empty interval before fetching an ISR instruction that writes
      * the same register. This is deliberately not an exact interrupt-latency
-     * claim: strict mode retains the collision as a validation stop. */
+     * claim; strict mode instead uses the fixed architectural interval. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     cdj_c674x_loop_set_functional_timing(true);
     c.control[5] = 0x1000;
@@ -2584,6 +2652,7 @@ int main(void)
     assert(c.pc == 0x10e0 && c.control[6] == 0x1000 &&
            c.control[2] == (1u << 4));
     assert((c.control[27] & (1u << 14)) && !(c.control[26] & (1u << 14)));
+    finish_interrupt_entry(&c);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     for (unsigned i = 0; i < 5; ++i)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
@@ -2617,6 +2686,7 @@ int main(void)
     assert(c.pc == 0x10e0 && c.control[6] == 0x1000 &&
            (c.control[27] & (1u << 14)));
     c.r[1][1] = 0;
+    finish_interrupt_entry(&c);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     for (unsigned i = 0; i < 5; ++i)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));

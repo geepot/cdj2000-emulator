@@ -173,6 +173,7 @@ def test_rejects_connected_stop_state_mismatch(tmp_path):
     ], cwd=ROOT, text=True, capture_output=True, timeout=30)
     assert result.returncode != 0
     assert 'event replay mismatch at sequence 2 (dsp_stop)' in result.stderr
+    assert 'observed pc=' in result.stderr and '; expected pc=' in result.stderr
 
 
 def test_later_dspint_alone_resumes_event_replay(tmp_path):
@@ -184,7 +185,7 @@ def test_later_dspint_alone_resumes_event_replay(tmp_path):
         encoded_event(2, 'hpi_host_control_write', address=0x11800000,
                       value=2, size=4, dspint=True) +
         encoded_event(3, 'dsp_stop', address=0x118001e0,
-                      value=0xdeadcafe, dspint=True)
+                      value=0xdeadcafe, dspint=True, packets=9, cycles=9)
     )
     (checkpoint_dir / 'manifest.json').write_text(json.dumps({
         'complete': True,

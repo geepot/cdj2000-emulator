@@ -8,6 +8,26 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Strict DSP interrupt acceptance now inserts the nine empty issue cycles from
+SPRUFE8B Figure 5-4 before ISR E1. Older results retire normally; conflict
+checks remain enabled. The saved late-USB INT15 collision no longer occurs
+in the bounded event-aware diagnostic (the old fault transcript appropriately
+diverges). Full combined-tree regression: 427 passed / 29 optional skips;
+core ASan/UBSan passes and QEMU is rebuilt. The connected 450-second USB run
+`runs/nxs-dsp-entry-fixed-usb-1` passes the former late-fault point, reaching
+1.663 billion packets with no DSP fault and unchanged input hashes. See
+DSP_INTERRUPT_ENTRY.md for exact scope and commands; this is not audio parity.
+
+The coordinated panel fix defaults the NXS SD lid closed through dedicated
+CDJ_NXS_SD_LID state. The --nxs-panel viewer queries/toggles this persistent
+contact; focus loss, button release and clear do not reopen it. Legacy raw
+defaults are unchanged. Use sd-lid open/closed/toggle/state rather than raw
+17/04 diagnostics once configured. Track loading/audio remain unverified.
+Panel commit 914ca37 is verified in the 180-second connected run
+`runs/nxs-persistent-sd-lid-1`: automatic closed state survives clear, real
+SD initialization commands occur without a manual contact, no DSP fault and
+unchanged input hashes. This does not establish a filesystem mount or playback.
+
 Clean startup now reproduced in `runs/nxs-iic-identity-connected-3` and `-4`:
 120 seconds each, identical five input hashes unchanged at exit, normal player
 and MENU/UTILITY with no E-7010 or E-7206 banner. Run 4 responds to a late

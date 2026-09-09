@@ -991,6 +991,10 @@ mismatch:
         }
         fprintf(stderr, "event replay mismatch at sequence %" PRIu64 " (%s)\n",
                 event.sequence, event.type);
+        fprintf(stderr, "observed pc=%#x packets=%" PRIu64 " cycles=%" PRIu64
+                " fault=%s; expected pc=%#" PRIx64 " packets=%" PRIu64 " cycles=%" PRIu64 "\n",
+                cpu.pc, cpu.packets, cpu.cycles, cpu.fault ? cpu.fault : "none",
+                event.address, event.packets, event.cycles);
         fclose(file);
         return EVENT_REPLAY_ERROR;
     }
