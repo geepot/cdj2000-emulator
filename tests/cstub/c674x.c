@@ -31,6 +31,34 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* Figure F-24 scatters an unsigned byte across four fields. Exercise all
+     * constants, both banks and register subsets (including high-bit values). */
+    for (unsigned rs = 0; rs < 2; ++rs)
+        for (unsigned bank = 0; bank < 2; ++bank)
+            for (unsigned k = 0; k < 256; ++k) {
+                cdj_c674x_reset(&c, 0x1000);
+                unsigned dst = k & 7;
+                CdjC674xPacket p = {.count = 1, .next_pc = 0x1002,
+                    .instructions = {{.compact = true, .pc = 0x1000,
+                        .header = rs << 19,
+                        .word = 0x12 | bank | dst << 7 | (k & 7) << 13 |
+                            ((k >> 3) & 3) << 11 | ((k >> 5) & 3) << 5 |
+                            ((k >> 7) & 1) << 10}}};
+                assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+                assert(c.r[bank][dst + rs * 16] == k && c.cycles == 1);
+                assert(c.r[bank ^ 1][dst + rs * 16] == 0);
+            }
+    for (unsigned k = 0; k < 16; ++k) {
+        cdj_c674x_reset(&c, 0x1000);
+        c.r[0][20] = 0xffffffff;
+        CdjC674xPacket p = {.count = 1, .next_pc = 0x1002,
+            .instructions = {{.compact = true, .pc = 0x1000, .header = 1u << 19,
+                .word = 0x1441 | (k & 7) << 13 | (k >> 3) << 11 | 4u << 7}}};
+        int32_t offset = k & 8 ? (int32_t)(k & 7) - 8 : (k ? (int32_t)k : 8);
+        assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+        assert(c.r[1][20] == 0xffffffffu + (uint32_t)offset);
+        assert(c.r[0][20] == 0xffffffff);
+    }
     cdj_c674x_reset(&c, 0x1000);
     memory[0] = mvk(1, 15, -8);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));

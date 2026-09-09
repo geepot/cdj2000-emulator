@@ -5,10 +5,12 @@
 #include <stdint.h>
 #define CDJ_C6747_KICK0 0x01c14038u
 #define CDJ_C6747_KICK1 0x01c1403cu
-/* TI SPRUH91D sections 10.2.1.2 and 10.5.5. Only kick registers are
- * implemented. Other SYSCFG registers and privilege faults remain unsupported. */
+#define CDJ_C6747_PINMUX0 0x01c14120u
+/* TI SPRUH91D sections 10.2.1.2, 10.5.5 and 10.5.10.1-3. Kick registers
+ * and PINMUX0-2 configuration storage only; physical pin routing, other
+ * SYSCFG registers and privilege faults remain unsupported. */
 typedef struct {
-    uint32_t kick[2];
+    uint32_t kick[2], pinmux[3];
     bool unlocked;
 } CdjC6747Syscfg;
 void cdj_c6747_syscfg_reset(CdjC6747Syscfg *s);

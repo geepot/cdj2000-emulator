@@ -142,7 +142,16 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             bool simple = true;
             side = w & 1;
             cross = side ^ ((w >> 12) & 1);
-            if ((w & 0x047e) == 0x0426) { /* Figure D-8, MVK.L */
+            if ((w & 0x040e) == 0x0400) { /* Figure D-5, ADD.L immediate */
+                dst = ((w >> 4) & 7) + rs;
+                unsigned imm = (w >> 13) & 7;
+                int32_t offset = (w & 0x800) ? (int32_t)imm - 8 : (imm ? (int32_t)imm : 8);
+                value = cpu->r[cross][((w >> 7) & 7) + rs] + (uint32_t)offset;
+            } else if ((w & 0x001e) == 0x0012) { /* Figure F-24, unsigned MVK.S */
+                dst = ((w >> 7) & 7) + rs;
+                value = ((w >> 13) & 7) | (((w >> 11) & 3) << 3) |
+                        (((w >> 5) & 3) << 5) | (((w >> 10) & 1) << 7);
+            } else if ((w & 0x047e) == 0x0426) { /* Figure D-8, MVK.L */
                 dst = ((w >> 7) & 7) + rs;
                 value = sx(((w >> 13) & 7) | (((w >> 11) & 3) << 3), 5);
             } else if ((w & 0x147e) == 0x0026) { /* Figure D-9, CMPEQ immediate */
