@@ -67,6 +67,10 @@ typedef struct {
     void (*hint)(void *, bool);
     void *opaque;
     FILE *event_log;
+    FILE *tx_capture;
+    char *tx_capture_path;
+    uint64_t tx_capture_sequence;
+    bool tx_capture_failed;
 } NxsHpi;
 static NxsHpi *nxs_hpi;
 static void run_dsp(NxsHpi *s);
@@ -421,6 +425,7 @@ static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
 
 static bool advance_functional_mcasp_slots(NxsHpi *s)
 {
+    CdjC6747McaspControl original_mcasp = s->mcasp_control;
     CdjC6747Edma trial_edma = s->edma;
     CdjC6747McaspControl trial_mcasp = s->mcasp_control;
     EdmaBusContext trial_context = {.owner = s, .mcasp = &trial_mcasp};
@@ -446,6 +451,36 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         s->edma = trial_edma;
         s->mcasp_control = trial_mcasp;
         deliver_edma_notifications(s);
+        if (s->tx_capture) {
+            for (unsigned instance = 1; instance <= 2; ++instance) {
+                for (unsigned serializer = 0; serializer < 16; ++serializer) {
+                    uint64_t sequence = trial_mcasp.xrsr_source_sequence[instance][serializer];
+                    if (!sequence || sequence ==
+                        original_mcasp.xrsr_source_sequence[instance][serializer])
+                        continue;
+                    if (fprintf(s->tx_capture,
+                            "{\"sequence\":%" PRIu64 ",\"instance\":%u,"
+                            "\"slot\":%u,\"serializer\":%u,\"word\":%u,"
+                            "\"xbuf_sequence\":%" PRIu64 ",\"packets\":%" PRIu64 ","
+                            "\"cycles\":%" PRIu64 ",\"source\":\"genuine_xbuf\","
+                            "\"clock\":\"functional-coarse-packet-slot\"}\n",
+                            ++s->tx_capture_sequence, instance,
+                            trial_mcasp.xslot[instance], serializer,
+                            trial_mcasp.xrsr[instance][serializer], sequence,
+                            s->cpu.packets, s->cpu.cycles) < 0 ||
+                        fflush(s->tx_capture)) {
+                        s->tx_capture_failed = true;
+                        fclose(s->tx_capture);
+                        s->tx_capture = NULL;
+                        if (s->tx_capture_path)
+                            remove(s->tx_capture_path);
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) break;
+            }
+        }
     }
     edma_free_staged_writes(&trial_context);
     return ok;
@@ -456,8 +491,15 @@ static bool functional_audio_tick(NxsHpi *s)
     if (!s->functional_audio ||
         s->cpu.packets % CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL)
         return true;
+    if (s->tx_capture_failed) {
+        s->cpu.fault = "DSP transmit capture write failed";
+        s->cpu.fault_pc = s->cpu.pc;
+        s->cpu.fault_word = 0;
+        return false;
+    }
     if (advance_functional_mcasp_slots(s)) return true;
-    s->cpu.fault = "unsupported functional McASP transmit slot";
+    s->cpu.fault = s->tx_capture_failed ? "DSP transmit capture write failed" :
+                   "unsupported functional McASP transmit slot";
     s->cpu.fault_pc = s->cpu.pc;
     s->cpu.fault_word = 0;
     return false;
@@ -744,6 +786,15 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     nxs_hpi = s;
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     s->functional_audio = audio && !strcmp(audio, "1");
+    const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
+    if (tx_path && *tx_path) {
+        s->tx_capture_path = g_strdup(tx_path);
+        s->tx_capture = fopen(s->tx_capture_path, "wb");
+        if (!s->tx_capture) {
+            s->tx_capture_failed = true;
+            error_report("nxs-hpi: cannot open DSP transmit capture %s", tx_path);
+        }
+    }
     if (cdj_c674x_loop_functional_timing())
         warn_report("nxs-c674x: functional SPLOOPD timing enabled; run is not cycle-validation evidence");
     if (s->functional_audio)

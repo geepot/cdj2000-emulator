@@ -1561,8 +1561,8 @@ Run the focused and complete gates:
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
 ```
 
-The focused gate reports 24 passed.  With localhost sockets available, the
-complete suite reports 191 passed / 43 optional skips.  CPU, INTC, McASP,
+The focused gate reports 25 passed.  With localhost sockets available, the
+complete suite reports 192 passed / 43 optional skips.  CPU, INTC, McASP,
 EDMA, and checkpoint C stubs also pass when compiled with
 `-fsanitize=address,undefined -Wall -Wextra -Werror`.
 
@@ -1595,13 +1595,13 @@ Collect strict connected evidence and replay all MAIN/HPI events:
   --events runs/NEW_DSP_STRICT/dsp-events.jsonl --verify-repeat
 ```
 
-`runs/nxs-dsp-batch-strict-3` and `runs/dsp-batch-strict-replay-5`
+`runs/nxs-dsp-splx-strict-1` and `runs/dsp-splx-strict-replay-1`
 verify 39 connected stops and exact repeat state/memory. Strict execution
 fails closed at 25,364,865 packets / 60,779,972 cycles, PC `0xc004f306`, word
 `0x2627`, on the known SPLOOPD epilog register conflict. Trace SHA-256 is
 `e87f6d32b6cadc3760cd733776071dbf7b41a8f73ba8e0216b9dc2cf87c1eab3`;
 coverage SHA-256 is
-`d391220454a1da003e573451596389ea3472da36712e4109ad44af9610aa42ce`.
+`b95bc2267ace92d75590ca1b1473db6b76b1ff9c6f30f105eb3a237861c7f8fb`.
 The repeat gate passing proves reproducibility of this failure, not boot.
 
 For downstream breadth and coarse audio-flow discovery, preserve both labels:
@@ -1610,23 +1610,24 @@ For downstream breadth and coarse audio-flow discovery, preserve both labels:
 .venv/bin/python -m tools.cdj_main.nxs_vm \
   runs/NEW_DSP_FUNCTIONAL --seconds 15 \
   --qemu build/qemu/build/qemu-system-sh4 \
-  --functional-dsp-timing --functional-dsp-audio
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx
 .venv/bin/python -m tools.cdj_dsp.replay \
   runs/NEW_DSP_FUNCTIONAL/dsp-checkpoints/00000000000000000001.cdjdsp \
   runs/NEW_DSP_FUNCTIONAL_REPLAY --steps 100000000 \
   --events runs/NEW_DSP_FUNCTIONAL/dsp-events.jsonl \
-  --functional-dsp-timing --functional-dsp-audio --verify-repeat
+  --functional-dsp-timing --functional-dsp-audio --capture-dsp-tx \
+  --verify-repeat
 ```
 
-`runs/nxs-dsp-batch-functional-3` and
-`runs/dsp-batch-functional-replay-3` verify all 40 connected stops and exact
-repeat state/memory. The run ends by budget at 27,099,500 packets / 66,177,094
+`runs/nxs-dsp-tx-capture-3` and
+`runs/dsp-tx-capture-replay-3` verify all 40 connected stops, exact repeat
+state/memory, and a byte-identical transmit capture. The run ends by budget at 27,099,500 packets / 66,177,094
 cycles. Coverage has 3,447 confirmed source packets, 4,276 confirmed
 instruction addresses, 3,654 distinct encodings, 3,560 dynamic edges, 13
 probable direct targets, and zero unsupported faults. Trace SHA-256 is
 `18e075624287cc0f0a2cfaedb1c2bbf8f5125ea9a718f84c6abfd0f4305f971b`;
 coverage SHA-256 is
-`4cee443f0f9b77e18c8e0e4fcc7dd3934c7a9f2ed754aa41bc34c05b9fb166ce`.
+`5b3874f0f2697e424be30516564694af816eea8635eac864e63c0129b3a4c80f`.
 
 Functional audio advances active McASP1/2 slots once per 1,024 successful DSP
 packets and services the resulting EDMA work atomically. This is a deterministic
@@ -1635,11 +1636,26 @@ words, records underruns, and does not synthesize PCM, input, a host sink, or
 rate matching. Both functional switches make the run ineligible for
 architectural timing claims.
 
+`--capture-dsp-tx` requires `--functional-dsp-audio` and writes canonical
+JSONL only when a genuine accepted XBUF word is newly latched into XRSR.  It
+records unsigned serializer words, not interpreted PCM.  The connected capture
+has 3,348 records: 1,674 for McASP1 serializer 0 and 1,674 for McASP2 serializer
+3.  SHA-256 is
+`72c70733a4b7016cde086e322d754cdd17dbc4e13ca652a79f06e5667ab0e3b2`.
+All words are zero, and no nonzero source-ring payload was observed.  This is
+evidence that DMA-to-McASP transport is active but the upstream firmware path
+has not supplied audio; it is not working-audio evidence.  Replay validates
+record structure and sequence and compares the capture byte-for-byte on
+`--verify-repeat`.
+
 The strict schedule around `0xc004f2ec..0xc004f306` matches SPRUFE8B's
 SPLOOPD formulas: II=1, 128 iterations, dynamic length 7, and
 `SPKERNEL 3,0`. The post-loop `MVK .L2 1,B4` overlaps a buffered
 `MV .L2X A3,B4`. A two-cycle delay avoids the conflict but is not supported by
 the ISA documentation. Keep it functional-only pending C6747 ISS/EVM or
-D810K013 IERR/LBX evidence. TSR.SPLX loop-return behavior is also not yet
-implemented. Do not relax the strict resource check or describe the functional
-run as full DSP parity, full boot, or working audio.
+D810K013 IERR/LBX evidence. TSR.SPLX now tracks ordinary loop active/idle state,
+and the implemented B IRP return subset handles returned SPLOOPD counting and
+parallel-operation suppression. Returned SPMASK reversal, SPLOOPW return, full
+retained-buffer state, and interrupt-time loop drain still fail closed or remain
+unimplemented. Do not relax the strict resource check or describe the
+functional run as full DSP parity, full boot, or working audio.

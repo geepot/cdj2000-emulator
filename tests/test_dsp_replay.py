@@ -4,6 +4,9 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import pytest
+
+from tools.cdj_dsp.tx_capture import tx_capture_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -135,3 +138,46 @@ def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
     missing = tmp_path / 'missing'
     result = run(dump, missing, '--expect-trace', str(tmp_path / 'absent'))
     assert result.returncode != 0 and not missing.exists()
+
+
+def test_transmit_capture_metadata_and_repeat_gate(tmp_path):
+    capture = tmp_path / 'capture.jsonl'
+    capture.write_text(
+        '{"sequence":1,"instance":1,"slot":0,"serializer":0,"word":305419896,'
+        '"xbuf_sequence":7,"packets":1024,"cycles":2048,'
+        '"source":"genuine_xbuf","clock":"functional-coarse-packet-slot"}\n')
+    metadata = tx_capture_metadata(capture)
+    assert metadata['records'] == 1
+    assert metadata['counts'] == {'mcasp1.serializer0': 1}
+    assert metadata['synthesized_samples'] is False
+    empty = tmp_path / 'empty.jsonl'
+    empty.write_bytes(b'')
+    assert tx_capture_metadata(empty)['records'] == 0
+    truncated = tmp_path / 'truncated.jsonl'
+    truncated.write_bytes(capture.read_bytes()[:-1])
+    with pytest.raises((ValueError, json.JSONDecodeError)):
+        tx_capture_metadata(truncated)
+    malformed = tmp_path / 'malformed.jsonl'
+    malformed.write_text(capture.read_text().replace('"genuine_xbuf"', '"synthetic"'))
+    with pytest.raises(ValueError, match='invalid DSP transmit capture'):
+        tx_capture_metadata(malformed)
+
+    data = bytearray(0x40000)
+    struct.pack_into('<I', data, 0, 0x00800020)
+    struct.pack_into('<I', data, 0x20, 0xffffffff)
+    dump = tmp_path / 'dump.bin'
+    dump.write_bytes(data)
+    output = tmp_path / 'captured-replay'
+    result = run(dump, output, '--functional-dsp-audio', '--capture-dsp-tx',
+                 '--verify-repeat')
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads((output / 'manifest.json').read_text())
+    gate = json.loads((output / 'gate.json').read_text())
+    assert manifest['dsp_tx_capture']['records'] == 0
+    assert manifest['dsp_tx_capture']['synthesized_samples'] is False
+    assert gate['dsp_tx_capture_matches'] and gate['passed']
+    assert (output / 'dsp-tx.jsonl').read_bytes() == \
+        (output / 'repeat-dsp-tx.jsonl').read_bytes()
+
+    rejected = run(dump, tmp_path / 'invalid-capture', '--capture-dsp-tx')
+    assert rejected.returncode != 0 and 'requires --functional-dsp-audio' in rejected.stderr

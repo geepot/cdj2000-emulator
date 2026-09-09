@@ -15,6 +15,8 @@ import subprocess
 import sys
 import time
 
+from tools.cdj_dsp.tx_capture import tx_capture_metadata
+
 ROOT = Path(__file__).resolve().parents[2]
 
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
@@ -68,7 +70,8 @@ def checkpoint_metadata(path: Path) -> dict:
 
 
 def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: bool,
-                           functional_dsp_audio: bool) -> None:
+                           functional_dsp_audio: bool,
+                           capture_dsp_tx: bool) -> None:
     checkpoint_dir = run / 'dsp-checkpoints'
     checkpoints = [checkpoint_metadata(path) for path in sorted(checkpoint_dir.glob('*.cdjdsp'))]
     events = run / 'dsp-events.jsonl'
@@ -85,6 +88,10 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                 event_counts[event['event']] += 1
                 if event['event'] == 'boot_phase':
                     boot_phases.append(event['value'])
+    tx_path = run / 'dsp-tx.jsonl'
+    if capture_dsp_tx and not tx_path.is_file():
+        raise RuntimeError('requested DSP transmit capture is missing')
+    tx_capture = tx_capture_metadata(tx_path) if capture_dsp_tx else None
     sources = sorted((ROOT / 'emulator/qemu').glob('cdj_c674*.c')) + \
               sorted((ROOT / 'emulator/qemu').glob('cdj_c674*.h')) + \
               [ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c',
@@ -95,11 +102,14 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
         dsp_audio_mode=('coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
         architectural_validation_eligible=not (functional_dsp_timing or functional_dsp_audio),
-        byte_order=sys.byteorder, complete=bool(checkpoints and events.is_file()),
+        byte_order=sys.byteorder,
+        complete=bool(checkpoints and events.is_file() and
+                      (not capture_dsp_tx or tx_capture is not None)),
         checkpoints=checkpoints, latest=checkpoints[-1]['file'] if checkpoints else None,
         event_transcript=dict(file=events.name, sha256=sha256(events) if events.is_file() else None,
                               events=last_sequence, counts=dict(sorted(event_counts.items())),
                               boot_phases=boot_phases),
+        dsp_tx_capture=tx_capture,
         firmware_sha256={path.name: sha256(path) for path in
             (firmware / 'main-firmware.bin', firmware / 'gui-boot-memory.elf',
              firmware / 'gui-flash-image.bin')},
@@ -131,7 +141,11 @@ def main():
                         help='run past the unresolved SPLOOPD epilog with a labeled two-cycle approximation')
     parser.add_argument('--functional-dsp-audio', action='store_true',
                         help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
+    parser.add_argument('--capture-dsp-tx', action='store_true',
+                        help='capture genuine XBUF words consumed by coarse McASP slot progression')
     args = parser.parse_args()
+    if args.capture_dsp_tx and not args.functional_dsp_audio:
+        parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if args.seconds <= 0 or not 1024 <= args.port <= 65531:
         parser.error('positive duration and port 1024..65531 required')
     run = (ROOT / args.run).resolve()
@@ -162,6 +176,8 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
+    if args.capture_dsp_tx:
+        main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
     main_env['CDJ_REQ_STATUS_FRESH'] = '0'
     (run / 'run.json').write_text(json.dumps(dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
@@ -190,7 +206,7 @@ def main():
                     try: process.wait(timeout=5)
                     except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
             finalize_dsp_artifacts(run, firmware, args.functional_dsp_timing,
-                                   args.functional_dsp_audio)
+                                   args.functional_dsp_audio, args.capture_dsp_tx)
             (run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     return 0 if result.get('gui_exit') == 0 and result.get('frame_exists') else 1
 

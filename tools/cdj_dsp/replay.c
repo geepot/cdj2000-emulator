@@ -51,6 +51,9 @@ static PendingHpicEvent hpic_events[16];
 static unsigned hpic_count;
 static bool hpic_overflow;
 static bool functional_audio;
+static FILE *tx_capture;
+static uint64_t tx_capture_sequence;
+static bool tx_capture_failed;
 static bool read_bus(void *unused, uint32_t address, uint32_t *value);
 
 /* Compact dynamic coverage is emitted once at the end of a run. Keeping it
@@ -485,6 +488,7 @@ static bool edma_mcasp_transaction(bool edma_access, uint32_t address,
 
 static bool advance_functional_mcasp_slots(void)
 {
+    CdjC6747McaspControl original_mcasp = mcasp_control;
     CdjC6747Edma trial_edma = edma;
     CdjC6747McaspControl trial_mcasp = mcasp_control;
     EdmaBusContext trial_context = {.mcasp = &trial_mcasp};
@@ -510,6 +514,31 @@ static bool advance_functional_mcasp_slots(void)
         edma = trial_edma;
         mcasp_control = trial_mcasp;
         deliver_edma_notifications();
+        if (tx_capture) {
+            for (unsigned instance = 1; instance <= 2; ++instance) {
+                for (unsigned serializer = 0; serializer < 16; ++serializer) {
+                    uint64_t sequence = trial_mcasp.xrsr_source_sequence[instance][serializer];
+                    if (!sequence || sequence ==
+                        original_mcasp.xrsr_source_sequence[instance][serializer])
+                        continue;
+                    if (fprintf(tx_capture,
+                            "{\"sequence\":%" PRIu64 ",\"instance\":%u,"
+                            "\"slot\":%u,\"serializer\":%u,\"word\":%u,"
+                            "\"xbuf_sequence\":%" PRIu64 ",\"packets\":%" PRIu64 ","
+                            "\"cycles\":%" PRIu64 ",\"source\":\"genuine_xbuf\","
+                            "\"clock\":\"functional-coarse-packet-slot\"}\n",
+                            ++tx_capture_sequence, instance,
+                            trial_mcasp.xslot[instance], serializer,
+                            trial_mcasp.xrsr[instance][serializer], sequence,
+                            cpu.packets, cpu.cycles) < 0 || fflush(tx_capture)) {
+                        tx_capture_failed = true;
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) break;
+            }
+        }
     }
     edma_free_staged_writes(&trial_context);
     return ok;
@@ -520,6 +549,12 @@ static bool functional_audio_tick(void)
     if (!functional_audio ||
         cpu.packets % CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL)
         return true;
+    if (tx_capture_failed) {
+        cpu.fault = "DSP transmit capture write failed";
+        cpu.fault_pc = cpu.pc;
+        cpu.fault_word = 0;
+        return false;
+    }
     if (advance_functional_mcasp_slots()) return true;
     cpu.fault = "unsupported functional McASP transmit slot";
     cpu.fault_pc = cpu.pc;
@@ -796,6 +831,14 @@ int main(int argc, char **argv)
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     functional_audio = audio && !strcmp(audio, "1");
+    const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
+    if (tx_path && *tx_path) {
+        tx_capture = fopen(tx_path, "wb");
+        if (!tx_capture) {
+            perror("DSP transmit capture");
+            return 2;
+        }
+    }
     if (argc != 8 && argc != 9) return 2;
     char *end;
     errno = 0;
@@ -958,5 +1001,6 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-    return ferror(stdout) ? 2 : 0;
+    int tx_status = tx_capture ? fclose(tx_capture) : 0;
+    return ferror(stdout) || tx_capture_failed || tx_status ? 2 : 0;
 }

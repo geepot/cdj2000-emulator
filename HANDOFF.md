@@ -14,17 +14,18 @@ This section supersedes the older chronological status below.  The current
 source combines the broad C674x ISA batches with CPU interrupt recognition,
 C6747 INTC pulse delivery, cache-control registers, McASP transmit state,
 EDMA3CC transfers/events, SYSCFG master-priority registers, transactional
-McASP/EDMA integration, and a labeled coarse functional-audio scheduler.
+McASP/EDMA integration, a labeled coarse functional-audio scheduler, genuine
+XBUF-word capture, and a fail-closed subset of TSR.SPLX loop-return handling.
 Checkpoint schema 8 preserves all of that state.  Its native state is 15,704
 bytes; the final component is 7,712 bytes.  Exact one-step migrations from
 schemas 6 and 7 are recorded in `runs/dsp-schema6-to-8-migration-2` and
 `runs/dsp-schema7-to-8-migration-2`; both repeat/state/memory gates pass.
 
-The latest strict connected run is `runs/nxs-dsp-batch-strict-3`.  It records
+The latest strict connected run is `runs/nxs-dsp-splx-strict-1`.  It records
 65 checkpoints, 110,208 ordered events and 39 DSP stops, then reproduces the
 known fail-closed SPLOOPD conflict at exactly 25,364,865 packets / 60,779,972
 cycles, PC `0xc004f306`, compact `0x2627`.  Standalone
-`runs/dsp-batch-strict-replay-5` verifies all 39 connected stops and exact
+`runs/dsp-splx-strict-replay-1` verifies all 39 connected stops and exact
 repeat state/memory.  This is architectural-validation-eligible evidence of
 the failure, not successful boot.
 
@@ -37,14 +38,21 @@ but the ISA does not justify making that delay strict.  TI compiler defect
 SDSCM00042974 produced this class of malformed epilog overlap; that is a
 plausible lead, not proof about this firmware.  Keep strict mode fail-closed
 until the fragment can be checked on a C6747 ISS/EVM or D810K013 hardware.
-TSR.SPLX loop/return handling is a separate real omission.
+TSR.SPLX is now synchronized with normal loop activation and clearing.  The
+implemented B IRP return subset preserves idle SPLX, restarts returned SPLOOPD
+with ordinary SPLOOP counting, and suppresses operations parallel with the
+return setup.  Returned SPMASK retained-buffer reversal and SPLOOPW return
+remain fail-closed; interrupt-time loop draining and the full retained-buffer
+state are not implemented.  This is partial architectural bookkeeping, not
+complete interruptible software-loop support.
 
-The latest breadth run is `runs/nxs-dsp-batch-functional-3`, using both
-`--functional-dsp-timing` and `--functional-dsp-audio`.  It reaches the genuine
+The latest breadth run is `runs/nxs-dsp-tx-capture-3`, using
+`--functional-dsp-timing`, `--functional-dsp-audio`, and
+`--capture-dsp-tx`.  It reaches the genuine
 DSP scheduler/poll loop and ends by budget at 27,099,500 packets / 66,177,094
 cycles, not at an unsupported instruction.  Exact replay in
-`runs/dsp-batch-functional-replay-3` verifies all 40 connected stops plus
-state/memory.  Coverage contains 3,447 confirmed source packets, 4,276
+`runs/dsp-tx-capture-replay-3` verifies all 40 connected stops, state/memory,
+and the transmit capture byte-for-byte.  Coverage contains 3,447 confirmed source packets, 4,276
 confirmed instruction addresses, 3,654 distinct encodings, 3,560 dynamic
 edges, 13 probable direct targets and zero unsupported faults.  All probable
 targets use already exercised decoder families.  This shows strong reachable
@@ -54,11 +62,18 @@ working-audio evidence.
 The functional-audio mode advances active McASP1/2 transmit slots once per
 1,024 successful DSP packets and services resulting EDMA requests atomically.
 It consumes only genuine firmware/EDMA XBUF writes and records underruns rather
-than inventing samples.  It has no physical sample clock, PCM sink, host audio,
-receive path or rate matching.  Completing observable PCM transport and the
-interrupt/service-loop path are higher-value next steps than speculative ISA
-families: the currently reached instruction inventory has no missing-opcode
-frontier.
+than inventing samples.  `dsp-tx.jsonl` records 3,348 newly latched 32-bit
+serializer words: 1,674 from McASP1 serializer 0 and 1,674 from McASP2
+serializer 3.  Its SHA-256 is
+`72c70733a4b7016cde086e322d754cdd17dbc4e13ca652a79f06e5667ab0e3b2`.
+Every captured word is zero.  Source-ring inspection also found no nonzero
+payload, so the current upstream playback/control/storage path has not supplied
+audio; the result must not be described as silence successfully rendered.  The
+mode has no physical sample clock, PCM interpretation, host audio, receive path
+or rate matching.  Stimulating the genuine upstream playback path and then
+adding a measured McASP clock/PCM sink are higher-value next steps than
+speculative ISA families: the currently reached instruction inventory has no
+missing-opcode frontier.
 
 Replay now accepts independent packet and cycle delta ceilings in addition to
 step limits, reports progress and approximation/eligibility fields, writes an
@@ -68,7 +83,7 @@ from repeat-gated checkpoints.  A connected transcript still must reach its
 next recorded stop; an earlier user ceiling is not accepted as a partial
 connected validation.
 
-The complete socket-enabled suite reports 191 passed / 43 optional skips.
+The complete socket-enabled suite reports 192 passed / 43 optional skips.
 CPU, INTC, McASP, EDMA and schema-8 checkpoint ASan/UBSan harnesses pass, and
 the current QEMU SH4 build completes.  A visible MAIN run can still stop on a
 panel/GUI contract outside this DSP milestone; a rendered frame or GUI exit

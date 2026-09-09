@@ -16,6 +16,7 @@ import tempfile
 import sys
 
 from .coverage import build_coverage
+from .tx_capture import tx_capture_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
@@ -36,7 +37,8 @@ CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
 SHARED_RAM_SIZE = 0x20000
 DEFAULT_FORMATS = ROOT / 'build/gdb-17.2/include/opcode/tic6x-insn-formats.h'
 ANALYSIS_SOURCES = [ROOT / 'tools/cdj_dsp/coverage.py',
-                    ROOT / 'tools/cdj_dsp/inventory.py']
+                    ROOT / 'tools/cdj_dsp/inventory.py',
+                    ROOT / 'tools/cdj_dsp/tx_capture.py']
 
 
 def _fnv1a(data):
@@ -171,9 +173,13 @@ def main():
                         help='use labeled two-cycle SPLOOPD run-ahead; deterministic but not cycle-validation evidence')
     parser.add_argument('--functional-dsp-audio', action='store_true',
                         help='schedule labeled coarse McASP slots; deterministic but not audio-timing evidence')
+    parser.add_argument('--capture-dsp-tx', action='store_true',
+                        help='capture genuine McASP XBUF words consumed at functional slot boundaries')
     parser.add_argument('--formats', type=Path, default=DEFAULT_FORMATS,
                         help='GNU tic6x-insn-formats.h used for automatic coverage')
     args = parser.parse_args()
+    if args.capture_dsp_tx and not args.functional_dsp_audio:
+        parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if (not 0 < args.steps <= 100000000 or
             not 0 <= args.packets <= 0xffffffffffffffff or
             not 0 <= args.cycles <= 0xffffffffffffffff or
@@ -322,13 +328,21 @@ def main():
             replay_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
         else:
             replay_env.pop('CDJ_NXS_DSP_FUNCTIONAL_AUDIO', None)
+        if args.capture_dsp_tx:
+            replay_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(args.output / 'dsp-tx.jsonl')
+        else:
+            replay_env.pop('CDJ_NXS_DSP_TX_CAPTURE', None)
         with (args.output / 'trace.jsonl').open('w') as trace:
             subprocess.run(command, stdout=trace, check=True, env=replay_env)
         if args.verify_repeat:
             repeat_command = command.copy()
             repeat_command[7] = str(args.output / 'repeat-final.cdjdsp')
+            repeat_env = replay_env.copy()
+            if args.capture_dsp_tx:
+                repeat_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(
+                    args.output / 'repeat-dsp-tx.jsonl')
             with (args.output / 'repeat.jsonl').open('w') as trace:
-                subprocess.run(repeat_command, stdout=trace, check=True, env=replay_env)
+                subprocess.run(repeat_command, stdout=trace, check=True, env=repeat_env)
     coverage_data = {}
     for trace_name, checkpoint_name, output_name in [
             ('trace.jsonl', 'final.cdjdsp', 'coverage.json'),
@@ -358,6 +372,17 @@ def main():
     }
     primary_coverage = coverage_data['coverage.json'][0]
     manifest['progress'] = primary_coverage.get('progress', {})
+    tx_capture = None
+    repeat_tx_capture = None
+    if args.capture_dsp_tx:
+        try:
+            tx_capture = tx_capture_metadata(args.output / 'dsp-tx.jsonl')
+            if args.verify_repeat:
+                repeat_tx_capture = tx_capture_metadata(
+                    args.output / 'repeat-dsp-tx.jsonl')
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            parser.error(f'DSP transmit capture validation failed: {error}')
+        manifest['dsp_tx_capture'] = tx_capture
     final_checkpoint_bytes = (args.output / 'final.cdjdsp').read_bytes()
     manifest['output_checkpoint'] = {
         'file': 'final.cdjdsp',
@@ -453,6 +478,13 @@ def main():
             gate['repeat_coverage_sha256'] = hashlib.sha256(repeated_coverage).hexdigest()
             gate['repeat_coverage_matches'] = coverage_data['coverage.json'][1] == repeated_coverage
             gate['passed'] &= gate['repeat_coverage_matches']
+            if args.capture_dsp_tx:
+                tx_bytes = (args.output / 'dsp-tx.jsonl').read_bytes()
+                repeat_tx_bytes = (args.output / 'repeat-dsp-tx.jsonl').read_bytes()
+                gate['dsp_tx_capture'] = tx_capture
+                gate['repeat_dsp_tx_capture'] = repeat_tx_capture
+                gate['dsp_tx_capture_matches'] = tx_bytes == repeat_tx_bytes
+                gate['passed'] &= gate['dsp_tx_capture_matches']
         if expected is not None:
             gate['expected_path'] = str(args.expect_trace.resolve())
             gate['expected_sha256'] = hashlib.sha256(expected).hexdigest()
