@@ -476,3 +476,31 @@ loading cycles, so they are not executed-instruction counts or coverage proof.
 Use the nearby families to plan a coherent implementation batch, consult TI
 operand/timing rules, run focused CPU tests and deterministic replay, then run
 the connected boards after material progress. Unsupported execution still stops.
+
+### SPMASK and predicate batch
+
+Full and compact SPMASK decode to the eight unit-mask bits (compact has six).
+During loading, masked program-memory instructions execute once and are not
+buffered. During loading/draining, masked buffered instructions are suppressed
+before the scheduler's eight-operation limit, and program-memory replacements
+merge into the same architectural commit. Zero masks and masks outside the
+loop are supported. Misplaced masks fail atomically. Unit classification uses
+TI appendices C-G; unknown formats stop when masking requires their unit.
+The full-width SPMASK opcode follows GNU's correction to SPRUFE8B; compact
+encoding follows Figure H-8. Behavior follows sections 7.11 and 7.15.
+
+Compact predicated MVK (Figure G-3) supports L/S/D, both banks/subsets,
+constants zero/one, and A0/!A0/B0/!B0. Tests cover all combinations. Further
+tests verify masked versus unmasked operations across all six compact mask
+bits, replacement during loading and draining, zero/idle masks, misplaced-mask
+rollback, and filtering a 16-candidate issue down to eight before capacity
+checking. Reload/SPMASKR, interrupt restart and masked multicycle operations
+remain unsupported. General functional-unit conflict checking remains incomplete.
+
+Replays `runs/dsp-mask-batch-1` and `-2` match byte-for-byte. The rebuilt
+connected run `runs/nxs-mask-batch-connected` agrees at 608 packets / 710 cycles,
+PC `0x11801f34`, opcode `0x42140264`, stopping on an unmapped LDW from
+PSC0 PTSTAT (`0x01c10128`). See SPRUH91D Table 8-6 and section 8.6.10.
+GUI exit 0/frame publication after 15 seconds is not full boot. PSC transition
+modeling is the next peripheral batch. Full suite: 164 passed, 43 skipped;
+the CPU harness passes address/undefined-behavior sanitizers.

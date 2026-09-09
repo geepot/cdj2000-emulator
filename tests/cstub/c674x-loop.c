@@ -2,6 +2,11 @@
 #include <assert.h>
 #include <string.h>
 #include "cdj_c674x_loop.h"
+static bool even_tag(void *opaque, uint32_t tag)
+{
+    (void)opaque;
+    return !(tag & 1);
+}
 int main(void)
 {
     CdjC674xLoop loop;
@@ -58,6 +63,10 @@ int main(void)
     CdjC674xLoop before = loop;
     assert(!cdj_c674x_loop_issue(&loop, out, &n, &post, &drained));
     assert(!memcmp(&loop, &before, sizeof(loop)));
+    /* Masks apply before capacity validation: 16 candidates, eight issued. */
+    assert(cdj_c674x_loop_issue_filtered(&loop, out, &n, &post, &drained, even_tag, NULL));
+    assert(n == 8);
+    for (unsigned j = 0; j < n; ++j) assert(out[j] == 2 * (j % 4 + 1));
     /* A predicate loop has no finite iteration count or count-driven epilog. */
     assert(cdj_c674x_loop_init(&loop, 2, 0));
     loop.predicate_loop = true;

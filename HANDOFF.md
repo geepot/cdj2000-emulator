@@ -8,6 +8,31 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Latest batch: full-width and compact SPMASK, functional-unit classification,
+load-time exclusion, buffered suppression before issue-capacity checks, and
+epilog replacement are implemented. Compact Figure G-3 predicated MVK covers
+both banks, both register subsets, all four predicates, constants 0/1 and L/S/D.
+SPMASKR, interrupt/reload behavior, masked multicycle/control operations,
+unknown unit formats and general functional-unit conflict checking remain open.
+
+`runs/nxs-mask-batch-connected` verifies 608 packets / 710 cycles, stopping on
+`0x42140264` at `0x11801f34`: LDW from A5=`0x01c10128`, PSC0 PTSTAT.
+The address is confirmed by SPRUH91D Table 8-6 and section 8.6.10. The register
+is unmapped; no fabricated zero/ready value was supplied. The 15-second GUI
+run exits 0 and publishes a frame. Replays `runs/dsp-mask-batch-1` and `-2`
+are byte-identical (trace SHA-256
+`9a59481768c021d9438a616a0866ae02763b056923bb8b19838f481aae2b0722`) and match
+the connected stop. Full boot remains incomplete. Suite: 164 passed, 43 skipped;
+CPU harness passes address/undefined-behavior sanitizers.
+
+Next batch: PSC0/PSC1 register state and transition behavior using SPRUH91D
+chapter 8, especially Tables 8-1/8-2 (module/reset/domain assignments), section
+8.3.2 (MDCTL NEXT -> PTCMD GO -> PTSTAT busy -> MDSTAT), and register reset
+values. Do not clear PTSTAT without modeling the requested transition. Physical
+clock/reset effects and transition latency need explicit fidelity boundaries.
+
+### Previous compact NOP checkpoint
+
 The latest connected MAIN/Blackfin run, `runs/nxs-compact-nop-connected`,
 uploads 13,781 DSP words and executes 606 DSP packets / 708 cycles. It stops at
 `0x11801f26`, compact opcode `0x2d66`: `SPMASK S1` (TI Figure H-8).
@@ -49,8 +74,9 @@ support. The broad uploaded range has 13,978 candidates across 70 families;
 the current loop range has 23 candidates across 13 families. Broad counts
 include data and cannot be interpreted as instruction coverage percentages.
 
-Next batch: full/compact SPMASK with functional-unit classification and loop
-load/replay suppression, plus the nearby predicate/move/arithmetic families.
+The first inventory-driven batch implemented full/compact SPMASK with
+functional-unit classification and loop load/replay suppression, plus nearby
+predicated MVK. The current blocker is the PSC peripheral described above.
 The unfinished MVK-only SPMASK attempt was removed: it rejected unmasked
 instructions and did not implement buffered suppression. Do not resurrect that
 special case. Implement the family, validate synthetic schedules and replay,

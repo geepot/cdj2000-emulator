@@ -40,6 +40,13 @@ bool cdj_c674x_loop_load(CdjC674xLoop *loop, const uint32_t *tags,
 bool cdj_c674x_loop_issue(CdjC674xLoop *loop, uint32_t tags[8], unsigned *count,
                          bool *post_fetch, bool *drained)
 {
+    return cdj_c674x_loop_issue_filtered(loop, tags, count, post_fetch, drained, NULL, NULL);
+}
+
+bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *loop, uint32_t tags[8], unsigned *count,
+                                  bool *post_fetch, bool *drained,
+                                  bool (*allow)(void *, uint32_t), void *opaque)
+{
     uint32_t result[8];
     unsigned n = 0;
     if (!loop->ii || (!loop->sealed && loop->cycle >= 48)) return false;
@@ -47,9 +54,12 @@ bool cdj_c674x_loop_issue(CdjC674xLoop *loop, uint32_t tags[8], unsigned *count,
         if (origin > loop->cycle) continue;
         uint64_t age = loop->cycle - origin;
         if (age % loop->ii || (!loop->predicate_loop && age / loop->ii >= loop->iterations)) continue;
-        if (n + loop->count[origin] > 8) return false;
-        memcpy(result + n, loop->tags[origin], loop->count[origin] * sizeof(*result));
-        n += loop->count[origin];
+        for (unsigned j = 0; j < loop->count[origin]; ++j) {
+            uint32_t tag = loop->tags[origin][j];
+            if (allow && !allow(opaque, tag)) continue;
+            if (n == 8) return false;
+            result[n++] = tag;
+        }
     }
     if (n) memcpy(tags, result, n * sizeof(*tags));
     *count = n;

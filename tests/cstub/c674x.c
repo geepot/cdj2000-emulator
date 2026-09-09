@@ -31,6 +31,95 @@ static uint32_t mvk(unsigned side, unsigned dst, int value)
 int main(void)
 {
     CdjC674x c;
+    /* Figure G-3 predicate MVK: all predicate polarities, units, sides,
+     * register subsets and constants. Predicates always use low A0/B0. */
+    for (unsigned cc = 0; cc < 4; ++cc)
+        for (unsigned unit = 0; unit < 3; ++unit)
+            for (unsigned side = 0; side < 2; ++side)
+                for (unsigned rs = 0; rs < 2; ++rs)
+                    for (unsigned value = 0; value < 2; ++value)
+                        for (unsigned predicate = 0; predicate < 2; ++predicate) {
+                            cdj_c674x_reset(&c, 0x1000);
+                            c.r[cc >> 1][0] = predicate;
+                            c.r[side][3 + 16 * rs] = 55;
+                            CdjC674xPacket p = {.count = 1, .next_pc = 0x1002,
+                                .instructions = {{.compact = true, .pc = 0x1000,
+                                    .header = rs << 19, .word = 0x0866 | cc << 14 |
+                                        value << 13 | 3u << 7 | unit << 3 | side}}};
+                            assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+                            assert(c.r[side][3 + 16 * rs] == ((predicate ^ (cc & 1)) ? value : 55));
+                        }
+    /* SPMASK suppresses an existing buffered S1 write before merging a
+     * program-memory replacement. Exercise full and compact encodings. */
+    for (unsigned compact = 0; compact < 2; ++compact) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[13] = 3;
+        memory[0] = 0x38000;
+        memory[1] = 4u << 23 | 4u << 18 | 1u << 13 | 0x1a0; /* ADD.S1 1,A4,A4 */
+        memory[2] = compact ? 0x0c6e2d66 : 0x130001; /* SPMASK S1 */
+        memory[3] = mvk(0, 4, 100);
+        memory[4] = 0x34000;
+        if (compact) memory[7] = 0xe0800030; /* SPMASK || NOP || MVK */
+        for (unsigned j = 0; j < 4; ++j)
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.r[0][4] == 101 && c.loop_tags == 1);
+        for (unsigned j = 0; j < 3 && c.loop_active; ++j)
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(!c.loop_active && c.r[0][4] == 101);
+    }
+    /* During the epilog, a program-memory SPMASK replaces a draining S1
+     * operation without changing the buffer; it executes again next cycle. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[13] = 3;
+    memory[0] = 0x38000; memory[1] = 2u << 13; /* SPLOOP 1; NOP 3 */
+    memory[2] = 0x34001;
+    memory[3] = 4u << 23 | 4u << 18 | 1u << 13 | 0x1a0;
+    memory[4] = 0x130001; memory[5] = mvk(0, 4, 100);
+    unsigned mask_steps = 0;
+    do {
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(++mask_steps < 12);
+    } while (c.loop_active);
+    assert(c.r[0][4] == 101);
+    /* Zero masks and idle masks are legal; a misplaced mask is atomic. */
+    for (unsigned compact = 0; compact < 2; ++compact) {
+        cdj_c674x_reset(&c, 0x1000);
+        CdjC674xPacket p = {.count = 2, .next_pc = 0x1008,
+            .instructions = {{.pc = 0x1000, .compact = compact,
+                               .word = compact ? 0x2c66 : 0x30000},
+                              {.pc = 0x1004, .word = mvk(0, 4, 99)}}};
+        assert(cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+        assert(c.r[0][4] == 99);
+        CdjC674xInstruction first = p.instructions[0];
+        p.instructions[0] = p.instructions[1]; p.instructions[1] = first;
+        cdj_c674x_reset(&c, 0x1000);
+        assert(!cdj_c674x_execute(&c, &p, read_word, write_memory, NULL));
+        assert(c.r[0][4] == 0 && c.cycles == 0);
+    }
+    /* All compact L/S/D mask bits: masked moves execute once; unmasked
+     * moves remain buffered, including the other side of the same unit. */
+    for (unsigned unit = 0; unit < 3; ++unit)
+        for (unsigned side = 0; side < 2; ++side) {
+            static const unsigned bits[] = {1,128,256,512,16384,32768};
+            memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+            c.control[13] = 3; c.r[side][1] = 99; c.r[side ^ 1][1] = 77;
+            memory[0] = 0x838000; /* SPLOOP 2 */
+            unsigned move = 0x46 | 4u << 13 | 1u << 7 | unit << 3;
+            memory[1] = (move | side) << 16 | 0x2c66 | bits[2 * unit + side];
+            memory[2] = (move | (side ^ 1)) | 0x0c6e0000;
+            memory[3] = 0x34000;
+            memory[7] = 0xe0c0000c; /* mask || move || opposite move */
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(c.r[side][4] == 99 && c.r[side ^ 1][4] == 77 && c.loop_tags == 1);
+            c.r[side][1] = 55; c.r[side ^ 1][1] = 66;
+            unsigned steps = 0;
+            while (c.loop_active) {
+                assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+                assert(++steps < 12);
+            }
+            assert(c.r[side][4] == 99 && c.r[side ^ 1][4] == 66);
+        }
     /* Figure F-24 scatters an unsigned byte across four fields. Exercise all
      * constants, both banks and register subsets (including high-bit values). */
     for (unsigned rs = 0; rs < 2; ++rs)

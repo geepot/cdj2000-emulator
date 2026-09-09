@@ -21,6 +21,67 @@ static unsigned nop_cycles(const CdjC674xInstruction *insn)
     return 0;
 }
 
+/* SPMASK unit bits are L1,L2,S1,S2,D1,D2,M1,M2. GNU's opcode table
+ * corrects the full-width opcode in SPRUFE8B; compact is Figure H-8. */
+static bool spmask_decode(const CdjC674xInstruction *insn, unsigned *mask)
+{
+    uint32_t w = insn->word;
+    if (insn->compact && (w & 0x3c7e) == 0x2c66) {
+        *mask = (w & 1) | ((w >> 6) & 14) | ((w >> 10) & 48);
+        return true;
+    }
+    if (!insn->compact && (w & 0xfc03fffe) == 0x30000) {
+        *mask = (w >> 18) & 255;
+        return true;
+    }
+    return false;
+}
+
+/* Format-level unit classification (SPRUFE8B appendices C-G). Zero means
+ * unknown: never infer that an unknown operation is safe to mask or replay.
+ * This classifies units, not opcode validity; execution still validates ISA. */
+static unsigned instruction_unit(const CdjC674xInstruction *insn)
+{
+    uint32_t w = insn->word;
+    unsigned side = insn->compact ? w & 1 : (w >> 1) & 1;
+    if (!insn->compact) {
+        if ((w & 0x1c) == 0x18) return 1u << side;
+        if ((w & 0x0c) == 4 || (w & 0x0c) == 12 ||
+            (w & 0x7c) == 0x40 || (w & 0xc3c) == 0x830) return 16u << side;
+        if ((w & 0x3c) == 0x20 || (w & 0x3c) == 0x28 ||
+            (w & 0x3c) == 8 || (w & 0x7c) == 0x10 ||
+            (w & 0x7c) == 0x50 || (w & 0xc3c) == 0xc30) return 4u << side;
+        if ((w & 0x7c) == 0 || (w & 0x83c) == 0x30) return 64u << side;
+        return 0;
+    }
+    if (((w & 0x26) == 6 || (w & 0x1c66) == 0x0866 ||
+         (w & 0x1c66) == 0x1866) && ((w >> 3) & 3) != 3)
+        return 1u << (2 * ((w >> 3) & 3) + side);
+    if ((w & 6) == 4 || (w & 0x087f) == 0x0077 ||
+        (w & 0x047e) == 0x0036 || (w & 0x047e) == 0x0436 ||
+        (w & 0x1c7e) == 0x0c76) return 16u << side;
+    if ((w & 0x040e) == 0 || (w & 0x040e) == 0x400 ||
+        (w & 0x040e) == 0x408 || (w & 0x047e) == 0x426 ||
+        (w & 0x047e) == 0x26) return 1u << side;
+    if ((w & 0x001e) == 0x001e) return 64u << side;
+    if ((w & 0x040e) == 0xa || (w & 0x040e) == 0x40a ||
+        (w & 0x001e) == 0x12 || (w & 0x001e) == 2 ||
+        (w & 0x047e) == 0x62 || (w & 0x047e) == 0x462 ||
+        (w & 0x047e) == 0x2e || (w & 0x047e) == 0x42e ||
+        (w & 0x187e) == 0x6e || (w & 0x1c7e) == 0x186e) return 4u << side;
+    return 0;
+}
+
+typedef struct { CdjC674x *cpu; unsigned mask; bool unknown; } LoopMask;
+static bool loop_allow(void *opaque, uint32_t tag)
+{
+    LoopMask *context = opaque;
+    if (!context->mask) return true;
+    unsigned unit = instruction_unit(&context->cpu->loop_instructions[tag]);
+    if (!unit) context->unknown = true;
+    return !(unit & context->mask);
+}
+
 /* Side-effect-free RAM reads; nonaligned words may span two bus words. */
 static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
                         unsigned size, uint64_t *value)
@@ -125,6 +186,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         const CdjC674xInstruction *insn = &packet->instructions[i];
         uint32_t w = insn->word, pc = insn->pc, value = 0;
         bool compact = insn->compact;
+        unsigned ignored_mask;
+        if (spmask_decode(insn, &ignored_mask)) {
+            if (i) return stop(cpu, pc, w, "SPMASK must start packet");
+            continue; /* Idle loop buffer: SPMASK is a NOP, section 7.15. */
+        }
         unsigned nop = nop_cycles(insn);
         if (nop) {
             if (nop > 9) return stop(cpu, pc, insn->word, "reserved NOP count");
@@ -189,7 +255,13 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             bool simple = true;
             side = w & 1;
             cross = side ^ ((w >> 12) & 1);
-            if ((w & 0x040e) == 0x0400) { /* Figure D-5, ADD.L immediate */
+            if ((w & 0x1c66) == 0x0866 && ((w >> 3) & 3) != 3) {
+                /* Figure G-3: [A0/!A0/B0/!B0] MVK 0/1 on L/S/D. */
+                unsigned cc = w >> 14;
+                if (!((cpu->r[cc >> 1][0] != 0) ^ (cc & 1))) continue;
+                dst = ((w >> 7) & 7) + rs;
+                value = (w >> 13) & 1;
+            } else if ((w & 0x040e) == 0x0400) { /* Figure D-5, ADD.L immediate */
                 dst = ((w >> 4) & 7) + rs;
                 unsigned imm = (w >> 13) & 7;
                 int32_t offset = (w & 0x800) ? (int32_t)imm - 8 : (imm ? (int32_t)imm : 8);
@@ -542,6 +614,8 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
 {
     CdjC674x out = *cpu;
     CdjC674xPacket combined = {.next_pc = cpu->pc, .single_cycle = true};
+    CdjC674xPacket direct = {0};
+    LoopMask masking = {.cpu = &out};
     bool loading = !out.loop.sealed;
     bool post = out.loop.sealed && out.loop.cycle >= out.loop.post_cycle;
     if (loading && !out.loop_wait) {
@@ -552,9 +626,15 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         bool finish = false;
         unsigned delay = 0, count = 0;
         uint32_t tags[8];
+        bool has_mask = spmask_decode(&source.instructions[0], &masking.mask);
         for (unsigned i = 0; i < source.count; ++i) {
             CdjC674xInstruction insn = source.instructions[i];
             uint32_t w = insn.word;
+            unsigned mask;
+            if (spmask_decode(&insn, &mask)) {
+                if (i) return stop(cpu, insn.pc, w, "SPMASK must start packet");
+                continue;
+            }
             if (!insn.compact && (w & 0xf03ffffc) == 0x34000) {
                 if (i != 0) return stop(cpu, insn.pc, w, "SPKERNEL must start packet");
                 unsigned cbits = 0, stage = 0, field = (w >> 22) & 63;
@@ -576,14 +656,26 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 if (n > 1) out.loop_wait = n - 1;
                 continue;
             }
-            /* This initial integration accepts single-cycle body operations.
-             * More loop control forms must not be mistaken for ordinary code. */
-            if ((!insn.compact && ((w & 0x1ffe) == 0x162 ||
-                  (w & 0x0f830ffe) == 0x00800362 || (w & 0x7c) == 0x10 ||
-                  (w & 0x0f83effe) == 0x362)) ||
-                (insn.header & (1u << 20)) ||
+            /* Multicycle masked operations need program-fetch stall handling
+             * during loading. Preserve the explicit stop until that exists. */
+            if ((insn.header & (1u << 20)) ||
+                (!insn.compact && ((w & 0x1ffe) == 0x162 || (w & 0x7c) == 0x10 ||
+                                  (w & 0xffe) == 0x362)) ||
                 (insn.compact && ((insn.header & 0x8000) || (w & 0x187f) == 0x006f)))
                 return stop(cpu, insn.pc, w, "loop body control or protected instruction not implemented");
+            if (has_mask && masking.mask) {
+                unsigned unit = instruction_unit(&insn);
+                if (!unit) return stop(cpu, insn.pc, w, "SPMASK unit not implemented");
+                if (unit & masking.mask) {
+                    direct.instructions[direct.count++] = insn;
+                    continue;
+                }
+            }
+            /* Section 7.18: MVC may execute from memory when masked but
+             * cannot enter the loop buffer. */
+            if ((!insn.compact && (w & 0xffe) == 0x3a2) ||
+                (insn.compact && (w & 0xfc7f) == 0xd86f))
+                return stop(cpu, insn.pc, w, "unmasked loop MVC not permitted");
             if (out.loop_tags == 112) return stop(cpu, insn.pc, w, "loop instruction capacity exceeded");
             tags[count++] = out.loop_tags;
             out.loop_instructions[out.loop_tags++] = insn;
@@ -596,22 +688,32 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         if (!cdj_c674x_loop_load(&out.loop, NULL, 0, false, 0))
             return stop(cpu, cpu->pc, 0, "loop dynamic length exceeded");
     }
-    uint32_t tags[8]; unsigned count; bool scheduler_post, drained;
-    if (!cdj_c674x_loop_issue(&out.loop, tags, &count, &scheduler_post, &drained))
-        return stop(cpu, cpu->pc, 0, "loop issue capacity exceeded");
-    for (unsigned i = 0; i < count; ++i)
-        combined.instructions[combined.count++] = out.loop_instructions[tags[i]];
     if (post && !out.idle_cycles) {
         CdjC674xPacket source;
         if (!cdj_c674x_fetch(&out, read, opaque, &source))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
-        if (combined.count + source.count > 8) return stop(cpu, cpu->pc, 0, "loop/post packet capacity exceeded");
-        for (unsigned i = 0; i < source.count; ++i)
-            combined.instructions[combined.count++] = source.instructions[i];
+        bool has_mask = spmask_decode(&source.instructions[0], &masking.mask);
+        for (unsigned i = has_mask ? 1 : 0; i < source.count; ++i) {
+            unsigned mask;
+            if (spmask_decode(&source.instructions[i], &mask))
+                return stop(cpu, source.instructions[i].pc, source.instructions[i].word,
+                            "SPMASK must start packet");
+            direct.instructions[direct.count++] = source.instructions[i];
+        }
         combined.next_pc = source.next_pc;
     } else if (out.idle_cycles) {
         --out.idle_cycles;
     }
+    uint32_t tags[8]; unsigned count; bool scheduler_post, drained;
+    if (!cdj_c674x_loop_issue_filtered(&out.loop, tags, &count, &scheduler_post,
+                                     &drained, loop_allow, &masking))
+        return stop(cpu, cpu->pc, 0, "loop issue capacity exceeded");
+    if (masking.unknown) return stop(cpu, cpu->pc, 0, "buffered SPMASK unit not implemented");
+    if (count + direct.count > 8) return stop(cpu, cpu->pc, 0, "loop/direct packet capacity exceeded");
+    for (unsigned i = 0; i < count; ++i)
+        combined.instructions[combined.count++] = out.loop_instructions[tags[i]];
+    for (unsigned i = 0; i < direct.count; ++i)
+        combined.instructions[combined.count++] = direct.instructions[i];
     /* SPRUFE8B 7.10: sample the selected condition each cycle. At the end
      * of a stage, use its value three cycles earlier; the first three loop
      * cycles cannot terminate. No ILC/RILC access and no epilog. */
@@ -670,6 +772,9 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         for (unsigned j = 1; j < packet.count; ++j) {
             CdjC674xInstruction other = packet.instructions[j];
             uint32_t v = other.word;
+            unsigned mask;
+            if (spmask_decode(&other, &mask))
+                return stop(cpu, other.pc, v, "SPMASK cannot share loop setup packet");
             if ((other.header & (1u << 20)) ||
                 (nop_cycles(&other) > 1) ||
                 (!other.compact && ((v & 0xffe) == 0x362 || (v & 0x7c) == 0x10)) ||
