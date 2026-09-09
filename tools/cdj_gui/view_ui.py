@@ -64,6 +64,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.paths import (BFIN_SIM, BOARDS, FIRMWARE,  # noqa: E402
                          PACKETS, RUNS, board_path)
 from tools.cdj_main import panel_control  # noqa: E402
+from tools.cdj_main import nxs_panel  # noqa: E402
 from tools.cdj_gui import faceplate  # noqa: E402
 
 # ---------------------------------------------------------------- geometry --
@@ -379,11 +380,32 @@ def channel_controls() -> list[Control]:
     ]
 
 
-def controls() -> list[Control]:
-    return button_controls() + analog_controls() + channel_controls()
+def controls(nxs: bool = False) -> list[Control]:
+    buttons = button_controls()
+    if nxs:
+        translated = []
+        for control in buttons:
+            if control.group == "bits":
+                continue
+            if control.input_id is not None:
+                target = nxs_panel.deck_input(control.input_id)
+                byte, mask = panel_control.button_mask(target)
+                duration = WINDOW_LONG_HOLD_MS if control.kind == "hold" else WINDOW_HOLD_MS
+                control = control._replace(input_id=target,
+                    lines=(panel_control.encode_press(byte, mask, duration),),
+                    note="NXS firmware panel decoder 042f5810")
+            translated.append(control)
+        for byte, bit in nxs_panel.BUTTON_BITS:
+            key = f"{byte}.{bit}"
+            name = nxs_panel.KEY_NAMES.get((byte, bit), "unassigned")
+            translated.append(Control(key, key, "button", "bits",
+                (panel_control.encode_press(byte, 1 << bit, WINDOW_HOLD_MS),),
+                f"NXS decoder 042f5810; {name}"))
+        buttons = translated
+    return buttons + analog_controls() + channel_controls()
 
 
-def coverage(built: list[Control] | None = None
+def coverage(built: list[Control] | None = None, nxs: bool = False
              ) -> tuple[list[str], list[str], list[str]]:
     """(inputs reached, inputs with no control, controls with no input).
 
@@ -391,8 +413,8 @@ def coverage(built: list[Control] | None = None
     does not have is the same class of error as a missing one, and it is the
     error a hand-written table makes first.
     """
-    built = controls() if built is None else built
-    board = panel_control.input_ids()
+    built = controls(nxs) if built is None else built
+    board = nxs_panel.input_ids() if nxs else panel_control.input_ids()
     # field6-touch is a control for a flag inside field 6 rather than for one
     # of the 48 the manifest enumerates; it is counted as reaching field 6.
     reached = {control.input_id.split("-")[0]
@@ -402,9 +424,9 @@ def coverage(built: list[Control] | None = None
             sorted(name for name in reached if name not in board))
 
 
-def coverage_line(built: list[Control] | None = None) -> str:
+def coverage_line(built: list[Control] | None = None, nxs: bool = False) -> str:
     """What the window says about itself, in one line."""
-    reached, missing, stray = coverage(built)
+    reached, missing, stray = coverage(built, nxs)
     text = "%d of %d inputs have a control" % (len(reached),
                                                len(reached) + len(missing))
     if missing:
@@ -622,14 +644,15 @@ class UiViewer:
                            row=1, column=0, columnspan=2, sticky="e")
             self.root.after(1000, self.poll_sd_lid)
 
-        built = controls()
+        built = controls(self.args.nxs_panel)
         self.by_id = {control.input_id: control for control in built
                       if control.input_id}
         self.viewport = tk.Frame(outer, background="#0b0d10")
         self.viewport.grid(row=1, column=0, sticky="nsew")
         self.deck = faceplate.Faceplate(
             self.viewport, 1,
-            resolve=self.by_id.get,
+            resolve=lambda key: self.by_id.get(
+                nxs_panel.deck_input(key) if self.args.nxs_panel else key),
             click=self.click,
             rotate=lambda field, delta: self.rotate(
                 panel_control.ANALOG_CONTROLS[field], delta),
@@ -726,8 +749,11 @@ class UiViewer:
         an input can never be in neither.  `coverage()` still counts controls,
         not positions, so 48 of 48 means the same thing it did before.
         """
-        board = panel_control.input_ids()
-        leftover = faceplate.unplaced(board)
+        nxs = self.args.nxs_panel
+        board = nxs_panel.input_ids() if nxs else panel_control.input_ids()
+        placed = {nxs_panel.deck_input(key) if nxs else key
+                  for key in faceplate.PLACEMENTS}
+        leftover = [key for key in board if key not in placed]
         by_id = {control.input_id: control for control in built
                  if control.input_id}
 
@@ -736,7 +762,8 @@ class UiViewer:
             box = ttk.LabelFrame(parent, padding=7, text="Unassigned digital inputs")
             box.grid(row=0, column=0, sticky="w", padx=(0, 10))
             for column, name in enumerate(bits):
-                ttk.Button(box, text=name, width=6,
+                label = nxs_panel.KEY_NAMES.get(tuple(map(int, name.split('.'))), name) if nxs else name
+                ttk.Button(box, text=label, width=max(6, len(label)),
                            command=lambda n=name: self.click(by_id[n])).grid(
                                row=0, column=column, padx=2)
 
@@ -760,7 +787,7 @@ class UiViewer:
                         % self.args.control_port if self.args.control_port
                         else "no control channel: every control will refuse "
                              "(start with --control-port)")
-        self.control_note.set("%s | %s" % (coverage_line(built), channel_note))
+        self.control_note.set("%s | %s" % (coverage_line(built, self.args.nxs_panel), channel_note))
 
     # -------------------------------------------------------------- lab --
     def build_lab(self) -> None:
@@ -768,7 +795,7 @@ class UiViewer:
         outer = ttk.Frame(self.root, padding=10)
         outer.grid(row=0, column=0, sticky="nsew")
 
-        built = controls()
+        built = controls(self.args.nxs_panel)
         by_group: dict[str, list[Control]] = {}
         for control in built:
             by_group.setdefault(control.group, []).append(control)
@@ -828,7 +855,7 @@ class UiViewer:
                         % self.args.control_port if self.args.control_port
                         else "no control channel: every control will refuse "
                              "(start with --control-port)")
-        self.control_note.set("%s | %s" % (coverage_line(built), channel_note))
+        self.control_note.set("%s | %s" % (coverage_line(built, self.args.nxs_panel), channel_note))
 
     def hardware_button(self, parent: tk.Misc, control: Control) -> ttk.Button:
         """A front-panel key.
@@ -931,7 +958,11 @@ class UiViewer:
             # The run name is part of the finding, not decoration: 18.1 is
             # "changes the display" in r026 and 0 in r096, on different screens.
             byte, bit = (int(part) for part in control.input_id.split("."))
-            name = firmware_name(byte, bit)
+            if self.args.nxs_panel:
+                name = nxs_panel.KEY_NAMES.get((byte, bit), "")
+                verdict, world = "", ""  # legacy run annotations are not NXS evidence
+            else:
+                name = firmware_name(byte, bit)
             shown = "%s  [%s]" % (verdict[:30], world) if world else verdict[:30]
             ttk.Label(box, text="%-13s %s" % (name, shown),
                       foreground="#555555").grid(
@@ -1102,6 +1133,9 @@ class UiViewer:
         return True
 
     def show_contact(self, bit_id: str, down: bool) -> None:
+        if getattr(getattr(self, "args", None), "nxs_panel", False):
+            bit_id = next((key for key in faceplate.PLACEMENTS
+                           if nxs_panel.deck_input(key) == bit_id), None)
         if self.deck is not None and bit_id in faceplate.PLACEMENTS:
             self.deck.set_latched(bit_id, down)
             if bit_id == "20.3":
