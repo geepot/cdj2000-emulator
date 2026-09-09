@@ -273,6 +273,16 @@ genuine panel-to-MAIN-to-GUI response, not complete boot: the visible E-7206
 auth-chip banner and strict SPI1 DSP stop remain. Local temporary evidence is
 in `/tmp/cdj-panel-delivery-strict-1`; it is not a committed test fixture.
 
+The follow-up `/tmp/cdj-panel-delivery-visible-1` exercised the actual native
+Tk deck against the rebuilt strict timed-SPI binary. A generated mouse-down
+on MENU sent `down 20 08`; releasing outside the button sent `up 20 08`.
+The control channel reported MENU held at frame 182, all bits released at
+frame 221, and queue zero throughout. The captured firmware picture
+`viewer-hold.png` visibly shows UTILITY, still with E-7206. DSP execution now
+ended each phase by its cooperative budget rather than the earlier SPI fault.
+This is visible-viewer interaction evidence, not an error-free boot gate or
+evidence that USB/SD track loading is ready.
+
 ### Existing tracing tools
 
 ```sh
