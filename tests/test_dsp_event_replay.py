@@ -1,4 +1,7 @@
-from tools.cdj_dsp.event_replay import replay
+import struct
+
+from tools.cdj_dsp.event_replay import checkpoint_start, replay
+from tools.cdj_dsp.inventory import CHECKPOINT_HEADER, SHARED_RAM_SIZE, _fnv1a
 
 
 def event(sequence, kind, *, value=0, address=0, offset=0, size=0,
@@ -38,3 +41,32 @@ def test_rejects_event_sequence_gap():
         assert 'sequence gap' in str(error)
     else:
         raise AssertionError('sequence gap accepted')
+
+
+def test_schema2_start_checkpoint_verifies_checksum_and_l2(tmp_path):
+    state = bytearray(100)
+    struct.pack_into('<IIQQQ', state, 0, 0x11800004, 2, 7, 19, 3)
+    state[36:36 + len(b'DSP start boundary')] = b'DSP start boundary'
+    l2 = bytearray(0x40000)
+    l2[:4] = b'code'
+    payload = state + l2 + bytes(SHARED_RAM_SIZE) + bytes(1024)
+    header = CHECKPOINT_HEADER.pack(
+        b'CDJDSP2\0', 2, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 0,
+        len(payload), _fnv1a(payload),
+    )
+    path = tmp_path / 'start.cdjdsp'
+    path.write_bytes(header + payload)
+    result = checkpoint_start(path)
+    assert result['schema'] == 2 and result['reason'] == 'DSP start boundary'
+    assert result['hpi_address'] == 0x11800004 and result['boot_phase'] == 2
+    assert result['l2'][:4] == b'code'
+    damaged = bytearray(header + payload)
+    damaged[-1] ^= 1
+    path.write_bytes(damaged)
+    try:
+        checkpoint_start(path)
+    except ValueError as error:
+        assert 'checksum' in str(error)
+    else:
+        raise AssertionError('damaged schema-2 checkpoint accepted')

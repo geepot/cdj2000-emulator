@@ -13,9 +13,9 @@ import json
 from pathlib import Path
 import struct
 
-HEADER = struct.Struct('<8sIIII9I5IQQ')
+from .inventory import BASE as L2_BASE, CHECKPOINT_HEADER as HEADER, read_input
+
 STATE_PREFIX = struct.Struct('<IIQQQ')
-L2_BASE = 0x11800000
 L2_SIZE = 0x40000
 
 
@@ -25,25 +25,21 @@ def sha256(data: bytes) -> str:
 
 def checkpoint_start(path: Path) -> dict:
     data = path.read_bytes()
-    if len(data) < HEADER.size:
-        raise ValueError('checkpoint header is incomplete')
+    memories, info = read_input(data)
     fields = HEADER.unpack_from(data)
-    magic, schema, endian, header_size, state_size = fields[:5]
-    l2_size = fields[14]
-    if (magic != b'CDJDSP1\0' or schema != 1 or endian != 0x01020304 or
-            header_size != HEADER.size or l2_size != L2_SIZE):
-        raise ValueError('checkpoint format is incompatible')
+    header_size, state_size = fields[3:5]
+    if info['kind'] != 'checkpoint' or state_size < 100:
+        raise ValueError('checkpoint state prefix is incompatible')
     start = header_size
     hpi_address, phase, words, event_sequence, checkpoint_sequence = \
         STATE_PREFIX.unpack_from(data, start)
     reason = data[start + 36:start + 36 + 64].split(b'\0', 1)[0].decode('ascii')
-    l2_start = start + state_size
-    l2 = data[l2_start:l2_start + l2_size]
-    if len(l2) != L2_SIZE:
+    l2 = memories.get(L2_BASE)
+    if l2 is None or len(l2) != L2_SIZE:
         raise ValueError('checkpoint L2 payload is incomplete')
     return dict(reason=reason, hpi_address=hpi_address, boot_phase=phase,
                 words=words, event_sequence=event_sequence,
-                checkpoint_sequence=checkpoint_sequence, l2=l2)
+                checkpoint_sequence=checkpoint_sequence, schema=info['schema'], l2=l2)
 
 
 def host_control(state: dict, value: int) -> None:

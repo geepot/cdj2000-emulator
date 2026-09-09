@@ -44,6 +44,20 @@ packets, 1,098 confirmed instruction addresses, 988 encodings, 811 dynamic
 edges, three probable addresses, and no unsupported-opcode fault.  Full boot,
 interrupts, peripherals, and audio remain incomplete.
 
+The external HPI transcript replayer now uses the common checkpoint reader
+instead of assuming schema-1 offsets.  It validates schema-2 payload size and
+checksum and obtains L2 after the recorded state size while continuing to
+accept compatible schema-1 inputs.  The exact-repeat command below validates
+all 110,209 connected events, 104,093 uploaded words, 14 HINT acknowledgements,
+13 DSP HINT edges, and one DSPINT edge; replay and repeat SHA-256 are both
+`f08c16567269ea54c0eba1b9b7a2dd6ed0668cc8b59ea28796d66bdc98667c98`.
+
+```sh
+python -m tools.cdj_dsp.event_replay \
+  runs/nxs-sploopd-shared-connected-3 /tmp/dsp-event-replay-schema2 \
+  --verify-repeat
+```
+
 ### Previous stable-wait checkpoint
 
 The confirmed connected/replay DSP path no longer stops on an unsupported
