@@ -80,6 +80,7 @@ def environment() -> dict[str, str]:
     settings = dict(os.environ)
     settings["PATH"] = str(bindir) + os.pathsep + settings.get("PATH", "")
     settings.pop("CDJ_INPUT_PORT", None)
+    settings.pop("CDJ_NXS_SD_LID", None)
     return settings
 
 
@@ -180,6 +181,32 @@ def script(harness: Path, steps: list[tuple[str, int]],
     assert [segment.command for segment in segments] == \
         [command for command, _ in steps], "the harness lost a command"
     return segments
+
+
+def test_sd_lid_is_persistent_and_overrides_raw_button_commands(harness, tmp_path):
+    steps = [('sd-lid closed', 3), ('clear', 3), ('up 17 04', 3),
+             ('sd-lid open', 3), ('down 17 04', 3), ('clear', 3),
+             ('sd-lid toggle', 3), ('sd-lid invalid', 3),
+             ('sd-lid open extra', 3), ('sd-lid state', 3)]
+    segments = script(harness, steps, tmp_path)
+    for segment, closed in zip(segments, [True, True, True, False, False,
+                                          False, True, True, True, True]):
+        assert all(bool(frame[17] & 4) == closed for frame in segment.frames)
+    assert 'ok sd-lid closed' in segments[-1].replies
+    assert any(r.startswith('err ') for r in segments[-2].replies)
+
+
+@pytest.mark.parametrize('state,closed', [('closed', True), ('open', False)])
+def test_sd_lid_default_works_without_control_socket(harness, state, closed):
+    settings = environment()
+    settings['CDJ_NXS_SD_LID'] = state
+    result = subprocess.run([str(harness), 'quiet'], env=settings,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    frames = [bytes.fromhex(line.split(' ', 3)[3])
+              for line in result.stdout.splitlines() if line.startswith('f ')]
+    assert frames
+    assert all(bool(frame[17] & 4) == closed for frame in frames)
 
 
 def test_script_waits_for_replies_before_starting_the_next_segment(harness, tmp_path):

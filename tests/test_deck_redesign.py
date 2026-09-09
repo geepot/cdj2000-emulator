@@ -115,6 +115,39 @@ def play_control():
     return next(c for c in view_ui.controls() if c.input_id == '16.0')
 
 
+def test_nxs_lid_toggles_once_and_release_does_not_open_it():
+    viewer = contact_viewer()
+    viewer.args = SimpleNamespace(nxs_panel=True)
+    viewer.sd_lid_text = Mock()
+    viewer.send.return_value = 'ok sd-lid closed'
+    control = next(c for c in view_ui.controls() if c.input_id == '17.2')
+    assert viewer.contact(control, True)
+    assert viewer.contact(control, True)  # auto-repeat must not toggle again
+    assert viewer.contact(control, False)
+    assert [c.args[1] for c in viewer.send.call_args_list] == ['sd-lid toggle\n']
+    viewer.sd_lid_text.set.assert_called_with('SD lid: closed')
+    assert not viewer.held and not viewer.momentary and not viewer.contact_sources
+    viewer.send.reset_mock()
+    viewer.click(control)
+    viewer.long_press(control)
+    viewer.toggle_hold(control)
+    assert [c.args[1] for c in viewer.send.call_args_list] == ['sd-lid toggle\n'] * 3
+
+
+def test_lid_state_is_queried_with_complete_line_and_not_assumed():
+    viewer = contact_viewer()
+    viewer.sd_lid_text = Mock()
+    panel = Mock()
+    viewer.control = Mock(return_value=panel)
+    panel.send.return_value = 'ok sd-lid open'
+    assert viewer.sd_lid_command('state')
+    panel.send.assert_called_once_with('sd-lid state\n')
+    viewer.sd_lid_text.set.assert_called_with('SD lid: open')
+    viewer.control.return_value = None
+    assert not viewer.sd_lid_command('state')
+    viewer.sd_lid_text.set.assert_called_with('SD lid: unknown')
+
+
 def test_physical_contact_sends_down_and_up_without_a_timed_pulse():
     viewer, control = contact_viewer(), play_control()
     assert viewer.contact(control, True)
@@ -376,5 +409,31 @@ def test_native_deck_resize_and_inspector(tmp_path):
         assert [call.args[1] for call in viewer.send.call_args_list] == [
             panel_control.encode_hold(16, 1, True),
             panel_control.encode_hold(16, 1, False)]
+    finally:
+        viewer.close()
+
+
+@pytest.mark.skipif(os.environ.get('CDJ_TEST_TK') != '1', reason='opt-in native Tk smoke test')
+def test_native_nxs_sd_lid_pointer_keyboard_and_focus(tmp_path):
+    args = view_ui.parse_args(['--attach', '--nxs-panel', '--output', str(tmp_path / 'missing.ppm')])
+    viewer = view_ui.UiViewer(args)
+    try:
+        viewer.send = Mock(return_value='ok sd-lid closed')
+        viewer.root.update_idletasks()
+        viewer.deck.set_scale(1)
+        p = faceplate.PLACEMENTS['17.2']
+        viewer.deck.event_generate('<ButtonPress-1>', x=int(p.x+p.w/2), y=int(p.y+p.h/2))
+        viewer.deck.event_generate('<ButtonRelease-1>', x=-20, y=-20)
+        assert [c.args[1] for c in viewer.send.call_args_list] == ['sd-lid toggle\n']
+        assert viewer.sd_lid_text.get() == 'SD lid: closed'
+        viewer.send.reset_mock()
+        viewer.deck.focus_force()
+        viewer.root.update()
+        viewer.deck.focused_name = '17.2'
+        viewer.deck.event_generate('<KeyPress-space>')
+        viewer.deck.event_generate('<KeyPress-space>')
+        viewer.deck.event_generate('<FocusOut>')
+        assert [c.args[1] for c in viewer.send.call_args_list] == ['sd-lid toggle\n']
+        assert not viewer.sd_lid_sources
     finally:
         viewer.close()

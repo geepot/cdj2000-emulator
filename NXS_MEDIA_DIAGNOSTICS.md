@@ -115,3 +115,50 @@ it models a closed lid, not an ordinary pressed button.
 The current UI's SD OPEN label/momentary treatment and a neutral open-lid
 launch state need a coherent persistent-lid implementation. Do not implement
 that by forcing the firmware's readiness or mount-status RAM.
+
+## Persistent panel-lid implementation
+
+The NXS launcher now explicitly sets `CDJ_NXS_SD_LID=closed` before the first
+panel exchange, including headless runs. Unconfigured legacy launches retain
+their original raw input behavior. This models only the verified byte 17 bit 2
+physical contact; it does not set card-present, mount state, or firmware RAM.
+
+The input channel accepts `sd-lid open`, `sd-lid closed`, `sd-lid toggle`, and
+`sd-lid state`. A configured lid owns this contact independently of raw key
+commands: `clear`, mouse release, focus loss, and raw `up 17 04` no longer
+open it. Use the dedicated command for deliberate open-lid diagnostics.
+The NXS viewer (`--nxs-panel`, supplied by the launcher) treats the SD LID
+control as a toggle, including keyboard and modified clicks. The header reports
+the queried emulator state, not an assumed local state. Legacy viewer behavior
+is unchanged apart from the neutral SD LID label.
+
+Focused C-harness tests cover closed/open startup without a control socket,
+persistent state, raw-key isolation, toggle, and invalid-command rejection.
+UI tests cover release, auto-repeat, and alternate activation paths. The earlier
+connected contact test remains the firmware-level evidence for this electrical
+mapping; the new implementation still needs a rebuilt connected gate. None of
+these checks establishes successful track loading or audio.
+
+That connected gate is now recorded in `runs/nxs-persistent-sd-lid-1`:
+
+```
+.venv/bin/python -m tools.cdj_main.nxs_vm runs/nxs-persistent-sd-lid-1 \
+  --seconds 180 --frame-interval 10 --port 6080 \
+  --sd runs/nxs-test-media-1/test-track.img --trace-media
+```
+
+Combined QEMU (including the parallel DSP interrupt-entry fix) SHA-256:
+`bcf1f4b3e64b82741b3007eccbf32a8c8235c91788ad617f67e43b4e87363367`.
+Manifest confirms `CDJ_NXS_SD_LID=closed` and no changed input hashes. Live
+`sd-lid state`, `clear`, `sd-lid state` replies confirm closed before and after
+release-all. An initial diagnostic query omitted its newline and timed out;
+the corrected query and UI use complete lines. A late SD source down/up was
+acknowledged. No manual lid-contact command or guest RAM write was used.
+
+MAIN issues CMD0/2/3/6/7/8/9/10/13/16/41/51/55. DSP logs contain only phase
+budgets and HINT yields, not execution faults. This is automatic-lid startup
+and controller-initialization evidence, not successful track loading. Focused
+panel/input/layout/control/launcher tests: 178 passed, 3 optional skips before
+the final query/native additions; native UI tests including lid mouse,
+auto-repeat and focus handling: 30 passed. The query regression additionally
+checks newline termination and unknown state after disconnection.

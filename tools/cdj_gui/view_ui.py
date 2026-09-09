@@ -615,6 +615,12 @@ class UiViewer:
             row=0, column=2, padx=4)
         ttk.Button(badges, text="Full screen", command=self.toggle_fullscreen).grid(
             row=0, column=3, padx=4)
+        if self.args.nxs_panel:
+            self.sd_lid_text = tk.StringVar(value="SD lid: unknown")
+            ttk.Button(badges, textvariable=self.sd_lid_text,
+                       command=lambda: self.sd_lid_command("toggle")).grid(
+                           row=1, column=0, columnspan=2, sticky="e")
+            self.root.after(1000, self.poll_sd_lid)
 
         built = controls()
         self.by_id = {control.input_id: control for control in built
@@ -1062,6 +1068,16 @@ class UiViewer:
 
     def contact(self, control: Control, down: bool, *, source: object = "deck-pointer") -> bool:
         """Combine pointer/keyboard/widget ownership, independently of latches."""
+        if self.is_sd_lid(control):
+            sources = getattr(self, "sd_lid_sources", set())
+            if down and source not in sources:
+                if not self.sd_lid_command("toggle"):
+                    return False
+                sources.add(source)
+            elif not down:
+                sources.discard(source)
+            self.sd_lid_sources = sources
+            return True
         if control.input_id is None or control.kind not in ("button", "hold"):
             self.click(control)
             return False
@@ -1092,6 +1108,9 @@ class UiViewer:
                 self.deck.set_latched("20.3-hold", down)
 
     def click(self, control: Control) -> None:
+        if self.is_sd_lid(control):
+            self.sd_lid_command("toggle")
+            return
         if control.kind == "hold" and control.input_id is not None:
             self.long_press(control)
             return
@@ -1106,6 +1125,9 @@ class UiViewer:
 
     def long_press(self, control: Control) -> None:
         """Shift-click, or the UTILITY key: down across two status records."""
+        if self.is_sd_lid(control):
+            self.sd_lid_command("toggle")
+            return
         if control.kind not in ("button", "hold") or control.input_id is None:
             self.click(control)
             return
@@ -1138,6 +1160,9 @@ class UiViewer:
 
     def toggle_hold(self, control: Control) -> None:
         """Right-click: hold the bit down, right-click again to release it."""
+        if self.is_sd_lid(control):
+            self.sd_lid_command("toggle")
+            return
         if control.input_id is None:
             self.click(control)
             return
@@ -1158,6 +1183,35 @@ class UiViewer:
                                      ", ".join(sorted(c.label for c
                                                       in self.held.values()))
                                      or "none"))
+
+    def is_sd_lid(self, control: Control) -> bool:
+        return (getattr(getattr(self, "args", None), "nxs_panel", False) and
+                control.input_id == "17.2")
+
+    def sd_lid_command(self, action: str) -> bool:
+        control = Control("SD lid", "17.2", "switch", "bits", (),
+                          "Persistent physical SD lid contact; click to toggle")
+        if action == "state":
+            panel = self.control()
+            try:
+                reply = panel.send("sd-lid state\n") if panel else None
+            except (OSError, ValueError) as error:
+                self.forget_control(error)
+                reply = None
+        else:
+            reply = self.send(control, "sd-lid " + action + "\n")
+        state = reply.strip().removeprefix("ok sd-lid ") if reply else "unknown"
+        if state not in ("open", "closed"):
+            state = "unknown"
+        if hasattr(self, "sd_lid_text"):
+            self.sd_lid_text.set("SD lid: " + state)
+        if reply and action != "state":
+            self.control_note.set("SD lid: " + state + " (persistent physical switch)")
+        return state in ("open", "closed")
+
+    def poll_sd_lid(self) -> None:
+        self.sd_lid_command("state")
+        self.root.after(2000, self.poll_sd_lid)
 
     def field_value(self, entry: panel_control.AnalogControl) -> int | None:
         """The number in the row's box, or None with the reason said out loud.
@@ -1448,6 +1502,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="watch --output without starting or stopping a simulator")
     parser.add_argument("--device-name", default="CDJ-2000",
                         help="device label in the window header")
+    parser.add_argument("--nxs-panel", action="store_true",
+                        help="use verified NXS persistent SD-lid contact semantics")
     parser.add_argument("--skin", choices=("device", "lab"), default="device",
                         help="'device' draws the CDJ-2000 front panel around "
                              "the picture; 'lab' is the bit-level window, "

@@ -41,6 +41,11 @@
  *   hold <ms> / gap <ms>      default press hold and the quiet time after it
  *   clear                     release every bit and stop driving the analogue
  *   state                     report held bits, analogue fields, queue depth
+ *   sd-lid open|closed|toggle|state  persistent NXS lid contact, not a key
+ *
+ * CDJ_NXS_SD_LID=open|closed opts into this contact even without a socket.
+ * Unset preserves legacy raw frames. Once enabled it owns byte17 bit2;
+ * raw button pulses/holds and clear cannot change the physical lid state.
  *
  * Numbers are decimal unless prefixed 0x, except <mask>, which is always hex
  * because that is how CDJ_PANEL_KEYS spells it and how the manifest lists it.
@@ -115,6 +120,9 @@ static int64_t cdj_input_phase_since;
 static unsigned cdj_input_phase_frames;
 
 static uint8_t cdj_input_held[CDJ_INPUT_PAYLOAD_MAX];
+/* NXS lid is a level contact, not a key. -1 preserves legacy raw input. */
+static int cdj_input_sd_lid = -1; /* 0=open, 1=closed */
+static bool cdj_input_lid_initialized;
 
 static bool cdj_input_analog_driven[CDJ_INPUT_ANALOG_FIELDS];
 static int32_t cdj_input_analog_value[CDJ_INPUT_ANALOG_FIELDS];
@@ -304,7 +312,8 @@ static void cdj_input_report_state(void)
                                cdj_input_analog_value[i],
                                cdj_input_analog_target[i]);
     }
-    g_string_append_c(text, '\n');
+    g_string_append_printf(text, " sd_lid=%s\n", cdj_input_sd_lid < 0 ? "raw" :
+                           cdj_input_sd_lid ? "closed" : "open");
     cdj_input_reply(text->str);
     g_string_free(text, TRUE);
 }
@@ -355,6 +364,27 @@ static void cdj_input_command(char *line)
     }
     if (!strcmp(verb, "state")) {
         cdj_input_report_state();
+        return;
+    }
+    if (!strcmp(verb, "sd-lid")) {
+        if (!arg1 || arg2 ||
+            (strcmp(arg1, "open") && strcmp(arg1, "closed") &&
+             strcmp(arg1, "toggle") && strcmp(arg1, "state"))) {
+            cdj_input_reply("err sd-lid <open|closed|toggle|state>\n");
+            return;
+        }
+        if (!strcmp(arg1, "open")) cdj_input_sd_lid = 0;
+        if (!strcmp(arg1, "closed")) cdj_input_sd_lid = 1;
+        if (!strcmp(arg1, "toggle")) {
+            if (cdj_input_sd_lid < 0) {
+                cdj_input_reply("err SD lid not configured\n");
+                return;
+            }
+            cdj_input_sd_lid ^= 1;
+        }
+        cdj_input_reply(cdj_input_sd_lid < 0 ? "ok sd-lid raw\n" :
+                        cdj_input_sd_lid ? "ok sd-lid closed\n" :
+                                           "ok sd-lid open\n");
         return;
     }
     if (!strcmp(verb, "clear")) {
@@ -740,7 +770,23 @@ void cdj_input_apply(uint8_t *payload, unsigned len)
     int64_t now;
     unsigned i;
 
+    if (!cdj_input_lid_initialized) {
+        const char *lid = getenv("CDJ_NXS_SD_LID");
+        cdj_input_lid_initialized = true;
+        if (lid) {
+            if (strcmp(lid, "closed") && strcmp(lid, "open")) {
+                info_report("CDJ_NXS_SD_LID must be open or closed");
+                exit(1);
+            }
+            cdj_input_sd_lid = !strcmp(lid, "closed");
+        }
+    }
     cdj_input_poll();
+    /* Applied even without a socket; clear/focus loss cannot open a lid.
+     * NXS 042f5810 inverts byte17 bit2 into the SD-open firmware gate. */
+    if (len > 17 && cdj_input_sd_lid >= 0) {
+        payload[17] = (payload[17] & ~4u) | (cdj_input_sd_lid ? 4u : 0u);
+    }
     if (cdj_input_listen_fd < 0 || !len) {
         return;
     }
@@ -752,4 +798,7 @@ void cdj_input_apply(uint8_t *payload, unsigned len)
     }
     cdj_input_run_press(payload, len, now);
     cdj_input_run_analog(payload, len, now);
+    if (len > 17 && cdj_input_sd_lid >= 0) {
+        payload[17] = (payload[17] & ~4u) | (cdj_input_sd_lid ? 4u : 0u);
+    }
 }

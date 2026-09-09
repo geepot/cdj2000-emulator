@@ -421,6 +421,7 @@ def main():
     gui_env.update(overrides)
     main_env = {k:v for k,v in os.environ.items() if not k.startswith('CDJ_')}
     main_env['CDJ_INPUT_PORT'] = str(args.port + 4)
+    main_env['CDJ_NXS_SD_LID'] = 'closed'
     if args.sd_insert_seconds is not None:
         main_env['CDJ_SD_INSERT'] = str(args.sd_insert_seconds)
     if args.trace_media:
@@ -453,6 +454,7 @@ def main():
                                    'no IRQ, arbitration, double buffering, repeated START or certificates'),
         input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
         media=dict(images={name: str(path) for name, path in media_inputs.items()},
+                   sd_lid_initial='closed; persistent physical panel contact 17/04',
                    writes='temporary QEMU snapshot overlays; discarded at exit',
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
@@ -489,7 +491,7 @@ def main():
                 snapshots = FrameSnapshots(run, args.frame_interval, time.monotonic())
             if args.ui:
                 viewer = subprocess.Popen([sys.executable, '-m', 'tools.cdj_gui.view_ui',
-                    '--attach', '--device-name', 'CDJ-2000NXS',
+                    '--attach', '--device-name', 'CDJ-2000NXS', '--nxs-panel',
                     '--output', str(run / 'screen.ppm'),
                     '--control-port', str(args.port + 4)], cwd=ROOT)
                 processes.append(viewer)

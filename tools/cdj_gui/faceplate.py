@@ -118,7 +118,7 @@ PLACEMENTS: dict[str, Place] = {
     "19.1": Place(8, 96, 70, 26, "USB", AMBER, font=10),
     "19.2": Place(8, 130, 70, 26, "SD", AMBER, font=10),
     "19.3": Place(8, 164, 70, 26, "DISC", AMBER, font=10),
-    "17.2": Place(8, 206, 70, 22, "SD OPEN", DIM_TEXT, font=8),
+    "17.2": Place(8, 206, 70, 22, "SD LID", DIM_TEXT, font=8),
     "20.5": Place(8, 234, 70, 22, "TAG TRACK", AMBER, font=8),
     # ---- the selector, right of the panel ----
     "17.0": Place(586, 62, 76, 76, "PUSH", WHITE, shape="knob"),
