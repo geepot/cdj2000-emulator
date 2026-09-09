@@ -421,11 +421,11 @@ def main():
         # timing conflict.  Keep that terminal encoding in the broader fault
         # set without misclassifying it as an unsupported opcode.
         faults = dict(unsupported)
-        terminal_key = (stop.get('fault_word'), stop.get('fault'))
-        if stop.get('fault_word') is not None and terminal_key not in faults:
-            faults[terminal_key] = dict(
-                word=stop.get('fault_word'), pc=stop.get('fault_pc'),
-                reason=stop.get('fault'), width=None,
+        for item in primary_coverage['faults']:
+            key = (item.get('word'), item.get('reason'))
+            faults[key] = dict(
+                word=item.get('word'), pc=item.get('pc'),
+                reason=item.get('reason'), width=None,
                 width_limitation='fault latch does not retain compact/full width')
         failure = dict(
             schema=1,

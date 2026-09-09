@@ -1662,6 +1662,23 @@ functional run as full DSP parity, full boot, or working audio.
 
 ## Schema-9 SPI1, SPLOOPW and interrupt-return batch
 
+Coverage reporting distinguishes decoder rejections from other execution
+faults. Reanalyze existing traces without rerunning firmware:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.coverage \
+  runs/dsp-splx-strict-replay-1/final.cdjdsp \
+  runs/dsp-splx-strict-replay-1/trace.jsonl /tmp/NEW_STRICT_COVERAGE.json \
+  --formats build/gdb-17.2/include/opcode/tic6x-insn-formats.h
+```
+
+This reports 1,504 confirmed source packets, 1,943 instruction addresses,
+six probable addresses, one execution fault, and zero unsupported encodings.
+The terminal register conflict remains in `faults` and makes coverage
+`validation_eligible` false. A repeat gate passing is independent of successful
+execution. Reserved predicates and unsupported modes likewise remain execution
+faults rather than automatically becoming missing-opcode inventory.
+
 The historical schema-8 limitations immediately above are superseded by this
 section.  Rebuild QEMU and run the focused/full validation before collecting
 new evidence:

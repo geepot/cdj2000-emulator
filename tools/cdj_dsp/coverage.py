@@ -92,6 +92,13 @@ def instruction_unit(event):
 UNIT_NAMES = {1: 'L1', 2: 'L2', 4: 'S1', 8: 'S2',
               16: 'D1', 32: 'D2', 64: 'M1', 128: 'M2'}
 
+# Only the decoder's terminal rejections establish a missing encoding.
+# Resource conflicts, unsupported operating modes, and peripheral failures
+# can reject valid instructions and must remain separate backlog evidence.
+UNSUPPORTED_ENCODING_FAULTS = frozenset({
+    'instruction not implemented', 'compact instruction not implemented',
+})
+
 
 def architecture_family(format_name):
     if format_name.startswith('d_'):
@@ -283,12 +290,15 @@ def build_coverage(checkpoint_data, trace_data, format_data):
                     probable.add(target)
 
     stops = [event for event in events if event.get('event') == 'stop']
-    unsupported = []
+    faults, unsupported = [], []
     for event in stops:
-        if event.get('reason') == 'fault' and event.get('fault'):
+        if event.get('fault'):
             fault_pc = normalize_pc(event.get('fault_pc') or event.get('pc'))
-            unsupported.append(dict(pc=fault_pc, word=event.get('fault_word'),
-                                    reason=event['fault']))
+            fault = dict(pc=fault_pc, word=event.get('fault_word'),
+                         reason=event['fault'])
+            faults.append(fault)
+            if event['fault'] in UNSUPPORTED_ENCODING_FAULTS:
+                unsupported.append(fault)
             probable.add(fault_pc)
         elif event.get('reason') == 'breakpoint':
             probable.add(normalize_pc(event['pc']))
@@ -340,7 +350,7 @@ def build_coverage(checkpoint_data, trace_data, format_data):
     return dict(
         schema=1,
         evidence_scope='completed deterministic replay source packets only',
-        validation_eligible=not unsupported,
+        validation_eligible=not faults,
         caveats=[
             'A completed packet proves that this emulator accepted that observed encoding; it does not prove architectural correctness or that a predicate body was true.',
             'Software-loop scheduler_cycles count issue cycles at a parked fetch PC and are not instruction-issue frequencies; only direct_fetches and loop_fetches establish source-packet observations.',
@@ -358,6 +368,7 @@ def build_coverage(checkpoint_data, trace_data, format_data):
                     confirmed_distinct_encodings=len(distinct_words),
                     probable_code_addresses=len(probable_rows),
                     unsupported_faults=len(unsupported),
+                    execution_faults=len(faults),
                     dynamic_edges=len(dynamic_edges), self_edges=len(self_edges),
                     grouped_rows=len(groups)),
         entry_points=[normalize_pc(summary['first_pc'])] if confirmed_sources else [],
@@ -365,6 +376,7 @@ def build_coverage(checkpoint_data, trace_data, format_data):
         confirmed_instructions=rows,
         probable_code=probable_rows,
         unsupported=unsupported,
+        faults=faults,
         control_flow=dict(observed_source_transitions=dynamic_edges,
                           direct_targets=direct_targets,
                           software_loop_source_packets=sorted(loop_sources),

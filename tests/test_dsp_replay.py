@@ -54,13 +54,12 @@ def test_replay_determinism_breakpoints_and_limits(tmp_path):
     assert (tmp_path / 'first/coverage.json').is_file()
     failure = json.loads((tmp_path / 'first/failure.json').read_text())
     assert failure['outcome'] == 'fail_closed_fault'
-    assert failure['distinct_unsupported_encodings'] == [{
+    assert failure['distinct_unsupported_encodings'] == []
+    assert failure['distinct_fault_encodings'] == [{
         'word': 0xffffffff, 'pc': 0x11800024,
         'reason': 'reserved predicate', 'width': None,
         'width_limitation': 'fault latch does not retain compact/full width',
     }]
-    assert failure['distinct_fault_encodings'] == \
-        failure['distinct_unsupported_encodings']
     assert failure['resumable_checkpoint']['checkpoint_sha256'] == \
         manifest['output_checkpoint']['checkpoint_sha256']
     # Even a single diagnostic run is resumable with explicit (non-repeat)

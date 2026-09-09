@@ -1,6 +1,7 @@
 """Dynamic coverage must distinguish completed packets from probable code."""
 import json
 import struct
+import pytest
 
 from tools.cdj_dsp.coverage import build_coverage
 from tools.cdj_dsp.inventory import CHECKPOINT_HEADER, SHARED_RAM_SIZE, _fnv1a
@@ -89,3 +90,31 @@ def test_faulting_word_is_probable_and_never_confirmed():
     assert report['unsupported'] == [
         {'pc': 0x11800020, 'word': 0xffffffff, 'reason': 'instruction not implemented'}]
     assert report['probable_code'][0]['pc'] == 0x11800020
+
+
+@pytest.mark.parametrize('reason,missing_encoding', [
+    ('instruction not implemented', True),
+    ('compact instruction not implemented', True),
+    ('parallel register write conflict', False),
+    ('delayed-result write conflict', False),
+    ('unmapped memory read', False),
+    ('SPLOOP interrupt-return buffer unavailable', False),
+    ('circular memory addressing not implemented', False),
+])
+@pytest.mark.parametrize('stop_reason', ['fault', 'connected stop'])
+def test_fault_classification_preserves_non_isa_blockers(reason, missing_encoding,
+                                                        stop_reason):
+    data = trace(
+        {'event': 'coverage_summary', 'first_pc': 0, 'last_pc': 0,
+         'overflow': False},
+        {'event': 'stop', 'reason': stop_reason, 'fault': reason,
+         'pc': 0x00800020, 'fault_pc': 0x00800020, 'fault_word': 0x2627},
+    )
+    report = build_coverage(checkpoint([(0x20, 0x2627)]), data, FORMATS)
+    assert not report['validation_eligible']
+    assert report['counts']['execution_faults'] == 1
+    assert report['counts']['unsupported_faults'] == int(missing_encoding)
+    assert report['faults'] == [
+        {'pc': 0x11800020, 'word': 0x2627, 'reason': reason}]
+    assert report['unsupported'] == (report['faults'] if missing_encoding else [])
+    assert report['confirmed_instructions'] == []

@@ -8,6 +8,16 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Coverage fault classification now separates `faults`/`execution_faults` from
+decoder-only `unsupported`/`unsupported_faults`. A nonempty terminal fault is
+recognized regardless of the stop reason: connected traces use the fault text
+as their reason. Previously these connected faults were omitted from coverage.
+Reanalysis of `runs/dsp-splx-strict-replay-1` reports one execution fault at
+`0xc004f306` (`0x2627`, parallel register write conflict), zero unsupported
+encodings, and six probable addresses. Its coverage `validation_eligible` is
+false; exact-repeat success still describes reproducibility of the failure.
+Historical coverage hashes describe the old reports and are not rewritten.
+
 ### Latest integrated DSP batch (schema 9)
 
 This section supersedes the schema-8 checkpoint below.  The C674x core now
