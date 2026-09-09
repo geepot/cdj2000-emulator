@@ -14,6 +14,7 @@
 #include "cdj_c6747_i2c.h"
 #include "cdj_c6747_intc.h"
 #include "cdj_c6747_timer.h"
+#include "cdj_c6747_spi.h"
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
@@ -28,6 +29,7 @@ static CdjC6747Gpio gpio;
 static CdjC6747I2c i2c;
 static CdjC6747Intc intc;
 static CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT];
+static CdjC6747Spi spis[CDJ_C6747_SPI_COUNT];
 static CdjC6747Pll pll;
 static CdjC6747Hpi hpi;
 static CdjC6747Emifb emifb;
@@ -236,6 +238,7 @@ static void restore_devices(const CdjDspCheckpointState *state)
     emifb = state->emifb;
     intc = state->intc;
     memcpy(timers, state->timers, sizeof(timers));
+    memcpy(spis, state->spis, sizeof(spis));
 }
 
 static void capture_devices(CdjDspCheckpointState *state, const char *reason)
@@ -251,6 +254,7 @@ static void capture_devices(CdjDspCheckpointState *state, const char *reason)
     state->emifb = emifb;
     state->intc = intc;
     memcpy(state->timers, timers, sizeof(state->timers));
+    memcpy(state->spis, spis, sizeof(state->spis));
     state->dsp_started = true;
     state->dsp_halted = cpu.fault != NULL;
     ++state->checkpoint_sequence;
@@ -282,6 +286,7 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
     if (cdj_c6747_i2c_read(&i2c, a, v)) return true;
     if (cdj_c6747_intc_read(&intc, a, v)) return true;
     if (cdj_c6747_timers_read(timers, a, v)) return true;
+    if (cdj_c6747_spis_read(spis, a, v)) return true;
     if (cdj_c6747_pll_read(&pll, a, v)) return true;
     if (cdj_c6747_emifb_read(&emifb, a, v)) return true;
     if ((syscfg.cfgchip[1] & 0x8000) && cdj_c6747_hpi_cpu_read(&hpi, a, v)) return true;
@@ -315,6 +320,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
     if (!ok) ok = cdj_c6747_i2c_write(&i2c, a, v, size, commit);
     if (!ok) ok = cdj_c6747_intc_write(&intc, a, v, size, commit);
     if (!ok) ok = cdj_c6747_timers_write(timers, a, v, size, commit);
+    if (!ok) ok = cdj_c6747_spis_write(spis, a, v, size, commit);
     if (!ok && cdj_c6747_syscfg_pll_locked(&syscfg) &&
         cdj_c6747_pll_write_mapped(a, size)) ok = true;
     if (!ok) ok = cdj_c6747_pll_write(&pll, a, v, size, commit);
@@ -548,7 +554,8 @@ int main(int argc, char **argv)
                       (!memcmp(magic, "CDJDSP1\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP2\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP3\0", sizeof(magic)) ||
-                       !memcmp(magic, "CDJDSP4\0", sizeof(magic)));
+                       !memcmp(magic, "CDJDSP4\0", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP5\0", sizeof(magic)));
     rewind(f);
     bool valid = false;
     if (!checkpoint)
@@ -583,6 +590,7 @@ int main(int argc, char **argv)
         cdj_c6747_i2c_reset(&i2c);
         cdj_c6747_intc_reset(&intc);
         cdj_c6747_timers_reset(timers);
+        cdj_c6747_spis_reset(spis);
         cdj_c6747_pll_reset(&pll);
         cdj_c6747_hpi_reset(&hpi);
         cdj_c6747_emifb_reset(&emifb);

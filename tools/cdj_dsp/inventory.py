@@ -21,7 +21,7 @@ SHARED_RAM_SIZE = 0x20000
 SDRAM_BASE = 0xc0000000
 CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
-                    4: b'CDJDSP4\0'}
+                    4: b'CDJDSP4\0', 5: b'CDJDSP5\0'}
 
 
 def _fnv1a(data):

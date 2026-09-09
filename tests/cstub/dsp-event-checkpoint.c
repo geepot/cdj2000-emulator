@@ -18,6 +18,7 @@ int main(int argc, char **argv)
     state.cpu.pc = 0x11800020;
     cdj_c6747_intc_reset(&state.intc);
     cdj_c6747_timers_reset(state.timers);
+    cdj_c6747_spis_reset(state.spis);
     /* There is no compact header in this fetch packet. This unsupported
      * full-width word gives event-injection tests a deterministic fault. */
     l2[0x20] = 0xfe;

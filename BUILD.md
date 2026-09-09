@@ -1124,7 +1124,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
-  emulator/qemu/cdj_c6747_timer.c \
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
   -o /tmp/cdj-checkpoint-v3-san
 /tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
 .venv/bin/python -m pytest -q
@@ -1205,7 +1205,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
-  emulator/qemu/cdj_c6747_timer.c \
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
   -o /tmp/cdj-checkpoint-coverage-san
 /tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1215,7 +1215,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   emulator/qemu/cdj_c6747_gpio.c emulator/qemu/cdj_c6747_i2c.c \
   emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c6747_hpi.c \
   emulator/qemu/cdj_c6747_emifb.c emulator/qemu/cdj_c6747_intc.c \
-  emulator/qemu/cdj_c6747_timer.c \
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
   emulator/qemu/cdj_dsp_checkpoint.c \
   -o /tmp/cdj-replay-coverage-san
 /tmp/cdj-replay-coverage-san \
@@ -1271,7 +1271,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
-  emulator/qemu/cdj_c6747_timer.c \
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
   -o /tmp/cdj-checkpoint-v3-san
 /tmp/cdj-checkpoint-v3-san /tmp/cdj-checkpoint-v3-san.cdjdsp
 ```
@@ -1319,7 +1319,8 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \
   emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
-  emulator/qemu/cdj_c6747_timer.c -o /tmp/cdj-checkpoint-v4-san
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  -o /tmp/cdj-checkpoint-v4-san
 /tmp/cdj-checkpoint-v4-san /tmp/cdj-checkpoint-v4-san.cdjdsp
 .venv/bin/python -m pytest -q
 ```
@@ -1349,3 +1350,72 @@ peripheral, Timer64P, L2/shared/SDRAM state. It ends at the unchanged validated
 25,364,865-packet conflict. Exploratory run-ahead reaches SPI1 SPIGCR0 at
 `0x01e12000`; SPI0/1 are the next peripheral family. Neither the exploratory
 path nor a GUI frame proves boot or audio.
+
+### C6747 SPI and schema-5 gate
+
+SPRUH91D chapter 27 and SPRS377F section 6.17 back the SPI0/SPI1 register
+model. It implements GCR reset/mode control, interrupt enable/level/flags and
+vector side effects, GPIO pin function/direction/output set/clear, transmit
+configuration, receive-buffer read clearing, all delay/default/format
+registers, and documented reset/reserved-bit values. External input pin reads
+remain unavailable until a caller supplies observed pin values. Enabled
+SPIDAT0/SPIDAT1 writes remain fail-closed because no physical SPI slave,
+transfer clock, receive timing, DMA request, or INTC delivery is modeled.
+
+Reproduce focused, sanitizer, migration, connected and repeat validation:
+
+```sh
+.venv/bin/python -m pytest -q tests/test_c674x.py \
+  tests/test_dsp_inventory.py tests/test_dsp_coverage.py \
+  tests/test_dsp_event_replay.py tests/test_dsp_checkpoint_replay.py
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/c6747-spi.c \
+  emulator/qemu/cdj_c6747_spi.c -o /tmp/cdj-c6747-spi-san
+/tmp/cdj-c6747-spi-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I emulator/qemu tests/cstub/dsp-checkpoint.c \
+  emulator/qemu/cdj_dsp_checkpoint.c emulator/qemu/cdj_c6747_intc.c \
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_spi.c \
+  -o /tmp/cdj-checkpoint-v5-san
+/tmp/cdj-checkpoint-v5-san /tmp/cdj-checkpoint-v5-san.cdjdsp
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-timer-connected-1/dsp-checkpoints/00000000000000000064.cdjdsp \
+  runs/NEW_SPI_SCHEMA4_MIGRATION --steps 1000000 \
+  --events runs/nxs-timer-connected-1/dsp-events.jsonl --verify-repeat
+sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+.venv/bin/python -m tools.cdj_main.nxs_vm \
+  runs/NEW_SPI_CONNECTED --seconds 15 \
+  --qemu build/qemu/build/qemu-system-sh4
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/NEW_SPI_CONNECTED/dsp-checkpoints/00000000000000000001.cdjdsp \
+  runs/NEW_SPI_REPLAY --steps 100000000 \
+  --events runs/NEW_SPI_CONNECTED/dsp-events.jsonl --verify-repeat
+.venv/bin/python -m pytest -q
+```
+
+Recorded evidence is `runs/nxs-spi-connected-1` and
+`runs/dsp-spi-connected-replay-2`. The connected run has 65 schema-5
+checkpoints, 110,208 ordered events and 39 DSP stops. Replay verifies all 39
+stops and exact repeat state/memory, with trace SHA-256
+`e87f6d32b6cadc3760cd733776071dbf7b41a8f73ba8e0216b9dc2cf87c1eab3`,
+coverage SHA-256
+`43ec202de4627962042ac0a48988ab7d48cc0ea4392eeee055fe0a52f1074695`,
+and final checkpoint SHA-256
+`ce921817e55e21a936c30a02d1a3d327ba14347a1344a4e25e60151ac0195464`.
+Coverage remains 1,504 confirmed packets, 1,943 instruction addresses, 1,705
+encodings, 1,556 edges, five probable addresses and zero unsupported faults.
+The complete suite reports 188 passed / 43 skipped; SPI and checkpoint
+ASan/UBSan harnesses pass.
+
+The schema-4 migration run is `runs/dsp-spi-connected-replay-1`; its schema-5
+state is 8,448 bytes, final component size 456, and exact-repeat checkpoint
+SHA-256 is
+`c7975769c91f1d2fcec1f8752545cbc573f4a398034296719c5d890a7e9323d7`.
+A separately labeled non-validating run-ahead used the unproven +2-cycle
+SPLOOPD drain hypothesis only for inventory. It observed the complete SPI1
+initialization sequence (`SPIGCR0=1`, `SPIGCR1=3`, `SPIPC0=0xe01`,
+`SPIDAT1=0`, `SPIFMT0=0x00021810`, `SPIDELAY=0x02020408`, interrupt/level
+zero, then enable) and next reached L1PCFG at `0x01840020`, followed by
+L1DCFG at `0x01840040`. The exploratory scheduler edit was removed and QEMU
+rebuilt before final validation. Cache state/effects are the next peripheral
+family; none of this establishes the disputed SPLOOPD timing, boot, or audio.

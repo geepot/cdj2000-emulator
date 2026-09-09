@@ -34,6 +34,7 @@ def make_checkpoint(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_dsp_checkpoint.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_intc.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_timer.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_spi.c'),
         '-o', str(maker),
     ], check=True)
     subprocess.run([str(maker), str(checkpoint)], check=True, timeout=5)

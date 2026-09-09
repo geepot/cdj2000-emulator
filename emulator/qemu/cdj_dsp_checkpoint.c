@@ -8,10 +8,11 @@
 #include <string.h>
 
 #define CHECKPOINT_ENDIAN 0x01020304u
-#define CHECKPOINT_MAGIC "CDJDSP4\0"
+#define CHECKPOINT_MAGIC "CDJDSP5\0"
 #define CHECKPOINT_SCHEMA1_MAGIC "CDJDSP1\0"
 #define CHECKPOINT_SCHEMA2_MAGIC "CDJDSP2\0"
 #define CHECKPOINT_SCHEMA3_MAGIC "CDJDSP3\0"
+#define CHECKPOINT_SCHEMA4_MAGIC "CDJDSP4\0"
 #define CHECKPOINT_COMPONENTS 9u
 
 typedef struct {
@@ -50,12 +51,20 @@ static void component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
     /* Preserve the fixed nine-component header used by schemas 1-3. The
      * final component now describes the complete peripheral-state tail. */
     sizes[8] = sizeof(CdjC6747Emifb) + sizeof(CdjC6747Intc) +
+               sizeof(CdjC6747Timer) * CDJ_C6747_TIMER_COUNT +
+               sizeof(CdjC6747Spi) * CDJ_C6747_SPI_COUNT;
+}
+
+static void schema4_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
+{
+    component_sizes(sizes);
+    sizes[8] = sizeof(CdjC6747Emifb) + sizeof(CdjC6747Intc) +
                sizeof(CdjC6747Timer) * CDJ_C6747_TIMER_COUNT;
 }
 
 static void schema3_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
 {
-    component_sizes(sizes);
+    schema4_component_sizes(sizes);
     sizes[8] = sizeof(CdjC6747Emifb) + sizeof(CdjC6747Intc);
 }
 
@@ -92,7 +101,28 @@ static bool state_valid(const CdjDspCheckpointState *state)
                        !(timer->wdtcr & ~0xffffc000u) &&
                        !(timer->intctlstat & ~0x000f000fu);
     }
-    return timers_valid && state->boot_phase <= 7 && state->reset_released <= 1 &&
+    bool spis_valid = true;
+    for (unsigned i = 0; i < CDJ_C6747_SPI_COUNT; ++i) {
+        const CdjC6747Spi *spi = &state->spis[i];
+        spis_valid = spis_valid && spi->receive_empty <= 1 &&
+                     !(spi->gcr0 & ~1u) && !(spi->gcr1 & ~0x01010103u) &&
+                     (spi->gcr1 & 3u) != 1 && (spi->gcr1 & 3u) != 2 &&
+                     !(spi->interrupt_enable & ~0x0101035fu) &&
+                     !(spi->interrupt_level & ~0x0000035fu) &&
+                     !(spi->flags & ~0x0000035fu) &&
+                     !(spi->pin_function & ~CDJ_C6747_SPI_PIN_MASK) &&
+                     !(spi->pin_direction & ~CDJ_C6747_SPI_PIN_MASK) &&
+                     !(spi->pin_input & ~CDJ_C6747_SPI_PIN_MASK) &&
+                     !(spi->pin_input_valid & ~CDJ_C6747_SPI_PIN_MASK) &&
+                     !(spi->pin_output & ~CDJ_C6747_SPI_PIN_MASK) &&
+                     !(spi->dat0 & ~0xffffu) && !(spi->dat1 & ~0x1701ffffu) &&
+                     !(spi->receive_data & ~0xffffu) &&
+                     !(spi->receive_status & ~0x5f000000u) &&
+                     !(spi->chip_select_default & ~0xffu);
+        for (unsigned format = 0; format < 4; ++format)
+            spis_valid = spis_valid && !(spi->format[format] & ~0x3ff7ff1fu);
+    }
+    return timers_valid && spis_valid && state->boot_phase <= 7 && state->reset_released <= 1 &&
            state->dsp_started <= 1 && state->dsp_halted <= 1 &&
            state->had_fault <= 1 && state->cpu.cycle_tick == NULL &&
            state->cpu.cycle_opaque == NULL && state->cpu.fault == NULL &&
@@ -213,9 +243,11 @@ bool cdj_dsp_checkpoint_read(const char *path,
         return false;
     }
     CheckpointHeader header = {0};
-    uint32_t expected[CHECKPOINT_COMPONENTS], schema3_expected[CHECKPOINT_COMPONENTS];
+    uint32_t expected[CHECKPOINT_COMPONENTS], schema4_expected[CHECKPOINT_COMPONENTS];
+    uint32_t schema3_expected[CHECKPOINT_COMPONENTS];
     uint32_t legacy_expected[CHECKPOINT_COMPONENTS];
     component_sizes(expected);
+    schema4_component_sizes(schema4_expected);
     schema3_component_sizes(schema3_expected);
     legacy_component_sizes(legacy_expected);
     bool header_read = fread(&header, 1, sizeof(header), file) == sizeof(header);
@@ -228,6 +260,9 @@ bool cdj_dsp_checkpoint_read(const char *path,
     bool schema3 = header_read &&
                    memcmp(header.magic, CHECKPOINT_SCHEMA3_MAGIC,
                           sizeof(header.magic)) == 0 && header.schema == 3;
+    bool schema4 = header_read &&
+                   memcmp(header.magic, CHECKPOINT_SCHEMA4_MAGIC,
+                          sizeof(header.magic)) == 0 && header.schema == 4;
     bool current = header_read &&
                    memcmp(header.magic, CHECKPOINT_MAGIC,
                           sizeof(header.magic)) == 0 &&
@@ -239,6 +274,8 @@ bool cdj_dsp_checkpoint_read(const char *path,
                                 alignment - 1) / alignment * alignment;
     size_t schema3_state_size = (offsetof(CdjDspCheckpointState, timers) +
                                  alignment - 1) / alignment * alignment;
+    size_t schema4_state_size = (offsetof(CdjDspCheckpointState, spis) +
+                                 alignment - 1) / alignment * alignment;
     bool legacy = (schema1 || schema2) &&
                   header.state_size == legacy_state_size &&
                   memcmp(header.component_size, legacy_expected,
@@ -246,7 +283,10 @@ bool cdj_dsp_checkpoint_read(const char *path,
     bool old_schema3 = schema3 && header.state_size == schema3_state_size &&
                        memcmp(header.component_size, schema3_expected,
                               sizeof(schema3_expected)) == 0;
-    bool old = legacy || old_schema3;
+    bool old_schema4 = schema4 && header.state_size == schema4_state_size &&
+                       memcmp(header.component_size, schema4_expected,
+                              sizeof(schema4_expected)) == 0;
+    bool old = legacy || old_schema3 || old_schema4;
     bool ok = (old || current) &&
               header.endian == CHECKPOINT_ENDIAN &&
               header.header_size == sizeof(header) &&
@@ -292,7 +332,8 @@ bool cdj_dsp_checkpoint_read(const char *path,
      * appended state. This also avoids relying on old tail padding
      * having happened to contain zero bytes. */
     if (ok && legacy) cdj_c6747_intc_reset(&state->intc);
-    if (ok && old) cdj_c6747_timers_reset(state->timers);
+    if (ok && (legacy || old_schema3)) cdj_c6747_timers_reset(state->timers);
+    if (ok && old) cdj_c6747_spis_reset(state->spis);
     ok = ok && state_valid(state);
     fclose(file);
     free(bitmap);

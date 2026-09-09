@@ -84,6 +84,12 @@ int main(int argc, char **argv)
     before.timers[0].tgcr = 0x17;
     before.timers[0].intctlstat = 1;
     before.timers[1].prd12 = UINT32_MAX;
+    cdj_c6747_spis_reset(before.spis);
+    before.spis[1].gcr0 = 1;
+    before.spis[1].gcr1 = 3;
+    before.spis[1].pin_function = 0xe01;
+    before.spis[1].format[0] = 0x00021810;
+    before.spis[1].delay = 0x02020408;
     l2[0] = 0x68;
     l2[sizeof(l2) - 1] = 0xa5;
     shared_ram[0] = 0x56;
@@ -120,6 +126,10 @@ int main(int argc, char **argv)
     assert(after.timers[0].tgcr == 0x17 &&
            after.timers[0].intctlstat == 1 &&
            after.timers[1].prd12 == UINT32_MAX);
+    assert(after.spis[1].gcr0 == 1 && after.spis[1].gcr1 == 3 &&
+           after.spis[1].pin_function == 0xe01 &&
+           after.spis[1].format[0] == 0x00021810 &&
+           after.spis[1].delay == 0x02020408);
 
     FILE *file = fopen(argv[1], "r+b");
     assert(file && fputc('X', file) != EOF && fclose(file) == 0);

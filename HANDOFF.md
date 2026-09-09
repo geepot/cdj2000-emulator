@@ -152,6 +152,41 @@ initialization writes and reached 25,364,997 packets / 60,780,156 cycles at PC
 that address as SPI1 SPIGCR0. The exploratory SPLOOPD/transcript edits were
 removed; SPI0/1 are the next coherent peripheral family.
 
+Both C6747 SPI instances now implement the complete register family from
+SPRUH91D chapter 27: module reset/mode control, interrupt enable/level/flags
+and vector side effects, GPIO pin control, transmit configuration,
+receive-buffer read clearing, delay/default chip-select, and four format
+registers. Reserved fields are masked. External pin reads require explicitly
+supplied pin evidence, and enabled data-register writes fail closed because no
+physical SPI slave, transfer clock/timing, DMA request, or INTC delivery is
+modeled. The reached initialization sequence does not transfer data.
+
+Checkpoint schema 5 appends both SPI states and migrates schema 1-4 only after
+validating each old payload. Schema-4 migration produces an 8,448-byte state,
+final component size 456, and repeat checkpoint SHA-256
+`c7975769c91f1d2fcec1f8752545cbc573f4a398034296719c5d890a7e9323d7`.
+The complete suite reports 188 passed / 43 skipped; SPI and checkpoint
+ASan/UBSan harnesses pass. The rebuilt connected run
+`runs/nxs-spi-connected-1` has 65 schema-5 checkpoints, 110,208 events and 39
+DSP stops, reproducing the unchanged validated SPLOOPD conflict.
+`runs/dsp-spi-connected-replay-2 --verify-repeat` gates all stops and exact
+state/memory: trace SHA-256
+`e87f6d32b6cadc3760cd733776071dbf7b41a8f73ba8e0216b9dc2cf87c1eab3`,
+coverage SHA-256
+`43ec202de4627962042ac0a48988ab7d48cc0ea4392eeee055fe0a52f1074695`,
+and final checkpoint SHA-256
+`ce921817e55e21a936c30a02d1a3d327ba14347a1344a4e25e60151ac0195464`.
+
+One explicitly non-validating run-ahead temporarily restored the still
+unproven two-cycle SPLOOPD drain hypothesis. It observed all nine SPI1 setup
+writes, including `SPIFMT0=0x00021810`, then reached 25,365,052 packets /
+60,780,224 cycles at PC `0xc004f568`, `STW B5,*A3`, A3=`0x01840020`, B5=7.
+SPRS377F Table 3-2 identifies this as L1PCFG; the next instruction writes the
+same value to L1DCFG at `0x01840040`. The temporary edit was removed and the
+stable QEMU binary rebuilt. DSP memory-system/cache control is the next
+coherent family. This downstream inventory does not validate SPLOOPD timing,
+cache behavior, full boot, or audio.
+
 ### Previous stable-wait checkpoint
 
 The confirmed connected/replay DSP path no longer stops on an unsupported
