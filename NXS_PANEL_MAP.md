@@ -43,3 +43,9 @@ Full suite at the first profile commit: 430 passed, 29 optional skips.
 Native Tk follow-up: 35 passed, including actual NXS USB mouse down/up,
 the corresponding faceplate highlight, no LINK highlight for the raw
 REKORDBOX contact, and unchanged legacy encoder/inspector coverage.
+
+Further decoder/table comparison identifies 17.1 as LOOP MODE (status
++53 bit 3, service code 35) and 17.3 as SLIP (+53 bit 4, code 34).
+The legacy 4-BEAT LOOP visual slot is not assigned an invented NXS contact;
+the verified functions remain available in the raw inspector. Native Tk
+profile/layout tests after this correction: 35 passed.

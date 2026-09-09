@@ -34,3 +34,19 @@ Fresh-only delivery previously exposed the SIC mask-order defect; that defect
 has since been fixed (see NXS_GUI_STALL.md). Replaying cached frames is not
 needed to work around that old interrupt failure. The present comparison is
 still needed to establish the effect on actual media browsing and loading.
+
+## Mounted-card follow-up
+
+The fresh-only run reaches SD mode 3 and visibly lists TESTTONE.WAV at
+approximately 580 seconds. This establishes detection, mounting and listing,
+not loading or audio output. MAIN's 0x11/0x1b list replies may be only
+64 bytes long; a decoder that assumes every 64-byte record is status will
+misreport these replies as missing.
+
+GUI-only diagnostic reconnects retain the running MAIN and its SD snapshot
+overlay, and are recorded as warm reconnects rather than cold boots.
+Watches verify encoder press 17/01 reaches GUI status 6003e8 bit 0, emits
+key 0x10, drains the first event queue (60753c), and enters the general
+window-event queue at 7e911c as event 5. The second queue also drains.
+Neither queue is permanently full in this case. The remaining investigation
+is the browser-window handler and its outgoing load request.

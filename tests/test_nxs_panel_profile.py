@@ -28,7 +28,8 @@ def test_nxs_inventory_and_deck_have_no_lost_or_duplicate_bindings():
     assert set(reached) == set(nxs_panel.input_ids())
     mapped = [nxs_panel.deck_input(key) for key in faceplate.PLACEMENTS]
     assert len(mapped) == len(set(mapped))
-    assert set(mapped) <= {c.input_id for c in built}
+    assert {key for key in mapped if key is not None} <= {c.input_id for c in built}
+    assert nxs_panel.deck_input('17.1') is None  # legacy 4-BEAT LOOP is not LOOP MODE evidence
     assert view_ui.coverage(view_ui.controls())[1:] == ([], [])
 
 
@@ -44,6 +45,7 @@ def test_changed_contacts_match_nxs_firmware_service_names():
         return data[offset:offset + 40].split(b"\0")[0].decode("ascii")
     # Decoder 042f5810: physical contact -> byte/bit in status record.
     decoded = {
+        (17, 1): (0x53, 3), (17, 3): (0x53, 4),
         (18, 0): (0x53, 7), (18, 1): (0x4e, 5),
         (18, 2): (0x4e, 0), (18, 3): (0x4d, 7),
         (18, 4): (0x4d, 6), (18, 5): (0x4d, 5),

@@ -8,6 +8,7 @@ from tools.cdj_main import panel_control as legacy
 KEY_NAMES = {pair: name for pair, name in legacy.FIRMWARE_KEY_NAMES.items()
              if pair[0] in (15, 16, 17, 20)}
 KEY_NAMES.update({
+    (17, 1): "LOOP MODE", (17, 3): "SLIP",
     (18, 0): "QUANTIZE", (18, 1): "REC MODE",
     (18, 2): "PREVIOUS |<<", (18, 3): "NEXT >>|",
     (18, 4): "REV <<", (18, 5): "FWD >>",
@@ -36,5 +37,7 @@ def deck_input(legacy_id):
     name = legacy.FIRMWARE_KEY_NAMES.get(pair)
     if name is None:
         return legacy_id
-    target = next(pair for pair, candidate in KEY_NAMES.items() if candidate == name)
+    target = next((pair for pair, candidate in KEY_NAMES.items() if candidate == name), None)
+    if target is None:
+        return None  # no verified NXS contact for this legacy-named position
     return f"{target[0]}.{target[1]}" + (separator + suffix if separator else "")
