@@ -1458,6 +1458,25 @@ int main(void)
         assert(c.r[0][10] == 7 && c.r[1][1] == 0 && !c.cycles && !c.branch_due);
     }
 
+    /* MVD reads at issue and writes at E4, including cross-path sources. */
+    for (unsigned side = 0; side < 2; ++side)
+    for (unsigned cross = 0; cross < 2; ++cross)
+    for (unsigned pred = 0; pred < 2; ++pred) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        c.r[side ^ cross][4] = 0x89abcdef;
+        c.r[side][8] = 0x12345678;
+        memory[0] = 0x340f0 | (4u << 18) | (8u << 23) |
+                    (side << 1) | (cross << 12) | (pred ? 6u << 29 : 0);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[side][8] == 0x12345678);
+        c.r[side ^ cross][4] = 0;
+        for (unsigned delay = 0; delay < 3; ++delay) {
+            assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+            assert(c.r[side][8] == (delay == 2 && !pred ? 0x89abcdef : 0x12345678));
+        }
+    }
+
     /* Compact moves in both directions between full and subset registers.
      * Parallel source reads see the old value, including across register files. */
     memset(memory, 0, sizeof(memory));

@@ -100,3 +100,17 @@ Signed-stride two-frame regression and existing core/device tests pass
 (17 tests). `nxs-bdec-ab-replay-1` repeats one million additional DSP
 packets without fault, with identical final state and memory. The replay
 has no future MAIN input, so the connected cold run remains necessary.
+
+Connected `nxs-native-load-bdec-ab-1` mounted SD at about 580 seconds,
+accepted ENTER at 665.4774 and LOAD at 693.7953, and sustained PCM HPI
+transfers beyond both previous failures. It then reached unsupported MVD
+at c003a174, word 001340f2, packet 2883226957. MVD now samples its source
+in E1 and writes in E4, per SPRUFE8B p379, using the existing delayed
+result queue. Both banks, cross paths, false predicates and source
+sampling pass; core tests and ASan/UBSan pass. `nxs-mvd-replay-1` advances
+one million packets identically without fault. Full-suite result before
+MVD: 436 passed, 30 skipped. Loading is still not verified complete.
+Capture provenance caveat: that run's QEMU hashes were recorded unchanged
+at exit; its late-finalized source hashes include the subsequent MVD edit.
+The captured executable contains BDEC/AB fixes, not MVD; use the run.json
+executable hash and the recorded fault, not late source hashes, for identity.

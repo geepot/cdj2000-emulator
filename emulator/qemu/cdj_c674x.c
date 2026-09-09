@@ -1981,6 +1981,25 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                     .size = pair ? 16 : 0
                 };
             }
+        } else if ((w & 0x3effc) == 0x340f0) {
+            /* MVD, SPRUFE8B p379: multiplier-path move, E1 source
+             * sampled now, E4 destination written after three delay slots. */
+            reg_write = false;
+            if (enabled) {
+                uint64_t due = cpu->cycles + 4;
+                if (out.load_count == 40)
+                    return stop(cpu, pc, w, "delayed-result queue full");
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned count = queued_result_registers(&out.loads[j]);
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst <= dst && dst < out.loads[j].dst + count)
+                        return stop(cpu, pc, w, "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due, .value = cpu->r[cross][b],
+                    .bank = side, .dst = dst, .size = 0
+                };
+            }
         } else if ((w & 0x3cffc) == 0x958 ||
                    (w & 0x3cffc) == 0x938) {
             /* INTSP/INTSPU read the integer in E1 and write binary32 in E4.
