@@ -102,3 +102,29 @@ fresh control must restore the documented default insertion delay before
 changing SD behavior. Its immediate blocker is card detection/mounting,
 not an observed DSP instruction fault. The verified replay above supplies
 the narrower unpack contract without claiming this fresh attempt succeeded.
+
+## Queued native PCM ownership trace
+
+Network virtual-clock/PTPv1 work remains the current priority. The coordinated
+16-channel task supplied these MAIN 1.44 static findings for a later bounded
+stock stereo WAV load/reload/cancel trace. They are hypotheses to bind to the
+exact input hash and genuine execution, not already observed runtime evidence.
+
+- Preparation at 041d77f4: r4 owner, r5 source object, r6 auxiliary record,
+  r7 status pointer, fifth argument error pointer; source+10 is borrowed into
+  owner+58 (offsets hexadecimal).
+- At callsite 041d64fa, source is r15+56 at call time (normal caller SP+52).
+  Open wrapper 041d76f4 returns a handle stored at caller SP+68 (decimal SP
+  offsets as supplied by the coordinating task; verify against disassembly).
+- Another open/preparation pair is 041d6ccc / 041d6cfc. Close 041d77b4 clears
+  source+10/+14/+30. Cached metadata path 041d7826..041d7834 skips WAV parsing.
+- Capture parser dispatch 041d98c8, call arguments, open/close results, source
+  record lifetime and first payload read after parsing. Bind these to task
+  identity and load/reload/cancel events to establish who can safely perform
+  repeated reads and how cached loads differ.
+
+Use the default SD insertion control and strict genuine firmware. Capture
+bounded observations without changing file results or bypassing instructions.
+Failure to mount remains a failed prerequisite, not permission to force load.
+Stock stereo evidence cannot establish sixteen-channel playback or concurrent
+buffer ownership. Preserve the pending bank-evidence tool/tests separately.
