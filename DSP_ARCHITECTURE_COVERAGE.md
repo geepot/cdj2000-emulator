@@ -50,9 +50,11 @@ how "the tests pass" becomes "the architecture is implemented".
 values* were read, and that the expected values are independent of the emulator
 (hand-computed from the manual, or produced by the TI assembler/disassembler).
 A matching test name is not evidence. `tools/cdj_dsp/coverage_matrix.py`
-enforces that a row making this claim names at least one test and states where
-its expected values came from; it rejected five rows that did not, and those
-were downgraded.
+enforces three things about such a claim: the row must name at least one test,
+each test must state where its expected values came from, and each test must be a
+**committed, rerunnable** file. It rejected five rows naming no test at all, and a
+further sixteen citing scratchpad probes that no longer exist or citing emulator
+source as if it were a test. All were repaired or downgraded; see section 7.
 
 Each row also carries the **verifier verdict** from an independent adversarial
 pass: `upheld` / `downgraded` / `overturned` / `unresolved` / `not-challenged`.
@@ -352,6 +354,19 @@ rows make a positive claim and were never challenged: `PER-GPIO`, `PER-I2C`,
 that was an artefact of the digest it was given being truncated — all six
 verifiers ran, and their corrections are merged into the inventory.
 
+**Evidence that had already evaporated.** Sixteen rows cited a "test" that was
+either a scratchpad probe from an earlier audit pass — gone the moment that
+session ended — or an emulator source location rather than a test. The
+control-register inventory was the worst case: its sole authority was a scratch
+program containing no assertions at all. That one now cites the committed sweep
+and its assertions (section 5.7); the other fifteen lost the citation, and the
+rows left with no test at all were downgraded to `untested`.
+`coverage_matrix.py` now rejects both citation shapes, so the class cannot
+recur. Separately, `PKT-PROT` cited a scratch probe that recorded the PROT
+dual-load divergence; a test asserting that refusal would be asserting the
+defect, so the divergence is recorded in section 5.4 instead and the row keeps
+its two genuine tests.
+
 **Circular validation.** 11 rows cite at least one test whose expected values are
 derived from the emulator rather than independently: `DOC-BUILD-CIRCULAR`,
 `EP-CIRC-LOOPORACLE`, `EP-TEST-CLASSIFY`, `IC-DEV-EVENT-SOURCES`,
@@ -414,9 +429,12 @@ marked `unresolved` rather than split.
   what hardware does when bit 4 is set.
 - **Is the silent drop of supervisor-writable `TSR` bits intended policy?** This
   is the one non-fail-closed path found in the entire CPU model (§10, task 5).
-- **SPLOOP `ii` above 14.** The assembler rejects `ii > 14`
-  (`[E1400] SPLOOP II N out of range`), while three of our tests assert `ii = 16`
-  behaviour with no architectural referent.
+- **SPLOOP `ii` above 14.** Partly settled: the TI assembler refuses to emit it
+  (`[E1400] SPLOOP II N out of range`, 1..14 accepted), so no TI-generated
+  firmware can contain it. What remains genuinely unknown is what *hardware* does
+  with such an encoding, and SPRUFE8B does not say. Three of our tests assert
+  `ii = 16` behaviour with no architectural referent, so those assertions pin our
+  own choice rather than the manual's.
 
 ## 10. Prioritised backlog
 
@@ -771,7 +789,7 @@ questions and next acceptance test are in
 | `PKT-BRDELAY` | Five branch delay slots, branch taken the cycle after the fifth; six simultaneous in-flight branch positions;  | SPRUFE8B 7.14 Branch Instructions; B instruction entries pprinted page | partial | reference-backed-tests | approximation | downgraded |
 | `PKT-BRNOP` | A branch whose delay slots expire while a multicycle NOP is still dispatching overrides the NOP; the target be | SPRUFE8B 4.4.2 Multicycle NOPs, Figure 4-32 Branching and Multicycle N | supported | reference-backed-tests | strict | upheld |
 | `PKT-CIRCQ` | A queued transfer must keep the circular-buffer width it had at issue time; a later AMR change must not retarg | SPRUFE8B 2.8.3 AMR; 3.9.2 circular addressing; Table 4-44 load phases  | supported | reference-backed-tests | strict | upheld |
-| `PKT-DELAY` | Delayed results: E1 compute address, E2 send address, E3 memory read/write, E4 data at CPU boundary, E5 data t | SPRUFE8B 4.4.3 Memory Considerations, Table 4-44 Program Memory Access | supported | untested | strict | downgraded |
+| `PKT-DELAY` | Delayed results: E1 compute address, E2 send address, E3 memory read/write, E4 data at CPU boundary, E5 data t | SPRUFE8B 4.4.3 Memory Considerations, Table 4-44 Program Memory Access | supported | untested | unknown | downgraded |
 | `PKT-EPRES` | Execute packets spanning fetch packets may not be a branch target when either fetch packet is header-based; an | SPRUFE8B 3.10.4 Execute Packet Restrictions pprinted page 96 (PDF page | unsupported | untested | approximation | not-challenged |
 | `PKT-FPHDR` | Compact fetch-packet header: header word occupies no issue slot, per-slot 16/32-bit selection, p-bits field, a | SPRUFE8B 3.10.1 fetch-packet header; 3.10.3 Processing of Fetch Packet | partial | reference-backed-tests | approximation | downgraded |
 | `PKT-MCNOP` | Multicycle-NOP constraints: two multicycle-NOP generators (NOP n>1, IDLE, BNOP target,n, ADDKPC label,reg,n) c | SPRUFE8B 3.8.10 Constraints on Multicycle NOPs; 3.8.11.2/3.8.11.4/3.8. | partial | reference-backed-tests | approximation | downgraded |

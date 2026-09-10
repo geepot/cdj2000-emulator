@@ -70,6 +70,18 @@ def validate(data: dict) -> list[str]:
                 if not test.get("expected_values"):
                     problems.append(
                         f"{rid}: test {test.get('name')!r} does not state expected-value provenance")
+                # A cited test has to be something a later reader can actually run.
+                # A scratchpad path dies with the session that made it, and an
+                # emulator source location is the implementation, not a test of it.
+                where = test.get("file") or ""
+                if "scratchpad" in where or "/tmp/" in where:
+                    problems.append(
+                        f"{rid}: test {test.get('name')!r} cites {where!r}, which is not a "
+                        "committed test and cannot be rerun")
+                if where.startswith("emulator/"):
+                    problems.append(
+                        f"{rid}: test {test.get('name')!r} cites emulator source {where!r} "
+                        "rather than a test")
     return problems
 
 
