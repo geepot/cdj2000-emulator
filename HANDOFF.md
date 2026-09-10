@@ -8,6 +8,16 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+DHCP/RX milestone: `runs/nxs-dhcp-connected-1` captures genuine firmware
+Discover/Offer/Request/ACK through the isolated peer. MAIN's read-only
+interface record becomes 192.168.42.2 (DHCP state 3), corroborated by subsequent
+firmware TX source addresses. No forced RAM/flags or relaxed DSP mode.
+Optional peer `--dhcp-lease 192.168.42.2` is a single-client SELECTING fixture
+with an infinite lease, no router/DNS, no physical network. Full regression
+489 passed / 29 skips. PTP lock, audio and physical interoperability remain
+unproven; see ETHERNET_LOCAL.md. The historical startup diagnosis below is
+superseded by this complete exchange.
+
 Ethernet (2026-09-09): SH7764 EtherC/E-DMAC and service-manual-confirmed
 RTL8201FL now transmit genuine modified Dante firmware frames to localhost.
 The strict 180-second `runs/nxs-dante-ethernet-2` reaches the normal unloaded

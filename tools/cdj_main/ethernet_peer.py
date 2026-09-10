@@ -1,7 +1,8 @@
 """Isolated QEMU socket-netdev peer; no host interfaces or forwarding.
 
 ARP follows RFC 826; ICMP echo follows RFC 792. Only untagged Ethernet,
-IPv4 without options/fragmentation, ARP and echo are supported. DHCP, PTP,
+IPv4 without options/fragmentation, ARP and echo are supported. Optional DHCP
+SELECTING is an isolated single-client fixture. PTP,
 Dante subscription and audio validation are deliberately absent.
 Run: python -m tools.cdj_main.ethernet_peer NEW_DIRECTORY --seconds 600
 Read endpoint.json, then give QEMU -netdev socket,id=net0,connect=127.0.0.1:PORT.
@@ -87,12 +88,14 @@ def respond(frame: bytes, address: bytes) -> bytes | None:
     return (src + MAC + kind + header + echo).ljust(60, b"\0")
 
 
-def serve(directory: Path, seconds: float, address: str):
+def serve(directory: Path, seconds: float, address: str, dhcp_lease=None):
     ip = ipaddress.IPv4Address(address)
     if ip.is_multicast or ip.is_unspecified or int(ip) == 0xffffffff:
         raise ValueError("peer must have a unicast IPv4 address")
     if not 0 < seconds <= 86400:
         raise ValueError("seconds must be in (0, 86400]")
+    from tools.cdj_main.dhcp_peer import DhcpPeer
+    dhcp = DhcpPeer(address, dhcp_lease) if dhcp_lease else None
     directory.mkdir(parents=True, exist_ok=False)
     counts = {"received": 0, "sent": 0, "unsupported_or_invalid": 0}
     deadline = time.monotonic() + seconds
@@ -102,6 +105,10 @@ def serve(directory: Path, seconds: float, address: str):
         listener.listen(1)
         endpoint = {"host": "127.0.0.1", "port": listener.getsockname()[1],
                     "ip": str(ip), "mac": MAC.hex(), "protocols": ["ARP", "ICMP echo"]}
+        if dhcp:
+            endpoint['protocols'].append('DHCP SELECTING')
+            endpoint['dhcp'] = dict(lease=dhcp_lease, prefix=24, lease_seconds=0xffffffff,
+                                    scope='single client; no routing/DNS/renewal or guest clock model')
         (directory / "endpoint.json").write_text(json.dumps(endpoint) + "\n")
         print(json.dumps(endpoint), flush=True)
         listener.settimeout(seconds)
@@ -121,6 +128,8 @@ def serve(directory: Path, seconds: float, address: str):
                         counts["received"] += 1
                         capture.write(json.dumps({"direction": "guest-to-peer", "time_ns": time.time_ns(), "hex": frame.hex()}) + "\n")
                         reply = respond(frame, ip.packed)
+                        if reply is None and dhcp:
+                            reply = dhcp.respond(frame)
                         if reply is None:
                             counts["unsupported_or_invalid"] += 1
                         else:
@@ -131,6 +140,8 @@ def serve(directory: Path, seconds: float, address: str):
         except socket.timeout:
             pass
         finally:
+            if dhcp:
+                (directory / 'dhcp.json').write_text(json.dumps(dhcp.events, indent=2) + '\n')
             (directory / "summary.json").write_text(json.dumps(counts) + "\n")
 
 
@@ -139,8 +150,9 @@ def main():
     parser.add_argument("directory", type=Path)
     parser.add_argument("--seconds", type=float, default=600)
     parser.add_argument("--ip", default="192.168.42.1")
+    parser.add_argument('--dhcp-lease', help='enable isolated DHCP SELECTING with one reserved /24 address')
     args = parser.parse_args()
-    serve(args.directory, args.seconds, args.ip)
+    serve(args.directory, args.seconds, args.ip, args.dhcp_lease)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,60 @@
 # Local Ethernet checkpoint — 2026-09-09
 
+## Optional DHCP fixture
+
+`--dhcp-lease 192.168.42.2` enables a single-client SELECTING-state DHCP
+fixture in the isolated peer. The peer address defaults to 192.168.42.1;
+server and reserved client address must be distinct hosts in one /24.
+It validates IP/UDP checksums and lengths, BOOTP identity, transaction ID,
+requested address and selected server before sending Offer/ACK. Unsupported
+relay, renewal, option-overload and other modes receive no reply.
+
+This follows [RFC 2131](https://www.rfc-editor.org/rfc/rfc2131) and
+[RFC 2132](https://www.rfc-editor.org/rfc/rfc2132), with client-identifier echo.
+The infinite test lease deliberately avoids a false host-time/guest-time
+expiration model. There is no router, DNS, forwarding or physical interface.
+An ACK sent by the fixture is not proof that firmware accepted it: check
+subsequent packets and the genuine interface address in a read-only snapshot.
+
+```sh
+.venv/bin/python -m tools.cdj_main.ethernet_peer runs/NEW_DHCP_PEER \
+  --seconds 400 --dhcp-lease 192.168.42.2
+# Use its allocated localhost port with nxs_vm --ethernet-peer-port PORT.
+.venv/bin/python -m pytest -q tests/test_dhcp_peer.py tests/test_ethernet_peer.py
+```
+
+Historical ARP/ICMP-only results below remain unchanged; the DHCP fixture
+does not retroactively validate RX in those runs.
+
+### Genuine firmware lease acceptance
+
+`runs/nxs-dhcp-connected-1` with `runs/nxs-dhcp-peer-1` captures the complete
+Discover -> Offer -> Request -> ACK exchange. Read-only `network-before.json`
+shows IP 0.0.0.0/state 1/tick 1370; `network-after.json` shows
+**192.168.42.2/state 3/tick 1874**. Subsequent genuine firmware packets use
+192.168.42.2. This establishes real firmware reception and address assignment
+through the emulated controller, not only transmission or synthetic DMA RX.
+No firmware memory writes, forced flags or relaxed DSP settings were used.
+
+The completed 300-second run has 343 guest frames and two peer replies,
+normal GUI exit, MAIN alive before teardown, unchanged input hashes, and a
+normal unloaded player screen without a DSP error banner. Final DSP count:
+1,097,099,500 packets / 1,981,680,083 cycles. This is not playback evidence.
+`runs/nxs-dhcp-replay-1` verifies one late connected DSP stop with exact repeat;
+trace SHA256 `53290d6c821afb8e05634353c49e5760395c2309bd485501a9b0498a83309aac`.
+It replays DSP state/events, not MAIN or the network peer:
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/nxs-dhcp-connected-1/dsp-checkpoints/00000000000000001136.cdjdsp \
+  runs/NEW_DHCP_DSP_REPLAY --steps 3000000 \
+  --events runs/nxs-dhcp-connected-1/dsp-events.jsonl --verify-repeat
+```
+
+DHCP/peer focused tests: 35 passed. Full regression with TI toolchain and
+`CDJ_ETH_QEMU_TEST=1`: 489 passed / 29 skipped. The interface snapshot extension
+also passes its five focused tests. This does not establish PTP or audio.
+
 The NXS board now connects the genuine MAIN driver to SH7764 EtherC/E-DMAC,
 an RTL8201FL PHY, and an optional isolated localhost peer. No physical NIC
 is bridged, no firmware is flashed, and no push is authorized.
@@ -134,11 +189,10 @@ and resuming MAIN after capture failure.
 
 ## Next blockers
 
-1. Add an explicit isolated DHCP test-server mode and observe Offer/Request/Ack
-   through the real driver. DHCP startup is confirmed above; AutoIP fallback
-   needs more guest ticks than these bounded runs supplied. Do not force IP
-   addresses, task flags, or infer a stall from host elapsed time alone.
-2. Prove genuine firmware RX with ARP/ICMP after addressing works.
+1. DHCP initial lease acceptance is now demonstrated above. Renewal, finite
+   lease clocks, AutoIP fallback and fault/recovery cases remain untested.
+   Do not infer a stall from host elapsed time alone.
+2. Extend application-level RX validation with ARP/ICMP after addressing.
 3. Add reference-backed PTP/Dante fixtures with an explicit clock domain;
    observe lock/subscriptions rather than assuming them from initialization.
 4. Prove actual stereo DSP audio before expanding flows. Current channel

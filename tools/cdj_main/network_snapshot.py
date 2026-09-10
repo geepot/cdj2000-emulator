@@ -14,7 +14,7 @@ import time
 MAIN_SHA = 'd88369e4b1986a9d3dcd58b68b784968ff1a756b7e59637c71dc13e4f9d891fe'
 REGIONS = {'autoip': (0x045a6360, 0x20), 'dhcp': (0x046313b4, 0x70),
            'kernel': (0x04d12b48, 0xc00), 'dhcp_task': (0x04d16128, 0x100),
-           'dhcp_stack': (0x04631708, 0x400)}
+           'dhcp_stack': (0x04631708, 0x400), 'interface': (0x046329ec, 0x4c)}
 
 
 def capture(run, tag):
@@ -74,6 +74,7 @@ def capture(run, tag):
     pointer_matches = (0 < task_id < 256 and
                        u32(kernel, task_id * 4) == REGIONS['dhcp_task'][0])
     decoded = dict(dhcp_task_id=task_id, dhcp_task_live=dhcp[0x58],
+                   interface_ipv4='.'.join(str(b) for b in buffers['interface'][0x20:0x24]),
                    dhcp_allocated=dhcp[0x14], dhcp_request=dhcp[0x15],
                    dhcp_state=dhcp[0x24], dhcp_timer_last_ms=u32(dhcp, 0),
                    kernel_tick=u32(kernel, 0xb48),
