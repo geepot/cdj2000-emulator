@@ -521,3 +521,20 @@ attachment log. This is a functionality addition, so no speedup is claimed.
 Validation: the rebuilt QEMU image passed the new ATA qtest plus the existing
 SH4 HPI, MAIN DMAC, IIC and Ethernet regressions (**16 passed**). Full ATAPI
 packet data, DMA and error sequencing remain future coverage work.
+
+## Functionality follow-up — Blackfin DMA error latching
+
+The patched Blackfin DMA controller previously set `DMA_ERR` on a failed
+transfer but left `DMA_RUN` asserted and did not raise its request line. A
+firmware ISR could therefore observe a channel that looked permanently busy.
+The new `bfin_dma_latch_error` path clears `DMA_RUN`, preserves the latched
+`DMA_ERR` W1C status, raises the channel request, and is used for alignment,
+short descriptor fetch and partial-element failures. The enable path also avoids
+rescheduling a channel that failed during descriptor setup. This is a
+functionality correction, so no speedup is claimed.
+
+Validation: the normal Blackfin patch stack round-trips cleanly, the simulator
+rebuild succeeds, and the Blackfin-focused suite reports **11 passed, 1
+skipped** including `tests/test_bfin_dma_error.py`. The skipped assembled
+parallel test still needs `bfin-elf-as` and `bfin-elf-ld`; DMAC global-error
+routing and full descriptor-chain integration remain future work.

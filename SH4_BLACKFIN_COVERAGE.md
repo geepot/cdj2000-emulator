@@ -107,6 +107,8 @@ Covered with direct tests or evidence:
   (`tests/test_bfin_cold_lzss.py`).
 - Persistent SPORT capture visibility and normal/abrupt finalization
   (`tests/test_bfin_sport_capture.py`).
+- DMA error latching for alignment, descriptor-fetch and partial-transfer
+  failures (`tests/test_bfin_dma_error.py`).
 - MAIN-link fresh-record cache behavior (`tests/test_bfin_link_cache.py`).
 - Connected GUI execution, frame scans, MAIN link traffic and wall-clock pacing
   in the bounded smoke run.
@@ -123,6 +125,8 @@ Important unvalidated or approximate areas:
 - PPI line timing, descriptor/error/interrupt combinations and SPORT framing
   are only partially tested. The capture tests validate the host observer, not
   complete hardware serializer behavior.
+- DMA error status is now fail-closed, but full DMAC global-error routing and
+  end-to-end malformed-descriptor fixtures remain unvalidated.
 - Wall-clock synchronization, parked-loop wake latency and host clock
   conversion remain approximations. Lower CPU usage or matching frame counts
   does not prove firmware timing equivalence.
