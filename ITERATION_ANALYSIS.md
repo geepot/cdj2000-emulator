@@ -492,3 +492,18 @@ within modes. Original-baseline data/script: `09-combined.json` and
 `09-benchmark-combined.py`. Candidate source hashes and compiler provenance are
 recorded. Current evidence supports roughly **2.5–2.7×** faster warm replay
 versus the original baseline, not a monotonically increasing precise figure.
+
+## Functionality follow-up — SH4 USB host remote wakeup
+
+The SH7764 USB host's `USBPortOps.wakeup` hook was previously empty, so a
+QEMU USB device that requested remote wakeup could never reach the firmware's
+bus-change path. The hook now honors `DVSTCTR.RWUPE`, raises the documented
+`INTSTS1.BCHG` status when an attached device wakes, and schedules the normal
+controller work path. Disabled or detached wakeups are ignored, and the guest
+still owns the `RESUME`/`UACT` register sequence. This is a functional coverage
+addition rather than an execution-speed optimization, so no speedup is claimed.
+
+Validation: the rebuilt SH4 QEMU image passed the focused HPI, MAIN DMAC, IIC
+and Ethernet set (**15 passed**) after the change. The existing connected smoke
+remains the acceptance path for firmware USB behavior; a standalone suspend/
+resume timing fixture remains future work.

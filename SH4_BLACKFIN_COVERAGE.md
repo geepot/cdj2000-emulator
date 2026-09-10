@@ -1,6 +1,7 @@
 # SH4 and Blackfin coverage status
 
-This is a board-side audit of the current tree at `3da5ff2`. It covers the
+This is a board-side audit of the current tree after the SH4 USB host
+remote-wakeup follow-up. It covers the
 custom SH7764/QEMU integration, the patched Blackfin simulator integration,
 and the two-board evidence that exercises them. It does not claim complete
 SH-4 or Blackfin ISA coverage; those CPU cores come from QEMU and GNU sim and
@@ -38,6 +39,16 @@ The following focused checks were run with
 | SH4 IIC, MAIN DMAC and Ethernet checks | 48 passed, 1 skipped | Standalone IIC, DMA address modes and Ethernet regression coverage |
 | QEMU build | Passed | The tested board source is present in the installed SH4 binary |
 
+The SH4 USB host model now handles QEMU downstream remote-wakeup callbacks.
+When the firmware enables `DVSTCTR.RWUPE`, an accepted device wake raises the
+documented `INTSTS1.BCHG` status and schedules controller work; callbacks are
+ignored while the port is detached or wake detection is disabled. The model
+leaves the firmware-controlled `RESUME`/`UACT` sequencing to the guest, as the
+hardware manual specifies. The rebuilt QEMU binary and the 15 focused SH4
+DMA/IIC/Ethernet/HPI regressions passed after this change. This fills the
+previously empty callback, but does not claim cycle-accurate USB suspend or
+resume timing.
+
 The skipped Blackfin test that matters most is
 `tests/test_blackfin_parallel.py`: `bfin-elf-as`/`bfin-elf-ld` are not installed,
 so the assembled parallel-writeback path is not currently exercised. Five GUI
@@ -68,8 +79,9 @@ Important unvalidated or approximate areas:
   are delegated to QEMU; this repository has no complete SH-4 architecture
   matrix.
 - `emulator/qemu/cdj2000_ata.c`, `cdj2000_usb.c`, `cdj2000_usbh.c` and related
-  paths do not have equivalent standalone model tests. Their current support is
-  primarily connected-startup evidence.
+  paths still do not have equivalent standalone model tests. The USB host now
+  has explicit remote-wakeup behavior, but ATA/USB data paths and error
+  sequencing remain primarily connected-startup evidence.
 - Ethernet uses atomic coherent DMA, omits bus arbitration, FCS and wire
   serialization, and uses synthetic reset/negotiation/backend timing. Register
   13 readback is an explicitly unverified write-only-register assumption.
