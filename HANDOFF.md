@@ -8,6 +8,13 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Network work resumed at user request. The read-only network_inventory tool
+audits all 345 DHCP peer capture records with no invalid records; no UDP
+319/320 traffic is present. DHCP remains proven, PTP lock/subscriptions/audio
+remain unproven. Next: match the candidate's PTPv1 clock contract and add a
+bounded isolated fixture; do not substitute wall time for guest timing.
+Ethernet inventory/DHCP/peer regressions: 37 passed. See ETHERNET_LOCAL.md.
+
 PCM coordination: PCM_EXECUTION_EVIDENCE.md records strict replay of the
 native stock load capture. Sixteen connected stops repeat exactly; four
 588-frame stereo S16 blocks execute c003c398 and produce float32 planes at

@@ -1,5 +1,28 @@
 # Local Ethernet checkpoint — 2026-09-09
 
+## Directional traffic audit
+
+`tools.cdj_main.network_inventory` inventories captured Ethernet/IPv4/UDP
+tuples without treating port numbers as protocol validation. It checks IPv4
+and present UDP checksums and lengths, keeps fragments separate, hashes the
+capture, and exits nonzero for malformed records.
+
+```sh
+.venv/bin/python -m tools.cdj_main.network_inventory runs/nxs-dhcp-peer-1/frames.jsonl
+.venv/bin/python -m pytest -q tests/test_network_inventory.py tests/test_dhcp_peer.py tests/test_ethernet_peer.py
+```
+
+This capture has 345 records (343 guest frames, two peer replies), with no
+invalid records. After addressing, observed UDP destinations include
+239.192.77.83:17683 (102), 224.0.0.233:8708 (102),
+192.168.42.255:50000 (6), and 224.0.0.251:5353 (5).
+There are no captured UDP source/destination ports 319/320. This absence
+does not establish a PTP implementation defect: the peer supplies no clock.
+The next fixture must use the modified firmware's PTPv1 contract and an
+explicit clock domain before any lock claim. ARC subscription and genuine
+audio capture remain separate gates. Focused tests: 37 passed with localhost
+socket permission; the first sandboxed attempt could not start its listener.
+
 ## Optional DHCP fixture
 
 `--dhcp-lease 192.168.42.2` enables a single-client SELECTING-state DHCP
