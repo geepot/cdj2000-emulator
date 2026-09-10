@@ -383,6 +383,14 @@ def main():
                         help='virtual seconds at which to press it; defaults to '
                              'two seconds after the card goes in, which is before '
                              "the GUI's first browse")
+    parser.add_argument('--browse-aids', action='store_true',
+                        help="opt into the board-side aids RUNNING.md measured "
+                             "for bringing a card's library up on a running "
+                             "machine: the status repeat is rewritten into the "
+                             "fresh shape and MAIN's browse replies are "
+                             "re-stamped with the cursor being answered. This "
+                             "changes link bytes, so a run using it is media "
+                             "evidence and not link-fidelity evidence")
     parser.add_argument('--panel-hold-ms', type=int, default=3300,
                         help='how long each scheduled key stays down. MAIN builds '
                              'a status record every 3.05 s when nothing else '
@@ -515,10 +523,15 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
-    main_env['CDJ_REQ_STATUS_FRESH'] = '0'
-    # The legacy board defaults to rewriting browse reply commands. Genuine
-    # NXS validation must transport the firmware's bytes unchanged.
-    main_env['CDJ_LINK_LINK_ROWS'] = 'off'
+    # Genuine NXS validation must transport the firmware's bytes unchanged, so
+    # both board-side aids stay off by default. They are not optional for one
+    # job, though: RUNNING.md measures the card's library reaching the screen in
+    # 0.6-2.6 s of the SOURCE key with them and the key being lost more often
+    # than not without them, because MAIN's status records collapse and the
+    # GUI's browse loop for the empty boot source never ends. Hardcoding them
+    # off left that path unreachable from this launcher.
+    main_env['CDJ_REQ_STATUS_FRESH'] = '1' if args.browse_aids else '0'
+    main_env['CDJ_LINK_LINK_ROWS'] = 'match' if args.browse_aids else 'off'
     run_manifest = dict(main=main_command, gui=gui_command,
         gui_environment=overrides, main_environment={k:v for k,v in main_env.items() if k.startswith('CDJ_')},
         dsp='NXS UHPI plus partial C674x interpreter; incomplete ISA, ROM handoff abstraction', profile='experimental NXS',
@@ -528,6 +541,11 @@ def main():
                                    'no IRQ, arbitration, double buffering, repeated START or certificates'),
         input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
         link_delivery='fresh-only diagnostic' if args.fresh_link else 'legacy cached repeats',
+        link_fidelity=('board-side browse aids ENABLED: status repeats rewritten '
+                       'fresh and browse replies re-stamped; media evidence only, '
+                       'not link-fidelity evidence'
+                       if args.browse_aids else
+                       'firmware link bytes transported unchanged'),
         media=dict(images={name: str(path) for name, path in media_inputs.items()},
                    sd_lid_initial='closed; persistent physical panel contact 17/04',
                    panel_key_schedule=main_env.get('CDJ_PANEL_KEYS'),
