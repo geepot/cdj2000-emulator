@@ -88,14 +88,56 @@ counter includes valid unhandled protocols; these are not 182 malformed
 frames. Firmware RX was not demonstrated. Synthetic QEMU RX tests do not
 establish firmware network-stack reception.
 
+### Correction: DHCP starts; guest time is slow
+
+A subsequent full-frame audit found one genuine DHCP Discover in **each**
+of captures `nxs-ethernet-peer-2` and `-3`. Completed run 4 (240 seconds)
+captures 264 frames including two Discovers (transaction IDs 1 and 2),
+confirming the first retry. MAIN stays alive until normal teardown, GUI exits
+zero, and input hashes remain unchanged.
+The earlier inference of a DHCP startup blocker was wrong. The first
+Discovers are 342-byte Ethernet frames, UDP 68 -> 67, IPv4 0.0.0.0 ->
+255.255.255.255, BOOTP xid 1, broadcast flag set, DHCP option 53 = 1.
+Our ARP/ICMP peer deliberately provides no DHCP Offer.
+
+Read-only snapshots in `runs/nxs-dante-ethernet-4` establish the path:
+
+| Snapshot | Kernel tick | DHCP deadline | Saved SP | Evidence |
+| --- | ---: | ---: | --- | --- |
+| first | 758 | 1571 | 04631a2c | Initial delay return address 0411588a |
+| second | 1307 | 1571 | 04631a2c | Same initial wait |
+| third | 1538 | 1571 | 04631a2c | Deadline not yet reached |
+| fourth | 1778 | 2571 | 04631998 | UDP receive path, return addresses 041163ec / 0411595c |
+| fifth | 2468 | 2571 | 04631998 | Waiting for an Offer; DHCP timer callback last time 2007 |
+
+Stock disassembly: `04115886` calls `dly_tsk(1000)`; `04115944` constructs
+and sends Discover; `04115958` waits for Offer. The kernel timer insertion
+at `04369a46` adds the delay to tick word `04d13690` and writes the task
+deadline at offset 12. Task 39's live table entry resolves to `04d16128`.
+This shows progress, not a frozen kernel timer. Host seconds and kernel
+ticks are very different under the current synchronous DSP scheduling.
+No clock ratio, scheduler behavior, task flags or firmware RAM was changed.
+
+Reproduce the observer while the exact-image run's monitor is live:
+
+```sh
+.venv/bin/python -m tools.cdj_main.network_snapshot runs/NEW_CONNECTED first
+.venv/bin/python -m pytest -q tests/test_network_snapshot.py
+```
+
+The observer gates on the MAIN hash, briefly stops/resumes MAIN, saves raw
+RAM with hashes and records its pause duration. Kernel/task/stack addresses
+are specific to this candidate; decoded task fields require a matching live
+task-table pointer. It is a diagnostic, not a faithful machine checkpoint.
+Five focused tests pass, including rejecting wrong images before connection
+and resuming MAIN after capture failure.
+
 ## Next blockers
 
-1. Trace genuine DHCP startup/fallback. Stock getter `0412d0b4` returns mode
-   4 (DHCP first); mode 3 starts AutoIP directly. AutoIP initializes candidate
-   `169.254.0.1` for the observed MAC but waits for an event. Read runtime RAM
-   `045a6360..045a6380` and `046313b4..04631424`. DHCP task record `0463140c`
-   contains live byte/task ID/semaphore; starter `04115cbe` returns -102 when
-   not live. Do not force IP addresses or task flags.
+1. Add an explicit isolated DHCP test-server mode and observe Offer/Request/Ack
+   through the real driver. DHCP startup is confirmed above; AutoIP fallback
+   needs more guest ticks than these bounded runs supplied. Do not force IP
+   addresses, task flags, or infer a stall from host elapsed time alone.
 2. Prove genuine firmware RX with ARP/ICMP after addressing works.
 3. Add reference-backed PTP/Dante fixtures with an explicit clock domain;
    observe lock/subscriptions rather than assuming them from initialization.

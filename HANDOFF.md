@@ -12,7 +12,12 @@ Ethernet (2026-09-09): SH7764 EtherC/E-DMAC and service-manual-confirmed
 RTL8201FL now transmit genuine modified Dante firmware frames to localhost.
 The strict 180-second `runs/nxs-dante-ethernet-2` reaches the normal unloaded
 player without a DSP error banner; the peer captures 182 outgoing frames.
-Source IP remains zero: genuine DHCP startup/AutoIP fallback is next.
+Source IP remains zero, but DHCP startup is now confirmed: a full capture
+audit finds a Discover in each of runs 2/3/4. The earlier startup-blocker
+diagnosis was incorrect. Read-only task snapshots in run 4 show the initial
+delay expiring at kernel tick 1571, followed by UDP receive waiting for an
+Offer until tick 2571. Our peer answers only ARP/ICMP, not DHCP. Next bite:
+add an explicit local DHCP test server and verify genuine firmware reception.
 See ETHERNET_LOCAL.md for sources, hashes, commands and approximations.
 Synthetic QEMU tests cover TX/RX; firmware RX, PTP and audio remain unproven.
 
