@@ -365,3 +365,40 @@ Scheduler, spin-loop clock, and asynchronous DSP changes remain deferred because
 they alter timing contracts and require separate correctness evidence. The
 current improvements preserve those contracts while shortening build and replay
 iteration time.
+
+
+### Iteration 07 — retain only coverage pre-step metadata
+
+Replaced the complete CPU copy before every standalone and connected-event
+replay step with a small snapshot of PC, six predicate bits, and loop/idle
+classification. These are the only pre-execution values coverage consumes.
+Coverage is still recorded only after a successful step. The separate packet
+fetch and its scratch CPU, interpreter rollback, and QEMU execution are unchanged.
+This improves replay observation overhead, not the connected QEMU interpreter.
+
+Three alternating one-million-step native trials against `e048cc9`: before
+**0.510, 0.381, 0.387 s**; after **0.432, 0.320, 0.318 s**. Median
+**0.387 → 0.320 s**, a **1.210× speedup (17.3% less time)**. All six traces
+and final checkpoints matched byte for byte, including emitted coverage. The
+same pinned Command Line Tools compiler and functional timing/audio workload
+were used. All **65 targeted replay, coverage, checkpoint, deferred, and event
+replay tests passed in 30.70 s**. No new connected smoke was required for this
+replay-only change.
+
+A fresh five-pair alternating complete-workflow comparison against the original
+`c16d1cb` baseline gives **2.614× overall speedup: 2.962 → 1.133 s (61.7% less
+time)** using warm medians, with compact traces enabled for the candidate.
+Cold first runs were 3.120 s baseline and 2.116 s candidate. All ten runs passed
+repeat gates with identical final checkpoint and semantic coverage, and exact
+trace equality within each mode. The previous comparison was 2.582×; host
+variation and Python/build/analysis overhead mean the native 17.3% reduction
+must not be presented as an additional 17.3% complete-workflow improvement.
+
+Scripts, raw trials and test output: `analysis/iterations/07-benchmark-native.py`,
+`07-native-coverage.json`, `07-benchmark-combined.py`, `07-combined.json`, and
+`07-tests.txt`. The combined report identifies the candidate's base commit;
+its candidate source is the replay change committed with this ledger entry.
+Baseline archives and generated firmware artifacts stay under ignored
+`build/performance`. Remaining duplicate fetch elimination would require an
+execution observation interface and broader retirement-semantics validation;
+it is intentionally a separate optimization.

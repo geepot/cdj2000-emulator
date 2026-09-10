@@ -124,12 +124,34 @@ static bool coverage_capture(const CdjC674x *before, CdjC674xPacket *packet)
     return cdj_c674x_fetch(&scratch, read_bus, NULL, packet);
 }
 
-static void coverage_record(const CdjC674x *before,
+/* Coverage retains only pre-step classification and predicate values. */
+typedef struct {
+    uint32_t pc;
+    unsigned predicates;
+    bool loop_active, idle, loop_fetch, direct_fetch;
+} CoverageBefore;
+
+static CoverageBefore coverage_before(const CdjC674x *state)
+{
+    return (CoverageBefore){
+        .pc = state->pc,
+        .predicates = (state->r[1][0] != 0) |
+            (state->r[1][1] != 0) << 1 | (state->r[1][2] != 0) << 2 |
+            (state->r[0][1] != 0) << 3 | (state->r[0][2] != 0) << 4 |
+            (state->r[0][0] != 0) << 5,
+        .loop_active = state->loop_active,
+        .idle = !state->loop_active && state->idle_cycles,
+        .loop_fetch = coverage_loop_fetch(state),
+        .direct_fetch = !state->loop_active && !state->idle_cycles,
+    };
+}
+
+static void coverage_record(const CoverageBefore *before,
                             const CdjC674xPacket *packet)
 {
     uint32_t pc = before->pc;
-    bool loop_fetch = coverage_loop_fetch(before);
-    bool direct_fetch = !before->loop_active && !before->idle_cycles;
+    bool loop_fetch = before->loop_fetch;
+    bool direct_fetch = before->direct_fetch;
     bool source_fetch = packet != NULL;
     unsigned slot = coverage_mix(pc) & (COVERAGE_PC_SLOTS - 1);
     CoveragePc *matched = NULL;
@@ -143,7 +165,7 @@ static void coverage_record(const CdjC674x *before,
             if (direct_fetch) ++entry->direct_fetches;
             if (loop_fetch) ++entry->loop_fetches;
             if (before->loop_active) ++entry->scheduler_cycles;
-            if (!before->loop_active && before->idle_cycles) ++entry->idle_cycles;
+            if (before->idle) ++entry->idle_cycles;
             matched = entry;
             break;
         }
@@ -151,14 +173,10 @@ static void coverage_record(const CdjC674x *before,
         if (probes + 1 == COVERAGE_PC_SLOTS) coverage_overflow = true;
     }
     if (before->loop_active) ++coverage_scheduler_cycles;
-    if (!before->loop_active && before->idle_cycles) ++coverage_idle_cycles;
+    if (before->idle) ++coverage_idle_cycles;
     if (!source_fetch) return;
     if (matched) {
-        unsigned predicates = (before->r[1][0] != 0) |
-            (before->r[1][1] != 0) << 1 | (before->r[1][2] != 0) << 2 |
-            (before->r[0][1] != 0) << 3 | (before->r[0][2] != 0) << 4 |
-            (before->r[0][0] != 0) << 5;
-        matched->predicate_states |= UINT64_C(1) << predicates;
+        matched->predicate_states |= UINT64_C(1) << before->predicates;
     }
     if (matched && !matched->has_packet) {
         matched->packet = *packet;
@@ -793,9 +811,9 @@ static const char *run_quota(ReplayLimits *limits, uint32_t breakpoint,
                 &cpu, cdj_c6747_intc_cpu_pending(&intc_delivery)))
             return cpu.fault ? cpu.fault : "CPU interrupt stopped";
         pcm_observe();
-        CdjC674x before = cpu;
+        CoverageBefore before = coverage_before(&cpu);
         CdjC674xPacket coverage_packet;
-        bool has_coverage_packet = coverage_capture(&before, &coverage_packet);
+        bool has_coverage_packet = coverage_capture(&cpu, &coverage_packet);
         if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL))
             return cpu.fault ? cpu.fault : "CPU stopped";
         coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
@@ -1230,9 +1248,9 @@ int main(int argc, char **argv)
                    ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
                    cpu.pc, cpu.cycles, cpu.loop_active ? "true" : "false", cpu.branch_due);
             pcm_observe();
-            CdjC674x before = cpu;
+            CoverageBefore before = coverage_before(&cpu);
             CdjC674xPacket coverage_packet;
-            bool has_coverage_packet = coverage_capture(&before, &coverage_packet);
+            bool has_coverage_packet = coverage_capture(&cpu, &coverage_packet);
             if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL)) { reason = "fault"; break; }
             coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
             --limits.steps_remaining;
