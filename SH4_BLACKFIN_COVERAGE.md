@@ -31,7 +31,7 @@ The following focused checks were run with
 
 | Area | Result | What it establishes |
 | --- | --- | --- |
-| Blackfin SIC, frame-change, cold LZSS, SPORT capture, TX capture, link cache and GUI helpers | 12 passed, 6 skipped | Patched helper semantics and source-level host behavior |
+| Blackfin helpers, assembled parallel packets and DMA/SPORT guest integration | 21 passed, 0 skipped | Helper semantics, instruction write ordering, DMA data/status and SIC request acknowledgement |
 | Blackfin connected path | Included in the 35-second smoke | GUI execution, MAIN link, frame scanning/publication and wall-clock operation |
 | SH4 boot evidence, GUI state/profile helpers | 59 passed, 6 skipped | Launcher contracts, manifests, firmware selection and evidence handling |
 | SH4 panel protocol, Ethernet model and PHY | 72 passed, 1 skipped | Panel transport plus custom Ethernet/PHY behavior |
@@ -109,6 +109,9 @@ Covered with direct tests or evidence:
   (`tests/test_bfin_sport_tx_capture.py`).
 - DMA error latching for alignment, descriptor-fetch and partial-transfer
   failures (`tests/test_bfin_dma_error.py`).
+- Guest DMA/SPORT TX, two-descriptor chains, RX payload/adjacent-memory checks,
+  completion interrupt enable/disable, alignment/unreadable-descriptor errors,
+  and W1C deassertion through SIC (`tests/test_bfin_dma_sport_integration.py`).
 - MAIN-link fresh-record cache behavior (`tests/test_bfin_link_cache.py`).
 - Connected GUI execution, frame scans, MAIN link traffic and wall-clock pacing
   in the bounded smoke run.
@@ -125,8 +128,9 @@ Important unvalidated or approximate areas:
 - PPI line timing, descriptor/error/interrupt combinations and SPORT framing
   are only partially tested. The capture tests validate the host observer, not
   complete hardware serializer behavior.
-- DMA error status is now fail-closed, but full DMAC global-error routing and
-  end-to-end malformed-descriptor fixtures remain unvalidated.
+- Guest DMA tests now cover unaligned buffers and an unreadable initial
+  descriptor. Full DMAC global-error routing, mid-chain descriptor failures
+  and malformed descriptor contents remain unvalidated.
 - Wall-clock synchronization, parked-loop wake latency and host clock
   conversion remain approximations. Lower CPU usage or matching frame counts
   does not prove firmware timing equivalence.
@@ -135,9 +139,9 @@ Important unvalidated or approximate areas:
 
 1. Extend the now-executable Blackfin parallel-writeback checks to additional
    packet classes and exception cases as firmware evidence warrants.
-2. Add a Blackfin PPI/SPORT fixture with real descriptor chains, completion and
-   interrupt sequencing, malformed descriptors, short records and a bounded
-   frame-rate assertion.
+2. Extend the new DMA/SPORT guest fixtures beyond their two-descriptor TX, RX,
+   completion/error and SIC request checks: PPI frame rate, short records,
+   mid-chain errors and actual CEC ISR entry still need coverage.
 3. Add SH4 HPI/DMAC error, completion-interrupt and burst/fixed-port cases,
    including ordinary-RAM fixed-source fills and unmapped/unaligned accesses.
 4. Extend the ATA/USB model tests from identify/reset into packet data transfer,

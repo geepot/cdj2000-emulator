@@ -606,3 +606,23 @@ BFIN_PARALLEL_WRITEBACK and requires the specific old-value failure (stored
 11 instead of 7), rather than accepting any process failure. Both cases pass:
 **2 passed in 0.04 s**. This closes the previously skipped instruction check;
 it is coverage work and claims no runtime speedup.
+
+## Coverage follow-up — Blackfin DMA/SPORT guest integration
+
+Added six assembled BF531 programs exercised through the installed simulator
+in operating mode: single-buffer SPORT TX, a two-descriptor large-list TX,
+SPORT RX, completion with interrupts disabled, an unaligned source, and an
+unreadable initial descriptor. Guest assertions check DMA_RUN clearing,
+DONE/ERR status, SIC request assertion and W1C deassertion. TX captures must
+match every header/payload byte; RX checks every received word and adjacent
+memory. Guest polling and host execution are bounded so failures cannot hang
+routine development.
+
+Validation: **6 integration cases passed in 0.10 s**; the combined Blackfin
+suite reported **21 passed in 1.97 s, no skips** before the final strengthened
+RX byte/guard assertions, which also passed in the six-case rerun. The local
+tool-build helper was rerun successfully against the checksum-pinned archive.
+No model change was required for these cases, and no runtime speedup is claimed.
+These tests establish SIC request visibility, not CEC ISR entry or cycle timing.
+PPI frame timing, short RX records, mid-chain descriptor failures and full
+DMAC global-error routing remain follow-up coverage.
