@@ -122,6 +122,12 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# The NXS panel puts the SOURCE contacts one bit above the CDJ-2000's, which is
+# why boot_vm's SOURCE_KEYS does not apply here: NXS_PANEL_MAP.md and the
+# runs/nxs-track-load-sd-1 evidence both record SD as 19/08 and USB as 19/04.
+NXS_SOURCE_KEYS = {'usb': (19, 0x04), 'sd': (19, 0x08)}
+
+
 def input_metadata(path: Path) -> dict:
     """Hash the resolved artifact before launch, rejecting concurrent rewrites."""
     path = path.resolve()
@@ -369,6 +375,19 @@ def main():
                         help='record actual GUI SPORT transmit frames for loss/queue diagnosis')
     parser.add_argument('--sd-insert-seconds', type=int,
                         help='SD insertion time after reset in virtual seconds (0 keeps slot empty)')
+    parser.add_argument('--source-key', default=None,
+                        help="SOURCE key to press on the panel schedule: 'sd', "
+                             "'usb', 'none', or a raw BYTE:MASK such as 19:08. "
+                             "Defaults to 'sd' when --sd is given")
+    parser.add_argument('--source-key-at', type=float,
+                        help='virtual seconds at which to press it; defaults to '
+                             'two seconds after the card goes in, which is before '
+                             "the GUI's first browse")
+    parser.add_argument('--panel-hold-ms', type=int, default=3300,
+                        help='how long each scheduled key stays down. MAIN builds '
+                             'a status record every 3.05 s when nothing else '
+                             'changes and a press only lands if one falls inside '
+                             'it, so the default is deliberately longer than that')
     parser.add_argument('--port', type=int, default=5980)
     parser.add_argument('--qemu', type=Path, default=ROOT / 'build/qemu/build/qemu-system-sh4')
     parser.add_argument('--main-firmware', type=Path,
@@ -391,6 +410,10 @@ def main():
         parser.error('--sd-insert-seconds requires --sd and a value from 0 to 86400')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
+    if not 0 <= args.panel_hold_ms <= 60000:
+        parser.error('--panel-hold-ms must be 0..60000')
+    if args.source_key_at is not None and not 0 <= args.source_key_at <= 86400:
+        parser.error('--source-key-at must be 0..86400 virtual seconds')
     if args.ethernet_peer_port is not None and not 1024 <= args.ethernet_peer_port <= 65535:
         parser.error('--ethernet-peer-port must be 1024..65535')
     if args.seconds <= 0 or not 1024 <= args.port <= 65531:
@@ -454,6 +477,27 @@ def main():
         main_env['CDJ_BUS_TRACE'] = '1'
     if args.sd_insert_seconds is not None:
         main_env['CDJ_SD_INSERT'] = str(args.sd_insert_seconds)
+    # A card that is already the source before the GUI's first browse gives the
+    # card's library together with the player screen; a key pressed after that
+    # browse loop has started is lost more often than not (RUNNING.md,
+    # "Switching to a medium"). boot_vm schedules the key for exactly that
+    # reason, and main_env deliberately drops every inherited CDJ_ variable, so
+    # without this the reliable path is unreachable from nxs_vm at all.
+    source_key = args.source_key or ('sd' if args.sd else 'none')
+    if source_key != 'none':
+        contact = NXS_SOURCE_KEYS.get(source_key)
+        if contact is None:
+            byte, _, mask = source_key.partition(':')
+            try:
+                contact = (int(byte, 10), int(mask, 16))
+            except ValueError:
+                contact = None
+            if contact is None or not (0 <= contact[0] <= 21) or not (1 <= contact[1] <= 255):
+                parser.error("--source-key must be sd, usb, none or BYTE:MASK")
+        insert_at = args.sd_insert_seconds if args.sd_insert_seconds is not None else 20
+        at = args.source_key_at if args.source_key_at is not None else insert_at + 2.0
+        main_env['CDJ_PANEL_KEYS'] = '%g:%d:%02x' % (at, contact[0], contact[1])
+        main_env['CDJ_PANEL_HOLD_MS'] = str(args.panel_hold_ms)
     if args.trace_media:
         main_env['CDJ_SDHI_TRACE'] = '1'
         main_env['CDJ_USBH_TRACE'] = '1'
@@ -486,6 +530,8 @@ def main():
         link_delivery='fresh-only diagnostic' if args.fresh_link else 'legacy cached repeats',
         media=dict(images={name: str(path) for name, path in media_inputs.items()},
                    sd_lid_initial='closed; persistent physical panel contact 17/04',
+                   panel_key_schedule=main_env.get('CDJ_PANEL_KEYS'),
+                   panel_key_hold_ms=main_env.get('CDJ_PANEL_HOLD_MS'),
                    writes='temporary QEMU snapshot overlays; discarded at exit',
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
