@@ -263,3 +263,25 @@ is covered by the synthetic test. Reproduce using `tools/cdj_gui/benchmark_sim.p
 with `--ticks 60000000`; it uses instruction-counted time and a captured SPRX
 packet fixture, not the connected wall-clock timing mode. Binary/input hashes,
 all trials, and prologue are in `analysis/iterations/04-blackfin-*`.
+
+### Iteration 05 — persistent SPORT capture descriptor
+
+Patch 10 opens the run-local receive transcript once and closes it at normal
+exit. Every complete SPRX record is still flushed, preserving visibility for
+live readers and records written before abrupt process termination. This
+removes open/close churn, not record capture. The configured path is fixed for
+the process lifetime; external log rotation is not supported by this mode.
+The rebuilt simulator is installed.
+
+Three alternating synthetic capture trials (100,000 64-byte records): before
+**1.992, 1.933, 1.905 s**; after **0.272, 0.161, 0.157 s**. Median capture-path
+speedup **11.97× (91.6% less time)**. All six files were **7,200,000 bytes**
+with identical SHA-256. These figures apply only to capture I/O; they are not a
+12× firmware or whole-emulator claim. The fixed-tick benchmark from iteration
+04 emits no SPORT TX/receive capture in its early slice and cannot measure this
+change meaningfully.
+
+Both focused tests passed: the actual compiled helper opens only once,
+records are visible before close, and normal/abrupt exits produce identical
+bytes. Benchmark code: `tools/cdj_gui/benchmark_capture.py`; raw results:
+`analysis/iterations/05-sport-capture.json`.

@@ -427,3 +427,12 @@ updates, and the original pre-probe bypass when acceleration declines.
 space-producing bank and an unsupported source. Fixed-tick firmware benchmarks
 and the generated dispatcher prologue are recorded in `ITERATION_ANALYSIS.md`.
 Rebuild with `sh scripts/build-bfin-sim.sh` to apply the patch.
+
+## 10: retain the SPORT receive capture descriptor
+
+Keep the run-local receive capture file open, flushing each complete SPRX
+record immediately. Normal exit closes the descriptor; abrupt termination
+still retains already flushed records. Write/close failures are reported.
+The capture path is a process-lifetime setting, as used by the NXS launcher.
+`tests/test_bfin_sport_capture.py` checks descriptor reuse, record visibility,
+and byte-exact output after both normal and abrupt process exit.
