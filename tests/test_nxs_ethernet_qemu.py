@@ -66,6 +66,29 @@ def test_nxs_ethernet_qemu(tmp_path):
                 def read_mem(address, size):
                     return bytes.fromhex(command(f"read {address:#x} {size}")[0][2:])
 
+                # Synthetic clock characterization, not firmware setup. Repeat
+                # from the same counter epoch; never derive rate from host time.
+                clock_runs = []
+                for _ in range(2):
+                    wr(0xFFDC0004, 0)  # TSTR2: stop TMU3
+                    wr(0xFFDC0008, 0xFFFFFFFF)  # TCOR3
+                    wr(0xFFDC000C, 0xFFFFFFFF)  # TCNT3
+                    wr(0xFFDC0010, 0)  # TCR3: Pphi/4, no IRQ
+                    wr(0xFFDC0004, 1)
+                    initial = rd(0xFFDC000C)
+                    values = []
+                    for delta in (1000000, 999000000, 318000000000):
+                        command(f"clock_step {delta}")
+                        values.append(rd(0xFFDC000C))
+                    clock_runs.append(values)
+                    assert (initial - values[0]) & 0xFFFFFFFF == 13500
+                    assert (initial - values[1]) & 0xFFFFFFFF == 13500000
+                    # 319 virtual seconds crosses the 32-bit downcounter wrap.
+                    assert abs(((initial - values[2]) & 0xFFFFFFFF)
+                               - ((319 * 13500000) & 0xFFFFFFFF)) <= 1
+                assert clock_runs[0] == clock_runs[1]
+                wr(0xFFDC0004, 0)
+
                 def bit(drive, value):
                     v = (2 if drive else 0) | (4 if value else 0)
                     wr(BASE + 0x120, v)

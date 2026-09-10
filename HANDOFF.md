@@ -14,6 +14,10 @@ audits all 345 DHCP peer capture records with no invalid records; no UDP
 remain unproven. Next: match the candidate's PTPv1 clock contract and add a
 bounded isolated fixture; do not substitute wall time for guest timing.
 Ethernet inventory/DHCP/peer regressions: 37 passed. See ETHERNET_LOCAL.md.
+Synthetic QEMU TMU3 characterization now repeats rate/wrap checks: 13.5 MHz
+vs firmware's nominal 13.4825 MHz. No clock change or genuine PTP stimulus yet.
+The one optional QEMU integration test passes; see the clock prerequisite
+section for timestamp observation points and fixture limitations.
 
 PCM coordination: PCM_EXECUTION_EVIDENCE.md records strict replay of the
 native stock load capture. Sixteen connected stops repeat exactly; four

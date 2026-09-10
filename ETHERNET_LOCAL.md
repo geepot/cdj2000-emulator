@@ -2,6 +2,36 @@
 
 ## Directional traffic audit
 
+### Virtual clock prerequisite
+
+The optional QEMU integration test now programs TMU3 synthetically (CPU never
+executes) and repeats the same counter epoch twice. TSTR2=1, TCOR3/TCNT3=
+ffffffff, TCR3=0 select the board's 54 MHz Pphi divided by four. Measured
+decrements are 13,500 per virtual millisecond and 13,500,000 per virtual
+second. A 319-second step sequence crosses the 32-bit wrap and agrees with
+modulo arithmetic within one tick; both sequences are exactly identical.
+This tests the existing QEMU model, not the genuine firmware configuration.
+
+The firmware worktree's dante_clock.h assumes 13,482,500 Hz, approximately
+1,298 ppm below the emulated rate when comparing their ratio. Neither rate
+was changed. A full wrap is about 318.146 virtual seconds at 13.5 MHz;
+sampling less often cannot uniquely reconstruct elapsed time from TCNT3.
+The fixture must retain virtual nanoseconds and counter epoch/configuration,
+not silently fit a host-time ratio or assume an unchanging timer setup.
+
+Firmware source samples RX TCNT3 in the Ethernet input hook before stock IP
+delegation and later claims it by destination port/PTP sequence. TX sampling
+is in the interface transmit hook for event-port packets, not a measured
+physical wire departure. QEMU Ethernet TX/RX logging uses virtual nanoseconds;
+the external peer capture only has host timestamps. Backend polling is 10 ms
+virtual, with no modeled wire serialization. These different observation
+points and scheduling latency still need a clocked stimulus fixture before
+connected PTP evidence is possible. No clock lock or accuracy is established.
+
+`CDJ_ETH_QEMU_TEST=1 .venv/bin/python -m pytest -q tests/test_nxs_ethernet_qemu.py`
+passes with the repeated clock checks. The test writes synthetic timer state;
+it is not used to alter a running firmware's time or force PTP acquisition.
+
 `tools.cdj_main.network_inventory` inventories captured Ethernet/IPv4/UDP
 tuples without treating port numbers as protocol validation. It checks IPv4
 and present UDP checksums and lengths, keeps fragments separate, hashes the
