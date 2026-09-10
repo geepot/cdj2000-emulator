@@ -252,6 +252,27 @@ static bool valid_data(NxsHpi *s)
 static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
 {
     NxsHpi *s = opaque;
+    /* RAM and its local L2 alias do not overlap any peripheral window.
+     * Instruction fetches dominate reads: avoid probing every MMIO device.
+     * Keep SDRAM's dynamic enable gate and all alignment checks. */
+    if (!(address & 3) && address >= SHARED_RAM_BASE &&
+        address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4) {
+        *value = ldl_le_p(s->shared_ram + address - SHARED_RAM_BASE);
+        return true;
+    }
+    if (!(address & 3) && address >= SDRAM_BASE &&
+        address <= SDRAM_BASE + SDRAM_SIZE - 4 &&
+        cdj_c6747_emifb_sdram_enabled(&s->emifb)) {
+        *value = ldl_le_p(s->sdram + address - SDRAM_BASE);
+        return true;
+    }
+    uint32_t local_address = address;
+    if (address >= 0x00800000 && address < 0x00840000) local_address += 0x11000000;
+    if (!(local_address & 3) && local_address >= L2_BASE &&
+        local_address <= L2_BASE + L2_SIZE - 4) {
+        *value = ldl_le_p(s->l2 + local_address - L2_BASE);
+        return true;
+    }
     if (cdj_c6747_syscfg_read(&s->syscfg, address, value)) return true;
     if (cdj_c6747_syscfg_priority_read(&s->syscfg_priority, address, value))
         return true;
@@ -273,20 +294,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     if (cdj_c6747_emifb_read(&s->emifb, address, value)) return true;
     if ((s->syscfg.cfgchip[1] & 0x8000) &&
         cdj_c6747_hpi_cpu_read(&s->hpi, address, value)) return true;
-    if (!(address & 3) && address >= SHARED_RAM_BASE &&
-        address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4) {
-        *value = ldl_le_p(s->shared_ram + address - SHARED_RAM_BASE);
-        return true;
-    }
-    if (cdj_c6747_emifb_sdram_enabled(&s->emifb) && !(address & 3) &&
-        address >= SDRAM_BASE && address <= SDRAM_BASE + SDRAM_SIZE - 4) {
-        *value = ldl_le_p(s->sdram + address - SDRAM_BASE);
-        return true;
-    }
-    if (address >= 0x00800000 && address < 0x00840000) address += 0x11000000;
-    if ((address & 3) || address < L2_BASE || address > L2_BASE + L2_SIZE - 4) return false;
-    *value = ldl_le_p(s->l2 + address - L2_BASE);
-    return true;
+    return false;
 }
 
 static uint8_t *dsp_memory_span(NxsHpi *s, uint32_t address, size_t size)

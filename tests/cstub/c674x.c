@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include "cdj_c674x.h"
@@ -44,8 +45,83 @@ static void finish_interrupt_entry(CdjC674x *c)
         assert(c->idle_cycles == 8 - i);
     }
 }
+static unsigned fetch_reads;
+static bool count_fetch_read(void *unused, uint32_t address, uint32_t *value)
+{
+    ++fetch_reads;
+    return read_word(unused, address, value);
+}
+
+static void test_fetch_headers(void)
+{
+    CdjC674x cpu;
+    CdjC674xPacket packet;
+    memset(memory, 0, sizeof(memory));
+    /* Eight parallel full instructions share one header read. */
+    for (unsigned i = 0; i < 7; ++i) memory[i] = 1;
+    cdj_c674x_reset(&cpu, 0x1000);
+    fetch_reads = 0;
+    assert(cdj_c674x_fetch(&cpu, count_fetch_read, NULL, &packet));
+    assert(packet.count == 8 && packet.next_pc == 0x1020);
+    assert(fetch_reads == 9 && cpu.pc == 0x1000 && cpu.cycles == 0);
+    /* Crossing a fetch block must inspect the new block's compact header. */
+    memory[7] = 1;
+    memory[8] = 0x12345678;
+    memory[15] = 0xe0200001; /* slot 0 compact, first half parallel */
+    cdj_c674x_reset(&cpu, 0x101c);
+    fetch_reads = 0;
+    assert(cdj_c674x_fetch(&cpu, count_fetch_read, NULL, &packet));
+    assert(packet.count == 3 && packet.next_pc == 0x1024 && fetch_reads == 5);
+    assert(!packet.instructions[0].compact);
+    assert(packet.instructions[1].compact && packet.instructions[1].word == 0x5678);
+    assert(packet.instructions[2].compact && packet.instructions[2].word == 0x1234);
+    /* No cache survives a fetch: firmware/DMA updates are immediately seen. */
+    memory[15] = 0;
+    cdj_c674x_reset(&cpu, 0x1020);
+    assert(cdj_c674x_fetch(&cpu, count_fetch_read, NULL, &packet));
+    assert(packet.count == 1 && !packet.instructions[0].compact);
+    assert(packet.instructions[0].word == 0x12345678);
+    /* A missing next header fails without publishing a partial packet. */
+    memory[63] = 1;
+    cdj_c674x_reset(&cpu, 0x10fc);
+    memset(&packet, 0, sizeof(packet));
+    packet.next_pc = 0xdeadbeef;
+    assert(!cdj_c674x_fetch(&cpu, count_fetch_read, NULL, &packet));
+    assert(cpu.fault && cpu.fault_pc == 0x1100);
+    assert(cpu.pc == 0x10fc && cpu.cycles == 0 && packet.next_pc == 0xdeadbeef);
+}
+
+static void test_packet_preserves_loop_storage(void)
+{
+    CdjC674x c;
+    cdj_c674x_reset(&c, 0x1000);
+    assert(cdj_c674x_loop_init(&c.loop, 4, 12));
+    c.loop.tags[47][7] = 91;
+    c.loop_instructions[111] = (CdjC674xInstruction){.pc=0x1234, .word=0x5678};
+    c.loop_active = true;
+    c.control[26] |= 1u << 14;
+    c.branch_due = 1; c.branch_target = 0x2000;
+    CdjC674x before = c;
+    CdjC674xPacket p = {.count=1, .next_pc=0x1004,
+        .instructions={{.pc=0x1000, .word=0x01803da8}}}; /* MVK 123,A3 */
+    assert(cdj_c674x_execute(&c, &p, NULL, NULL, NULL));
+    assert(c.pc == 0x2000 && !c.loop_active && !(c.control[26] & (1u << 14)));
+    assert(c.r[0][3] == 123);
+    assert(!memcmp(&c.loop, &before.loop, sizeof(c) - offsetof(CdjC674x, loop)));
+    /* A conflicting parallel register write must roll back the entire
+     * architectural state, including the uncopied retained loop storage. */
+    before = c;
+    p.count = 2; p.instructions[1] = p.instructions[0];
+    assert(!cdj_c674x_execute(&c, &p, NULL, NULL, NULL));
+    assert(c.fault);
+    c.fault = before.fault; c.fault_pc = before.fault_pc; c.fault_word = before.fault_word;
+    assert(!memcmp(&c, &before, sizeof(c)));
+}
+
 int main(void)
 {
+    test_fetch_headers();
+    test_packet_preserves_loop_storage();
     CdjC674x c;
     /* Board clocks advance on every cycle, including PROT/NOP delays;
      * E3 captures the value on that edge, not the step's final value. */

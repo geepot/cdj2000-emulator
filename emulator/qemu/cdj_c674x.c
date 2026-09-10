@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <stddef.h>
 #include <string.h>
 #include "cdj_c674x.h"
 
@@ -991,15 +992,24 @@ bool cdj_c674x_fetch(CdjC674x *cpu, CdjC674xRead read, void *opaque,
 {
     CdjC674xPacket result = {0};
     uint32_t next = cpu->pc;
+    uint32_t header = 0, header_address = 0;
+    bool have_header = false;
     unsigned count = 0;
     bool parallel = true;
     if (cpu->fault) return false;
     /* Validate the entire packet before committing any architectural state. */
     do {
-        uint32_t header, word;
+        uint32_t word;
         if (next & 1) return stop(cpu, next, 0, "unaligned instruction fetch");
-        if (!read(opaque, (next & ~31u) + 28, &header))
-            return stop(cpu, next, 0, "unmapped instruction fetch");
+        uint32_t block_header = (next & ~31u) + 28;
+        /* Fetch has no clock edges or writes. Reuse the side-effect-free
+         * header read within this packet only; the next fetch reads anew. */
+        if (!have_header || block_header != header_address) {
+            if (!read(opaque, block_header, &header))
+                return stop(cpu, next, 0, "unmapped instruction fetch");
+            header_address = block_header;
+            have_header = true;
+        }
         bool mixed = (header >> 28) == 14;
         /* The header occupies no execution slot. */
         if (mixed && (next & 31) == 28) {
@@ -1034,7 +1044,13 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
 {
     unsigned elapsed = 1, memory_count = 0;
     bool nonaligned_memory = false, bdec_issued = false;
-    CdjC674x out = *cpu;
+    /* Packet execution changes only the scalar/pipeline prefix. The loop
+     * schedule and retained instructions are owned by loop_step/setup and
+     * remain untouched here, including on branches that idle the loop.
+     * Keep a transactional copy, but do not copy that large immutable tail.
+     * No helper called with &out may inspect loop or loop_instructions. */
+    CdjC674x out;
+    memcpy(&out, cpu, offsetof(CdjC674x, loop));
     bool written[2][32] = {{false}}, controls[32] = {false};
     if (cpu->fault) return false;
     if (packet->count > 8) return stop(cpu, cpu->pc, 0, "execute packet exceeds eight instructions");
@@ -2535,7 +2551,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
     }
     ++out.packets;
-    *cpu = out;
+    memcpy(cpu, &out, offsetof(CdjC674x, loop));
     return true;
 }
 

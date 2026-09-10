@@ -401,3 +401,17 @@ Store the mask first. The BF531 NXS GUI uses the **bf537** register-layout path.
 forwarding stub, covering masking, unmasking, pending shared sources and no
 pending source. It requires the locally patched simulator source and a compiler.
 This is a mask-ordering fix, not a complete SIC/CEC pulse/acknowledgment model.
+
+## 08: skip full-frame comparisons after unchanged scans
+
+Track whether a scanline was converted during the current frame. If none was,
+the RGB buffer cannot have changed, so skip comparing it with the previously
+published frame. A changed scan still compares RGB before publishing: changes
+in unused raw pixel bits must not create duplicate images. Initial publication,
+forced publication, scoring, raw output, scan timing, and DMA consumption retain
+their existing behavior.
+
+`tests/test_bfin_frame_change.py` compiles the actual locally patched file
+backend and feeds black, unchanged, changed, and restored scanlines. It checks
+publication counts and that unchanged scans avoid the full RGB comparison.
+Rebuild with `sh scripts/build-bfin-sim.sh` to apply the patch.
