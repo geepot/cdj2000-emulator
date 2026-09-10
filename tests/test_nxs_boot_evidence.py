@@ -157,6 +157,22 @@ def test_dsp_artifact_manifest_records_scheduler_validation_scope(
         assert 'not a DSP timing fix' in scheduling[0]
 
 
+def test_modified_main_provenance_does_not_hash_stock_in_its_place(tmp_path):
+    firmware = tmp_path / 'firmware'
+    firmware.mkdir()
+    for name in ('main-firmware.bin', 'gui-boot-memory.elf', 'gui-flash-image.bin'):
+        (firmware / name).write_bytes(name.encode())
+    candidate = tmp_path / 'candidate.bin'
+    candidate.write_bytes(b'modified firmware')
+    run = tmp_path / 'run'
+    run.mkdir()
+    nxs_vm.finalize_dsp_artifacts(run, firmware, False, False, False, 'legacy', candidate)
+    manifest = json.loads((run / 'dsp-checkpoints/manifest.json').read_text())
+    assert manifest['firmware_sha256']['main-firmware.bin'] == nxs_vm.sha256(candidate)
+    assert manifest['main_firmware_path'] == str(candidate)
+    assert (firmware / 'main-firmware.bin').read_bytes() == b'main-firmware.bin'
+
+
 @pytest.mark.parametrize('interval', ['-1', 'nan', 'inf'])
 def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
     monkeypatch.setattr(nxs_vm.sys, 'argv', ['nxs_vm', 'unused', '--frame-interval', interval])
@@ -169,8 +185,9 @@ def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
     (0, False, False), (0.5, False, False), (0, True, False), (0, True, True),
 ])
 @pytest.mark.parametrize('fresh_link,trace_link', [(False, False), (True, True)])
+@pytest.mark.parametrize('custom_main', [False, True])
 def test_run_manifest_records_launched_inputs_and_optional_observations(
-        tmp_path, monkeypatch, interval, deferred, profile, fresh_link, trace_link):
+        tmp_path, monkeypatch, interval, deferred, profile, fresh_link, trace_link, custom_main):
     paths = ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
              'firmware/nxs/main-firmware.bin', 'firmware/nxs/gui-boot-memory.elf',
              'firmware/nxs/gui-flash-image.bin')
@@ -181,6 +198,11 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     original_simulator = nxs_vm.sha256(tmp_path / paths[0])
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
     argv = ['nxs_vm', 'run', '--seconds', '2', '--frame-interval', str(interval)]
+    selected_main = tmp_path / 'firmware/nxs/main-firmware.bin'
+    if custom_main:
+        selected_main = tmp_path / 'modified-main.bin'
+        selected_main.write_bytes(b'independent modified MAIN image')
+        argv += ['--main-firmware', str(selected_main), '--trace-bus', '--ethernet-peer-port', '6123']
     if deferred:
         argv.append('--deferred-dsp-scheduling')
     if profile:
@@ -215,6 +237,11 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     def launch(command, **kwargs):
         gui = '--model' in command
         if not gui:
+            assert command[command.index('-nic') + 1] == (
+                'socket,model=cdj-nxs-ethernet,id=nxsnet,connect=127.0.0.1:6123'
+                if custom_main else 'none')
+            assert command[command.index('-bios') + 1] == str(selected_main)
+            assert kwargs['env'].get('CDJ_BUS_TRACE') == ('1' if custom_main else None)
             assert kwargs['env']['CDJ_REQ_STATUS_FRESH'] == '0'
             assert kwargs['env']['CDJ_LINK_LINK_ROWS'] == 'off'
             assert kwargs['env']['CDJ_NXS_DSP_SCHEDULER'] == (
@@ -229,6 +256,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     monkeypatch.setattr(nxs_vm.subprocess, 'Popen', launch)
     assert nxs_vm.main() == 0
     manifest = json.loads((tmp_path / 'run/run.json').read_text())
+    assert manifest['ethernet']['peer'] == ('127.0.0.1:6123' if custom_main else None)
+    assert manifest['ethernet']['hardware_timing_validated'] is False
     assert manifest['main_environment']['CDJ_LINK_LINK_ROWS'] == 'off'
     assert manifest['link_delivery'] == ('fresh-only diagnostic' if fresh_link
                                          else 'legacy cached repeats')

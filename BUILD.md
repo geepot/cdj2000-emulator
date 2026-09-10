@@ -1,5 +1,10 @@
 # Building
 
+For the optional SH7764 EtherC/RTL8201FL localhost backend, custom Dante MAIN
+input, integration tests and evidence limitations, see [ETHERNET_LOCAL.md](ETHERNET_LOCAL.md).
+The normal QEMU build script includes the new controller/PHY automatically.
+Without `--ethernet-peer-port`, the launcher keeps the Ethernet link disconnected.
+
 Check the captured NXS MAIN/DSP ready/clear/ack sequence without executing or
 modifying firmware:
 

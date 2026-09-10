@@ -8,6 +8,15 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+Ethernet (2026-09-09): SH7764 EtherC/E-DMAC and service-manual-confirmed
+RTL8201FL now transmit genuine modified Dante firmware frames to localhost.
+The strict 180-second `runs/nxs-dante-ethernet-2` reaches the normal unloaded
+player without a DSP error banner; the peer captures 182 outgoing frames.
+Source IP remains zero: genuine DHCP startup/AutoIP fallback is next.
+See ETHERNET_LOCAL.md for sources, hashes, commands and approximations.
+Synthetic QEMU tests cover TX/RX; firmware RX, PTP and audio remain unproven.
+
+
 Strict DSP interrupt acceptance now inserts the nine empty issue cycles from
 SPRUFE8B Figure 5-4 before ISR E1. Older results retire normally; conflict
 checks remain enabled. The saved late-USB INT15 collision no longer occurs

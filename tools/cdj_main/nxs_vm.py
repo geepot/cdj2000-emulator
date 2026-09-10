@@ -268,7 +268,8 @@ def checkpoint_metadata(path: Path) -> dict:
 def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: bool,
                            functional_dsp_audio: bool,
                            capture_dsp_tx: bool,
-                           dsp_scheduler_mode: str) -> None:
+                           dsp_scheduler_mode: str,
+                           main_firmware: Path | None = None) -> None:
     checkpoint_dir = run / 'dsp-checkpoints'
     checkpoints = [checkpoint_metadata(path) for path in sorted(checkpoint_dir.glob('*.cdjdsp'))]
     events = run / 'dsp-events.jsonl'
@@ -312,9 +313,11 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                               events=last_sequence, counts=dict(sorted(event_counts.items())),
                               boot_phases=boot_phases),
         dsp_tx_capture=tx_capture,
-        firmware_sha256={path.name: sha256(path) for path in
-            (firmware / 'main-firmware.bin', firmware / 'gui-boot-memory.elf',
-             firmware / 'gui-flash-image.bin')},
+        firmware_sha256={
+            'main-firmware.bin': sha256(main_firmware or firmware / 'main-firmware.bin'),
+            'gui-boot-memory.elf': sha256(firmware / 'gui-boot-memory.elf'),
+            'gui-flash-image.bin': sha256(firmware / 'gui-flash-image.bin')},
+        main_firmware_path=str((main_firmware or firmware / 'main-firmware.bin').resolve()),
         source_sha256={str(path.relative_to(ROOT)): sha256(path) for path in sources},
         approximations=[
             'DSP boot ROM is not executed; its documented HPI-ready handoff is modeled',
@@ -368,6 +371,12 @@ def main():
                         help='SD insertion time after reset in virtual seconds (0 keeps slot empty)')
     parser.add_argument('--port', type=int, default=5980)
     parser.add_argument('--qemu', type=Path, default=ROOT / 'build/qemu/build/qemu-system-sh4')
+    parser.add_argument('--main-firmware', type=Path,
+                        help='isolated address-zero MAIN flash image; leaves stock firmware untouched')
+    parser.add_argument('--trace-bus', action='store_true',
+                        help='log unmodeled external-bus accesses; does not implement the missing devices')
+    parser.add_argument('--ethernet-peer-port', type=int,
+                        help='connect modeled Ethernet to a framed test peer on 127.0.0.1 only')
     parser.add_argument('--functional-dsp-timing', action='store_true',
                         help='run past the unresolved SPLOOPD epilog with a labeled two-cycle approximation')
     parser.add_argument('--functional-dsp-audio', action='store_true',
@@ -382,17 +391,20 @@ def main():
         parser.error('--sd-insert-seconds requires --sd and a value from 0 to 86400')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
+    if args.ethernet_peer_port is not None and not 1024 <= args.ethernet_peer_port <= 65535:
+        parser.error('--ethernet-peer-port must be 1024..65535')
     if args.seconds <= 0 or not 1024 <= args.port <= 65531:
         parser.error('positive duration and port 1024..65531 required')
     if not math.isfinite(args.frame_interval) or args.frame_interval < 0:
         parser.error('--frame-interval must be finite and nonnegative')
     run = (ROOT / args.run).resolve()
     firmware = ROOT / 'firmware/nxs'
+    main_firmware = (args.main_firmware or firmware / 'main-firmware.bin').resolve()
     simulator = ROOT / 'bin/cdj-run'
-    for path in (args.qemu, simulator, firmware / 'main-firmware.bin', firmware / 'gui-boot-memory.elf', firmware / 'gui-flash-image.bin'):
+    for path in (args.qemu, simulator, main_firmware, firmware / 'gui-boot-memory.elf', firmware / 'gui-flash-image.bin'):
         if not path.is_file(): parser.error(f'missing input: {path}')
     inputs = dict(qemu=args.qemu, simulator=simulator,
-                  main_firmware=firmware / 'main-firmware.bin',
+                  main_firmware=main_firmware,
                   gui_boot=firmware / 'gui-boot-memory.elf',
                   gui_flash=firmware / 'gui-flash-image.bin')
     from tools.cdj_main.test_media import media_drives
@@ -403,11 +415,19 @@ def main():
     inputs.update(media_inputs)
     input_artifacts = {name: input_metadata(path) for name, path in inputs.items()}
     run.mkdir(parents=True, exist_ok=False)
-    main_command = [str(args.qemu.resolve()), '-M', 'cdj2000nxs-main', '-bios', str(firmware / 'main-firmware.bin'),
+    main_command = [str(args.qemu.resolve()), '-M', 'cdj2000nxs-main', '-bios', str(main_firmware),
         '-display', 'none', '-no-reboot', '-d', 'unimp,guest_errors', '-D', str(run / 'main.log'),
         '-serial', f'tcp:127.0.0.1:{args.port},server,nowait',
         '-serial', f'tcp:127.0.0.1:{args.port + 2},server,nowait', '-serial', 'null']
     main_command += media_command
+    if args.ethernet_peer_port is None:
+        main_command += ['-nic', 'none']
+    else:
+        # No bridge, physical interface, DNS or arbitrary host selection.
+        # Guest services (including modified firmware's debug console) stay
+        # on this raw-Ethernet test connection, not the host's real network.
+        main_command += ['-nic', 'socket,model=cdj-nxs-ethernet,id=nxsnet,'
+                         f'connect=127.0.0.1:{args.ethernet_peer_port}']
     if args.qemu_sync_profile:
         monitor_path = os.path.relpath(run / 'qemu-monitor.sock', ROOT)
         if ',' in monitor_path or len(os.fsencode(monitor_path)) >= 104:
@@ -430,6 +450,8 @@ def main():
     main_env = {k:v for k,v in os.environ.items() if not k.startswith('CDJ_')}
     main_env['CDJ_INPUT_PORT'] = str(args.port + 4)
     main_env['CDJ_NXS_SD_LID'] = 'closed'
+    if args.trace_bus:
+        main_env['CDJ_BUS_TRACE'] = '1'
     if args.sd_insert_seconds is not None:
         main_env['CDJ_SD_INSERT'] = str(args.sd_insert_seconds)
     if args.trace_media:
@@ -480,6 +502,17 @@ def main():
             'it is not a DSP timing fix, frequency model, or hardware proof'
             if args.deferred_dsp_scheduling else
             'legacy synchronous bounded DSP activation'))
+    run_manifest['ethernet'] = dict(
+        controller='SH7764 EtherC/E-DMAC', phy='RTL8201FL-VB-CG',
+        peer=(f'127.0.0.1:{args.ethernet_peer_port}' if args.ethernet_peer_port else None),
+        mode='isolated framed Ethernet' if args.ethernet_peer_port else 'disconnected',
+        hardware_timing_validated=False,
+        approximations=['atomic descriptor DMA; unified coherent RAM; no bus arbitration or wire timing',
+                        'PHY negotiation uses an explicit virtual peer and modeled delay, not analog signaling',
+                        'PHY MACR write-only register 13 reads zero for firmware RMW; hardware readback unverified',
+                        'PHY external reset GPIO and LED activity pulses are not modeled',
+                        'only EtherC interrupt masking is modeled in INT2MSKR1',
+                        'network and MAIN state are not included in DSP-only checkpoints'])
     if args.frame_interval:
         run_manifest['frame_snapshots_manifest'] = 'frames/manifest.json'
     (run / 'run.json').write_text(json.dumps(run_manifest, indent=2) + '\n')
@@ -516,6 +549,7 @@ def main():
                 time.sleep(.1)
             closed = viewer is not None and viewer.poll() == 0
             result = dict(gui_exit=gui.poll(), viewer_closed=closed,
+                          main_exit_before_teardown=main_process.poll(),
                           timed_out=gui.poll() is None and not closed,
                           frame_exists=(run / 'screen.ppm').exists())
             print(json.dumps(result), flush=True)
@@ -544,9 +578,11 @@ def main():
             (run / 'run.json').write_text(json.dumps(run_manifest, indent=2) + '\n')
             finalize_dsp_artifacts(run, firmware, args.functional_dsp_timing,
                                    args.functional_dsp_audio, args.capture_dsp_tx,
-                                   dsp_scheduler_mode)
+                                   dsp_scheduler_mode, main_firmware)
             (run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
-    return 0 if result.get('viewer_closed') or (result.get('gui_exit') == 0 and result.get('frame_exists')) else 1
+    return 0 if (result.get('main_exit_before_teardown') is None and
+                 (result.get('viewer_closed') or
+                  (result.get('gui_exit') == 0 and result.get('frame_exists')))) else 1
 
 
 if __name__ == '__main__':
