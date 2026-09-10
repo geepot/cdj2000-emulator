@@ -187,3 +187,31 @@ mirrored `cdj_c6747_pll.c` caused exactly one compilation when the script restor
 it; changing mirrored `cdj_c674x.h` caused three dependent compilations. Both
 files were restored byte-for-byte from repository source. No guest behavior
 changed. Raw results: `analysis/iterations/01-build-*.json`.
+
+### Iteration 02 — optimized, content-addressed replay builds
+
+Replay now defaults to `-O2` and caches binaries using source/header contents,
+compiler identity/version, target, build flags, and relevant environment hashes.
+Compiler-discovered dependencies include system headers. Cached executables are
+hash-checked and copied into the run's private snapshot before use; atomic cache
+publication supports concurrent builders. `--build-profile debug` retains `-O0`,
+`--no-build-cache` forces compilation, and `CDJ_REPLAY_CACHE` selects the cache.
+`CDJ_REPLAY_CACHE_EPOCH` provides explicit invalidation after external toolchain
+or linker changes not reflected in compiler/header identity. This is a trusted
+local development cache, not a hermetic build or remote artifact trust system.
+
+The complete 300,000-step exploratory continuation with `--verify-repeat`
+(including launcher, two executions, coverage and gates) took **3.115, 2.854,
+2.883 s** at baseline. Candidate: **3.484 s cold**, then **2.627, 2.574 s warm**.
+Comparing warm medians gives **1.10× (9.4% less time)**. Cold compilation is
+slower; large detailed-trace analysis still dominates this short workload.
+All six runs have identical trace, final-checkpoint, and semantic coverage hashes.
+Eight focused tests passed, including real compiler cache hit, external-header
+invalidation, profile separation, corrupted binary rejection and failed-build
+nonpublication. The existing replay fault/budget/repeat tests also passed.
+
+Measurements explicitly set `DEVELOPER_DIR=/Library/Developer/CommandLineTools`
+for both versions (Apple clang 21.0.0 / clang-2100.3.34.2): the default host
+selection mixed Xcode's linker with a newer SDK and could not link. That failed
+attempt is excluded. Reproduce with `tools/cdj_dsp/benchmark_replay.py`; raw
+results are `analysis/iterations/02-replay-{before,after}.json`.

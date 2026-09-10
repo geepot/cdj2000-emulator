@@ -1,0 +1,42 @@
+{
+  "root": "/private/tmp/cdj-perf-baseline",
+  "steps": 300000,
+  "checkpoint_sha256": "de477c08ae02c23ef4c8fd3ad8c4dc9bc434ab60cf25f3d696768b173202c96a",
+  "formats_sha256": "f273a7e40d2520fede98a6129daadbf45f09cfc69e12314e37fdf4ceaa3a4d9c",
+  "args": [
+    "--functional-dsp-timing",
+    "--functional-dsp-audio"
+  ],
+  "trials": [
+    {
+      "trial": 0,
+      "seconds": 3.1150971250026487,
+      "gate_passed": true,
+      "trace_bytes": 29416880,
+      "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+      "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd",
+      "coverage_semantic_sha256": "d1fc44ce0d3c089ccee1fbbb52272602ab1312699df983e7629afd1656fa729d",
+      "build": null
+    },
+    {
+      "trial": 1,
+      "seconds": 2.8536090000125114,
+      "gate_passed": true,
+      "trace_bytes": 29416880,
+      "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+      "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd",
+      "coverage_semantic_sha256": "d1fc44ce0d3c089ccee1fbbb52272602ab1312699df983e7629afd1656fa729d",
+      "build": null
+    },
+    {
+      "trial": 2,
+      "seconds": 2.8834363329806365,
+      "gate_passed": true,
+      "trace_bytes": 29416880,
+      "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+      "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd",
+      "coverage_semantic_sha256": "d1fc44ce0d3c089ccee1fbbb52272602ab1312699df983e7629afd1656fa729d",
+      "build": null
+    }
+  ]
+}

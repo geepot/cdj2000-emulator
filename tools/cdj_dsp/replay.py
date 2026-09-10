@@ -17,6 +17,7 @@ import sys
 
 from .coverage import build_coverage
 from .tx_capture import tx_capture_metadata
+from .build_cache import build_native
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
@@ -246,6 +247,10 @@ def main():
                         help='fixed external MAIN boot-phase GPIO value, 0..7 (default: captured phase 0)')
     parser.add_argument('--verify-repeat', action='store_true',
                         help='run the same compiled binary twice and gate on identical traces')
+    parser.add_argument('--build-profile', choices=('optimized', 'debug'), default='optimized',
+                        help='optimized (-O2, default) or debug (-O0) native replay build')
+    parser.add_argument('--no-build-cache', action='store_true',
+                        help='compile a fresh binary instead of reusing the content-addressed cache')
     parser.add_argument('--observe-pcm', action='store_true',
                         help='record at most 64 RAM-only stock PCM PC observations; includes fall-through, not ownership proof')
     parser.add_argument('--connected-stops', type=int, default=0,
@@ -357,9 +362,11 @@ def main():
             event_snapshot.write_bytes(event_data)
         for path, content in source_data.items():
             (Path(temp) / path.name).write_bytes(content)
-        subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
-                        '-I', temp, *[str(Path(temp) / p.name) for p in SOURCES],
-                        '-o', str(binary)], check=True)
+        binary, build = build_native(cc, Path(temp),
+            [Path(temp) / p.name for p in SOURCES],
+            cache=None if args.no_build_cache else Path(os.environ.get(
+                'CDJ_REPLAY_CACHE', str(ROOT / 'build/replay-cache'))),
+            optimization='-O0' if args.build_profile == 'debug' else '-O2')
         args.output.mkdir(parents=True, exist_ok=False)
         external_event_assumption = (
             'ordered post-checkpoint MAIN/HPI events injected and gated against every connected DSP stop'
@@ -397,7 +404,7 @@ def main():
         limits = dict(steps=args.steps, packets=args.packets, cycles=args.cycles,
                       packet_cycle_origin='input checkpoint counters',
                       boundary_semantics='checked between successful core steps; multicycle steps may cross a cycle ceiling')
-        manifest = dict(dump_sha256=hashlib.sha256(data).hexdigest(),
+        manifest = dict(build=build, dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
                         limits=limits, approximations=approximations,
                         dsp_timing_mode=('functional-runahead' if args.functional_dsp_timing else 'strict'),
