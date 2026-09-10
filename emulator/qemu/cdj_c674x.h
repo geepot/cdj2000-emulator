@@ -94,4 +94,9 @@ void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry);
  * redirects the next fetch to its IST entry without advancing CPU time. */
 bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending);
 bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque);
+/* Optional direct source packet observation, before loop-setup transformations.
+ * Consume only when the step succeeds. count=0 for loop/idle steps; this does
+ * not observe loop-buffer source fetches. No extra bus reads or CPU effects. */
+bool cdj_c674x_step_capture_direct(CdjC674x *, CdjC674xRead, CdjC674xWrite,
+                                  void *, CdjC674xPacket *);
 #endif

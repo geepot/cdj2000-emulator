@@ -1,0 +1,43 @@
+{
+  "duration_seconds": 35,
+  "result": {
+    "gui_exit": 0,
+    "viewer_closed": false,
+    "main_exit_before_teardown": null,
+    "timed_out": false,
+    "frame_exists": true
+  },
+  "input_artifacts": {
+    "qemu": {
+      "path": "/Users/gpotvin/Git/cdj2000-emulator/build/qemu/build/qemu-system-sh4",
+      "size": 13565368,
+      "sha256": "f956e4dae19107d9ef3b5db9945a3dca843de6973823d20f8e002e8ca308deeb"
+    },
+    "simulator": {
+      "path": "/Users/gpotvin/Git/cdj2000-emulator/bin/cdj-run",
+      "size": 1682144,
+      "sha256": "72f0d12063f29805e4e5cf31c73f1cd8ebad9a122c365c2ecf0490afd6d23458"
+    },
+    "main_firmware": {
+      "path": "/Users/gpotvin/Git/cdj2000-emulator/firmware/nxs/main-firmware.bin",
+      "size": 3019968,
+      "sha256": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85"
+    },
+    "gui_boot": {
+      "path": "/Users/gpotvin/Git/cdj2000-emulator/firmware/nxs/gui-boot-memory.elf",
+      "size": 16798024,
+      "sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb"
+    },
+    "gui_flash": {
+      "path": "/Users/gpotvin/Git/cdj2000-emulator/firmware/nxs/gui-flash-image.bin",
+      "size": 2097152,
+      "sha256": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+    }
+  },
+  "inputs_differ_at_exit": [],
+  "last_stats": [
+    "STATS wall=35.0 pc=0xd0bf88 insns=1041891328 mips=32.17 ticks=14000499201 tick_rate=400.000M/s events=1205332 dma=623386 frames=2098 published=10 link_rx=14888 mem_fill=1540 guest_s=35.00 parked_s=9.48 dropped_ms=0.0 waits=97865 spins=73276609",
+    "STATS exit after 35.0 s of wall clock"
+  ],
+  "limitations": "Bounded smoke only, concurrent regression tests; no boot or performance claim."
+}

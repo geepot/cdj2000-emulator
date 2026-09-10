@@ -2791,8 +2791,11 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     return true;
 }
 
-bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
+bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
+                                  CdjC674xWrite write, void *opaque,
+                                  CdjC674xPacket *direct)
 {
+    if (direct) direct->count = 0;
     if (cpu->fault) return false;
     if (cpu->loop_active) return loop_step(cpu, read, write, opaque);
     if (cpu->idle_cycles) {
@@ -2806,6 +2809,7 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
     }
     CdjC674xPacket packet;
     if (!cdj_c674x_fetch(cpu, read, opaque, &packet)) return false;
+    if (direct) *direct = packet;
     CdjC674xInstruction first = packet.instructions[0];
     bool compact_sploop = first.compact && (first.word & 0xbc7f) == 0x0c66;
     bool compact_sploopd = first.compact &&
@@ -2912,4 +2916,9 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
         return true;
     }
     return cdj_c674x_execute(cpu, &packet, read, write, opaque);
+}
+
+bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
+{
+    return cdj_c674x_step_capture_direct(cpu, read, write, opaque, NULL);
 }

@@ -818,10 +818,13 @@ static const char *run_quota(ReplayLimits *limits, uint32_t breakpoint,
         pcm_observe();
         CoverageBefore before = coverage_before(&cpu);
         CdjC674xPacket coverage_packet;
-        bool has_coverage_packet = coverage_capture(&cpu, &coverage_packet);
-        if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL))
+        bool has_coverage_packet = !before.direct_fetch &&
+            coverage_capture(&cpu, &coverage_packet);
+        if (!cdj_c674x_step_capture_direct(&cpu, read_bus, write_bus, NULL,
+                before.direct_fetch ? &coverage_packet : NULL))
             return cpu.fault ? cpu.fault : "CPU stopped";
-        coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
+        coverage_record(&before, (before.direct_fetch || has_coverage_packet) ?
+                        &coverage_packet : NULL);
         --limits->steps_remaining;
         if (spi_transfer.fault) {
             cpu.fault = "unsupported SPI transfer clock or state";
@@ -1255,9 +1258,12 @@ int main(int argc, char **argv)
             pcm_observe();
             CoverageBefore before = coverage_before(&cpu);
             CdjC674xPacket coverage_packet;
-            bool has_coverage_packet = coverage_capture(&cpu, &coverage_packet);
-            if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL)) { reason = "fault"; break; }
-            coverage_record(&before, has_coverage_packet ? &coverage_packet : NULL);
+            bool has_coverage_packet = !before.direct_fetch &&
+                coverage_capture(&cpu, &coverage_packet);
+            if (!cdj_c674x_step_capture_direct(&cpu, read_bus, write_bus, NULL,
+                before.direct_fetch ? &coverage_packet : NULL)) { reason = "fault"; break; }
+            coverage_record(&before, (before.direct_fetch || has_coverage_packet) ?
+                        &coverage_packet : NULL);
             --limits.steps_remaining;
             if (spi_transfer.fault) {
                 cpu.fault = "unsupported SPI transfer clock or state";

@@ -63,3 +63,68 @@ int main(void) {
                     str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
                     '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
+
+
+def test_direct_packet_observer_preserves_execution_and_reads(tmp_path):
+    source = tmp_path / 'observe.c'
+    source.write_text(r'''
+#include <assert.h>
+#include <string.h>
+#include "cdj_c674x.h"
+static uint32_t memory[16];
+static unsigned reads;
+static bool read_word(void *opaque, uint32_t address, uint32_t *value) {
+    (void)opaque;
+    ++reads;
+    if (address >= sizeof(memory)) return false;
+    *value = memory[address / 4];
+    return true;
+}
+static bool write_word(void *p, uint32_t a, uint64_t v, unsigned n, bool c) {
+    (void)p; (void)a; (void)v; (void)n; (void)c;
+    assert(0); return false;
+}
+int main(void) {
+    for (unsigned mode=0; mode<5; ++mode) {
+        memset(memory, 0, sizeof(memory));
+        /* Changed source, loop setup, inserted idle, decode fault, fetch fault. */
+        memory[0] = mode == 1 ? 0x38000 : mode == 3 ? 0xffffffff : 0;
+        CdjC674x a, b;
+        cdj_c674x_reset(&a, mode == 4 ? 64 : 0);
+        a.control[13] = 2;
+        if (mode == 2) a.idle_cycles = 1;
+        b = a;
+        CdjC674xPacket captured;
+        reads = 0;
+        bool accepted = cdj_c674x_step(&a, read_word, write_word, NULL);
+        unsigned count = reads;
+        reads = 0;
+        assert(accepted == cdj_c674x_step_capture_direct(
+            &b, read_word, write_word, NULL, &captured));
+        assert(count == reads);
+        assert(!memcmp(&a, &b, sizeof(a)));
+        if (accepted) {
+            assert(captured.count == (mode == 2 ? 0 : 1));
+            if (captured.count) assert(captured.instructions[0].word == memory[0]);
+        }
+    }
+    /* No cached instruction survives a source-memory change between steps. */
+    CdjC674x cpu;
+    cdj_c674x_reset(&cpu, 0);
+    memory[0] = 0;
+    CdjC674xPacket packet;
+    assert(cdj_c674x_step_capture_direct(&cpu, read_word, write_word, NULL, &packet));
+    cpu.pc = 0;
+    memory[0] = 0x38000;
+    cpu.control[13] = 2;
+    assert(cdj_c674x_step_capture_direct(&cpu, read_word, write_word, NULL, &packet));
+    assert(packet.count == 1 && packet.instructions[0].word == 0x38000);
+}
+''')
+    binary = tmp_path / 'observe'
+    subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+                    '-I', str(ROOT / 'emulator/qemu'), str(source),
+                    str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+                    str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
+                    '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True)

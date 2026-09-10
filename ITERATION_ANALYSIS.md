@@ -438,3 +438,57 @@ speedups. The workload still uses opt-in compact tracing and functional DSP
 modes; it does not measure connected-player boot or strict hardware timing.
 Reproduction and provenance: `08-benchmark-combined.py` and `08-combined.json`,
 including the candidate replay source hash and base commit.
+
+
+### Iteration 09 — reuse direct execution packets for replay coverage
+
+Added an optional direct-source packet output to the existing DSP step path.
+Replay consumes that packet only after a successful step, before loop-setup
+packet transformations. Direct instructions now require one fetch instead of
+separate coverage and execution fetches. Ordinary callers retain the existing
+step API. Loop and idle stepping still follow their original paths; coverage's
+separate loop-fetch logic is preserved, including its existing interrupt-drain
+classification. No code cache or timing/scheduling change is introduced.
+
+Three alternating one-million-step native trials against `e095f2b`: before
+**0.376, 0.252, 0.246 s**; after **0.336, 0.207, 0.209 s**. Median
+**0.252 → 0.209 s**, a **1.208× speedup (17.2% less time)**. All six traces,
+including coverage, and final checkpoints match byte for byte. The same pinned
+compiler, functional timing/audio flags, and checkpoint were used. Results and
+reproduction: `analysis/iterations/09-native-direct-fetch.json` and
+`09-benchmark-native.py`.
+
+The new observer regression compares full CPU state and bus-read counts with
+the standard stepping path, covering successful instructions, loop setup, idle,
+decode/fetch faults, and changed instruction memory between steps. It verifies
+that the original loop-setup opcode is retained in the observed source packet.
+
+
+Full validation: **506 passed, 31 skipped in 67.76 s**; QEMU rebuilt successfully.
+The rebuilt pair completed a 35-second connected NXS smoke run with GUI exit 0,
+no launcher timeout, a framebuffer, and unchanged input artifacts. Tests/build
+and smoke overlapped, so neither their duration nor GUI counters are performance
+measurements. All completed before timing comparisons. Evidence: `09-tests.txt`
+and `09-smoke.json`. This is bounded integration validation, not full boot/audio
+acceptance.
+
+Five alternating pairs of the complete compact replay workflow against the
+immediately preceding `e095f2b` give warm medians **1.124 → 1.104 s**, an
+observed **1.018× speedup (1.8% less time)**, with overlapping ranges. Cold
+observations were 2.149 and 2.152 s. This confirms the native gain translates
+to only a small end-to-end change at 300,000 steps; analysis and build identity
+work remain part of the command. Data/script: `09-adjacent.json` and
+`09-benchmark-adjacent.py`.
+
+A separate fresh comparison against original `c16d1cb` measured **2.526×
+overall speedup: 3.008 → 1.191 s (60.4% less time)**. Its variability is
+visible in the raw samples, including a 3.514 s baseline and 1.284 s candidate.
+This is lower than iteration 08's 2.675× measurement; cross-run differences
+must not be interpreted as a reliable regression or compounded improvement.
+The directly matched adjacent comparison above is the better estimate for
+this change. All twenty full-workflow runs across both comparisons passed
+repeat gates and matched final checkpoint/semantic coverage; traces matched
+within modes. Original-baseline data/script: `09-combined.json` and
+`09-benchmark-combined.py`. Candidate source hashes and compiler provenance are
+recorded. Current evidence supports roughly **2.5–2.7×** faster warm replay
+versus the original baseline, not a monotonically increasing precise figure.
