@@ -12,6 +12,12 @@ static bool locate(uint32_t address, unsigned *bank, unsigned *offset)
     *offset = (address - 0x01d00000u) % 0x4000;
     return true;
 }
+bool cdj_c6747_mcasp_control_write_mapped(uint32_t address, unsigned size)
+{
+    unsigned bank, offset;
+    return size == 4 && locate(address, &bank, &offset);
+}
+
 void cdj_c6747_mcasp_reset(CdjC6747Mcasp *s)
 {
     *s = (CdjC6747Mcasp){0};

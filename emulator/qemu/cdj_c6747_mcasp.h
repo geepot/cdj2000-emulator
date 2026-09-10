@@ -31,6 +31,8 @@ typedef struct {
     uint64_t xrsr_source_sequence[3][16], tx_slot_boundaries[3];
 } CdjC6747McaspControl;
 void cdj_c6747_mcasp_reset(CdjC6747Mcasp *s);
+/* Candidate window only; the control write still validates register/value. */
+bool cdj_c6747_mcasp_control_write_mapped(uint32_t address, unsigned size);
 bool cdj_c6747_mcasp_read(const CdjC6747Mcasp *s, uint32_t address,
                          uint32_t *value);
 bool cdj_c6747_mcasp_write(CdjC6747Mcasp *s, uint32_t address,

@@ -31,6 +31,12 @@ static bool locate(uint32_t address, uint32_t *offset)
     return true;
 }
 
+bool cdj_c6747_edma_write_mapped(uint32_t address, unsigned size)
+{
+    uint32_t offset;
+    return (size == 4 || size == 8) && locate(address, &offset);
+}
+
 static bool legal_opt(uint32_t value)
 {
     unsigned tcc = (value >> 12) & 0x3fu;

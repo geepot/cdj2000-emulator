@@ -543,6 +543,9 @@ static void deliver_edma_notifications(void)
 static bool edma_mcasp_transaction(bool edma_access, uint32_t address,
                                    uint64_t value, unsigned size, bool commit)
 {
+    if (!(edma_access ? cdj_c6747_edma_write_mapped(address, size) :
+                       cdj_c6747_mcasp_control_write_mapped(address, size)))
+        return false;
     CdjC6747Edma trial_edma = edma;
     CdjC6747McaspControl trial_mcasp = mcasp_control;
     EdmaBusContext trial_context = {.mcasp = &trial_mcasp};

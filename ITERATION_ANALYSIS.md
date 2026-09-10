@@ -285,3 +285,30 @@ Both focused tests passed: the actual compiled helper opens only once,
 records are visible before close, and normal/abrupt exits produce identical
 bytes. Benchmark code: `tools/cdj_gui/benchmark_capture.py`; raw results:
 `analysis/iterations/05-sport-capture.json`.
+
+### Iteration 06 — reject non-device writes before transaction copies
+
+Added side-effect-free EDMA and McASP write-window predicates, sharing each
+model's existing address locator. Both QEMU and standalone replay now reject
+non-device addresses before copying transactional EDMA/McASP state. Addresses
+inside those windows still use the complete register/value/state validation
+and commit paths. This does not skip writes or change the device schedule.
+
+Three alternating native replay trials (one million successful steps, compact
+trace, -O2): before **0.590, 0.433, 0.425 s**; after **0.489, 0.380, 0.382 s**.
+Median speedup: **1.132× (11.7% less time)**. All six runs ended at
+**34,100,114 packets / 78,352,698 cycles**, with identical traces and final
+checkpoints and no fault. This isolates native execution plus trace/checkpoint
+output; Python launch/build/coverage costs are excluded.
+
+All **51 focused CPU/device/replay/checkpoint/deferred tests passed**. The new
+mapping test checks every address around both bus windows, all widths 0..8,
+RAM aliases, and that accepted writes are never filtered out. QEMU rebuilt
+successfully with the same guards. Reproducible script and raw results:
+`analysis/iterations/06-benchmark-native.py` and `06-native-guard.json`.
+
+The interruption cleared the earlier /tmp benchmark snapshots. They were
+recreated from immutable commits under ignored `build/performance`: baseline
+`c16d1cb`, pre-iteration-06 `4ae1778`. Both native comparison binaries were
+rebuilt with the same pinned Command Line Tools compiler. No result depends on
+an executable recovered from an uncertain temporary directory.

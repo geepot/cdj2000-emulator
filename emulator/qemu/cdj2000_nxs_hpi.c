@@ -427,6 +427,9 @@ static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
                                    uint32_t address, uint64_t value,
                                    unsigned size, bool commit)
 {
+    if (!(edma_access ? cdj_c6747_edma_write_mapped(address, size) :
+                       cdj_c6747_mcasp_control_write_mapped(address, size)))
+        return false;
     CdjC6747Edma trial_edma = s->edma;
     CdjC6747McaspControl trial_mcasp = s->mcasp_control;
     EdmaBusContext trial_context = {.owner = s, .mcasp = &trial_mcasp};

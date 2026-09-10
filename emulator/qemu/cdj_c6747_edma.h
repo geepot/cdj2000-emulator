@@ -51,6 +51,9 @@ typedef struct {
 } CdjC6747Edma;
 
 void cdj_c6747_edma_reset(CdjC6747Edma *s);
+/* Cheap bus-window rejection before allocating a transactional device copy.
+ * True is only a candidate: cdj_c6747_edma_write still validates the register. */
+bool cdj_c6747_edma_write_mapped(uint32_t address, unsigned size);
 /* Check every modeled register invariant before accepting restored state. */
 bool cdj_c6747_edma_valid(const CdjC6747Edma *s);
 bool cdj_c6747_edma_read(const CdjC6747Edma *s, uint32_t address,
