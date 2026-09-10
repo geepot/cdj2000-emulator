@@ -383,6 +383,13 @@ def main():
                         help='virtual seconds at which to press it; defaults to '
                              'two seconds after the card goes in, which is before '
                              "the GUI's first browse")
+    parser.add_argument('--gui-link', metavar='HOST:PORT',
+                        help='point the GUI at this address instead of MAIN. Use '
+                             'it to put tools.cdj_main.link_inject between the '
+                             'boards; the NXS browse keys have never produced an '
+                             'ENTER, so injected browse/load requests are the '
+                             'documented way to load a track (RUNNING.md, '
+                             'link_inject). MAIN still listens on --port')
     parser.add_argument('--browse-aids', action='store_true',
                         help="opt into the board-side aids RUNNING.md measured "
                              "for bringing a card's library up on a running "
@@ -418,6 +425,10 @@ def main():
         parser.error('--sd-insert-seconds requires --sd and a value from 0 to 86400')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
+    if args.gui_link is not None:
+        host, _, port = args.gui_link.partition(':')
+        if not host or not port.isdigit() or not 1024 <= int(port) <= 65535:
+            parser.error('--gui-link must be HOST:PORT with port 1024..65535')
     if not 0 <= args.panel_hold_ms <= 60000:
         parser.error('--panel-hold-ms must be 0..60000')
     if args.source_key_at is not None and not 0 <= args.source_key_at <= 86400:
@@ -468,7 +479,8 @@ def main():
     gui_command = [str(simulator), '--model', 'bf531', '--environment', 'operating', '--memory-region', '0,64M',
         '--hw-board-file', 'emulator/cdj2000-gui-nxs.hw', str(firmware / 'gui-boot-memory.elf')]
     overrides = dict(BFIN_PARALLEL_WRITEBACK='1', BFIN_GUI_COLOR='rgb555le',
-        BFIN_GUI_OUTPUT=str(run / 'screen.ppm'), BFIN_MAIN_LINK=f'127.0.0.1:{args.port}',
+        BFIN_GUI_OUTPUT=str(run / 'screen.ppm'),
+        BFIN_MAIN_LINK=args.gui_link or f'127.0.0.1:{args.port}',
         BFIN_MAIN_LINK_DUMP=str(run / 'main-link.bin'), BFIN_GPIO5_READY_TOGGLE='1',
         BFIN_STATS='5', BFIN_EXCEPTION_TRACE='1', BFIN_EXIT_AFTER_WALL=str(args.seconds))
     if args.fresh_link:
@@ -541,6 +553,7 @@ def main():
                                    'no IRQ, arbitration, double buffering, repeated START or certificates'),
         input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
         link_delivery='fresh-only diagnostic' if args.fresh_link else 'legacy cached repeats',
+        gui_link_target=args.gui_link or f'127.0.0.1:{args.port} (MAIN directly)',
         link_fidelity=('board-side browse aids ENABLED: status repeats rewritten '
                        'fresh and browse replies re-stamped; media evidence only, '
                        'not link-fidelity evidence'
