@@ -312,3 +312,56 @@ recreated from immutable commits under ignored `build/performance`: baseline
 `c16d1cb`, pre-iteration-06 `4ae1778`. Both native comparison binaries were
 rebuilt with the same pinned Command Line Tools compiler. No result depends on
 an executable recovered from an uncertain temporary directory.
+
+### Final combined comparison and validation
+
+All six optimizations were benchmarked and committed separately:
+
+| Iteration | Commit | Measured scope | Median result |
+| --- | --- | --- | --- |
+| 01 | `5a757e0` | Unchanged QEMU build | 2.73× faster |
+| 02 | `84fa8ff` | Warm detailed replay workflow | 1.10× faster |
+| 03 | `cec7587` | Compact replay versus iteration 02 | 2.16× faster |
+| 04 | `89e427b` | Blackfin fixed-tick startup slice | 1.020× faster; overlapping ranges |
+| 05 | `4ae1778` | Synthetic SPORT capture I/O | 11.97× faster |
+| 06 | `13cef8f` | Native DSP replay versus iteration 05 | 1.132× faster |
+
+The final complete replay workflow is **2.58× faster: 3.080 s → 1.193 s,
+61.3% less elapsed time**, comparing baseline `c16d1cb` with `13cef8f`.
+This fresh comparison alternates five baseline/final pairs, with no concurrent
+builds or tests. The reported medians use trials 1–4, after the cold trial.
+It measures 300,000 exploratory steps, repeat verification, coverage analysis,
+and gates. Baseline uses its original detailed trace and build behavior;
+final uses the optimized cached build and opt-in compact trace. All ten runs
+passed their gates and produced identical final checkpoints and semantic
+coverage. Traces match exactly within each trace mode.
+
+The first final run, including a cold replay-cache build, took **2.157 s**;
+the first baseline run took **3.158 s**. These single cold observations are
+reported separately from repeated warm medians. The final four runs confirmed
+cache hits. Raw trials, hashes, compiler identity, and input provenance are in
+`analysis/iterations/final-comparison.json`; reproduce with
+`analysis/iterations/final-benchmark.py` after preparing its baseline archive.
+Builds used `DEVELOPER_DIR=/Library/Developer/CommandLineTools` consistently.
+
+For faster routine replay, add `--trace-mode compact --verify-repeat` to the
+usual replay command. Detailed tracing remains the default for instruction
+debugging; optimized builds and their verified cache are automatic. These gains
+are workload-specific and must not be multiplied or added into a whole-player
+speedup. The baseline already contains the initial optimizations in `c16d1cb`,
+so this comparison does not quantify improvements preceding that commit.
+
+Final validation: **504 tests passed, 31 skipped in 50.76 s**. The rebuilt SH4
+QEMU and Blackfin simulator completed a 35-second connected NXS smoke run:
+GUI exit 0, no launcher timeout, framebuffer present, and no input artifact
+changes. Blackfin reported 957,743,104 instructions, 2,099 frames processed,
+12 published frames, and zero dropped milliseconds at the last sample. MAIN
+remained running until normal launcher teardown. This bounded smoke does not
+establish complete boot or audio correctness, and supplies no boot-speed claim.
+Test output and smoke provenance are saved in `analysis/iterations/final-tests.txt`
+and `final-smoke.json`; firmware and full run artifacts remain ignored.
+
+Scheduler, spin-loop clock, and asynchronous DSP changes remain deferred because
+they alter timing contracts and require separate correctness evidence. The
+current improvements preserve those contracts while shortening build and replay
+iteration time.

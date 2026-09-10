@@ -1,0 +1,25 @@
+..........s......................s.............................ss....... [ 13%]
+........................................................................ [ 26%]
+......................................................................s. [ 40%]
+...............sssss.................................................... [ 53%]
+..sss................................................................... [ 67%]
+.s.............s........................................................ [ 80%]
+.....................ss.................ssssss........................ss [ 94%]
+ssssss.........................                                          [100%]
+============================= slowest 15 durations =============================
+4.16s call     tests/test_input_channel.py::test_every_control_of_the_window_moves_the_payload
+3.05s call     tests/test_input_channel.py::test_silence_immediately_after_connecting_does_not_kill_the_channel
+2.66s call     tests/test_dsp_replay.py::test_replay_determinism_breakpoints_and_limits
+2.46s call     tests/test_dsp_replay.py::test_replay_gate_preserves_faults_and_rejects_changed_baseline
+1.54s call     tests/test_dsp_replay.py::test_explicit_strict_resume_preserves_exploratory_ancestry
+1.51s call     tests/test_dsp_deferred_replay.py::test_deferred_host_request_coalesces_between_slices
+1.15s call     tests/test_dsp_deferred_replay.py::test_deferred_full_quota_boundary
+1.01s call     tests/test_input_channel.py::test_harness_missing_reply_is_a_bounded_failure
+0.98s call     tests/test_dsp_replay.py::test_compact_trace_preserves_execution_and_coverage
+0.92s call     tests/test_dsp_deferred_replay.py::test_deferred_fault_slice_repeat[deferred-phase-pending]
+0.90s call     tests/test_dsp_deferred_replay.py::test_deferred_fault_slice_repeat[deferred-phase]
+0.85s call     tests/test_dsp_checkpoint_replay.py::test_limit_coincident_with_exact_recorded_stop_remains_resumable
+0.85s call     tests/test_dsp_deferred_replay.py::test_deferred_fault_slice_repeat[deferred-start]
+0.84s call     tests/test_dsp_deferred_replay.py::test_deferred_rejects_bad_slice_contract[wrong_id]
+0.82s call     tests/test_dsp_checkpoint_replay.py::test_later_dspint_alone_resumes_event_replay
+504 passed, 31 skipped in 50.76s
