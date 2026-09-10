@@ -1,0 +1,36 @@
+verified optimization-11-prefix-baseline-0 12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25
+launch optimization-11-prefix-candidate-0 f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535
+{
+  "exit_code": 0,
+  "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-prefix-candidate-0",
+  "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/11-connected/optimization-11-prefix-candidate-0.json"
+}
+verified optimization-11-prefix-candidate-0 f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535
+launch optimization-11-prefix-baseline-1 12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25
+{
+  "exit_code": 0,
+  "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-prefix-baseline-1",
+  "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/11-connected/optimization-11-prefix-baseline-1.json"
+}
+verified optimization-11-prefix-baseline-1 12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25
+launch optimization-11-prefix-candidate-1 f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535
+{
+  "exit_code": 0,
+  "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-prefix-candidate-1",
+  "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/11-connected/optimization-11-prefix-candidate-1.json"
+}
+verified optimization-11-prefix-candidate-1 f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535
+launch optimization-11-prefix-baseline-2 12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25
+{
+  "exit_code": 0,
+  "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-prefix-baseline-2",
+  "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/11-connected/optimization-11-prefix-baseline-2.json"
+}
+verified optimization-11-prefix-baseline-2 12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25
+launch optimization-11-prefix-candidate-2 f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535
+{
+  "exit_code": 0,
+  "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-prefix-candidate-2",
+  "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/11-connected/optimization-11-prefix-candidate-2.json"
+}
+verified optimization-11-prefix-candidate-2 f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535

@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/gpotvin/Git/cdj2000-emulator/tools/cdj_main/nxs_vm.py", line 663, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/Users/gpotvin/Git/cdj2000-emulator/tools/cdj_main/nxs_vm.py", line 603, in main
+    if main_process.poll() is not None: raise RuntimeError('MAIN exited; see main-stderr.log')
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: MAIN exited; see main-stderr.log

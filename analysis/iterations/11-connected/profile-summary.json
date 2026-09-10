@@ -1,0 +1,40 @@
+{
+  "sh4_sample": {
+    "path": "analysis/iterations/11-connected/sh4.sample.txt",
+    "interval_ms": 1,
+    "cpu_thread_samples": 1935,
+    "mmio_write_samples": 1908,
+    "execute_dsp_samples_at_one_call_site": 1799,
+    "note": "This is one execute_dsp call site; other call sites add samples. Stack samples overlap and must not be summed."
+  },
+  "blackfin_sample": {
+    "path": "analysis/iterations/11-connected/blackfin.sample.txt",
+    "interval_ms": 1,
+    "main_thread_samples": 2387,
+    "select_samples": 550,
+    "sim_engine_run_samples": 1256,
+    "note": "The 550 select samples are waiting time, not interpreter CPU time; interpreter children overlap sim_engine_run."
+  },
+  "connected_run": {
+    "run": "runs/optimization-11-profile-2",
+    "dsp_callbacks": 451,
+    "dsp_execution_seconds": 67.804,
+    "dsp_reporting_seconds": 0.933,
+    "last_packets": 438099500,
+    "last_cycles": 802035289,
+    "result": {"gui_exit": 0, "viewer_closed": false, "main_exit_before_teardown": null, "timed_out": false, "frame_exists": true},
+    "blackfin_last_stats": {"wall_seconds": 70.0, "instructions": 2210136064, "ticks": 27996438000, "events": 2564227, "dma": 1268577, "frames": 4198, "published": 10, "link_rx": 30376, "parked_seconds": 20.78, "dropped_ms": 9.7, "waits": 205224, "spins": 144805933},
+    "input_sha256": {
+      "qemu": "ceda8c3f2aee29f41513db98110afc0c68bd35c008bccedac242bd51ee26fa04",
+      "simulator": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+      "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+      "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+      "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+    }
+  },
+  "failed_attempt": {
+    "run": "runs/optimization-11-profile",
+    "status": "not_execution",
+    "reason": "QEMU serial TCP bind denied on 127.0.0.1:6180"
+  }
+}

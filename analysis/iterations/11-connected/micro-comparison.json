@@ -1,0 +1,38 @@
+{
+  "source": "analysis/iterations/11-connected/microbench-summary.json",
+  "requested_ticks": 60000000,
+  "pairs": 5,
+  "baseline": {
+    "median_seconds": 6.970528542,
+    "range_seconds": [6.942204375, 7.04330575],
+    "binary_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25"
+  },
+  "candidate": {
+    "median_seconds": 6.979936667,
+    "range_seconds": [6.9620835, 6.994190291],
+    "binary_sha256": "81114209759fe03b752b120b5fba6e137f6466cf2ab508bc5d59263c99e6f1a8"
+  },
+  "paired_percent_deltas": [0.425854, 0.13497, -1.153184, 0.459702, 0.123445],
+  "median_percent_delta": 0.13497,
+  "state_match": {
+    "ticks": true,
+    "instructions": true,
+    "frame_sha256": true,
+    "tx_sha256": true,
+    "every_pair": true
+  },
+  "interpretation": "The candidate is effectively performance-neutral on this five-pair fixed-tick replay; the 0.135% median slowdown is below the observed run-to-run spread. This does not predict connected boot speed: wall-clock-paced connected instruction counts include idle-loop execution.",
+  "prefix_candidate": {
+    "source": "analysis/iterations/11-connected/prefix-microbench-summary.json",
+    "candidate_sha256": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+    "baseline_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+    "baseline_median_seconds": 7.00586025,
+    "baseline_range_seconds": [6.95218225, 7.019253083],
+    "candidate_median_seconds": 6.375913917,
+    "candidate_range_seconds": [6.336385041, 6.389823625],
+    "paired_percent_deltas": [-8.991706, -8.145015, -9.192829, -8.921656, -8.85761],
+    "median_percent_delta": -8.991706,
+    "state_match": {"ticks": true, "instructions": true, "frame_sha256": true, "tx_sha256": true, "every_pair": true},
+    "practical_significance": "About 9% faster in this fixed-tick replay, with all ten runs matching state outputs."
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "candidate": "build/performance/11/trace-candidate",
+  "baseline": "build/performance/11/baseline",
+  "build": {
+    "command": "DEVELOPER_DIR=/Library/Developer/CommandLineTools sh scripts/build-bfin-sim.sh",
+    "compiler_flags": "-O3 -march=native -g"
+  },
+  "fixture": "tests/bfin/parallel-store.s",
+  "link": "build/bfin-binutils/ld/ld-new -Ttext=0x1000 -e _start",
+  "run": "env BFIN_PARALLEL_WRITEBACK=1 <binary> --environment user --memory-region 0,64M --trace-insn --trace-register --trace-file <trace> <parallel.elf>",
+  "baseline_returncode": 0,
+  "candidate_returncode": 0,
+  "trace_sha256": "22988287f69128b1cfd435e6274337e8a566ab123fe9dbb4f92093a6b4f0c8c7",
+  "trace_byte_equal": true,
+  "tests": "python3 -m pytest -q tests/test_bfin_cold_lzss.py tests/test_bfin_dma_error.py tests/test_bfin_dma_sport_integration.py tests/test_bfin_frame_change.py tests/test_bfin_link_cache.py tests/test_bfin_sic_mask.py tests/test_bfin_sport_capture.py tests/test_bfin_sport_tx_capture.py tests/test_blackfin_parallel.py",
+  "tests_result": "21 passed"
+}

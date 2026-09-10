@@ -1,0 +1,94 @@
+01-gdb-17.2-bfin-parallel-dsp32alu.patch already applied
+02-gdb-17.2-bfin-cdj2000-board.patch already applied
+03-gdb-17.2-bfin-dma-errors.patch already applied
+03-gdb-17.2-macos-lp64.patch already applied
+04-gdb-17.2-posix-framebuffer.patch already applied
+05-gdb-17.2-live-link-fresh-only.patch already applied
+06-gdb-17.2-dma-mmr-trace.patch already applied
+07-gdb-17.2-sic-mask-order.patch already applied
+08-gdb-17.2-frame-change-check.patch already applied
+09-gdb-17.2-cold-lzss-helper.patch already applied
+10-gdb-17.2-persistent-sport-capture.patch already applied
+11-gdb-17.2-persistent-sport-tx-capture.patch already applied
+applying 12-gdb-17.2-bfin-disabled-trace-prefix.patch
+patching file 'sim/bfin/bfin-sim.c'
+configuring sim
+gmake: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build'
+gmake[1]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib'
+gmake  all-recursive
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib'
+Making all in import
+gmake[3]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib/import'
+gmake  all-recursive
+gmake[4]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib/import'
+gmake[5]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib/import'
+gmake[5]: Nothing to be done for 'all-am'.
+gmake[5]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib/import'
+gmake[4]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib/import'
+gmake[3]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib/import'
+gmake[3]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib'
+gmake[3]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib'
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib'
+gmake[1]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/gnulib'
+gmake[1]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/readline'
+Making all in readline
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/readline/readline'
+gmake[2]: Nothing to be done for 'all'.
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/readline/readline'
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/readline'
+gmake[2]: Nothing to be done for 'all-am'.
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/readline'
+gmake[1]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/readline'
+gmake: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build'
+building the libraries the simulator links against
+gmake: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build'
+gmake[1]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libiberty'
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libiberty/testsuite'
+gmake[2]: Nothing to be done for 'all'.
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libiberty/testsuite'
+gmake[1]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libiberty'
+gmake[1]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libsframe'
+gmake  all-am
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libsframe'
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libsframe'
+gmake[1]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/libsframe'
+gmake[1]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+Making info in po
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd/po'
+gmake[2]: Nothing to be done for 'info'.
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd/po'
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+gmake  all-recursive
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+Making all in po
+gmake[3]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd/po'
+gmake[3]: Nothing to be done for 'all'.
+gmake[3]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd/po'
+gmake[3]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+gmake[3]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+gmake[1]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/bfd'
+gmake: Nothing to be done for 'all-libiberty'.
+gmake[1]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes'
+gmake  all-recursive
+gmake[2]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes'
+Making all in .
+gmake[3]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes'
+gmake[3]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes'
+Making all in po
+gmake[3]: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes/po'
+gmake[3]: Nothing to be done for 'all'.
+gmake[3]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes/po'
+gmake[2]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes'
+gmake[1]: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/opcodes'
+gmake: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build'
+building
+gmake: Entering directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/sim'
+  CC       bfin/bfin-sim.o
+  AR       bfin/libsim.a
+  CCLD     bfin/run
+gmake: Leaving directory '/Users/gpotvin/Git/cdj2000-emulator/build/sim-build/sim'
+
+built: /Users/gpotvin/Git/cdj2000-emulator/bin/cdj-run ( 1682256 bytes, CFLAGS -O3 -march=native -g)
+installed 2026-09-10T16:26:22-0700

@@ -1,0 +1,13 @@
+{
+  "baseline": "build/performance/11/baseline",
+  "candidate": "build/performance/11/prefix-candidate",
+  "fixture": "tests/bfin/parallel-store.s",
+  "trace_options": ["--trace-insn", "--trace-register"],
+  "guest_environment": "BFIN_PARALLEL_WRITEBACK=1",
+  "baseline_returncode": 0,
+  "candidate_returncode": 0,
+  "trace_byte_equal": true,
+  "trace_sha256": "22988287f69128b1cfd435e6274337e8a566ab123fe9dbb4f92093a6b4f0c8c7",
+  "tests_result": "21 passed",
+  "patch_contract": "parallel packet trace_prefix is called only when TRACE_ANY_P is true; enabled trace output remains unchanged"
+}

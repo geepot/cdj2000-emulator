@@ -1,0 +1,163 @@
+{
+  "ticks_requested": 60000000,
+  "pairs": 5,
+  "baseline_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+  "candidate_sha256": "81114209759fe03b752b120b5fba6e137f6466cf2ab508bc5d59263c99e6f1a8",
+  "trials": [
+    {
+      "label": "baseline",
+      "pair": 0,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-baseline-0",
+      "binary": "/Users/gpotvin/Git/cdj2000-emulator/build/performance/11/baseline",
+      "binary_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+      "seconds": 6.942204375000074,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null
+    },
+    {
+      "label": "candidate",
+      "pair": 0,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-candidate-0",
+      "binary": "build/performance/11/trace-candidate",
+      "binary_sha256": "81114209759fe03b752b120b5fba6e137f6466cf2ab508bc5d59263c99e6f1a8",
+      "seconds": 6.97176804099945,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null,
+      "matched": {
+        "ticks": true,
+        "instructions": true,
+        "frame_sha256": true,
+        "tx_sha256": true
+      }
+    },
+    {
+      "label": "baseline",
+      "pair": 1,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-baseline-1",
+      "binary": "/Users/gpotvin/Git/cdj2000-emulator/build/performance/11/baseline",
+      "binary_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+      "seconds": 6.970528541999556,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null
+    },
+    {
+      "label": "candidate",
+      "pair": 1,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-candidate-1",
+      "binary": "build/performance/11/trace-candidate",
+      "binary_sha256": "81114209759fe03b752b120b5fba6e137f6466cf2ab508bc5d59263c99e6f1a8",
+      "seconds": 6.9799366669994924,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null,
+      "matched": {
+        "ticks": true,
+        "instructions": true,
+        "frame_sha256": true,
+        "tx_sha256": true
+      }
+    },
+    {
+      "label": "baseline",
+      "pair": 2,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-baseline-2",
+      "binary": "/Users/gpotvin/Git/cdj2000-emulator/build/performance/11/baseline",
+      "binary_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+      "seconds": 7.04330574999949,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null
+    },
+    {
+      "label": "candidate",
+      "pair": 2,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-candidate-2",
+      "binary": "build/performance/11/trace-candidate",
+      "binary_sha256": "81114209759fe03b752b120b5fba6e137f6466cf2ab508bc5d59263c99e6f1a8",
+      "seconds": 6.962083499999608,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null,
+      "matched": {
+        "ticks": true,
+        "instructions": true,
+        "frame_sha256": true,
+        "tx_sha256": true
+      }
+    },
+    {
+      "label": "baseline",
+      "pair": 3,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-baseline-3",
+      "binary": "/Users/gpotvin/Git/cdj2000-emulator/build/performance/11/baseline",
+      "binary_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+      "seconds": 6.962184958000762,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null
+    },
+    {
+      "label": "candidate",
+      "pair": 3,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-candidate-3",
+      "binary": "build/performance/11/trace-candidate",
+      "binary_sha256": "81114209759fe03b752b120b5fba6e137f6466cf2ab508bc5d59263c99e6f1a8",
+      "seconds": 6.99419029100045,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null,
+      "matched": {
+        "ticks": true,
+        "instructions": true,
+        "frame_sha256": true,
+        "tx_sha256": true
+      }
+    },
+    {
+      "label": "baseline",
+      "pair": 4,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-baseline-4",
+      "binary": "/Users/gpotvin/Git/cdj2000-emulator/build/performance/11/baseline",
+      "binary_sha256": "12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25",
+      "seconds": 6.979566417000569,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null
+    },
+    {
+      "label": "candidate",
+      "pair": 4,
+      "output": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-micro-candidate-4",
+      "binary": "build/performance/11/trace-candidate",
+      "binary_sha256": "81114209759fe03b752b120b5fba6e137f6466cf2ab508bc5d59263c99e6f1a8",
+      "seconds": 6.988182375000179,
+      "ticks": 60031090,
+      "instructions": 56950784,
+      "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+      "tx_sha256": null,
+      "matched": {
+        "ticks": true,
+        "instructions": true,
+        "frame_sha256": true,
+        "tx_sha256": true
+      }
+    }
+  ],
+  "inputs": {
+    "elf_sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+    "link_dump_sha256": "986de42ce539535242ade44c88dbc6b8cfa83f239c1a84bbe64fc0e8df8b6c27",
+    "board_sha256": "060b4eb8ba999e97ea45b6dd78983ace068403d8be436b1650383d489eddbeac"
+  }
+}

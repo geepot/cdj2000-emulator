@@ -1,0 +1,16 @@
+--- a/sim/bfin/bfin-sim.c
++++ b/sim/bfin/bfin-sim.c
+@@ -884 +884 @@
+-fmtconst_str (const_forms_t cf, bs32 x, bu32 pc)
++fmtconst_str_enabled (const_forms_t cf, bs32 x, bu32 pc)
+@@ -887,3 +886,0 @@
+-
+-  if (!bfin_insn_text)
+-    return "";
+@@ -939,0 +937,6 @@
++
++/* Keep disabled trace operands out of the formatter's call path.  Operand
++   extraction is independent of this display-only value; no formatting work
++   is needed unless TRACE_INSN is enabled for this instruction. */
++#define fmtconst_str(cf, x, pc) \
++  (bfin_insn_text ? fmtconst_str_enabled ((cf), (x), (pc)) : "")

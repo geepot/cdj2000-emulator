@@ -626,3 +626,132 @@ No model change was required for these cases, and no runtime speedup is claimed.
 These tests establish SIC request visibility, not CEC ISR entry or cycle timing.
 PPI frame timing, short RX records, mid-chain descriptor failures and full
 DMAC global-error routing remain follow-up coverage.
+
+## Iteration 11 — fresh connected baseline and Blackfin trace candidate
+
+Baseline: `d96c9b1`, installed Blackfin SHA-256
+`12c761061fe4c190b6d1721129c985e6fbfe3b72f58a926372a3b6c739677e25`.
+The other agent's untracked DSP coverage work is excluded. The strict,
+70-second current-binary profile is `runs/optimization-11-profile-2`;
+the initial attempt failed to bind localhost and is not execution evidence.
+
+The SH4 CPU thread has 1,935 samples: 1,908 in the MMIO write subtree and
+1,799 at the DSP execution call site. Across the run, 451 DSP callbacks
+consume 67.804 seconds executing and 0.933 seconds reporting. Blackfin has
+2,387 samples including 550 in `select` (waiting, not CPU consumption),
+and substantial clock/idle activity. Samples overlap their parents and are
+not additive. Profiling introduces overhead; this run is excluded from A/B
+performance comparisons. Raw profiles, hashes and counters are under
+`analysis/iterations/11-connected/`.
+
+Idle/clock changes are deferred: catch-up, event delivery, PC-change exits,
+link readiness, PLL wake state, hardware-loop exclusions and wait accounting
+need a bounded cross-board wake regression before changing their schedule.
+Lower spin counts alone would not establish faster firmware. SH4 RAM-side
+DMA/HPI batching is also deferred because it is not a leading sampled cost;
+it still needs alias/fault/completion and per-register ordering validation.
+The first measured candidate moves the disabled operand-formatter guard to
+its call site while retaining enabled formatting. Results follow below.
+
+### 11a — rejected operand-formatter guard
+
+Five alternating 60-million-tick startup pairs: baseline **6.942, 6.971,
+7.043, 6.962, 6.980 s**; candidate **6.972, 6.980, 6.962, 6.994, 6.988 s**.
+Medians **6.971 → 6.980 s** show no improvement. All ten runs stop at
+60,031,090 ticks / 56,950,784 instructions with identical framebuffer hashes.
+Neither binary emits TX in this slice, so no TX equivalence is established.
+All 21 Blackfin tests pass, and enabled instruction/register trace bytes match
+on the assembled parallel fixture. The candidate is rejected, not installed
+as a retained optimization. This microbenchmark supplies no connected speedup.
+Reproduction/results: `11-connected/microbench.py`, `microbench-summary.json`,
+`trace-validation.json`; the rejected source patch is retained as an experiment.
+
+### 11b — disabled parallel-packet trace-prefix guard
+
+The decoder formatted a parallel-packet prefix unconditionally, even with all
+tracing disabled. Patch 12 now uses the same `TRACE_ANY_P` guard as the normal
+instruction path. It preserves every enabled tracing category; instruction
+execution, device accesses and wall-clock policy are unchanged. The rejected
+formatter change is absent from this candidate.
+
+Five alternating startup-slice pairs: baseline **7.006, 6.953, 7.019, 7.016,
+6.952 s**; candidate **6.376, 6.387, 6.374, 6.390, 6.336 s**. Median
+**7.006 → 6.376 s**, **1.099× throughput / 9.0% less elapsed time**, with
+non-overlapping ranges. All ten runs retain 60,031,090 ticks / 56,950,784
+instructions and the same framebuffer hash; no TX is produced. This is an
+isolated instruction-counted startup slice, not connected-player speed.
+
+All 21 Blackfin tests pass. Enabled instruction/register traces on the assembled
+parallel fixture remain byte-identical. Standard build and atomic installation
+succeed. Evidence: `prefix-microbench-summary.json`, `prefix-validation.json`,
+`prefix-tests.txt` and `prefix-build.txt` in `analysis/iterations/11-connected/`.
+Connected measurements follow; CPU savings alone will not be called boot gains.
+
+### Connected comparison provenance correction
+
+The first connected sequence, `optimization-11-connected-*`, accidentally
+selected the rejected formatter binary (`811142…`) for its candidate trials.
+The recorded binary hashes caught this before acceptance. Those trials are
+excluded from the prefix result; the last launcher was interrupted during
+post-run processing, after GUI had reached its 85-second exit. Their raw
+artifacts remain available as diagnostics and are explicitly labelled.
+
+The replacement sequence is exclusively `optimization-11-prefix-*`, driven
+by `prefix-suite.py`. It pins baseline `12c761…`, prefix `f2456d…` and QEMU
+`ceda8c…`, checks before installation, and verifies the launch manifest,
+completion result and unchanged inputs after every run. Frame timestamps are
+GUI-launch-relative; panel timestamps are harness-launch-relative. Response
+latency therefore uses the identified frame's host publication mtime against
+panel send epoch, with an explicit no-wall-clock-step assumption. Boot times
+use the 0.2-second sampled GUI timeline. CPU process roles come from launcher
+PIDs, since macOS truncates `ps comm` output.
+
+### Corrected connected outcome and cumulative result
+
+Three alternating baseline/prefix pairs each ran strict MAIN/Blackfin for an
+85-second GUI budget, with no builds or regression tests during measurement.
+All six pass their launch/hash checks, retain unchanged firmware and QEMU
+inputs, render byte-identical normal-player/UTILITY/encoder-selection milestones,
+and finish with GUI exit 0, no timeout, 5,099 scanned frames, zero reported
+dropped milliseconds and no DSP execution-fault stop. MENU down/up and encoder
+commands are acknowledged in every run. These establish bounded visible
+behavior, not complete guest-state equivalence or cycle-accurate timing.
+
+| Connected metric (three-run median) | Baseline | Prefix guard | Interpretation |
+| --- | ---: | ---: | --- |
+| First normal player observed, from GUI launch | 8.675 s | 8.451 s | 0.224 s earlier observation; about one 0.2 s sample interval |
+| MENU send → UTILITY publication | 1.394 s | 1.351 s | Ranges overlap; no reliable latency gain |
+| Encoder send → changed selection publication | 0.360 s | 0.330 s | Ranges overlap; no reliable latency gain |
+| DSP packets / 85-second GUI budget | 6.366 M/s | 6.366 M/s | Identical median throughput |
+| SH4 host CPU, shared 10–80 s window | 100.03% | 100.02% | Essentially one core in either variant |
+| Blackfin host CPU, same window | 67.21% | 67.49% | No demonstrated CPU saving |
+| Combined host CPU, same window | 167.24% | 167.51% | No demonstrated CPU saving |
+| Blackfin instructions in bounded run | 2.578 billion | 2.579 billion | Includes idle-loop work; not useful-work throughput |
+
+CPU percentages use process CPU deltas divided by the same observed elapsed
+window; 100% is one host core. They exclude the launcher's post-run hashing.
+Normal-player observation ranges are 8.668–8.864 s baseline and 8.436–8.660 s
+candidate. MENU ranges are 1.363–1.420 s and 1.328–1.547 s; encoder ranges
+0.314–0.438 s and 0.311–0.401 s. Three pairs and coarse boot sampling cannot
+establish a robust small speedup. The DSP callback execution totals remain
+82.38–82.56 s per run, with callback p95 around 153–156 ms: synchronous DSP
+work remains the dominant connected constraint.
+
+**Cumulative improvement from this session's starting binaries: 1.099×
+fixed-tick GUI throughput (9.0% less elapsed time), with no reliable measured
+whole-player throughput, panel-latency or CPU improvement.** The prefix guard
+is retained for its repeatable firmware-development workload gain and unchanged
+guest execution semantics. The formatter guard is rejected. These results do
+not compound the prior replay-workflow gains or the 13.87× synthetic SPORT TX
+capture result. Idle scheduling, clock-read coalescing and RAM-side DMA/HPI
+batching remain deferred for the timing-validation/profile reasons above.
+
+Final installed Blackfin SHA-256 is `f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535`;
+`--help` and macOS signature verification both succeed. Reproduce with
+`DEVELOPER_DIR=/Library/Developer/CommandLineTools .venv/bin/python
+analysis/iterations/11-connected/prefix-suite.py`, then run `summarize.py`
+in that directory using the same Python interpreter. The suite refuses a wrong
+experiment binary and verifies existing completed reports before skipping them.
+Use fresh run names for a new timing campaign. Full raw run artifacts remain
+under ignored `runs/`; compact evidence is `prefix-connected-summary.json`.
+The other agent's DSP coverage work and all unrelated changes are preserved.

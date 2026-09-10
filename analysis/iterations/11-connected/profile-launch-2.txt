@@ -1,0 +1,2 @@
+MAIN 35320, GUI 35321; logs: /Users/gpotvin/Git/cdj2000-emulator/runs/optimization-11-profile-2
+{"gui_exit": 0, "viewer_closed": false, "main_exit_before_teardown": null, "timed_out": false, "frame_exists": true}
