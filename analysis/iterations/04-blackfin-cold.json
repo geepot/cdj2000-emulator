@@ -1,0 +1,122 @@
+[
+  {
+    "binary_sha256": "0c3ce0e77d69d577ff989f6d93e1a67303bc20a1ff5a65e32614968a7aa90560",
+    "elf_sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+    "packet_sha256": "3614dfedaf2b52806a1361e6bb3b974e2652c01958bcd8158313879102fa3fb6",
+    "board_sha256": "060b4eb8ba999e97ea45b6dd78983ace068403d8be436b1650383d489eddbeac",
+    "time_base": "insn",
+    "requested_ticks": 60000000,
+    "trials": [
+      {
+        "trial": 0,
+        "seconds": 7.102287666988559,
+        "ticks": 60031090,
+        "instructions": 56950784,
+        "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+        "tx_sha256": null
+      }
+    ],
+    "label": "before",
+    "trial": 0
+  },
+  {
+    "binary_sha256": "5a289e020e65700eac5b07b254cf22daac97ab689605ab0f479c854d2fc5bb8d",
+    "elf_sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+    "packet_sha256": "3614dfedaf2b52806a1361e6bb3b974e2652c01958bcd8158313879102fa3fb6",
+    "board_sha256": "060b4eb8ba999e97ea45b6dd78983ace068403d8be436b1650383d489eddbeac",
+    "time_base": "insn",
+    "requested_ticks": 60000000,
+    "trials": [
+      {
+        "trial": 0,
+        "seconds": 6.9592966249911115,
+        "ticks": 60031090,
+        "instructions": 56950784,
+        "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+        "tx_sha256": null
+      }
+    ],
+    "label": "after",
+    "trial": 0
+  },
+  {
+    "binary_sha256": "5a289e020e65700eac5b07b254cf22daac97ab689605ab0f479c854d2fc5bb8d",
+    "elf_sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+    "packet_sha256": "3614dfedaf2b52806a1361e6bb3b974e2652c01958bcd8158313879102fa3fb6",
+    "board_sha256": "060b4eb8ba999e97ea45b6dd78983ace068403d8be436b1650383d489eddbeac",
+    "time_base": "insn",
+    "requested_ticks": 60000000,
+    "trials": [
+      {
+        "trial": 0,
+        "seconds": 6.8997791669971775,
+        "ticks": 60031090,
+        "instructions": 56950784,
+        "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+        "tx_sha256": null
+      }
+    ],
+    "label": "after",
+    "trial": 1
+  },
+  {
+    "binary_sha256": "0c3ce0e77d69d577ff989f6d93e1a67303bc20a1ff5a65e32614968a7aa90560",
+    "elf_sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+    "packet_sha256": "3614dfedaf2b52806a1361e6bb3b974e2652c01958bcd8158313879102fa3fb6",
+    "board_sha256": "060b4eb8ba999e97ea45b6dd78983ace068403d8be436b1650383d489eddbeac",
+    "time_base": "insn",
+    "requested_ticks": 60000000,
+    "trials": [
+      {
+        "trial": 0,
+        "seconds": 7.039677332999418,
+        "ticks": 60031090,
+        "instructions": 56950784,
+        "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+        "tx_sha256": null
+      }
+    ],
+    "label": "before",
+    "trial": 1
+  },
+  {
+    "binary_sha256": "0c3ce0e77d69d577ff989f6d93e1a67303bc20a1ff5a65e32614968a7aa90560",
+    "elf_sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+    "packet_sha256": "3614dfedaf2b52806a1361e6bb3b974e2652c01958bcd8158313879102fa3fb6",
+    "board_sha256": "060b4eb8ba999e97ea45b6dd78983ace068403d8be436b1650383d489eddbeac",
+    "time_base": "insn",
+    "requested_ticks": 60000000,
+    "trials": [
+      {
+        "trial": 0,
+        "seconds": 6.914430167002138,
+        "ticks": 60031090,
+        "instructions": 56950784,
+        "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+        "tx_sha256": null
+      }
+    ],
+    "label": "before",
+    "trial": 2
+  },
+  {
+    "binary_sha256": "5a289e020e65700eac5b07b254cf22daac97ab689605ab0f479c854d2fc5bb8d",
+    "elf_sha256": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+    "packet_sha256": "3614dfedaf2b52806a1361e6bb3b974e2652c01958bcd8158313879102fa3fb6",
+    "board_sha256": "060b4eb8ba999e97ea45b6dd78983ace068403d8be436b1650383d489eddbeac",
+    "time_base": "insn",
+    "requested_ticks": 60000000,
+    "trials": [
+      {
+        "trial": 0,
+        "seconds": 6.851530833024299,
+        "ticks": 60031090,
+        "instructions": 56950784,
+        "frame_sha256": "b5bb753bd130f8a62423660ccc2e391c3ca3987388eb9d3ce1bfb46997ea9b41",
+        "tx_sha256": null
+      }
+    ],
+    "label": "after",
+    "trial": 2
+  }
+]

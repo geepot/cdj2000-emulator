@@ -238,3 +238,28 @@ including a fail-closed instruction fault and inherited environment override.
 All **33 replay/checkpoint/deferred tests passed**. Raw results:
 `analysis/iterations/03-replay-compact.json`. These are workflow gains from
 reduced diagnostics, not an interpreter throughput or connected-boot claim.
+
+### Iteration 04 — Blackfin cold LZSS helper
+
+Patch 09 moves the optional 4 KiB decompressor window into a non-inlined helper.
+The installed ARM64 dispatch prologue drops from a 0x1040-byte local allocation
+plus saved registers and stack probing to a **96-byte frame with no probe**.
+The accelerator's accepted-bank behavior and declined-path probe ordering remain
+unchanged. The simulator was rebuilt and installed.
+
+Three alternating fixed-tick NXS startup-slice trials before: **7.102, 7.040,
+6.914 s**; after: **6.959, 6.900, 6.852 s**. Median improvement: **1.020×
+(2.0% less time)**. This is a small observed gain, with overlapping ranges;
+no larger whole-player speedup is inferred. Every run stopped at exactly
+**60,031,090 ticks / 56,950,784 instructions**, with the same framebuffer hash.
+No TX file was emitted during this early startup slice, so TX equivalence is not
+claimed. The earlier 300-million-tick exploratory sample is excluded from this
+matched comparison.
+
+Six focused tests passed, including actual-helper synthetic decompression,
+unsupported-bank decline, framebuffer publication, and SIC mask forwarding.
+The optional accelerator is not enabled in the NXS benchmark; its enabled path
+is covered by the synthetic test. Reproduce using `tools/cdj_gui/benchmark_sim.py`
+with `--ticks 60000000`; it uses instruction-counted time and a captured SPRX
+packet fixture, not the connected wall-clock timing mode. Binary/input hashes,
+all trials, and prologue are in `analysis/iterations/04-blackfin-*`.

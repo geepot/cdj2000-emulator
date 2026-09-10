@@ -415,3 +415,15 @@ their existing behavior.
 backend and feeds black, unchanged, changed, and restored scanlines. It checks
 publication counts and that unchanged scans avoid the full RGB comparison.
 Rebuild with `sh scripts/build-bfin-sim.sh` to apply the patch.
+
+## 09: move the LZSS accelerator off the instruction stack
+
+Extract the optional decompressor into a non-inlined helper. Its 4 KiB window
+no longer enlarges every `interp_insn_bfin` call, including NXS runs where the
+accelerator is disabled. Preserve all bank checks, memory writes, return-PC
+updates, and the original pre-probe bypass when acceleration declines.
+
+`tests/test_bfin_cold_lzss.py` exercises the built helper with a synthetic
+space-producing bank and an unsupported source. Fixed-tick firmware benchmarks
+and the generated dispatcher prologue are recorded in `ITERATION_ANALYSIS.md`.
+Rebuild with `sh scripts/build-bfin-sim.sh` to apply the patch.
