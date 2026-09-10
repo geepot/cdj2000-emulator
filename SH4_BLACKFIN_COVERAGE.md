@@ -49,12 +49,10 @@ DMA/IIC/Ethernet/HPI regressions passed after this change. This fills the
 previously empty callback, but does not claim cycle-accurate USB suspend or
 resume timing.
 
-The skipped Blackfin test that matters most is
-`tests/test_blackfin_parallel.py`: `bfin-elf-as`/`bfin-elf-ld` are not installed,
-so the assembled parallel-writeback path is not currently exercised. Five GUI
-firmware tests require locally supplied proprietary update images. The optional
-SH4 panel-profile and some QEMU tests are similarly gated by an opt-in or local
-firmware prerequisite; these are recorded skips, not passing coverage.
+The assembled Blackfin parallel-writeback regression now runs with local
+binutils tools: both the corrected behavior and a specific old-write-order
+negative control pass. Firmware-image and opt-in integration tests retain
+their separate prerequisites; skipped coverage is not counted as passing.
 
 ## SH4 / SH7764
 
@@ -117,9 +115,9 @@ Covered with direct tests or evidence:
 
 Important unvalidated or approximate areas:
 
-- The assembled parallel-writeback regression is skipped without the Blackfin
-  cross assembler/linker. The C-level patch exists, but this leaves the most
-  important patched instruction path without its intended guest-binary test.
+- The assembled parallel-writeback regression now covers relocation and packed
+  subtract/store packets, including an old-write-order negative control. This
+  is targeted instruction coverage, not a complete parallel-issue matrix.
 - The five firmware-image tests are unavailable without local C2KGUI/C2KMAIN
   update images. The current smoke uses the existing extracted NXS GUI inputs.
 - There is no broad BF531 ISA, MMU, exception, cache or privilege coverage
@@ -135,9 +133,8 @@ Important unvalidated or approximate areas:
 
 ## Highest-value next checks
 
-1. Install or provide the Blackfin cross assembler/linker and unskip the
-   assembled parallel-writeback test. Require old-source/new-source register
-   results and a negative test for incorrect write ordering.
+1. Extend the now-executable Blackfin parallel-writeback checks to additional
+   packet classes and exception cases as firmware evidence warrants.
 2. Add a Blackfin PPI/SPORT fixture with real descriptor chains, completion and
    interrupt sequencing, malformed descriptors, short records and a bounded
    frame-rate assertion.

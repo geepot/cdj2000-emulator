@@ -2043,3 +2043,13 @@ the 59,988-record transmit SHA-256 is
 `f84639275492f868d73c8bff2009bcbaaaa7a76b911ff133dd36b230489a17b4`.
 All captured serializer words remain zero.  These are functional breadth and
 reproducibility results, not cycle accuracy, full boot, or working audio.
+
+### Blackfin guest regression tools
+
+Run `DEVELOPER_DIR=/Library/Developer/CommandLineTools sh scripts/build-bfin-tools.sh`
+on macOS (omit DEVELOPER_DIR elsewhere), then
+`python3 -m pytest -q tests/test_blackfin_parallel.py`.
+The helper downloads checksum-pinned GNU binutils 2.44 and builds a local
+`bfin-elf` assembler/linker under `build/bfin-binutils`; no system installation
+is needed. An existing archive can be supplied as the script's first argument.
+Tests also accept `BFIN_AS` and `BFIN_LD` overrides.

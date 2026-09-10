@@ -591,3 +591,18 @@ same framebuffer SHA-256. This confirms recovery, not a measurable firmware
 speedup; this startup workload emits no TX records. Raw before/after evidence:
 `analysis/iterations/10-blackfin-launch-fix.json`. The **13.87×** result remains
 specific to synthetic SPORT capture I/O.
+
+## Coverage follow-up — executable Blackfin parallel-writeback regression
+
+Built GNU binutils 2.44 for `bfin-elf` locally. The reproducible helper
+`scripts/build-bfin-tools.sh` verifies the archive checksum and builds only the
+assembler/linker targets and their dependencies. It uses system zlib to avoid
+an embedded-zlib incompatibility with the current macOS SDK. Tests discover
+these local tools automatically, while retaining BFIN_AS/BFIN_LD overrides.
+
+The assembled guest now checks both the relocation add/store/load packet and
+the packed subtract/store case from patch 01. A negative control removes
+BFIN_PARALLEL_WRITEBACK and requires the specific old-value failure (stored
+11 instead of 7), rather than accepting any process failure. Both cases pass:
+**2 passed in 0.04 s**. This closes the previously skipped instruction check;
+it is coverage work and claims no runtime speedup.
