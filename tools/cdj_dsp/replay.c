@@ -376,6 +376,63 @@ static uint8_t *memory_span(uint32_t address, size_t size)
     return NULL;
 }
 
+/* Optional bounded observer. RAM-only reads: no MMIO side effects, CPU
+ * changes, scheduling changes or inferred buffer ownership. */
+static bool observe_pcm;
+static unsigned pcm_observations;
+static unsigned connected_stop_limit;
+static uint32_t pcm_return_pc, pcm_output_base;
+static void pcm_span(const char *name, uint32_t address, size_t size)
+{
+    const uint8_t *p = memory_span(address, size);
+    printf(",\"%s\":{\"address\":%" PRIu32 ",\"hex\":", name, address);
+    if (!p) printf("null");
+    else {
+        putchar('"');
+        for (size_t i = 0; i < size; ++i) printf("%02x", p[i]);
+        putchar('"');
+    }
+    putchar('}');
+}
+static void pcm_observe(void)
+{
+    if (!observe_pcm || pcm_observations >= 64 || cpu.idle_cycles) return;
+    bool returning = pcm_return_pc && cpu.pc == pcm_return_pc;
+    switch (cpu.pc) {
+    case 0xc003c698: case 0xc003c488: case 0xc003c40c:
+    case 0xc003c398: case 0xc003c2b4: case 0xc003c210:
+    case 0xc003c16c: case 0xc003c034: case 0xc003bf00: break;
+    default: if (!returning) return;
+    }
+    if (cpu.pc == 0xc003c698) {
+        pcm_return_pc = cpu.r[1][3];
+        pcm_output_base = cpu.r[0][4];
+    }
+    printf("{\"event\":\"pcm_observation\",\"index\":%u,\"pc\":%" PRIu32
+           ",\"packets\":%" PRIu64 ",\"cycles\":%" PRIu64
+           ",\"a4\":%" PRIu32 ",\"b4\":%" PRIu32 ",\"a6\":%" PRIu32
+           ",\"b6\":%" PRIu32 ",\"b14\":%" PRIu32
+           ",\"b3\":%" PRIu32 ",\"return_observation\":%s",
+           ++pcm_observations, cpu.pc, cpu.packets, cpu.cycles,
+           cpu.r[0][4], cpu.r[1][4], cpu.r[0][6], cpu.r[1][6], cpu.r[1][14],
+           cpu.r[1][3], returning ? "true" : "false");
+    if (returning) {
+        pcm_span("output_plane0", pcm_output_base, 0x930);
+        pcm_span("output_plane1", pcm_output_base + 0xdc8, 0x930);
+        pcm_return_pc = 0;
+    }
+    pcm_span("state", 0x1182dda0, 0x8c);
+    pcm_span("a4_span", cpu.r[0][4], 0x100);
+    pcm_span("b4_span", cpu.r[1][4], 0x100);
+    pcm_span("b14_span", cpu.r[1][14], 0x80);
+    const uint8_t *p = memory_span(0x1182ddb8, 4);
+    if (p) {
+        uint32_t base = p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
+        pcm_span("raw_banks", base, 0x7980);
+    }
+    printf("}\n");
+}
+
 typedef struct {
     uint8_t *target;
     uint8_t *bytes;
@@ -732,6 +789,7 @@ static const char *run_quota(ReplayLimits *limits, uint32_t breakpoint,
         if (!cdj_c674x_interrupt(
                 &cpu, cdj_c6747_intc_cpu_pending(&intc_delivery)))
             return cpu.fault ? cpu.fault : "CPU interrupt stopped";
+        pcm_observe();
         CdjC674x before = cpu;
         CdjC674xPacket coverage_packet;
         bool has_coverage_packet = coverage_capture(&before, &coverage_packet);
@@ -944,6 +1002,8 @@ static EventReplayResult replay_external_events(
         } else goto mismatch;
         if (event.boot_phase != checkpoint_state.boot_phase ||
             event.hint != hpi.hint || event.dspint != hpi.dspint) goto mismatch;
+        if (connected_stop_limit && verified_stops >= connected_stop_limit &&
+            !strcmp(event.type, "dsp_stop")) break;
         if (begin_quota) {
             uint64_t before_steps = limits->steps_remaining;
             *reason = run_quota(limits, breakpoint, begin_quota);
@@ -1008,6 +1068,15 @@ mismatch:
 int main(int argc, char **argv)
 {
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
+    observe_pcm = getenv("CDJ_DSP_OBSERVE_PCM") != NULL;
+    const char *stop_limit = getenv("CDJ_DSP_CONNECTED_STOPS");
+    if (stop_limit) {
+        char *end;
+        errno = 0;
+        unsigned long n = strtoul(stop_limit, &end, 10);
+        if (errno || !*stop_limit || *end || !n || n > UINT32_MAX) return 2;
+        connected_stop_limit = n;
+    }
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     functional_audio = audio && !strcmp(audio, "1");
@@ -1155,6 +1224,7 @@ int main(int argc, char **argv)
             printf("{\"event\":\"step\",\"pc\":%" PRIu32 ",\"cycles\":%" PRIu64
                    ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
                    cpu.pc, cpu.cycles, cpu.loop_active ? "true" : "false", cpu.branch_due);
+            pcm_observe();
             CdjC674x before = cpu;
             CdjC674xPacket coverage_packet;
             bool has_coverage_packet = coverage_capture(&before, &coverage_packet);

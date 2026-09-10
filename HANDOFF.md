@@ -8,6 +8,14 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 
 ## Current checkpoint
 
+PCM coordination: PCM_EXECUTION_EVIDENCE.md records strict replay of the
+native stock load capture. Sixteen connected stops repeat exactly; four
+588-frame stereo S16 blocks execute c003c398 and produce float32 planes at
+11800200/11800fc8, matching every input/output sample. This is initial bank-0
+conversion, not fresh playback, lifetime/headroom proof or sixteen channels.
+The fresh earlier-insertion attempt remains NO CARD and was stopped without
+forcing readiness; restore default SD insertion timing for the next control.
+
 DHCP/RX milestone: `runs/nxs-dhcp-connected-1` captures genuine firmware
 Discover/Offer/Request/ACK through the isolated peer. MAIN's read-only
 interface record becomes 192.168.42.2 (DHCP state 3), corroborated by subsequent

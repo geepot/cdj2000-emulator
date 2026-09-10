@@ -246,6 +246,10 @@ def main():
                         help='fixed external MAIN boot-phase GPIO value, 0..7 (default: captured phase 0)')
     parser.add_argument('--verify-repeat', action='store_true',
                         help='run the same compiled binary twice and gate on identical traces')
+    parser.add_argument('--observe-pcm', action='store_true',
+                        help='record at most 64 RAM-only stock PCM PC observations; includes fall-through, not ownership proof')
+    parser.add_argument('--connected-stops', type=int, default=0,
+                        help='finish after this many verified connected stops (0: entire transcript)')
     parser.add_argument('--expect-trace', type=Path,
                         help='also require byte-identical output to this saved trace; not a boot test')
     parser.add_argument('--events', type=Path,
@@ -259,6 +263,8 @@ def main():
     parser.add_argument('--formats', type=Path, default=DEFAULT_FORMATS,
                         help='GNU tic6x-insn-formats.h used for automatic coverage')
     args = parser.parse_args()
+    if not 0 <= args.connected_stops <= 0xffffffff or (args.connected_stops and not args.events):
+        parser.error('--connected-stops requires --events and a count from 1 to 4294967295')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if (not 0 < args.steps <= 100000000 or
@@ -411,6 +417,7 @@ def main():
                         architectural_validation_eligible=validation_eligible,
                         inherited_exploratory_state=inherited_exploratory,
                         break_pc=args.break_pc, boot_phase=args.boot_phase,
+                        observe_pcm=args.observe_pcm, connected_stops=args.connected_stops,
                         input_kind=checkpoint_origin if checkpoint else 'legacy_l2_dump',
                         input_checkpoint=input_checkpoint,
                         input_manifest_sha256=checkpoint_manifest_sha256,
@@ -451,6 +458,12 @@ def main():
         if event_data is not None:
             command.append(str(event_snapshot))
         replay_env = os.environ.copy()
+        replay_env.pop('CDJ_DSP_OBSERVE_PCM', None)
+        replay_env.pop('CDJ_DSP_CONNECTED_STOPS', None)
+        if args.connected_stops:
+            replay_env['CDJ_DSP_CONNECTED_STOPS'] = str(args.connected_stops)
+        if args.observe_pcm:
+            replay_env['CDJ_DSP_OBSERVE_PCM'] = '1'
         if args.functional_dsp_timing:
             replay_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
         else:

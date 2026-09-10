@@ -149,6 +149,33 @@ def test_rejects_event_transcript_without_manifest_provenance(tmp_path):
     assert 'event-transcript provenance' in result.stderr
 
 
+def test_connected_stop_limit_preserves_verified_boundary(tmp_path):
+    checkpoint_dir, checkpoint = make_running_checkpoint(tmp_path)
+    transcript = tmp_path / 'events.jsonl'
+    transcript.write_text(encoded_event(1, 'boot_phase') +
+        encoded_event(2, 'dsp_stop', address=0x11800024, packets=1, cycles=1) +
+        encoded_event(3, 'reset_assert'))
+    (checkpoint_dir / 'manifest.json').write_text(json.dumps({
+        'complete': True,
+        'checkpoints': [{'file': checkpoint.name,
+                        'sha256': hashlib.sha256(checkpoint.read_bytes()).hexdigest()}],
+        'event_transcript': {'sha256': hashlib.sha256(transcript.read_bytes()).hexdigest()},
+    }))
+    output = tmp_path / 'bounded'
+    result = subprocess.run([
+        sys.executable, '-m', 'tools.cdj_dsp.replay', str(checkpoint), str(output),
+        '--steps', '1', '--events', str(transcript), '--connected-stops', '1',
+        '--observe-pcm', '--verify-repeat'], cwd=ROOT, text=True,
+        capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    gate = json.loads((output / 'gate.json').read_text())
+    assert gate['passed'] and gate['verified_connected_stops'] == 1
+    assert gate['final_state_and_memory_match']
+    manifest = json.loads((output / 'manifest.json').read_text())
+    assert manifest['connected_stops'] == 1 and manifest['observe_pcm']
+    assert (output / 'final.cdjdsp').is_file()
+
+
 def test_rejects_connected_stop_state_mismatch(tmp_path):
     checkpoint_dir, checkpoint = make_checkpoint(tmp_path)
     transcript = tmp_path / 'events.jsonl'
