@@ -1,0 +1,23 @@
+[
+  {
+    "trial": 0,
+    "seconds": 0.502874833997339,
+    "status": 0,
+    "compile_lines": 0,
+    "no_work": false
+  },
+  {
+    "trial": 1,
+    "seconds": 0.4768070410063956,
+    "status": 0,
+    "compile_lines": 0,
+    "no_work": false
+  },
+  {
+    "trial": 2,
+    "seconds": 0.4865334579953924,
+    "status": 0,
+    "compile_lines": 0,
+    "no_work": false
+  }
+]

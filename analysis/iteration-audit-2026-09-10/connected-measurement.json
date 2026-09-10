@@ -1,0 +1,27 @@
+{
+  "run": "runs/whole-emulator-audit-20260910",
+  "result": {
+    "gui_exit": 0,
+    "viewer_closed": false,
+    "main_exit_before_teardown": null,
+    "timed_out": false,
+    "frame_exists": true
+  },
+  "callbacks": 205,
+  "execution_seconds": 33.910237,
+  "reporting_seconds": 0.396162,
+  "max_execution_ms": 231.915,
+  "blackfin_stats": [
+    "STATS wall=5.0 pc=0xd0cf6c insns=118161408 mips=23.63 ticks=2000100800 tick_rate=400.000M/s events=105828 dma=79546 frames=299 published=1 link_rx=1224 mem_fill=1233 guest_s=5.00 parked_s=1.48 dropped_ms=0.0 waits=6071 spins=2095948",
+    "STATS wall=10.0 pc=0xd0cf4e insns=284753920 mips=33.31 ticks=4000537201 tick_rate=400.000M/s events=293116 dma=170904 frames=599 published=10 link_rx=3768 mem_fill=1523 guest_s=10.00 parked_s=2.70 dropped_ms=0.0 waits=13909 spins=12667540",
+    "STATS wall=15.0 pc=0xd0cf62 insns=446365696 mips=32.32 ticks=6000538401 tick_rate=400.000M/s events=482263 dma=262394 frames=899 published=10 link_rx=5712 mem_fill=1525 guest_s=15.00 parked_s=3.92 dropped_ms=0.0 waits=24439 spins=24604184",
+    "STATS wall=20.0 pc=0xd290fc insns=607518720 mips=32.23 ticks=8000814402 tick_rate=399.997M/s events=671296 dma=353870 frames=1199 published=10 link_rx=7584 mem_fill=1527 guest_s=20.00 parked_s=5.21 dropped_ms=0.0 waits=34086 spins=36249909",
+    "STATS wall=25.0 pc=0xd0cf5c insns=767950848 mips=32.10 ticks=10000110401 tick_rate=400.003M/s events=859880 dma=445286 frames=1499 published=10 link_rx=9456 mem_fill=1527 guest_s=25.00 parked_s=6.51 dropped_ms=0.0 waits=41665 spins=47776017",
+    "STATS wall=30.0 pc=0xd0ab00 insns=928579584 mips=32.12 ticks=12000364001 tick_rate=400.000M/s events=1048620 dma=536739 frames=1799 published=10 link_rx=11400 mem_fill=1529 guest_s=30.00 parked_s=7.78 dropped_ms=0.0 waits=50872 spins=59195113",
+    "STATS wall=35.0 pc=0xd0bf88 insns=1089273856 mips=32.14 ticks=14000389200 tick_rate=400.000M/s events=1237692 dma=628213 frames=2099 published=10 link_rx=13200 mem_fill=1531 guest_s=35.00 parked_s=8.94 dropped_ms=0.0 waits=60175 spins=70423807"
+  ],
+  "binaries": {
+    "bin/cdj-run": "4622e5162ac5c48b47f2d250e63943b2549d25774815d9a5bf6a1ef9aec9bdec",
+    "build/qemu/build/qemu-system-sh4": "27fa24eb76e4cdf4fde34e20d693494c0f44e3ba0300052a4cf516390c2b581f"
+  }
+}

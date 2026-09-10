@@ -1,0 +1,444 @@
+Analysis of sampling cdj-run (pid 69061) every 1 millisecond
+Process:         cdj-run [69061]
+Path:            /Users/USER/*/cdj-run
+Load Address:    0x102c68000
+Identifier:      cdj-run
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  python3.12 [68524]
+Target Type:     live task
+
+Date/Time:       2026-09-10 13:41:14.221 -0700
+Launch Time:     2026-09-10 13:40:44.825 -0700
+OS Version:      macOS 27.0 (26A5425a)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         39.2M
+Physical footprint (peak):  39.2M
+Idle exit:                  untracked
+----
+
+Call graph:
+    2384 Thread_8121063   DispatchQueue_1: com.apple.main-thread  (serial)
+      2384 start  (in dyld) + 6688  [0x18889fe88]
+        2384 main  (in cdj-run) + 460  [0x102c689b4]
+          2384 sim_resume  (in cdj-run) + 232  [0x102cc4f40]
+            1306 sim_engine_run  (in cdj-run) + 1240  [0x102cc20c0]
+            + 1003 interp_insn_bfin  (in cdj-run) + 1584  [0x102c99da8]
+            + ! 473 _interp_insn_bfin  (in cdj-run) + 44,6328,...  [0x102c9eee0,0x102ca076c,...]
+            + ! 103 _interp_insn_bfin  (in cdj-run) + 11968  [0x102ca1d74]
+            + ! : 61 decode_LDST_0  (in cdj-run) + 80,4696,...  [0x102ca93e0,0x102caa5e8,...]
+            + ! : 16 decode_LDST_0  (in cdj-run) + 5096  [0x102caa778]
+            + ! : | 16 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   12 _mmu_check_addr  (in cdj-run) + 908,20,...  [0x102c8c944,0x102c8c5cc,...]
+            + ! : |   3 _mmu_check_addr  (in cdj-run) + 64  [0x102c8c5f8]
+            + ! : |   + 3 cec_is_supervisor_mode  (in cdj-run) + 4  [0x102c84c90]
+            + ! : |   1 cec_is_supervisor_mode  (in cdj-run) + 108  [0x102c84cf8]
+            + ! : 15 decode_LDST_0  (in cdj-run) + 2344  [0x102ca9cb8]
+            + ! : | 14 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : | + 13 _mmu_check_addr  (in cdj-run) + 492,504,...  [0x102c8c7a4,0x102c8c7b0,...]
+            + ! : | + 1 _mmu_check_addr  (in cdj-run) + 64  [0x102c8c5f8]
+            + ! : | +   1 cec_is_supervisor_mode  (in cdj-run) + 4  [0x102c84c90]
+            + ! : | 1 _mmu_check_addr  (in cdj-run) + 1632  [0x102c8cc18]
+            + ! : 4 decode_LDST_0  (in cdj-run) + 4488  [0x102caa518]
+            + ! : | 4 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   4 _mmu_check_addr  (in cdj-run) + 908,880,...  [0x102c8c944,0x102c8c928,...]
+            + ! : 3 decode_LDST_0  (in cdj-run) + 5116  [0x102caa78c]
+            + ! : | 3 bfin_fast_host  (in cdj-run) + 36,72,...  [0x102d53304,0x102d53328,...]
+            + ! : 2 decode_LDST_0  (in cdj-run) + 3480  [0x102caa128]
+            + ! : | 2 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   2 _mmu_check_addr  (in cdj-run) + 908  [0x102c8c944]
+            + ! : 1 decode_LDST_0  (in cdj-run) + 2840  [0x102ca9ea8]
+            + ! : | 1 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   1 _mmu_check_addr  (in cdj-run) + 908  [0x102c8c944]
+            + ! : 1 decode_LDST_0  (in cdj-run) + 5308  [0x102caa84c]
+            + ! :   1 sim_core_write_buffer  (in cdj-run) + 276  [0x102c6c85c]
+            + ! :     1 sim_cpu_hw_io_write_buffer  (in cdj-run) + 72  [0x102c81984]
+            + ! :       1 bfin_dma_io_write_buffer  (in cdj-run) + 172  [0x102c8716c]
+            + ! 67 _interp_insn_bfin  (in cdj-run) + 12008  [0x102ca1d9c]
+            + ! : 34 decode_LDSTiiFP_0  (in cdj-run) + 24,488,...  [0x102cab30c,0x102cab4dc,...]
+            + ! : 16 decode_LDSTiiFP_0  (in cdj-run) + 612  [0x102cab558]
+            + ! : | 12 reg_write  (in cdj-run) + 292,352,...  [0x102cbba64,0x102cbbaa0,...]
+            + ! : | 4 reg_write  (in cdj-run) + 292  [0x102cbba64]
+            + ! : |   4 get_allreg  (in cdj-run) + 0,128  [0x102cbbcd4,0x102cbbd54]
+            + ! : 6 decode_LDSTiiFP_0  (in cdj-run) + 68  [0x102cab338]
+            + ! : | 6 fmtconst_str  (in cdj-run) + 20  [0x102cbb824]
+            + ! : 4 decode_LDSTiiFP_0  (in cdj-run) + 664  [0x102cab58c]
+            + ! : | 2 reg_read  (in cdj-run) + 216  [0x102cbbc28]
+            + ! : | + 2 get_allreg  (in cdj-run) + 0  [0x102cbbcd4]
+            + ! : | 2 reg_read  (in cdj-run) + 216,240  [0x102cbbc28,0x102cbbc40]
+            + ! : 3 fmtconst_str  (in cdj-run) + 92  [0x102cbb86c]
+            + ! : 2 reg_read  (in cdj-run) + 304  [0x102cbbc80]
+            + ! : 1 decode_LDSTiiFP_0  (in cdj-run) + 380  [0x102cab470]
+            + ! : | 1 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   1 _mmu_check_addr  (in cdj-run) + 972  [0x102c8c984]
+            + ! : 1 reg_write  (in cdj-run) + 500  [0x102cbbb34]
+            + ! 53 _interp_insn_bfin  (in cdj-run) + 9032  [0x102ca11fc]
+            + ! : 20 decode_REGMV_0  (in cdj-run) + 264,124,...  [0x102ca3b74,0x102ca3ae8,...]
+            + ! : 13 decode_REGMV_0  (in cdj-run) + 520  [0x102ca3c74]
+            + ! : | 8 reg_read  (in cdj-run) + 216,240,...  [0x102cbbc28,0x102cbbc40,...]
+            + ! : | 5 reg_read  (in cdj-run) + 216  [0x102cbbc28]
+            + ! : |   5 get_allreg  (in cdj-run) + 0,32,...  [0x102cbbcd4,0x102cbbcf4,...]
+            + ! : 10 reg_write  (in cdj-run) + 40,292,...  [0x102cbb968,0x102cbba64,...]
+            + ! : 6 reg_write  (in cdj-run) + 292  [0x102cbba64]
+            + ! : | 6 get_allreg  (in cdj-run) + 0,24,...  [0x102cbbcd4,0x102cbbcec,...]
+            + ! : 4 reg_read  (in cdj-run) + 296  [0x102cbbc78]
+            + ! 49 _interp_insn_bfin  (in cdj-run) + 12036  [0x102ca1db8]
+            + ! : 36 decode_LDSTii_0  (in cdj-run) + 584,48,...  [0x102caba4c,0x102cab834,...]
+            + ! : 8 decode_LDSTii_0  (in cdj-run) + 208  [0x102cab8d4]
+            + ! : | 8 fmtconst_str  (in cdj-run) + 20  [0x102cbb824]
+            + ! : 3 decode_LDSTii_0  (in cdj-run) + 2080  [0x102cac024]
+            + ! : | 3 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   2 _mmu_check_addr  (in cdj-run) + 432,880  [0x102c8c768,0x102c8c928]
+            + ! : |   1 _mmu_check_addr  (in cdj-run) + 64  [0x102c8c5f8]
+            + ! : |     1 cec_is_supervisor_mode  (in cdj-run) + 40  [0x102c84cb4]
+            + ! : 1 decode_LDSTii_0  (in cdj-run) + 916  [0x102cabb98]
+            + ! : | 1 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   1 _mmu_check_addr  (in cdj-run) + 504  [0x102c8c7b0]
+            + ! : 1 decode_LDSTii_0  (in cdj-run) + 3280  [0x102cac4d4]
+            + ! :   1 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! :     1 _mmu_check_addr  (in cdj-run) + 972  [0x102c8c984]
+            + ! 39 _interp_insn_bfin  (in cdj-run) + 9016  [0x102ca11ec]
+            + ! : 27 decode_UJUMP_0  (in cdj-run) + 56,0,...  [0x102ca392c,0x102ca38f4,...]
+            + ! : 9 decode_UJUMP_0  (in cdj-run) + 268  [0x102ca3a00]
+            + ! : | 9 bfin_trace_queue  (in cdj-run) + 40,0,...  [0x102c9653c,0x102c96514,...]
+            + ! : 3 bfin_trace_queue  (in cdj-run) + 64  [0x102c96554]
+            + ! 33 _interp_insn_bfin  (in cdj-run) + 4248  [0x102c9ff4c]
+            + ! : 33 decode_CCflag_0  (in cdj-run) + 40,24,...  [0x102ca2858,0x102ca2848,...]
+            + ! 33 _interp_insn_bfin  (in cdj-run) + 10048  [0x102ca15f4]
+            + ! : 20 decode_COMPI2opD_0  (in cdj-run) + 244,32,...  [0x102ca5a5c,0x102ca5988,...]
+            + ! : 10 decode_COMPI2opD_0  (in cdj-run) + 656  [0x102ca5bf8]
+            + ! : | 10 add32  (in cdj-run) + 80,20,...  [0x102cbc7a0,0x102cbc764,...]
+            + ! : 3 add32  (in cdj-run) + 456  [0x102cbc918]
+            + ! 28 _interp_insn_bfin  (in cdj-run) + 6372  [0x102ca0798]
+            + ! : 25 decode_BRCC_0  (in cdj-run) + 272,324,...  [0x102ca37f4,0x102ca3828,...]
+            + ! : 2 bfin_trace_queue  (in cdj-run) + 64  [0x102c96554]
+            + ! : 1 decode_BRCC_0  (in cdj-run) + 400  [0x102ca3874]
+            + ! :   1 bfin_trace_queue  (in cdj-run) + 12  [0x102c96520]
+            + ! 24 _interp_insn_bfin  (in cdj-run) + 9128  [0x102ca125c]
+            + ! : 13 decode_dsp32shiftimm_0  (in cdj-run) + 52,100,...  [0x102cb85e0,0x102cb8610,...]
+            + ! : 3 decode_dsp32shiftimm_0  (in cdj-run) + 6724  [0x102cb9ff0]
+            + ! : | 3 fmtconst_val  (in cdj-run) + 76,16  [0x102cbb804,0x102cbb7c8]
+            + ! : 3 decode_dsp32shiftimm_0  (in cdj-run) + 8408  [0x102cba684]
+            + ! : | 3 lshift  (in cdj-run) + 72,108  [0x102cbc1a8,0x102cbc1cc]
+            + ! : 3 lshift  (in cdj-run) + 588  [0x102cbc3ac]
+            + ! : 2 queue_store  (in cdj-run) + 24,40  [0x102ca23dc,0x102ca23ec]
+            + ! 14 _interp_insn_bfin  (in cdj-run) + 10912  [0x102ca1954]
+            + ! : 8 decode_LDSTpmod_0  (in cdj-run) + 4004  [0x102ca6d80]
+            + ! : | 4 sim_core_write_buffer  (in cdj-run) + 276  [0x102c6c85c]
+            + ! : | + 3 sim_cpu_hw_io_write_buffer  (in cdj-run) + 72  [0x102c81984]
+            + ! : | + ! 1 bfin_dma_io_write_buffer  (in cdj-run) + 920  [0x102c87458]
+            + ! : | + ! : 1 bfin_dma_reschedule  (in cdj-run) + 108  [0x102c87ac4]
+            + ! : | + ! :   1 hw_event_queue_schedule  (in cdj-run) + 0  [0x102c7d4b0]
+            + ! : | + ! 1 bfin_dma_io_write_buffer  (in cdj-run) + 848  [0x102c87410]
+            + ! : | + ! 1 dv_bfin_mmr_require_16_32  (in cdj-run) + 32  [0x102cbebf0]
+            + ! : | + 1 sim_cpu_hw_io_write_buffer  (in cdj-run) + 44  [0x102c81968]
+            + ! : | 3 sim_core_write_buffer  (in cdj-run) + 312,320,...  [0x102c6c880,0x102c6c888,...]
+            + ! : | 1 sim_core_write_buffer  (in cdj-run) + 244  [0x102c6c83c]
+            + ! : |   1 bfin_pc_get  (in cdj-run) + 4  [0x102cc4a4c]
+            + ! : 3 decode_LDSTpmod_0  (in cdj-run) + 1332  [0x102ca6310]
+            + ! : | 3 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! : |   3 _mmu_check_addr  (in cdj-run) + 180,504,...  [0x102c8c66c,0x102c8c7b0,...]
+            + ! : 3 decode_LDSTpmod_0  (in cdj-run) + 24,300,...  [0x102ca5df4,0x102ca5f08,...]
+            + ! 11 _interp_insn_bfin  (in cdj-run) + 10888  [0x102ca193c]
+            + ! : 11 decode_COMPI2opP_0  (in cdj-run) + 56,88,...  [0x102ca5c84,0x102ca5ca4,...]
+            + ! 9 _interp_insn_bfin  (in cdj-run) + 708  [0x102c9f178]
+            + ! : 4 trace_prefix  (in cdj-run) + 484  [0x102c79878]
+            + ! : | 4 sprintf  (in libsystem_c.dylib) + 68  [0x188b10018]
+            + ! : |   4 vsprintf_l  (in libsystem_c.dylib) + 204  [0x188b09b84]
+            + ! : |     2 __vfprintf  (in libsystem_c.dylib) + 512,564  [0x188afecd4,0x188afed08]
+            + ! : |     1 __ultoa  (in libsystem_c.dylib) + 252  [0x188b0229c]
+            + ! : |     1 __vfprintf  (in libsystem_c.dylib) + 11868  [0x188b01930]
+            + ! : |       1 __sfvwrite  (in libsystem_c.dylib) + 352  [0x188b01ecc]
+            + ! : |         1 _platform_memmove  (in libsystem_platform.dylib) + 0  [0x188c7fd60]
+            + ! : 4 trace_prefix  (in cdj-run) + 520  [0x102c7989c]
+            + ! : | 4 vsprintf_l  (in libsystem_c.dylib) + 204  [0x188b09b84]
+            + ! : |   3 __vfprintf  (in libsystem_c.dylib) + 116,2364,...  [0x188afeb48,0x188aff410,...]
+            + ! : |   1 __v2printf  (in libsystem_c.dylib) + 84  [0x188afe774]
+            + ! : 1 trace_prefix  (in cdj-run) + 496  [0x102c79884]
+            + ! :   1 _platform_strlen  (in libsystem_platform.dylib) + 80  [0x188c7cb90]
+            + ! 8 _interp_insn_bfin  (in cdj-run) + 3648  [0x102c9fcf4]
+            + ! : 7 decode_LDSTidxI_0  (in cdj-run) + 48,100,...  [0x102cace50,0x102cace84,...]
+            + ! : 1 decode_LDSTidxI_0  (in cdj-run) + 2376  [0x102cad768]
+            + ! :   1 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! :     1 _mmu_check_addr  (in cdj-run) + 504  [0x102c8c7b0]
+            + ! 7 _interp_insn_bfin  (in cdj-run) + 9720  [0x102ca14ac]
+            + ! : 4 setflags_logical  (in cdj-run) + 172,36,...  [0x102cbc624,0x102cbc59c,...]
+            + ! : 3 decode_COMP3op_0  (in cdj-run) + 28,124,...  [0x102ca5354,0x102ca53b4,...]
+            + ! 6 _interp_insn_bfin  (in cdj-run) + 5384  [0x102ca03bc]
+            + ! : 3 reg_write  (in cdj-run) + 292  [0x102cbba64]
+            + ! : | 3 get_allreg  (in cdj-run) + 128,0  [0x102cbbd54,0x102cbbcd4]
+            + ! : 3 reg_write  (in cdj-run) + 400,40  [0x102cbbad0,0x102cbb968]
+            + ! 6 _interp_insn_bfin  (in cdj-run) + 9544  [0x102ca13fc]
+            + ! : 3 decode_LOGI2op_0  (in cdj-run) + 132,228  [0x102ca4ef0,0x102ca4f50]
+            + ! : 2 decode_LOGI2op_0  (in cdj-run) + 48  [0x102ca4e9c]
+            + ! : | 2 fmtconst_str  (in cdj-run) + 20  [0x102cbb824]
+            + ! : 1 fmtconst_str  (in cdj-run) + 92  [0x102cbb86c]
+            + ! 5 _interp_insn_bfin  (in cdj-run) + 4376  [0x102c9ffcc]
+            + ! : 4 decode_linkage_0  (in cdj-run) + 44,284,...  [0x102caed64,0x102caee54,...]
+            + ! : 1 decode_linkage_0  (in cdj-run) + 308  [0x102caee6c]
+            + ! :   1 mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+            + ! :     1 _mmu_check_addr  (in cdj-run) + 504  [0x102c8c7b0]
+            + ! 5 decode_BRCC_0  (in cdj-run) + 508  [0x102ca38e0]
+            + ! 5 decode_LDSTiiFP_0  (in cdj-run) + 1008  [0x102cab6e4]
+            + ! 5 decode_UJUMP_0  (in cdj-run) + 356  [0x102ca3a58]
+            + ! 4 decode_COMPI2opD_0  (in cdj-run) + 716  [0x102ca5c34]
+            + ! 2 _interp_insn_bfin  (in cdj-run) + 4332  [0x102c9ffa0]
+            + ! : 2 reg_read  (in cdj-run) + 12  [0x102cbbb5c]
+            + ! 2 _interp_insn_bfin  (in cdj-run) + 5356  [0x102ca03a0]
+            + ! : 1 reg_read  (in cdj-run) + 216  [0x102cbbc28]
+            + ! : | 1 get_allreg  (in cdj-run) + 0  [0x102cbbcd4]
+            + ! : 1 reg_read  (in cdj-run) + 216  [0x102cbbc28]
+            + ! 2 decode_COMP3op_0  (in cdj-run) + 984,1556  [0x102ca5710,0x102ca594c]
+            + ! 2 decode_LDSTidxI_0  (in cdj-run) + 7124,7132  [0x102cae9f4,0x102cae9fc]
+            + ! 2 decode_LDSTii_0  (in cdj-run) + 5464  [0x102cacd5c]
+            + ! 1 _interp_insn_bfin  (in cdj-run) + 3668  [0x102c9fd08]
+            + ! : 1 fmtconst_str  (in cdj-run) + 20  [0x102cbb824]
+            + ! 1 decode_CCflag_0  (in cdj-run) + 1332  [0x102ca2d64]
+            + ! 1 decode_LDST_0  (in cdj-run) + 5700  [0x102caa9d4]
+            + ! 1 decode_LOGI2op_0  (in cdj-run) + 316  [0x102ca4fa8]
+            + ! 1 decode_linkage_0  (in cdj-run) + 1968  [0x102caf4e8]
+            + ! 1 fmtconst_str  (in cdj-run) + 92  [0x102cbb86c]
+            + 170 interp_insn_bfin  (in cdj-run) + 36,88,...  [0x102c9979c,0x102c997d0,...]
+            + 57 _interp_insn_bfin  (in cdj-run) + 10504,10496  [0x102ca17bc,0x102ca17b4]
+            + 49 interp_insn_bfin  (in cdj-run) + 44  [0x102c997a4]
+            + ! 49 ___chkstk_darwin  (in libsystem_pthread.dylib) + 52,20,...  [0x188c70d24,0x188c70d04,...]
+            + 27 sim_engine_run  (in cdj-run) + 1316,1144,...  [0x102cc210c,0x102cc2060,...]
+            512 sim_engine_run  (in cdj-run) + 2468  [0x102cc258c]
+            + 511 __select  (in libsystem_kernel.dylib) + 8  [0x188c3bef0]
+            + 1 sim_engine_run  (in cdj-run) + 2468  [0x102cc258c]
+            232 sim_engine_run  (in cdj-run) + 1268  [0x102cc20dc]
+            + 183 sim_engine_run  (in cdj-run) + 1144,880,...  [0x102cc2060,0x102cc1f58,...]
+            + 46 hwloop_get_next_pc  (in cdj-run) + 0,28,...  [0x102c995e8,0x102c99604,...]
+            + 2 hwloop_get_next_pc  (in cdj-run) + 160  [0x102c99688]
+            + ! 2 bfin_trace_queue  (in cdj-run) + 40  [0x102c9653c]
+            + 1 bfin_trace_queue  (in cdj-run) + 64  [0x102c96554]
+            93 sim_engine_run  (in cdj-run) + 2172  [0x102cc2464]
+            + 89 clock_gettime  (in libsystem_c.dylib) + 300  [0x188b0c264]
+            + ! 85 _mach_boottime_usec  (in libsystem_c.dylib) + 64  [0x188b32b90]
+            + ! : 85 gettimeofday  (in libsystem_c.dylib) + 56  [0x188b03f80]
+            + ! :   81 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x188c32c20]
+            + ! :   | 81 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x188c310f8,0x188c310fc,...]
+            + ! :   3 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 80,0  [0x188c32c44,0x188c32bf4]
+            + ! :   1 __commpage_gettimeofday  (in libsystem_kernel.dylib) + 0  [0x188c32bec]
+            + ! 4 _mach_boottime_usec  (in libsystem_c.dylib) + 88,64  [0x188b32ba8,0x188b32b90]
+            + 3 clock_gettime  (in libsystem_c.dylib) + 8,12,...  [0x188b0c140,0x188b0c144,...]
+            + 1 sim_engine_run  (in cdj-run) + 1184  [0x102cc2088]
+            91 sim_engine_run  (in cdj-run) + 1852  [0x102cc2324]
+            + 91 sim_events_process  (in cdj-run) + 1492  [0x102c70940]
+            +   81 bfin_dma_hw_event_callback  (in cdj-run) + 856  [0x102c87e34]
+            +   ! 39 bfin_sport_dma_read_buffer  (in cdj-run) + 4780  [0x102c91364]
+            +   ! : 38 fopen$DARWIN_EXTSN  (in libsystem_c.dylib) + 220  [0x188b76750]
+            +   ! : | 38 open$NOCANCEL  (in libsystem_kernel.dylib) + 64  [0x188c46024]
+            +   ! : |   38 __open_nocancel  (in libsystem_kernel.dylib) + 8  [0x188c3193c]
+            +   ! : 1 fopen$DARWIN_EXTSN  (in libsystem_c.dylib) + 392  [0x188b767fc]
+            +   ! :   1 _sseek  (in libsystem_c.dylib) + 72  [0x188b122b4]
+            +   ! :     1 __lseek  (in libsystem_kernel.dylib) + 8  [0x188c3261c]
+            +   ! 33 bfin_sport_dma_read_buffer  (in cdj-run) + 4876  [0x102c913c4]
+            +   ! : 18 fclose  (in libsystem_c.dylib) + 216  [0x188b1c4ec]
+            +   ! : | 18 __close_nocancel  (in libsystem_kernel.dylib) + 8  [0x188c3257c]
+            +   ! : 14 fclose  (in libsystem_c.dylib) + 152  [0x188b1c4ac]
+            +   ! : | 14 __sflush  (in libsystem_c.dylib) + 232  [0x188b0d730]
+            +   ! : |   14 _swrite  (in libsystem_c.dylib) + 108  [0x188b0f9e4]
+            +   ! : |     14 __swrite  (in libsystem_c.dylib) + 24  [0x188b2f254]
+            +   ! : |       14 __write_nocancel  (in libsystem_kernel.dylib) + 8  [0x188c34be8]
+            +   ! : 1 fclose  (in libsystem_c.dylib) + 0  [0x188b1c414]
+            +   ! 4 bfin_sport_dma_read_buffer  (in cdj-run) + 992  [0x102c90498]
+            +   ! : 4 bfin_sport_link_poll  (in cdj-run) + 116  [0x102c92ccc]
+            +   ! :   3 __recvfrom  (in libsystem_kernel.dylib) + 8  [0x188c353c8]
+            +   ! :   1 __recvfrom  (in libsystem_kernel.dylib) + 28  [0x188c353dc]
+            +   ! :     1 cerror  (in libsystem_kernel.dylib) + 44  [0x188c325f8]
+            +   ! :       1 _pthread_exit_if_canceled  (in libsystem_pthread.dylib) + 0  [0x188c6f958]
+            +   ! 2 bfin_sport_dma_read_buffer  (in cdj-run) + 4848  [0x102c913a8]
+            +   ! : 2 fwrite  (in libsystem_c.dylib) + 300  [0x188b1e618]
+            +   ! :   1 __sfvwrite  (in libsystem_c.dylib) + 76  [0x188b01db8]
+            +   ! :   | 1 __swsetup  (in libsystem_c.dylib) + 188  [0x188b1e734]
+            +   ! :   |   1 __smakebuf  (in libsystem_c.dylib) + 52  [0x188b11db0]
+            +   ! :   |     1 __swhatbuf  (in libsystem_c.dylib) + 76  [0x188b12068]
+            +   ! :   |       1 fstat  (in libsystem_kernel.dylib) + 8  [0x188c3f43c]
+            +   ! :   1 __sfvwrite  (in libsystem_c.dylib) + 400  [0x188b01efc]
+            +   ! :     1 _platform_memmove  (in libsystem_platform.dylib) + 428  [0x188c7ff0c]
+            +   ! 2 bfin_sport_dma_read_buffer  (in cdj-run) + 4868  [0x102c913bc]
+            +   ! : 1 fwrite  (in libsystem_c.dylib) + 300  [0x188b1e618]
+            +   ! : | 1 fwrite  (in libsystem_c.dylib) + 300  [0x188b1e618]
+            +   ! : |   1 __sfvwrite  (in libsystem_c.dylib) + 48  [0x188b01d9c]
+            +   ! : 1 fwrite  (in libsystem_c.dylib) + 300  [0x188b1e618]
+            +   ! 1 bfin_sport_dma_read_buffer  (in cdj-run) + 3392  [0x102c90df8]
+            +   7 bfin_dma_hw_event_callback  (in cdj-run) + 788  [0x102c87df0]
+            +   ! 6 bfin_sport_dma_write_buffer  (in cdj-run) + 324  [0x102c926e0]
+            +   ! : 6 __sendto  (in libsystem_kernel.dylib) + 8  [0x188c3539c]
+            +   ! 1 bfin_sport_dma_write_buffer  (in cdj-run) + 84  [0x102c925f0]
+            +   !   1 getenv  (in libsystem_c.dylib) + 64  [0x188afdf48]
+            +   !     1 __findenv_locked  (in libsystem_c.dylib) + 64  [0x188afdfb4]
+            +   1 bfin_ctimer_expire  (in cdj-run) + 120  [0x102c86d8c]
+            +   ! 1 hw_event_queue_schedule_tracef  (in cdj-run) + 48  [0x102c7d4e8]
+            +   1 bfin_dma_hw_event_callback  (in cdj-run) + 992  [0x102c87ebc]
+            +   ! 1 bfin_dma_finish_x  (in cdj-run) + 256  [0x102c88110]
+            +   !   1 hw_port_event  (in cdj-run) + 104  [0x102c7dbac]
+            +   !     1 bfin_sic_537_port_event  (in cdj-run) + 0  [0x102c95430]
+            +   1 bfin_dma_hw_event_callback  (in cdj-run) + 1268  [0x102c87fd0]
+            +     1 hw_event_queue_schedule_tracef  (in cdj-run) + 60  [0x102c7d4f4]
+            +       1 hw_zalloc  (in cdj-run) + 44  [0x102c7c538]
+            +         1 xcalloc  (in cdj-run) + 40  [0x102d52540]
+            +           1 _malloc_zone_calloc  (in libsystem_malloc.dylib) + 12  [0x188a9c540]
+            72 sim_engine_run  (in cdj-run) + 1632  [0x102cc2248]
+            + 67 clock_gettime  (in libsystem_c.dylib) + 300  [0x188b0c264]
+            + ! 63 _mach_boottime_usec  (in libsystem_c.dylib) + 64  [0x188b32b90]
+            + ! : 63 gettimeofday  (in libsystem_c.dylib) + 56  [0x188b03f80]
+            + ! :   63 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x188c32c20]
+            + ! :     63 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x188c310f8,0x188c310fc,...]
+            + ! 4 _mach_boottime_usec  (in libsystem_c.dylib) + 88,4,...  [0x188b32ba8,0x188b32b54,...]
+            + 3 DYLD-STUB$$clock_gettime  (in cdj-run) + 0  [0x102d54040]
+            + 2 clock_gettime  (in libsystem_c.dylib) + 12,344  [0x188b0c144,0x188b0c290]
+            43 interp_insn_bfin  (in cdj-run) + 1968  [0x102c99f28]
+            24 hwloop_get_next_pc  (in cdj-run) + 228  [0x102c996cc]
+            5 sim_engine_run  (in cdj-run) + 2480  [0x102cc2598]
+            + 2 clock_gettime  (in libsystem_c.dylib) + 300  [0x188b0c264]
+            + ! 1 _mach_boottime_usec  (in libsystem_c.dylib) + 32  [0x188b32b70]
+            + ! : 1 mach_boottime_usec  (in libsystem_kernel.dylib) + 0  [0x188c45cb4]
+            + ! 1 _mach_boottime_usec  (in libsystem_c.dylib) + 64  [0x188b32b90]
+            + !   1 gettimeofday  (in libsystem_c.dylib) + 56  [0x188b03f80]
+            + !     1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x188c32c20]
+            + !       1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x188c310f8]
+            + 2 clock_gettime  (in libsystem_c.dylib) + 0  [0x188b0c138]
+            + 1 sim_engine_run  (in cdj-run) + 1168  [0x102cc2078]
+            4 sim_engine_run  (in cdj-run) + 1692  [0x102cc2284]
+            + 4 sim_engine_run  (in cdj-run) + 1764,1824  [0x102cc22cc,0x102cc2308]
+            2 sim_engine_run  (in cdj-run) + 1952  [0x102cc2388]
+              2 sim_engine_run  (in cdj-run) + 2120,2580  [0x102cc2430,0x102cc25fc]
+
+Total number in stack (recursive counted multiple, when >=5):
+        13       _mmu_check_addr  (in cdj-run) + 0  [0x102c8c5b8]
+        12       mmu_check_addr  (in cdj-run) + 20  [0x102c8c594]
+        7       fmtconst_str  (in cdj-run) + 0  [0x102cbb810]
+        7       sim_engine_run  (in cdj-run) + 0  [0x102cc1be8]
+        6       bfin_trace_queue  (in cdj-run) + 0  [0x102c96514]
+        6       get_allreg  (in cdj-run) + 0  [0x102cbbcd4]
+        6       reg_read  (in cdj-run) + 0  [0x102cbbb50]
+
+Sort by top of stack, same collapsed (when >= 5):
+        _interp_insn_bfin  (in cdj-run)        530
+        __select  (in libsystem_kernel.dylib)        511
+        sim_engine_run  (in cdj-run)        219
+        interp_insn_bfin  (in cdj-run)        213
+        mach_absolute_time  (in libsystem_kernel.dylib)        145
+        hwloop_get_next_pc  (in cdj-run)        70
+        decode_LDST_0  (in cdj-run)        62
+        ___chkstk_darwin  (in libsystem_pthread.dylib)        49
+        _mmu_check_addr  (in cdj-run)        43
+        decode_LDSTiiFP_0  (in cdj-run)        39
+        __open_nocancel  (in libsystem_kernel.dylib)        38
+        decode_LDSTii_0  (in cdj-run)        38
+        decode_CCflag_0  (in cdj-run)        34
+        decode_UJUMP_0  (in cdj-run)        32
+        decode_BRCC_0  (in cdj-run)        30
+        reg_write  (in cdj-run)        26
+        decode_COMPI2opD_0  (in cdj-run)        24
+        fmtconst_str  (in cdj-run)        22
+        get_allreg  (in cdj-run)        21
+        decode_REGMV_0  (in cdj-run)        20
+        reg_read  (in cdj-run)        19
+        __close_nocancel  (in libsystem_kernel.dylib)        18
+        bfin_trace_queue  (in cdj-run)        18
+        __write_nocancel  (in libsystem_kernel.dylib)        14
+        add32  (in cdj-run)        13
+        decode_dsp32shiftimm_0  (in cdj-run)        13
+        decode_COMPI2opP_0  (in cdj-run)        11
+        decode_LDSTidxI_0  (in cdj-run)        9
+        _mach_boottime_usec  (in libsystem_c.dylib)        8
+        clock_gettime  (in libsystem_c.dylib)        7
+        __sendto  (in libsystem_kernel.dylib)        6
+        cec_is_supervisor_mode  (in cdj-run)        6
+        lshift  (in cdj-run)        6
+        __vfprintf  (in libsystem_c.dylib)        5
+        decode_COMP3op_0  (in cdj-run)        5
+        decode_linkage_0  (in cdj-run)        5
+
+Binary Images:
+       0x102c68000 -        0x102d80d8b +cdj-run (0) <C43597E9-27A7-33AC-B0FF-E336227E7684> /Users/*/cdj-run
+       0x103178000 -        0x1031ff44f +libzstd.1.5.7.dylib (0) <1CE1197A-4A2B-3036-984E-95599210332B> /opt/homebrew/*/libzstd.1.5.7.dylib
+       0x1887ec000 -        0x18883b527  libobjc.A.dylib (973.1) <220ABA7C-1B27-3461-AD64-F0C02DA55A5B> /usr/lib/libobjc.A.dylib
+       0x18883c000 -        0x18884623f  libsharedcache.dylib (0) <10B20858-73AC-3AB6-AEE8-B6E7243D386E> /usr/lib/libsharedcache.dylib
+       0x188847000 -        0x18886dceb  libdyld.dylib (27062) <2DE7C10A-5A74-3F3F-93B6-5ABA1D64F9B7> /usr/lib/system/libdyld.dylib
+       0x18886e000 -        0x18892d66f  dyld (1.0.0 - 27062) <B6C0F697-046B-3606-96F7-042154B70AB9> /usr/lib/dyld
+       0x18892e000 -        0x18893101f  libsystem_blocks.dylib (98.1) <426419BE-A433-3D7A-AE2A-39F3519571B4> /usr/lib/system/libsystem_blocks.dylib
+       0x188932000 -        0x18898707f  libxpc.dylib (3298.1.1) <4173B9B6-71E5-3A85-A1C8-798693A94EDB> /usr/lib/system/libxpc.dylib
+       0x188988000 -        0x1889a7c03  libsystem_trace.dylib (1966.1.1) <9649346D-1AA0-3844-8401-1F2BEF5DEC12> /usr/lib/system/libsystem_trace.dylib
+       0x1889a8000 -        0x188a5ce47  libcorecrypto.dylib (2109.0.22) <4747DEC8-74F6-3C3C-9CFA-958D749E55D4> /usr/lib/system/libcorecrypto.dylib
+       0x188a5d000 -        0x188ab2a07  libsystem_malloc.dylib (886.0.8) <5F121E9F-0046-36C7-B614-BD8EDA4252AA> /usr/lib/system/libsystem_malloc.dylib
+       0x188ab3000 -        0x188af913f  libdispatch.dylib (1605.0.2) <35B1D5C9-46F5-3E6C-88EB-9FEF218B3F6A> /usr/lib/system/libdispatch.dylib
+       0x188afa000 -        0x188afcd2b  libsystem_featureflags.dylib (108) <20C1CAB2-1F13-3426-8146-9CAE9FF2A33D> /usr/lib/system/libsystem_featureflags.dylib
+       0x188afd000 -        0x188b7fbdb  libsystem_c.dylib (1786.0.3) <B9578568-B137-3A96-A8C8-096F0B6F95CD> /usr/lib/system/libsystem_c.dylib
+       0x188b80000 -        0x188c15033  libc++.1.dylib (2200.27) <D69543EE-E165-3242-9281-5DAB86D55340> /usr/lib/libc++.1.dylib
+       0x188c16000 -        0x188c2feff  libc++abi.dylib (2200.27) <6FBE4525-E708-3750-AE43-FC9D7327E8F5> /usr/lib/libc++abi.dylib
+       0x188c30000 -        0x188c6e9ab  libsystem_kernel.dylib (13432.1.9) <1D409488-002C-3663-9BA9-37C334D384C1> /usr/lib/system/libsystem_kernel.dylib
+       0x188c6f000 -        0x188c7b91b  libsystem_pthread.dylib (553.0.1) <A55DAC52-24D5-3CB7-9310-0C7C029498C5> /usr/lib/system/libsystem_pthread.dylib
+       0x188c7c000 -        0x188c854f3  libsystem_platform.dylib (402.0.1.0.1) <97CB8000-7DFC-398B-B919-D525467BBF92> /usr/lib/system/libsystem_platform.dylib
+       0x188c86000 -        0x188cb48f3  libsystem_info.dylib (603) <3E847D64-2B41-3505-AAE8-918B10DC3253> /usr/lib/system/libsystem_info.dylib
+       0x18cdd6000 -        0x18cddfac3  libsystem_darwin.dylib (1786.0.3) <0270D881-5511-3056-8ABC-B62A1C4DEDF2> /usr/lib/system/libsystem_darwin.dylib
+       0x18d230000 -        0x18d241b8b  libsystem_notify.dylib (368) <BC2014EB-9569-3142-9B01-4ECD8ADD164E> /usr/lib/system/libsystem_notify.dylib
+       0x18f38a000 -        0x18f3a4da3  libsystem_networkextension.dylib (2340.1.2) <FC8BD562-14AD-34BD-8DA8-5CB1DBF4F9FD> /usr/lib/system/libsystem_networkextension.dylib
+       0x18f431000 -        0x18f448247  libsystem_asl.dylib (409) <0B8B1F14-A7FB-302F-B56B-AD113BB71055> /usr/lib/system/libsystem_asl.dylib
+       0x1903e8000 -        0x1903e8f2f  libobjcMsgSend.dylib (973.1) <41179EDE-DC97-3BBE-8848-6400D12C1436> /usr/lib/objc/libobjcMsgSend.dylib
+       0x191517000 -        0x19151eedf  libsystem_symptoms.dylib (2394.0.4) <AEAE80CC-C6AE-344D-BBFC-E7A9DC4382D0> /usr/lib/system/libsystem_symptoms.dylib
+       0x19588c000 -        0x1958c6adb  libsystem_containermanager.dylib (833.0.8.0.1) <B33F2B09-4BE9-32C5-954C-9233E1D5BB94> /usr/lib/system/libsystem_containermanager.dylib
+       0x196ed5000 -        0x196ed9317  libsystem_configuration.dylib (1446) <08EDCD0E-34BC-39E2-8B6C-4E5366461D75> /usr/lib/system/libsystem_configuration.dylib
+       0x196eda000 -        0x196ee0e03  libsystem_sandbox.dylib (3051.0.52) <1E892B56-092E-3832-BDE3-DCE356D7A4FA> /usr/lib/system/libsystem_sandbox.dylib
+       0x1983e8000 -        0x1983e8f2f  libobjcMsgSend1.dylib (973.1) <B40D9B2A-E1EE-37ED-8004-711A1F263DE1> /usr/lib/objc/libobjcMsgSend1.dylib
+       0x198ab2000 -        0x198ab4f93  libquarantine.dylib (217.0.4) <7FD4AE22-86EF-382B-83F5-ADF9336C1160> /usr/lib/system/libquarantine.dylib
+       0x1991b0000 -        0x1991b61e7  libsystem_coreservices.dylib (203) <7E74C917-CE45-393A-90B9-571B7BA0C9CF> /usr/lib/system/libsystem_coreservices.dylib
+       0x199769000 -        0x199777b37  libz.1.dylib (105) <B4048495-BEFA-3484-BEEC-29D510A824F9> /usr/lib/libz.1.dylib
+       0x199778000 -        0x1997b5b27  libsystem_m.dylib (3326.0.1) <0F33CC3F-E56C-3322-90FC-D2DE78A8E2CC> /usr/lib/system/libsystem_m.dylib
+       0x1997b7000 -        0x1997ba4d7  libmacho.dylib (27062) <10767E82-A76D-335D-A289-B977D5507577> /usr/lib/system/libmacho.dylib
+       0x1997d4000 -        0x1997e06ff  libcommonCrypto.dylib (600041) <215316D1-CCCC-3F21-B1A7-7AAA28C067BC> /usr/lib/system/libcommonCrypto.dylib
+       0x1997e1000 -        0x1997eac87  libunwind.dylib (2200.5) <12EC4D5E-7B70-3B75-B2F1-8060243A4BD3> /usr/lib/system/libunwind.dylib
+       0x1997f2000 -        0x1997fc7eb  libcopyfile.dylib (260.0.3) <52634F6F-1CEF-3F45-8F03-2807039C051C> /usr/lib/system/libcopyfile.dylib
+       0x1997fd000 -        0x1998008af  libcompiler_rt.dylib (103.4) <58DF4E26-8BF1-3A31-94D7-B837B76359A1> /usr/lib/system/libcompiler_rt.dylib
+       0x199801000 -        0x199806087  libsystem_collections.dylib (1786.0.3) <31B75E6B-F7E4-352D-A1A3-716D667F8C7F> /usr/lib/system/libsystem_collections.dylib
+       0x199807000 -        0x199809f1f  libsystem_secinit.dylib (182) <DE037464-4C5D-3E96-A33F-2A4557CC6A20> /usr/lib/system/libsystem_secinit.dylib
+       0x19980a000 -        0x19980c97f  libremovefile.dylib (96) <E6E6DFCF-6B2C-3F30-A59D-816CAB1190CE> /usr/lib/system/libremovefile.dylib
+       0x19980d000 -        0x19980de27  libkeymgr.dylib (31) <5EC997EF-3ADA-360B-9FCD-5F940C83FA4E> /usr/lib/system/libkeymgr.dylib
+       0x19980e000 -        0x199816af7  libsystem_dnssd.dylib (3111.0.5.0.1) <CFEEC9C2-091A-32AE-8771-967374AE1994> /usr/lib/system/libsystem_dnssd.dylib
+       0x199817000 -        0x19981bf1b  libcache.dylib (95) <83E81326-A587-374F-ABC1-BAE48D0FEE0D> /usr/lib/system/libcache.dylib
+       0x19981c000 -        0x19981d8f3  libSystem.B.dylib (1359) <4FDC9AA6-B344-37FE-B8C6-A4C94A038F57> /usr/lib/libSystem.B.dylib
+       0x1a03e8000 -        0x1a03e8f2f  libobjcMsgSend2.dylib (973.1) <BD27A84B-C9AE-3282-BBEA-3B6119837B5A> /usr/lib/objc/libobjcMsgSend2.dylib
+       0x1a83e8000 -        0x1a83e8f2f  libobjcMsgSend3.dylib (973.1) <C0860D68-DDFC-3BD7-8B06-DB0645CBBED4> /usr/lib/objc/libobjcMsgSend3.dylib
+       0x1b03e8000 -        0x1b03e8f2f  libobjcMsgSend4.dylib (973.1) <A6153BF5-622B-3B01-81B6-F64A365EF613> /usr/lib/objc/libobjcMsgSend4.dylib
+       0x1b83e8000 -        0x1b83e8f2f  libobjcMsgSend5.dylib (973.1) <3913A71C-B29A-3AEA-820B-BEC40AC1861A> /usr/lib/objc/libobjcMsgSend5.dylib
+       0x1be336000 -        0x1be37274b  libncurses.5.4.dylib (81) <90CBD640-818F-3E41-BF00-80CC3526DF43> /usr/lib/libncurses.5.4.dylib
+       0x1c03e8000 -        0x1c03e8f2f  libobjcMsgSend6.dylib (973.1) <9BC523A3-E167-3F6C-8CAE-0F3EBA671791> /usr/lib/objc/libobjcMsgSend6.dylib
+       0x1c83e8000 -        0x1c83e8f2f  libobjcMsgSend7.dylib (973.1) <248B7BCE-5B4C-34C7-A340-43D5228628C5> /usr/lib/objc/libobjcMsgSend7.dylib
+       0x1d03e8000 -        0x1d03e8f2f  libobjcMsgSend8.dylib (973.1) <3E041BAD-A8E8-3069-B741-78CD1A45B176> /usr/lib/objc/libobjcMsgSend8.dylib
+       0x1d83e8000 -        0x1d83e8f2f  libobjcMsgSend9.dylib (973.1) <34A67969-21A0-39D6-BB81-8FDA5A2409DB> /usr/lib/objc/libobjcMsgSend9.dylib
+       0x1e03e8000 -        0x1e03e8f2f  libobjcMsgSend10.dylib (973.1) <678186C0-8EAD-3B35-8CBB-00285B41E4A0> /usr/lib/objc/libobjcMsgSend10.dylib
+       0x1e83e8000 -        0x1e83e8f2f  libobjcMsgSend11.dylib (973.1) <E05CB08C-E956-36FA-8967-AE8E346A8D2C> /usr/lib/objc/libobjcMsgSend11.dylib
+       0x2103e8000 -        0x2103e8f2f  libobjcMsgSend12.dylib (973.1) <10AB03AA-FF1F-3FDC-9DFB-BFC40042C501> /usr/lib/objc/libobjcMsgSend12.dylib
+       0x2183e8000 -        0x2183e8f2f  libobjcMsgSend13.dylib (973.1) <ABF53427-FA6F-3D0D-8F9D-7AD795CA5C92> /usr/lib/objc/libobjcMsgSend13.dylib
+       0x2203e8000 -        0x2203e8f2f  libobjcMsgSend14.dylib (973.1) <9A844C46-A6DA-34D4-8EBF-2AD775C30684> /usr/lib/objc/libobjcMsgSend14.dylib
+       0x2283e8000 -        0x2283e8f2f  libobjcMsgSend15.dylib (973.1) <7C995666-2B2D-3284-AA0A-EBF7C922838E> /usr/lib/objc/libobjcMsgSend15.dylib
+       0x2303e8000 -        0x2303e8f2f  libobjcMsgSend16.dylib (973.1) <B6C0E14B-53AE-3E22-9ED5-1729C49F46F2> /usr/lib/objc/libobjcMsgSend16.dylib
+       0x2383e8000 -        0x2383e8f2f  libobjcMsgSend17.dylib (973.1) <07B4CF85-251B-301B-832B-20B315A59E19> /usr/lib/objc/libobjcMsgSend17.dylib
+       0x2403e8000 -        0x2403e8f2f  libobjcMsgSend18.dylib (973.1) <43E575B7-04DB-3999-A633-1A3B638BA6E3> /usr/lib/objc/libobjcMsgSend18.dylib
+       0x2483e8000 -        0x2483e8f2f  libobjcMsgSend19.dylib (973.1) <736F4D85-76F7-3B28-8D87-C07E8F7A0EF4> /usr/lib/objc/libobjcMsgSend19.dylib
+       0x2503e8000 -        0x2503e8f2f  libobjcMsgSend20.dylib (973.1) <74E67C8B-6BCA-3184-A18E-A97F370052C6> /usr/lib/objc/libobjcMsgSend20.dylib
+       0x2583e8000 -        0x2583e8f2f  libobjcMsgSend21.dylib (973.1) <CC0D732F-98E7-3888-9E15-70984DA2FB04> /usr/lib/objc/libobjcMsgSend21.dylib
+       0x2603e8000 -        0x2603e8f2f  libobjcMsgSend22.dylib (973.1) <85A60286-5DE3-32BA-B18C-2A498B065C88> /usr/lib/objc/libobjcMsgSend22.dylib
+       0x2683e8000 -        0x2683e8f2f  libobjcMsgSend23.dylib (973.1) <5452A0D2-6B19-39BE-ADDD-80B7BCDE3A98> /usr/lib/objc/libobjcMsgSend23.dylib
+       0x2703e8000 -        0x2703e8f2f  libobjcMsgSend24.dylib (973.1) <94BBF2D6-722B-350D-8557-4D25A8E8D53A> /usr/lib/objc/libobjcMsgSend24.dylib
+       0x2783e8000 -        0x2783e8f2f  libobjcMsgSend25.dylib (973.1) <35481387-5A8E-3AE4-86A6-94CEB3CC8726> /usr/lib/objc/libobjcMsgSend25.dylib
+       0x2983e8000 -        0x2983e8f2f  libobjcMsgSend26.dylib (973.1) <9E0C8664-E7F4-39D1-AAFC-BD92B255E4E8> /usr/lib/objc/libobjcMsgSend26.dylib
+       0x2a03e8000 -        0x2a03e8f2f  libobjcMsgSend27.dylib (973.1) <FD424935-55A9-3650-955A-EED3441A1D19> /usr/lib/objc/libobjcMsgSend27.dylib
+       0x2a83e8000 -        0x2a83e8f2f  libobjcMsgSend28.dylib (973.1) <09BA7B97-7DF7-3C7F-932A-B6847662FC49> /usr/lib/objc/libobjcMsgSend28.dylib
+       0x2b03e8000 -        0x2b03e8f2f  libobjcMsgSend29.dylib (973.1) <36D5BA3F-2139-30B0-8558-556764BE9813> /usr/lib/objc/libobjcMsgSend29.dylib
+       0x2b83e8000 -        0x2b83e8f2f  libobjcMsgSend30.dylib (973.1) <9F05564A-9D12-372C-98FC-E9F0E6BE4F04> /usr/lib/objc/libobjcMsgSend30.dylib
+       0x2bac02000 -        0x2bac08fe5  libRosetta.dylib (385) <88E33EA4-A20E-3ED1-AD7D-8D029E4E08BC> /usr/lib/libRosetta.dylib
+       0x2bb5ef000 -        0x2bb5f275b  libsystem_darwindirectory.dylib (129.0.1) <61264923-2AA5-3658-B8C4-550C71E9D4B3> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x2bb5f3000 -        0x2bb5fdd9b  libsystem_eligibility.dylib (446.1.3) <EDDE8E9C-A2CF-3931-BBB3-321CB852EB30> /usr/lib/system/libsystem_eligibility.dylib
+       0x2bb5fe000 -        0x2bb60742b  libsystem_sanitizers.dylib (32) <447BAA25-4DFF-3A23-976A-4B96AF067112> /usr/lib/system/libsystem_sanitizers.dylib
+       0x2bb608000 -        0x2bb608a13  libsystem_trial.dylib (511) <6AE48824-EC44-3A8C-B501-BE57DBE892E7> /usr/lib/system/libsystem_trial.dylib
+       0x2c03e8000 -        0x2c03e8f2f  libobjcMsgSend31.dylib (973.1) <0985E20F-78C3-3466-A2B2-DBB95F7104A3> /usr/lib/objc/libobjcMsgSend31.dylib
+       0x2c83e8000 -        0x2c83e8f2f  libobjcMsgSend32.dylib (973.1) <0D309D58-D576-3E5D-AD4B-6D55AB491702> /usr/lib/objc/libobjcMsgSend32.dylib
+       0x2d03e8000 -        0x2d03e8f2f  libobjcMsgSend33.dylib (973.1) <346E0484-48FA-369B-8A64-93B5F5341CFE> /usr/lib/objc/libobjcMsgSend33.dylib
+       0x2d83e8000 -        0x2d83e8f2f  libobjcMsgSend34.dylib (973.1) <6A31F809-BCBE-3E01-A367-E91FDACCE324> /usr/lib/objc/libobjcMsgSend34.dylib

@@ -1,0 +1,14 @@
+[
+  {
+    "input": "cdj_c6747_pll.c",
+    "status": 0,
+    "compile_lines": 1,
+    "restored": true
+  },
+  {
+    "input": "cdj_c674x.h",
+    "status": 0,
+    "compile_lines": 3,
+    "restored": true
+  }
+]

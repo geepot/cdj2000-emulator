@@ -1,0 +1,78 @@
+[
+  {
+    "kind": "compile",
+    "opt": "-O0",
+    "seconds": 0.3110128339903895
+  },
+  {
+    "kind": "compile",
+    "opt": "-O2",
+    "seconds": 0.8496742499992251
+  },
+  {
+    "kind": "execute",
+    "opt": "-O0",
+    "trial": 0,
+    "seconds": 0.44585141699644737,
+    "returncode": 0,
+    "stderr": "",
+    "bytes": 29416880,
+    "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+    "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd"
+  },
+  {
+    "kind": "execute",
+    "opt": "-O2",
+    "trial": 0,
+    "seconds": 0.2552172919968143,
+    "returncode": 0,
+    "stderr": "",
+    "bytes": 29416880,
+    "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+    "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd"
+  },
+  {
+    "kind": "execute",
+    "opt": "-O2",
+    "trial": 1,
+    "seconds": 0.1770941249851603,
+    "returncode": 0,
+    "stderr": "",
+    "bytes": 29416880,
+    "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+    "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd"
+  },
+  {
+    "kind": "execute",
+    "opt": "-O0",
+    "trial": 1,
+    "seconds": 0.3011420839757193,
+    "returncode": 0,
+    "stderr": "",
+    "bytes": 29416880,
+    "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+    "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd"
+  },
+  {
+    "kind": "execute",
+    "opt": "-O0",
+    "trial": 2,
+    "seconds": 0.3025708749773912,
+    "returncode": 0,
+    "stderr": "",
+    "bytes": 29416880,
+    "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+    "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd"
+  },
+  {
+    "kind": "execute",
+    "opt": "-O2",
+    "trial": 2,
+    "seconds": 0.18107154199969955,
+    "returncode": 0,
+    "stderr": "",
+    "bytes": 29416880,
+    "trace_sha256": "4c04b6c06b6ef9cd615951db1f1363f95ea6e0ea4d68d25c232aeae606ea723a",
+    "checkpoint_sha256": "9c0efd2a92c93167e4e319e3388874549083771b2b1eba2f5ad2786699025fdd"
+  }
+]
