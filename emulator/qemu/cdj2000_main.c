@@ -3972,7 +3972,7 @@ static void cdj_sdhi_data_ready(void *opaque)
 }
 
 /*
- * The media state the GUI routes on.
+ * The CDJ-2000 media state the GUI routes on (not an NXS address map).
  *
  * Status halfword 26 carries one 3-bit state per source, built by 0x218afe
  * from the four words at 0x0489bd68, one per source in MAIN's own numbering

@@ -381,19 +381,18 @@ def main():
                              "Defaults to 'sd' when --sd is given")
     parser.add_argument('--source-key-at', type=float,
                         help='virtual seconds at which to press it; defaults to '
-                             'two seconds after the card goes in, which is before '
-                             "the GUI's first browse")
+                             'two seconds after insertion. This schedule does '
+                             'not wait for NXS media-manager readiness')
     parser.add_argument('--gui-link', metavar='HOST:PORT',
                         help='point the GUI at this address instead of MAIN. Use '
                              'it to put tools.cdj_main.link_inject between the '
-                             'boards; the NXS browse keys have never produced an '
-                             'ENTER, so injected browse/load requests are the '
-                             'documented way to load a track (RUNNING.md, '
-                             'link_inject). MAIN still listens on --port')
+                             'boards for transport diagnostics. Native NXS '
+                             'ENTER and LOAD are verified through panel input '
+                             '(NXS_LINK_LOADING.md). MAIN still listens on --port')
     parser.add_argument('--browse-aids', action='store_true',
-                        help="opt into the board-side aids RUNNING.md measured "
-                             "for bringing a card's library up on a running "
-                             "machine: the status repeat is rewritten into the "
+                        help="opt into the legacy CDJ-2000 board-side aids "
+                             "described in RUNNING.md (not a verified NXS "
+                             "browse fix): the status repeat is rewritten into the "
                              "fresh shape and MAIN's browse replies are "
                              "re-stamped with the cursor being answered. This "
                              "changes link bytes, so a run using it is media "
@@ -497,12 +496,10 @@ def main():
         main_env['CDJ_BUS_TRACE'] = '1'
     if args.sd_insert_seconds is not None:
         main_env['CDJ_SD_INSERT'] = str(args.sd_insert_seconds)
-    # A card that is already the source before the GUI's first browse gives the
-    # card's library together with the player screen; a key pressed after that
-    # browse loop has started is lost more often than not (RUNNING.md,
-    # "Switching to a medium"). boot_vm schedules the key for exactly that
-    # reason, and main_env deliberately drops every inherited CDJ_ variable, so
-    # without this the reliable path is unreachable from nxs_vm at all.
+    # Preserve the existing insertion-relative key schedule. It does not wait
+    # for NXS media-manager readiness: the filesystem can be mounted while
+    # the browser still answers NO CARD. See NXS_BROWSE_BLOCKER.md. Explicit
+    # options are necessary because inherited CDJ_ variables are sanitized.
     source_key = args.source_key or ('sd' if args.sd else 'none')
     if source_key != 'none':
         contact = NXS_SOURCE_KEYS.get(source_key)

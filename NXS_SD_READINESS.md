@@ -4,6 +4,12 @@ Read-only firmware analysis, 2026-09-09. MAIN image SHA256
 `02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85`.
 No RAM values are changed or fabricated by this investigation.
 
+Follow-up: [NXS_BROWSE_BLOCKER.md](NXS_BROWSE_BLOCKER.md) records a fresh
+control where the latch and filesystem are populated before the browser can
+list the card. Mode 2 / table entry 1 are intermediate observations; mode 3 /
+entry 2 and real list replies follow later. Do not equate this low-level
+card-detection predicate with completed browser readiness.
+
 `0x04238922` returns true if any of these conditions hold:
 
 - u32 at `0x04cf2180` equals 3;

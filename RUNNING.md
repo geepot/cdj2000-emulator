@@ -407,6 +407,13 @@ runs. The last per-instruction cost the profiler found was the
 instruction text itself: every decoder formatted its immediate operands
 with `sprintf` for a trace line nothing printed; that is gated now.
 
+**NXS scope correction:** The media-state addresses and GUI routing functions
+in the following historical section describe CDJ-2000. They are not verified
+NXS addresses. NXS successfully lists TESTTONE.WAV with status halfword 26
+still at `0x1000`; that value does not establish a mount or browse blocker.
+Native NXS panel ENTER and LOAD are verified; see
+[NXS_LINK_LOADING.md](NXS_LINK_LOADING.md) for the actual captures and timing.
+
 **Switching to a medium.** With a card image (`--sd card.img`, a rekordbox
 export on it) the launchers put the card in at 10 s and press its key at
 12 s, before the GUI's first browse, and the card's library -- the `SD`

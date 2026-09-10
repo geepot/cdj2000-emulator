@@ -1,5 +1,11 @@
 # Track-loading link comparison
 
+Fresh 2026-09-10 reproduction: [NXS_BROWSE_BLOCKER.md](NXS_BROWSE_BLOCKER.md)
+records NO CARD, later genuine lists, native ENTER/LOAD, and completed
+10-second TESTTONE.WAV loading. The mount latch/FAT geometry become available
+before the media manager finishes; halfword 26 remains 0x1000 while browsing
+works and must not be interpreted with the legacy CDJ-2000 media-state map.
+
 `nxs_vm --fresh-link` opts into the existing Blackfin simulator's
 `BFIN_LINK_FRESH_ONLY=1`: real MAIN records are consumed once, rather than
 synthetic repeated DMA deliveries of cached status/payloads. This is an
