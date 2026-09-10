@@ -507,3 +507,17 @@ Validation: the rebuilt SH4 QEMU image passed the focused HPI, MAIN DMAC, IIC
 and Ethernet set (**15 passed**) after the change. The existing connected smoke
 remains the acceptance path for firmware USB behavior; a standalone suspend/
 resume timing fixture remains future work.
+
+## Functionality follow-up — SH4 ATA media attachment
+
+The SH4 ATA model previously created only an anonymous empty `ide-cd`, which
+made the firmware's disc-drive path observable but prevented real media from
+being exercised. It now consumes QEMU's standard
+`-drive if=ide,media=cdrom,bus=0,unit=0,file=...,format=raw` backend when one is
+provided, while preserving the empty-drive default. A direct qtest sends
+`IDENTIFY PACKET DEVICE` and checks the resulting DRDY/DSC/DRQ status and
+attachment log. This is a functionality addition, so no speedup is claimed.
+
+Validation: the rebuilt QEMU image passed the new ATA qtest plus the existing
+SH4 HPI, MAIN DMAC, IIC and Ethernet regressions (**16 passed**). Full ATAPI
+packet data, DMA and error sequencing remain future coverage work.

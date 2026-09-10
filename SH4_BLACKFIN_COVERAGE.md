@@ -70,6 +70,8 @@ Covered with direct tests or evidence:
   the opt-in QEMU integration (`tests/test_sh7764_eth.py`,
   `tests/test_nxs_ethernet_qemu.py`).
 - Panel input transport, command framing and evidence manifests.
+- ATA task-file attachment and ATAPI identify status with a supplied CD image
+  (`tests/test_sh7764_ata.py`).
 - Real firmware startup and a genuine DHCP Discover/Offer/Request/ACK exchange;
   see `CLEAN_BOOT_EVIDENCE.md` and `ETHERNET_LOCAL.md`.
 
@@ -79,9 +81,10 @@ Important unvalidated or approximate areas:
   are delegated to QEMU; this repository has no complete SH-4 architecture
   matrix.
 - `emulator/qemu/cdj2000_ata.c`, `cdj2000_usb.c`, `cdj2000_usbh.c` and related
-  paths still do not have equivalent standalone model tests. The USB host now
-  has explicit remote-wakeup behavior, but ATA/USB data paths and error
-  sequencing remain primarily connected-startup evidence.
+  paths still do not have complete standalone model tests. The USB host now
+  has explicit remote-wakeup behavior. ATA now accepts a standard QEMU IDE
+  CD backend and has a direct qtest for `IDENTIFY PACKET DEVICE`, but full
+  packet data, DMA and error sequencing remain outside the fixture.
 - Ethernet uses atomic coherent DMA, omits bus arbitration, FCS and wire
   serialization, and uses synthetic reset/negotiation/backend timing. Register
   13 readback is an explicitly unverified write-only-register assumption.
@@ -134,8 +137,9 @@ Important unvalidated or approximate areas:
    frame-rate assertion.
 3. Add SH4 HPI/DMAC error, completion-interrupt and burst/fixed-port cases,
    including ordinary-RAM fixed-source fills and unmapped/unaligned accesses.
-4. Add direct ATA/USB model tests for reset, status, data transfer, DMA/error
-   paths and interrupt delivery before relying on connected-screen evidence.
+4. Extend the ATA/USB model tests from identify/reset into packet data transfer,
+   DMA/error paths and interrupt delivery before relying on connected-screen
+   evidence.
 5. Build a cross-board timing fixture that records SH4 interrupt latency,
    Blackfin frame publication, MAIN-link delivery and panel-command response on
    one virtual-time timeline. Keep PTP, audio output and wire timing as separate
