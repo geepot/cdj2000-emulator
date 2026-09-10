@@ -436,3 +436,14 @@ still retains already flushed records. Write/close failures are reported.
 The capture path is a process-lifetime setting, as used by the NXS launcher.
 `tests/test_bfin_sport_capture.py` checks descriptor reuse, record visibility,
 and byte-exact output after both normal and abrupt process exit.
+
+## 11: retain the SPORT transmit capture descriptor
+
+Keep the `BFIN_SPORT_TX_OUTPUT` capture file open for the process, flushing each
+complete `SPTX` record immediately and closing it at normal exit. The packet
+header, SPORT base, payload bytes, append behavior and abrupt-termination
+visibility are unchanged. The destination is read once, matching the
+receive-capture lifetime contract. `tests/test_bfin_sport_tx_capture.py`
+checks one-open descriptor reuse, visibility before close, and byte-exact
+normal/abrupt output. `tools/cdj_gui/benchmark_sport_tx.py` measures the
+capture path against the previous open/write/close implementation.

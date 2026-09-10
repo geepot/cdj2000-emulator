@@ -538,3 +538,31 @@ rebuild succeeds, and the Blackfin-focused suite reports **11 passed, 1
 skipped** including `tests/test_bfin_dma_error.py`. The skipped assembled
 parallel test still needs `bfin-elf-as` and `bfin-elf-ld`; DMAC global-error
 routing and full descriptor-chain integration remain future work.
+
+## Iteration 10 — persistent SPORT transmit capture
+
+Patch 11 keeps the `BFIN_SPORT_TX_OUTPUT` stream open for the simulator
+process, flushes every complete `SPTX` record, and closes it through an exit
+handler. The output format, packet boundaries, append behavior, and bytes
+written before abrupt termination remain unchanged. The environment path is
+read once because the capture destination is process-scoped, matching the
+receive capture path. The Blackfin build script now recognizes all two-digit
+GDB patch names, so fresh trees apply patches 10 and 11 as well as 01–09.
+
+Three alternating synthetic capture trials of 100,000 64-byte records wrote
+7,600,000 bytes with identical SHA-256 output. Before: **2.138, 1.956,
+2.296 s**; after: **0.265, 0.153, 0.154 s**. Median capture-path speedup:
+**13.87× (92.8% less time)**. This measures transcript I/O only; it is not a
+13.87× firmware or whole-emulator claim. The fixed-tick firmware benchmark
+did not emit TX records in its 300-million-tick startup slice, so no connected
+firmware speedup is inferred. Reproduce with
+`tools/cdj_gui/benchmark_sport_tx.py`; raw measurements are in
+`analysis/iterations/10-blackfin-sport-tx.json`.
+
+The source-level helper test reports **2 passed** for normal and abrupt
+termination, including one open, deferred close, per-record visibility and
+byte-identical output. The simulator rebuild succeeds with the complete patch
+stack. TX capture still flushes each record deliberately, so storage latency
+per packet remains; batching or disabling flush would change live-observer and
+termination semantics. This is a host-side capture optimization and does not
+change SPORT register, DMA request, or firmware-visible data behavior.

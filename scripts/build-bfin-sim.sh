@@ -139,7 +139,7 @@ fi
 
 # ---------------------------------------------------------------- patches ---
 # --forward makes re-running the script on an already-patched tree a no-op.
-for patch in "$REPO"/patches/0*-gdb-*.patch; do
+for patch in "$REPO"/patches/[0-9][0-9]-gdb-*.patch; do
     [ -e "$patch" ] || continue
     name=$(basename "$patch")
     stamp=$SRC/.cdj-$name.applied

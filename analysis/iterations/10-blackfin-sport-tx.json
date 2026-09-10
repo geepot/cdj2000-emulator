@@ -1,0 +1,55 @@
+{
+  "records": 100000,
+  "trials": [
+    {
+      "label": "before",
+      "trial": 0,
+      "seconds": 2.13775487500061,
+      "bytes": 7600000,
+      "sha256": "7b04113d574707d6874f190436c074f3385010d538b337b76944409de267abfb"
+    },
+    {
+      "label": "after",
+      "trial": 0,
+      "seconds": 0.2645781249993888,
+      "bytes": 7600000,
+      "sha256": "7b04113d574707d6874f190436c074f3385010d538b337b76944409de267abfb"
+    },
+    {
+      "label": "after",
+      "trial": 1,
+      "seconds": 0.15301283299959323,
+      "bytes": 7600000,
+      "sha256": "7b04113d574707d6874f190436c074f3385010d538b337b76944409de267abfb"
+    },
+    {
+      "label": "before",
+      "trial": 1,
+      "seconds": 1.9561670830007643,
+      "bytes": 7600000,
+      "sha256": "7b04113d574707d6874f190436c074f3385010d538b337b76944409de267abfb"
+    },
+    {
+      "label": "before",
+      "trial": 2,
+      "seconds": 2.2959300409993375,
+      "bytes": 7600000,
+      "sha256": "7b04113d574707d6874f190436c074f3385010d538b337b76944409de267abfb"
+    },
+    {
+      "label": "after",
+      "trial": 2,
+      "seconds": 0.15414733400029945,
+      "bytes": 7600000,
+      "sha256": "7b04113d574707d6874f190436c074f3385010d538b337b76944409de267abfb"
+    }
+  ],
+  "before_source_sha256": "1b3dbf96f8fbd5ad53ff249c05d120d8b9a703c2c92b7a704a992ced6d4bd7de",
+  "after_source_sha256": "4dfa7c855a3ec915334ca7d2e2aa7911e6c6dc5c656c5d00133f38a7a0d22179",
+  "median_seconds": {
+    "before": 2.13775487500061,
+    "after": 0.15414733400029945
+  },
+  "speedup": 13.868257202531035,
+  "time_reduction_percent": 92.78928862223947
+}

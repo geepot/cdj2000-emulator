@@ -31,7 +31,7 @@ The following focused checks were run with
 
 | Area | Result | What it establishes |
 | --- | --- | --- |
-| Blackfin SIC, frame-change, cold LZSS, SPORT capture, link cache and GUI helpers | 10 passed, 6 skipped | Patched helper semantics and source-level host behavior |
+| Blackfin SIC, frame-change, cold LZSS, SPORT capture, TX capture, link cache and GUI helpers | 12 passed, 6 skipped | Patched helper semantics and source-level host behavior |
 | Blackfin connected path | Included in the 35-second smoke | GUI execution, MAIN link, frame scanning/publication and wall-clock operation |
 | SH4 boot evidence, GUI state/profile helpers | 59 passed, 6 skipped | Launcher contracts, manifests, firmware selection and evidence handling |
 | SH4 panel protocol, Ethernet model and PHY | 72 passed, 1 skipped | Panel transport plus custom Ethernet/PHY behavior |
@@ -107,6 +107,8 @@ Covered with direct tests or evidence:
   (`tests/test_bfin_cold_lzss.py`).
 - Persistent SPORT capture visibility and normal/abrupt finalization
   (`tests/test_bfin_sport_capture.py`).
+- Persistent SPORT transmit capture visibility and normal/abrupt finalization
+  (`tests/test_bfin_sport_tx_capture.py`).
 - DMA error latching for alignment, descriptor-fetch and partial-transfer
   failures (`tests/test_bfin_dma_error.py`).
 - MAIN-link fresh-record cache behavior (`tests/test_bfin_link_cache.py`).
