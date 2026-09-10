@@ -566,3 +566,28 @@ stack. TX capture still flushes each record deliberately, so storage latency
 per packet remains; batching or disabling flush would change live-observer and
 termination semantics. This is a host-side capture optimization and does not
 change SPORT register, DMA request, or firmware-visible data behavior.
+
+
+### Iteration 10 follow-up — restore macOS launch after rebuilding
+
+The installed `bin/cdj-run` was killed with SIGKILL before even printing
+`--help`, while the byte-identical executable in the build directory exited
+successfully. `codesign --verify` accepted the installed file on disk. Replacing
+its inode immediately restored launch without changing the executable bytes.
+This isolates the failure to installation and is consistent with stale macOS
+code-signature state after overwriting an executable in place.
+
+The build script now copies into a temporary file in `bin`, makes it executable,
+and atomically renames it over the installed binary. Copy failures preserve the
+previous installation. The unbenchmarked operand-formatting experiment was
+removed from the local build; the committed SPORT optimization remains enabled.
+
+Validation: rebuild and installed `--help` succeed, signature verification
+passes, and the Blackfin suite reports **13 passed, 1 skipped** (missing cross
+assembler/linker). The 300-million-tick isolated firmware replay completes in
+**30.907 s**, versus the earlier three-trial median of approximately **30.950 s**.
+Both execute **184,483,840 instructions / 300,115,016 ticks** and produce the
+same framebuffer SHA-256. This confirms recovery, not a measurable firmware
+speedup; this startup workload emits no TX records. Raw before/after evidence:
+`analysis/iterations/10-blackfin-launch-fix.json`. The **13.87×** result remains
+specific to synthetic SPORT capture I/O.

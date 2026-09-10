@@ -245,8 +245,16 @@ real=$OBJ/sim/bfin/.libs/run$EXE
 [ -f "$real" ] || { echo "no simulator was built" >&2; exit 1; }
 
 mkdir -p "$REPO/bin"
-cp "$real" "$REPO/bin/$INSTALL_NAME$EXE"
-chmod +x "$REPO/bin/$INSTALL_NAME$EXE"
+# Replace the inode instead of overwriting a previously executed Mach-O.
+# macOS can retain its old code-signature pages and kill the new image on launch
+# even when codesign verifies the bytes on disk. Stage on the same filesystem
+# so the rename is atomic and a failed copy leaves the installed binary intact.
+install_tmp=$(mktemp "$REPO/bin/.$INSTALL_NAME.XXXXXX")
+trap 'rm -f "$install_tmp"' EXIT
+cp "$real" "$install_tmp"
+chmod +x "$install_tmp"
+mv -f "$install_tmp" "$REPO/bin/$INSTALL_NAME$EXE"
+trap - EXIT
 
 size=$(wc -c < "$REPO/bin/$INSTALL_NAME$EXE")
 echo
