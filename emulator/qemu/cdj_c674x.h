@@ -80,7 +80,10 @@ typedef bool (*CdjC674xRead)(void *, uint32_t, uint32_t *);
  * remain stable, even if an earlier in-flight store changes register state. */
 typedef bool (*CdjC674xWrite)(void *, uint32_t, uint64_t, unsigned, bool commit);
 /* Fetch and execution are separate so loop-buffer instructions retain their
- * original PC/header and share one architectural commit with overlaid code. */
+ * original PC/header and share one architectural commit with overlaid code.
+ * Fetch reads only pc and fault from the CPU; rejection writes fault,
+ * fault_pc and fault_word. Observers may supply a scratch CPU with only
+ * pc/fault initialized. Registers, pipeline and loop state are not accessed. */
 bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
 bool cdj_c674x_execute(CdjC674x *, const CdjC674xPacket *, CdjC674xRead,
                       CdjC674xWrite, void *);

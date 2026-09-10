@@ -402,3 +402,39 @@ Baseline archives and generated firmware artifacts stay under ignored
 `build/performance`. Remaining duplicate fetch elimination would require an
 execution observation interface and broader retirement-semantics validation;
 it is intentionally a separate optimization.
+
+
+### Iteration 08 — avoid copying CPU state for coverage fetch
+
+Coverage's separate instruction fetch now initializes only PC and existing fault
+status in its private scratch CPU, instead of copying the entire CPU. Auditing
+`cdj_c674x_fetch` and its rejection helper confirmed these are its only CPU
+inputs; rejection writes only fault diagnostics. This contract is now documented
+in the public header and tested with different register/pipeline/loop contents,
+full and compact packets, alignment and mapping failures, overlong packets, and
+pre-existing faults. Actual instruction fetches, read ordering, execution, and
+coverage retirement remain unchanged. This is a replay-only runtime change.
+
+Three alternating one-million-step native trials against `7ff835e`: before
+**0.564, 0.324, 0.319 s**; after **0.357, 0.254, 0.249 s**. Median
+**0.324 → 0.254 s**, a **1.272× speedup (21.4% less time)**. First trials
+were slower for both binaries; all samples are retained. All six output traces
+and checkpoints matched byte for byte. The pinned compiler and functional
+timing/audio workload match the previous iteration. **83 core and replay tests
+passed in 35.42 s**, including the new fetch-state contract test.
+
+Native script/data: `analysis/iterations/08-benchmark-native.py` and
+`08-native-fetch-scratch.json`; validation: `08-tests.txt`. Firmware inputs and
+full output artifacts remain ignored under `build/performance`. This removes
+the second coverage CPU copy, but not the duplicate packet fetch itself.
+
+Fresh five-pair alternating full-workflow comparison against `c16d1cb`:
+**2.675× overall speedup**, warm median **2.940 → 1.099 s
+(62.6% less time)**. First cold runs were
+2.891 s baseline and 1.976 s candidate. All ten repeat gates passed; final
+checkpoints and semantic coverage match across modes, and traces match within
+each mode. This is a new end-to-end measurement, not the product of isolated
+speedups. The workload still uses opt-in compact tracing and functional DSP
+modes; it does not measure connected-player boot or strict hardware timing.
+Reproduction and provenance: `08-benchmark-combined.py` and `08-combined.json`,
+including the candidate replay source hash and base commit.

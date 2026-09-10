@@ -120,7 +120,12 @@ static bool coverage_capture(const CdjC674x *before, CdjC674xPacket *packet)
     bool source_fetch = (!before->loop_active && !before->idle_cycles) ||
         coverage_loop_fetch(before);
     if (!source_fetch) return false;
-    CdjC674x scratch = *before;
+    /* Fetch reads only pc/fault and writes fault diagnostics on rejection.
+     * It does not inspect registers, pipelines, or retained loop state.
+     * Keep its diagnostics private without copying the complete CPU. */
+    CdjC674x scratch;
+    scratch.pc = before->pc;
+    scratch.fault = before->fault;
     return cdj_c674x_fetch(&scratch, read_bus, NULL, packet);
 }
 
