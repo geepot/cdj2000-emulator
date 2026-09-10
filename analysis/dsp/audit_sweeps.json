@@ -1,0 +1,291 @@
+{
+  "compact": {
+    "accepted": 53856,
+    "accepting_configurations": {
+      "plain/all-pointers": 9216,
+      "plain/pointer": 43168,
+      "rs/all-pointers": 1344,
+      "rs/pointer": 128
+    },
+    "defensible_coverage_figure": {
+      "metric": "16-bit words rejected as \"compact instruction not implemented\"",
+      "of": 65536,
+      "value": 11440,
+      "why": "Independent of the probe's memory window and register values, unlike the accepted total."
+    },
+    "rejected": 11680,
+    "rejection_reasons": {
+      "compact instruction not implemented": 11440,
+      "reserved compact LSDx1 instruction": 176,
+      "unaligned stack access or invalid register pair": 64
+    },
+    "words_swept": 65536
+  },
+  "control_registers": {
+    "absent_ids": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      15,
+      16,
+      17,
+      22,
+      23,
+      24,
+      25,
+      28,
+      29,
+      30,
+      31
+    ],
+    "ids_swept": 32,
+    "note": "read_mask is what reads back after writing 0xffffffff, so a mask of ffffffff means the model stores every bit.  Compare each mask against that register's SPRUFE8B field table: any bit the manual marks Reserved must read 0.",
+    "read_accept_but_unmasked_ids": [
+      6,
+      7,
+      13,
+      14,
+      18,
+      19,
+      20
+    ],
+    "readable_ids": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      13,
+      14,
+      18,
+      19,
+      20,
+      21,
+      26,
+      27
+    ],
+    "rows": {
+      "0": {
+        "read": "accept",
+        "read_mask": "03ffffff",
+        "write": "accept"
+      },
+      "1": {
+        "read": "accept",
+        "read_mask": "14000103",
+        "write": "accept"
+      },
+      "10": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "11": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "12": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "13": {
+        "read": "accept",
+        "read_mask": "ffffffff",
+        "write": "accept"
+      },
+      "14": {
+        "read": "accept",
+        "read_mask": "ffffffff",
+        "write": "accept"
+      },
+      "15": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "16": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "17": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "18": {
+        "read": "accept",
+        "read_mask": "ffffffff",
+        "write": "accept"
+      },
+      "19": {
+        "read": "accept",
+        "read_mask": "ffffffff",
+        "write": "accept"
+      },
+      "2": {
+        "read": "accept",
+        "read_mask": "00000000",
+        "write": "accept"
+      },
+      "20": {
+        "read": "accept",
+        "read_mask": "ffffffff",
+        "write": "accept"
+      },
+      "21": {
+        "read": "accept",
+        "read_mask": "0000003f",
+        "write": "accept"
+      },
+      "22": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "23": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "24": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "25": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "26": {
+        "read": "accept",
+        "read_mask": "00000003",
+        "write": "accept"
+      },
+      "27": {
+        "read": "accept",
+        "read_mask": "0000c6df",
+        "write": "accept"
+      },
+      "28": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "29": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "3": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "accept"
+      },
+      "30": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "31": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "4": {
+        "read": "accept",
+        "read_mask": "0000fff3",
+        "write": "accept"
+      },
+      "5": {
+        "read": "accept",
+        "read_mask": "fffffc00",
+        "write": "accept"
+      },
+      "6": {
+        "read": "accept",
+        "read_mask": "ffffffff",
+        "write": "accept"
+      },
+      "7": {
+        "read": "accept",
+        "read_mask": "ffffffff",
+        "write": "accept"
+      },
+      "8": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      },
+      "9": {
+        "read": "reject",
+        "read_mask": "00000000",
+        "write": "reject"
+      }
+    },
+    "writable_ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      13,
+      14,
+      18,
+      19,
+      20,
+      21,
+      26,
+      27
+    ]
+  },
+  "packet_atomicity": {
+    "cases": [
+      {
+        "case": "gpr-write-then-reserved-predicate",
+        "executed": false,
+        "memory_unchanged": true,
+        "state_unchanged": true
+      },
+      {
+        "case": "control-write-then-reserved-predicate",
+        "executed": false,
+        "memory_unchanged": true,
+        "state_unchanged": true
+      },
+      {
+        "case": "store-then-reserved-predicate",
+        "executed": false,
+        "memory_unchanged": true,
+        "state_unchanged": true
+      },
+      {
+        "case": "parallel-write-conflict",
+        "executed": false,
+        "memory_unchanged": true,
+        "state_unchanged": true
+      }
+    ],
+    "failures": 0
+  },
+  "provenance": {
+    "core_sources": {
+      "emulator/qemu/cdj_c674x.c": "34e6a1c141016a2db672e11994721df1cc9b591ef39310b5ff6bd65d1442232f",
+      "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00"
+    },
+    "generator_sha256": "b174d15deb466e988fc8412fd3e1505f9a4bdd995deebaae824fe42f0b0b0354",
+    "probe_source": "tests/cstub/c674x-isa-probe.c",
+    "probe_source_sha256": "565f14cc09c631c461898a06f2ff72cd5a9dc6c19c5fa65f78b375399c109aa2"
+  },
+  "schema": 1
+}
