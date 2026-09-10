@@ -11,6 +11,33 @@ from tools.cdj_dsp.tx_capture import tx_capture_metadata
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_compact_trace_preserves_execution_and_coverage(tmp_path, monkeypatch):
+    data = bytearray(0x40000)
+    struct.pack_into('<I', data, 0, 0x00800020)
+    struct.pack_into('<II', data, 0x20, (3 << 23) | (123 << 7) | 0x28, 0xffffffff)
+    dump = tmp_path / 'dump.bin'
+    dump.write_bytes(data)
+    # The CLI owns its mode even if the parent has a different environment.
+    monkeypatch.setenv('CDJ_DSP_COMPACT_TRACE', '1')
+    for mode in ('detailed', 'compact'):
+        output = tmp_path / mode
+        result = run(dump, output, '--trace-mode', mode, '--verify-repeat')
+        assert result.returncode == 0, result.stderr
+        gate = json.loads((output / 'gate.json').read_text())
+        assert gate['passed'] and gate['trace_mode'] == mode
+    detailed = [json.loads(line) for line in (tmp_path / 'detailed/trace.jsonl').read_text().splitlines()]
+    compact = [json.loads(line) for line in (tmp_path / 'compact/trace.jsonl').read_text().splitlines()]
+    assert any(event['event'] == 'step' for event in detailed)
+    assert compact == [event for event in detailed if event['event'] != 'step']
+    assert (tmp_path / 'detailed/final.cdjdsp').read_bytes() == (tmp_path / 'compact/final.cdjdsp').read_bytes()
+    reports = []
+    for mode in ('detailed', 'compact'):
+        report = json.loads((tmp_path / mode / 'coverage.json').read_text())
+        report.pop('sha256')
+        reports.append(report)
+    assert reports[0] == reports[1]
+
+
 def run(dump, output, *args):
     return subprocess.run([sys.executable, '-m', 'tools.cdj_dsp.replay',
                            str(dump), str(output), *args], cwd=ROOT,

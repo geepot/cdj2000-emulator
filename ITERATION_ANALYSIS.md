@@ -215,3 +215,26 @@ for both versions (Apple clang 21.0.0 / clang-2100.3.34.2): the default host
 selection mixed Xcode's linker with a newer SDK and could not link. That failed
 attempt is excluded. Reproduce with `tools/cdj_dsp/benchmark_replay.py`; raw
 results are `analysis/iterations/02-replay-{before,after}.json`.
+
+### Iteration 03 — compact standalone replay diagnostics
+
+Added `--trace-mode compact`; detailed remains the default. Compact mode omits
+only standalone `step` records at their producer, preserving external events,
+coverage, PCM observations, faults, budgets, and stop state. The launcher clears
+inherited compact-mode environment state and records the chosen mode in both
+manifest and gate. Repeat trace equality is explicitly scoped to that mode.
+
+Same workload and compiler as iteration 02: **2.125 s cold**, then **1.202,
+1.207 s warm**, versus iteration 02's warm **2.627, 2.574 s**. Warm median
+improvement for this iteration: **2.16× (53.7% less time)**. Relative to the
+starting warm baseline: **2.38× (58.0% less time)** for the complete replay,
+repeat, analysis, and verification command. Trace size fell from **29,416,880
+to 3,521,306 bytes** per execution (88.0% smaller).
+
+Final checkpoint and semantic coverage hashes match every prior measured run;
+compact traces match their own repeats. A focused test compares detailed events
+minus `step` against compact events, exact final state, and semantic coverage,
+including a fail-closed instruction fault and inherited environment override.
+All **33 replay/checkpoint/deferred tests passed**. Raw results:
+`analysis/iterations/03-replay-compact.json`. These are workflow gains from
+reduced diagnostics, not an interpreter throughput or connected-boot claim.

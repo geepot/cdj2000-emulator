@@ -251,6 +251,8 @@ def main():
                         help='optimized (-O2, default) or debug (-O0) native replay build')
     parser.add_argument('--no-build-cache', action='store_true',
                         help='compile a fresh binary instead of reusing the content-addressed cache')
+    parser.add_argument('--trace-mode', choices=('detailed', 'compact'), default='detailed',
+                        help='compact omits standalone per-step diagnostics; events, stops and coverage remain')
     parser.add_argument('--observe-pcm', action='store_true',
                         help='record at most 64 RAM-only stock PCM PC observations; includes fall-through, not ownership proof')
     parser.add_argument('--connected-stops', type=int, default=0,
@@ -404,7 +406,8 @@ def main():
         limits = dict(steps=args.steps, packets=args.packets, cycles=args.cycles,
                       packet_cycle_origin='input checkpoint counters',
                       boundary_semantics='checked between successful core steps; multicycle steps may cross a cycle ceiling')
-        manifest = dict(build=build, dump_sha256=hashlib.sha256(data).hexdigest(),
+        manifest = dict(build=build, trace_mode=args.trace_mode,
+                        dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
                         limits=limits, approximations=approximations,
                         dsp_timing_mode=('functional-runahead' if args.functional_dsp_timing else 'strict'),
@@ -465,6 +468,9 @@ def main():
         if event_data is not None:
             command.append(str(event_snapshot))
         replay_env = os.environ.copy()
+        replay_env.pop('CDJ_DSP_COMPACT_TRACE', None)
+        if args.trace_mode == 'compact':
+            replay_env['CDJ_DSP_COMPACT_TRACE'] = '1'
         replay_env.pop('CDJ_DSP_OBSERVE_PCM', None)
         replay_env.pop('CDJ_DSP_CONNECTED_STOPS', None)
         if args.connected_stops:
@@ -646,7 +652,8 @@ def main():
     print(json.dumps(stop, separators=(',', ':')))
     if args.verify_repeat or expected is not None:
         actual = (args.output / 'trace.jsonl').read_bytes()
-        gate = dict(scope='trace equivalence only; not architectural correctness or boot',
+        gate = dict(scope='trace equivalence within selected mode; not architectural correctness or boot',
+                    trace_mode=args.trace_mode,
                     architectural_validation_eligible=validation_eligible,
                     limits=manifest['limits'],
                     approximations=manifest['approximations'],

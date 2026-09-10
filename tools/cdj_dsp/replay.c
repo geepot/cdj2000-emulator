@@ -1067,6 +1067,8 @@ mismatch:
 }
 int main(int argc, char **argv)
 {
+    const char *compact_trace = getenv("CDJ_DSP_COMPACT_TRACE");
+    bool trace_steps = !compact_trace || strcmp(compact_trace, "1");
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     observe_pcm = getenv("CDJ_DSP_OBSERVE_PCM") != NULL;
     const char *stop_limit = getenv("CDJ_DSP_CONNECTED_STOPS");
@@ -1221,7 +1223,7 @@ int main(int argc, char **argv)
                 reason = "fault";
                 break;
             }
-            printf("{\"event\":\"step\",\"pc\":%" PRIu32 ",\"cycles\":%" PRIu64
+            if (trace_steps) printf("{\"event\":\"step\",\"pc\":%" PRIu32 ",\"cycles\":%" PRIu64
                    ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
                    cpu.pc, cpu.cycles, cpu.loop_active ? "true" : "false", cpu.branch_due);
             pcm_observe();
