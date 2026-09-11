@@ -1213,6 +1213,20 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 uint32_t left = cpu->r[side][((w >> 13) & 7) + rs];
                 uint32_t right = cpu->r[cross][((w >> 7) & 7) + rs];
                 value = subtract ? left - right : left + right;
+            } else if ((w & 0x047e) == 0x002e) {
+                /* SPRUFE8B Figure F-29, Sx2op (printed page 755): compact
+                 * in-place .S ADD/SUB, op (bit 11) 0 = ADD, 1 = SUB with
+                 * dst = src1 - src2.  Bit 10 is the only bit separating this
+                 * format from Sx5 below, so the two masks are disjoint and
+                 * neither steals encodings from the other.  Unlike F-22 and
+                 * F-25, Figure F-29's table has neither a BR nor a SAT
+                 * column: the header bits do not redecode it, so ADD stays
+                 * ADD in a saturating fetch packet.  Both three-bit register
+                 * fields observe RS and bit 12 crosses src2 (xsint). */
+                dst = ((w >> 13) & 7) + rs;
+                uint32_t left = cpu->r[side][dst];
+                uint32_t right = cpu->r[cross][((w >> 7) & 7) + rs];
+                value = (w & 0x0800) ? left - right : left + right;
             } else if ((w & 0x047e) == 0x042e) {
                 /* SPRUFE8B Figure F-30, Sx5: compact ADDK adds its
                  * unsigned five-bit constant to the destination in place.
@@ -1357,7 +1371,21 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 out.r[side][dst] = value; written[side][dst] = true;
                 continue;
             }
-            if ((w & 0x187f) == 0x006f) { /* Figure F-32, register BNOP */
+            /* SPRUFE8B Figure F-32, Sx1b (printed page 756): register BNOP,
+             * s = 1 only.  Whether s = 0 is architecturally legal is an OPEN
+             * QUESTION and the manual contradicts itself: Figure F-32 draws s
+             * as an unconstrained field and carries no "(s = 1)" parenthetical
+             * (unlike Figure F-31 op 110 on the same page), and Table B-1
+             * (printed page 715) footnotes ADDKPC, "B register", "B IRP" and
+             * "B NRP" as S2-only while pointedly not footnoting "BNOP
+             * register" - but the BNOP-register entry on printed page 168 is
+             * headed "unit = .S2", its 32-bit figure hardwires bit 1 = 1, and
+             * cl6x refuses "BNOP .S1 B4,3" with W0005 "Branch to register
+             * requires .S2 unit".  Until that is settled this stays fail-closed
+             * like every other unresolved case in this core; accepting an
+             * encoding hardware may reject is the worse error.  Opening it is
+             * one bit here and in compact_branch(). */
+            if ((w & 0x187f) == 0x006f) {
                 unsigned n = w >> 13;
                 if (n && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
                 if (n + 1 > elapsed) elapsed = n + 1;

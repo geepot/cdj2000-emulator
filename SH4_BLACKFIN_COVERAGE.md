@@ -154,3 +154,34 @@ Important unvalidated or approximate areas:
 
 The current evidence supports “reliable for the tested firmware paths,” not
 “complete SH4/Blackfin emulation.”
+
+## Wake-timing harness follow-up
+
+The Blackfin set now reports **37 passed, 1 expected failure, no skips**.
+`tests/test_bfin_wake_timing.py` runs nine deterministic scenarios against
+extracted production `bfin_wall_wait`, `bfin_wall_deliver`, `bfin_wall_sync`,
+the parked-loop predicate, and GNU sim's `sim_events_time/tick/tickn` helpers.
+Six negative controls require specific failures when PC-change exits, prepaid
+wait credit, link readiness, hardware-loop exclusion, same-PC wake returns or
+the exact tick boundary are broken. All nine scenarios also pass ASan/UBSan.
+
+Clock/select and device callbacks are controlled test doubles. The callbacks
+model masked/unmasked and PLL-style outcomes; this is not full SIC/CEC ISR,
+SPORT delivery, Windows-waiter, physical PLL or cross-board timing coverage.
+The actual event-queue tick helpers are extracted to preserve their boundary
+contract: a deadline reached exactly by `tickn` is processed on the next tick,
+with its callback attributed to that deadline before time advances.
+
+`tests/test_bfin_wake_guest.py` adds assembled probes through the installed
+simulator, without firmware inputs. With normal interrupts disabled, a PLL
+wake already pending before IDLE works. **A PLL lock arriving during IDLE
+exposes an existing early-resume bug:** the next guest instruction can read
+PLL_STAT before the event has been delivered. That exact failure is recorded
+as a strict expected failure; tool errors, timeouts and other simulator failures
+remain failures. A fix must graduate the test rather than leave an XPASS.
+
+No runtime scheduler change is made. The known early-IDLE-resume gap must be
+addressed before treating this harness as evidence that idle/clock optimizations
+preserve guest wake timing. Full timer ISR and live MAIN-link integration remain
+additional gates. Reproduction is in BUILD.md; evidence is under
+`analysis/iterations/12-blackfin-wake/`.

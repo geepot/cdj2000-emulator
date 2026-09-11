@@ -133,16 +133,40 @@ def test_compact_decode_gap_is_exactly_the_measured_set(tmp_path):
         pytest.skip("requires C compiler")
     from tools.cdj_dsp.audit_sweeps import compact
 
-    result = compact(_sweep("compact", tmp_path))
+    text = _sweep("compact", tmp_path)
+    result = compact(text)
     assert result["words_swept"] == 0x10000
     # Decoder-only figure: independent of the probe's registers and memory window.
-    assert result["defensible_coverage_figure"]["value"] == 11440
+    # Was 11,440 when the audit was written.  Opening Figure F-29 Sx2op -
+    # (w & 0x047e) == 0x002e, 9 free bits, 512 words - accounts for the whole
+    # drop and nothing else.  Figure F-32 Sx1b with s = 0 is deliberately NOT
+    # opened: whether it is architecturally legal is an open question (see the
+    # comment at the Sx1b arm in cdj_c674x.c) and it stays fail-closed, so its
+    # 128 words remain in this count.
+    assert result["defensible_coverage_figure"]["value"] == 10928
     # Nothing may be rejected for reasons that are properties of the probe.
     assert set(result["rejection_reasons"]) == {
         "compact instruction not implemented",
         "reserved compact LSDx1 instruction",
         "unaligned stack access or invalid register pair",
     }, result["rejection_reasons"]
+    # Pin the 512-word delta to the format it is supposed to be, rather than to
+    # a total that happens to agree, and assert that the Sx1b s = 0 words are
+    # still refused.  The masks are read straight off the figures.
+    verdicts = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            verdicts[int(parts[0], 16)] = parts[1]
+    assert len(verdicts) == 0x10000
+    sx2op = {w for w in range(0x10000) if w & 0x047e == 0x002e}
+    sx1b_s0 = {w for w in range(0x10000) if w & 0x187f == 0x006e}
+    assert len(sx2op) == 512 and len(sx1b_s0) == 128
+    assert not sx2op & sx1b_s0
+    unaccepted = sorted(w for w in sx2op if verdicts[w] != "accept")
+    assert not unaccepted, [f"{w:04x}" for w in unaccepted]
+    still_closed = sorted(w for w in sx1b_s0 if verdicts[w] == "accept")
+    assert not still_closed, [f"{w:04x}" for w in still_closed]
 
 
 def test_control_register_reachability_and_reserved_bits(tmp_path):

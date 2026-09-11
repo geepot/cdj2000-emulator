@@ -3096,6 +3096,105 @@ int main(void)
     memory[0] = (5u << 13) | 0x2ef; memory[7] = 0xe0280000;
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.pc == 0x1040 && c.cycles == 6);
+    /* SPRUFE8B Figure F-32 Sx1b (printed page 756) register BNOP with s = 0 is
+     * an OPEN QUESTION and stays fail-closed.  The manual contradicts itself:
+     * Figure F-32 draws s as an unconstrained field with no "(s = 1)"
+     * parenthetical - contrast Figure F-31 op 110 on the same page - and
+     * Table B-1 (printed page 715) footnotes ADDKPC, "B register", "B IRP" and
+     * "B NRP" as S2-only while pointedly not footnoting "BNOP register"; but
+     * the BNOP-register entry on printed page 168 is headed "unit = .S2", its
+     * 32-bit figure hardwires bit 1 = 1, and cl6x refuses "BNOP .S1 B4,3" with
+     * W0005 "Branch to register requires .S2 unit".  dis6x does decode 0xa2ee
+     * as "BNOP.S1 B5,5", but dis6x is not authoritative on s-bit legality - it
+     * also decodes 0xda6e as MVC.S1 where Figure F-31 says (s = 1).  Until the
+     * question is settled, refusing an encoding hardware may reject is the
+     * lesser error, so 0xa2ee must still fault. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][5] = 0x1040;
+    memory[0] = 0xa2ee; memory[7] = 0xe0200000;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.fault && c.pc == 0x1000 && c.cycles == 0);
+    /* The s = 1 twin of the same word is unaffected and still branches. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][5] = 0x1040;
+    memory[0] = 0xa2ef; memory[7] = 0xe0200000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.pc == 0x1040 && c.cycles == 6);
+
+    /* SPRUFE8B Figure F-29 Sx2op (printed page 755): compact in-place .S ADD
+     * and SUB, "src1 = dst" and "dst = src1 - src2", src2 of type xsint.  The
+     * words come from TI's dis6x -mv6740, which names 0x622e "ADD.S1
+     * A3,A4,A3", 0x6a2e "SUB.S1 A3,A4,A3", 0x622f "ADD.S2 B3,B4,B3", 0xb32e
+     * "ADD.S1X A5,B6,A5" and, under an RS=1 header, 0x622e
+     * "ADD.S1 A19,A20,A19"; the results below are hand-computed from those. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 0x00001000; c.r[0][4] = 0x00000234;
+    memory[0] = 0x622e; memory[7] = 0xe0200000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == 0x00001234 && c.r[0][4] == 0x00000234);
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 0x00001000; c.r[0][4] = 0x00000234;
+    memory[0] = 0x6a2e;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == 0x00000dcc && c.r[0][4] == 0x00000234);
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][3] = 0x00000010; c.r[1][4] = 0x00000007;
+    memory[0] = 0x622f;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[1][3] == 0x00000017 && c.r[0][3] == 0);
+    /* Bit 12 crosses src2 only; src1/dst stays on the s side. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][5] = 0x00000100; c.r[1][6] = 0x00000020; c.r[0][6] = 0x0badf00d;
+    memory[0] = 0xb32e;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][5] == 0x00000120);
+    /* Both three-bit register fields observe header RS. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][19] = 0x00001000; c.r[0][20] = 0x00000234;
+    c.r[0][3] = 0x0badf00d; c.r[0][4] = 0x0badf00d;
+    memory[0] = 0x622e; memory[7] = 0xe0280000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][19] == 0x00001234 && c.r[0][3] == 0x0badf00d);
+    /* Figure F-29's mnemonic table carries neither a BR nor a SAT column,
+     * unlike Figures F-22 and F-25, so a saturating fetch packet leaves this
+     * ADD alone: 0x7fffffff + 1 wraps instead of clamping, and no CSR.SAT
+     * update is queued.  TI's compressor agrees - compiling "SADD .S1 A3,A4,A5"
+     * next to "ADD .S1 A3,A4,A3" emits header SAT=1 with 0x622e for the ADD,
+     * and dis6x reads that word back as ADD, not SADD. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 0x7fffffff; c.r[0][4] = 1;
+    memory[0] = 0x622e; memory[7] = 0xe0204000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == 0x80000000 && !c.load_count && !(c.control[1] & 0x200));
+
+    /* The two neighbours of the newly opened space are unmoved.  Figure F-30
+     * Sx5 differs from Sx2op only in bit 10: dis6x names 0xa5ae "ADDK.S1 5,A3"
+     * and 0xfdae "ADDK.S1 31,A3", the top of the five-bit constant. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 0x00000100;
+    memory[0] = 0xa5ae; memory[7] = 0xe0200000;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == 0x00000105);
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[0][3] = 0x00000100;
+    memory[0] = 0xfdae;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == 0x0000011f);
+    /* Figure F-31 op 110 keeps its "(s = 1)" requirement: 0xda6f writes ILC
+     * and its s = 0 twin 0xda6e is still refused.  Sx1b cannot claim 0xda6e
+     * because Figure F-32 fixes bits 12-11 to 00 and this word has them set. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][4] = 0x0000002a;
+    memory[0] = 0xda6f;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[13] == 0x0000002a);
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0xda6e;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.fault && !strcmp(c.fault, "compact instruction not implemented") &&
+           c.fault_word == 0xda6e);
+    c.fault = NULL;
+
     /* CALLP writes the next execute-packet address and takes six cycles.
      * A parallel operation observes the old link register. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);

@@ -755,3 +755,43 @@ experiment binary and verifies existing completed reports before skipping them.
 Use fresh run names for a new timing campaign. Full raw run artifacts remain
 under ignored `runs/`; compact evidence is `prefix-connected-summary.json`.
 The other agent's DSP coverage work and all unrelated changes are preserved.
+
+## Iteration 12 — Blackfin wake-timing regression gate
+
+Added a firmware-free deterministic harness for the actual prepared Blackfin
+wall-clock helpers and parked predicate. GNU sim's time/tick/tickn functions
+are also extracted; event-queue boundary behavior is not reimplemented in a
+convenient but inaccurate tick stub. A small controlled callback backend and
+mock clock/POSIX select provide reproducible deadlines and arrivals.
+
+Nine scenarios cover exact event boundaries, PC-changing interrupt exits,
+pending work without premature future-event delivery, masked/same-PC and
+PLL-style callbacks, prepaid wait credit, unpaid lag capping, readable MAIN-link
+wake, short spins, and both hardware-loop self-jump exclusions. Six compiled
+negative variants must fail at a specific assertion, proving the checks detect
+lost PC exits, wait credit, link readiness, loop exclusion, same-PC wake return,
+and a changed tick boundary. The tests do not claim full peripheral/CEC behavior.
+
+An actual assembled PLL/IDLE probe found an existing integration defect. A
+pending PLL wake before IDLE passes under CLI. If the lock is still pending,
+wall-clock sync may return from its early host wait and execute the next guest
+instruction before dispatching the lock event; the immediate PLL_STAT assertion
+reads zero instead of PLL_LOCKED. The 1 MHz diagnostic clock with a 75 ms model
+lock deadline makes this small reproduction independent of proprietary firmware.
+It is not a physical PLL timing measurement. The precise failure is a strict
+expected failure, with setup errors, timeouts and unrelated failures kept fatal.
+A successful future fix deliberately produces XPASS until this annotation is
+removed. No runtime behavior was changed to make the test pass.
+
+Validation: **37 passed, 1 expected failure, no skips in 5.13 seconds** across
+all Blackfin tests, including the previous 21 passing cases. All nine new C
+scenarios also pass AddressSanitizer and UndefinedBehaviorSanitizer with
+`-O2 -Wall -Wextra -Werror`. The six mutations are rejected as intended.
+Commands are in BUILD.md; logs and source/binary provenance are under
+`analysis/iterations/12-blackfin-wake/`.
+
+This is a correctness prerequisite, **not an execution-speed improvement**.
+The installed Blackfin binary and scheduler are unchanged. Next, correct the
+exposed IDLE resumption state before optimizing the parked loop; actual timer
+ISR, live link delivery and Windows wake behavior still need integration gates.
+Unrelated in-progress DSP source and coverage work was left untouched.
