@@ -1072,6 +1072,72 @@ Trace SHA-256 `65dba25926a35dc30506d2cb4bbf955a47dafb5e23c53bdfbecab93c2df5a1c0`
 Connected GUI exit 0/frame is not boot completion. No working audio or physical
 PLL lock/clock propagation has been established.
 
+### Derived clock tree: OSCIN to the Timer64P and McASP serial clocks
+
+`cdj_c6747_pll.c` now answers what frequency each output clock actually runs
+at, instead of only latching divider registers. `CDJ_C6747_OSCIN_HZ` is the one
+board constant (16,934,400 Hz; X501 via parent `docs/dsp/dsp-hardware.md`,
+RRV4356 pp 12, 13, 96) and replaces the three literals that were inlined in the
+operating-point check. Every other term cites a page:
+
+* `cdj_c6747_pll_auxclk_hz()` = OSCIN. AUXCLK is the **PLL bypass clock**, with
+  no PREDIV, PLLM, POSTDIV or PLLDIVn in its path: SPRUH91D Table 7-1 printed
+  page 118, Table 6-2 printed page 104, section 6.2 printed page 105,
+  Figure 7-1 printed page 117.
+* `cdj_c6747_pll_sysclk_hz()` = OSCIN / PREDIV x (PLLM+1) / POSTDIV / PLLDIVn in
+  PLL mode, OSCIN / PLLDIVn in bypass (SPRUH91D Figure 7-1 printed page 117,
+  6.2 printed page 105, 7.2 printed page 116, Tables 7-8/7-9/7-17 printed pages
+  125/126/131). It refuses when a divider's enable bit is clear, because
+  SPRUH91D Table 7-24 printed page 137 ties SYSTAT's SYSnON status to DnEN: a
+  disabled divider means the clock is **off**, not divide-by-one.
+* `cdj_c6747_timer_input_hz()` = AUXCLK for timer 1:2, AUXCLK / (PSC34+1) for
+  timer 3:4 in dual 32-bit unchained mode only (SPRUH91D Table 6-2 printed page
+  104, Table 7-1 printed page 118, 28.1.5.2.1 printed page 1229,
+  28.1.5.4.2.2.1/2 printed page 1236, TGCR printed page 1254). On this board
+  that is **16,934,400 Hz**, unchanged by PLL multiplication. **No PSC gate is
+  in this path at all**: Tables 8-1 and 8-2 printed pages 140 and 141 assign no
+  LPSC to Timer64P0 or Timer64P1, and 8.2 printed page 140 says such modules
+  "do not have their module reset/clocks controlled by the PSC module".
+* `cdj_c6747_mcasp_tx_clock_hz()` = AUXCLK / (HCLKXDIV+1) for AHCLKX,
+  / (CLKXDIV+1) again for ACLKX, and / (XSSZ bits x XMOD slots) for an
+  internally generated TDM AFSX (SPRUH91D Figure 24-15 printed page 996, Tables
+  24-35/24-36/24-37/24-38 printed pages 1075/1076/1077/1078, bits-per-frame
+  identity printed page 1011).
+
+Rates are returned as an exact unreduced fraction (numerator Hz over
+denominator) so no ratio is ever silently rounded, and every query returns
+false — outputs untouched — where the manuals fix no frequency. These are
+rates, not run conditions: nothing here counts, raises an event or touches the
+INTC, and GBLCTL/TIMnRS/ENAMODEn/TIEN12 still decide whether a counter moves.
+`CKEN.AUXEN` gating (SPRUH91D 7.4.20 printed page 135) stays unmodelled; CKEN
+is outside the PLL model's register window so writes to `0x01c11148` already
+fail closed, and the reported state is its reset value AUXEN = 1.
+
+`tests/cstub/c6747-pll-clock.c` carries the arithmetic in comments. The headline
+check is audio-shaped and hand-computed: with HCLKXDIV = 2, CLKXDIV = 1,
+XMOD = 2 and XSSZ = Fh, AFSX = 16,934,400 / (3 x 2 x 64) = **44,100 Hz exactly**,
+which is why the board fits a 16.9344 MHz part (384 x 44.1 kHz).
+
+```sh
+.venv/bin/pytest -q
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu \
+  tests/cstub/c6747-pll-clock.c emulator/qemu/cdj_c6747_pll.c \
+  emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_mcasp.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
+  emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_sp.c \
+  emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_loop.c \
+  -o /tmp/cdj-pll-clock-san
+/tmp/cdj-pll-clock-san
+.venv/bin/python -m tools.cdj_dsp.refdocs --check
+```
+
+SPRS377F is now a first-class reference: `tools/cdj_dsp/refdocs.py` fetches it
+from `https://www.ti.com/lit/ds/symlink/tms320c6747.pdf`, sha256
+`297a63b4c4dae68e98d361162b238bde992466991f25fa3ef0e4b82e8bb9a869`, 230 PDF
+pages with printed page == PDF page throughout. The indexer learned the
+datasheet footer layout, which carries no literature number; SPRU* indexing is
+unchanged.
+
 ### Cycle-edge PLL clock integration
 
 Both replay and connected DSP execution now advance PLL state through the

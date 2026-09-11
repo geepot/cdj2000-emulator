@@ -43,6 +43,14 @@ DOCS = {
         "revision": "SPRUH91D, March 2013 - Revised September 2016",
         "sha256": "8f00cb85ee803c034794096b2e663293c677fdc09bd8843415520e229fd76e6c",
     },
+    "sprs377f": {
+        # TI serves the C6747 datasheet from the device symlink path; the
+        # literature number SPRS377F appears on every page of the PDF itself.
+        "url": "https://www.ti.com/lit/ds/symlink/tms320c6747.pdf",
+        "title": "TMS320C6745, TMS320C6747 Fixed- and Floating-Point DSP",
+        "revision": "SPRS377F, September 2008 - Revised June 2014",
+        "sha256": "297a63b4c4dae68e98d361162b238bde992466991f25fa3ef0e4b82e8bb9a869",
+    },
 }
 
 # TI alternates the footer layout: odd pages read
@@ -50,6 +58,15 @@ DOCS = {
 # "120   <chapter>   SPRUFE8B - July 2010".  Accept both orientations.
 _FOOTER = re.compile(
     r"^(?:SPRU[A-Z0-9]+\b.*?(\d+)|\s*(\d+)\s{2,}.*?SPRU[A-Z0-9]+\b.*)\s*$",
+    re.MULTILINE,
+)
+
+# Datasheets (SPRS*) carry no literature number in the running footer; they use
+# "Copyright (c) <years>, Texas Instruments Incorporated" with the page number
+# on the outer edge, again swapping sides between odd and even pages.
+_FOOTER_DS = re.compile(
+    r"^(?:Copyright\s*.{0,12}\s*Texas Instruments Incorporated\b.*?(\d+)"
+    r"|\s*(\d+)\s{2,}.*?Copyright\s*.{0,12}\s*Texas Instruments Incorporated\b.*)\s*$",
     re.MULTILINE,
 )
 
@@ -85,6 +102,8 @@ def index(pdf: Path) -> tuple[Path, list[int | None]]:
     out = []
     for i, page in enumerate(raw.split("\f"), start=1):
         hits = [a or b for a, b in _FOOTER.findall(page)]
+        if not hits:
+            hits = [a or b for a, b in _FOOTER_DS.findall(page)]
         p = int(hits[-1]) if hits else None
         printed.append(p)
         out.append(f"@@ PDFPAGE {i} PRINTED {p if p is not None else '-'}\n{page}")

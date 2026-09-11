@@ -30,6 +30,51 @@ static CdjC6747Timer *decode(CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT],
     return &timers[index];
 }
 
+bool cdj_c6747_timer_input_hz(const CdjC6747Timer *s, uint32_t auxclk_hz,
+                              unsigned half, uint64_t *numerator,
+                              uint32_t *denominator)
+{
+    if (!s || !auxclk_hz || !numerator || !denominator ||
+        half > CDJ_C6747_TIMER_HALF_34)
+        return false;
+    /* CLKSRC12 = 1 takes the clock from the TM64P_IN12 pin instead
+     * (SPRUH91D Table 28-1 and 28.1.5.2.2 printed page 1229; TCR bit 8,
+     * printed page 1253).  That pin's frequency is a board fact no manual
+     * page fixes, so refuse rather than invent one.
+     *
+     * How far that refusal reaches depends on the mode, and printed page 1229
+     * is explicit: "If the timer is configured in 64-bit mode or 32-bit chained
+     * mode, CLKSRC12 controls the clock source for the entire timer.  If the
+     * timer is configured in dual 32-bit unchained mode (TIMMODE = 01 in TGCR),
+     * CLKSRC12 controls the timer 1:2 side of the timer only."  So in dual
+     * 32-bit unchained mode the 3:4 side still runs from AUXCLK through its own
+     * prescaler whatever CLKSRC12 says, and refusing it there would hide a rate
+     * the manual does fix. */
+    bool dual_unchained = ((s->tgcr >> 2) & 3u) == 1u;
+
+    if ((s->tcr & (1u << 8)) &&
+        (half == CDJ_C6747_TIMER_HALF_12 || !dual_unchained))
+        return false;
+    if (half == CDJ_C6747_TIMER_HALF_12) {
+        /* Timer 1:2 has no prescaler (SPRUH91D 28.1.5.4.2.2.2 printed page
+         * 1236), and in 64-bit, watchdog and chained modes CLKSRC12 clocks
+         * the whole timer (28.1.5.2.1 printed page 1229). */
+        *numerator = auxclk_hz;
+        *denominator = 1u;
+        return true;
+    }
+    /* Only dual 32-bit unchained mode (TIMMODE = 1h in TGCR, printed page
+     * 1254) gives timer 3:4 a clock of its own: the 4-bit prescaler emits one
+     * TIM34 clock every PSC34 + 1 input clocks (SPRUH91D 28.1.5.4.2.2.1
+     * printed page 1236).  In the other three modes TIM34 advances off the
+     * 1:2 side at a rate PRD12 sets, which is not a clock the PLLC defines -
+     * refuse instead of inventing a ratio. */
+    if (!dual_unchained) return false;
+    *numerator = auxclk_hz;
+    *denominator = ((s->tgcr >> 8) & 15u) + 1u;
+    return true;
+}
+
 void cdj_c6747_timers_reset(CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT])
 {
     memset(timers, 0, sizeof(*timers) * CDJ_C6747_TIMER_COUNT);

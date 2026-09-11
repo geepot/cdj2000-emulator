@@ -27,6 +27,55 @@ The parent prototype remains useful evidence; this fork is the active emulator.
 > current and historical state to be the largest single source of confusion in
 > the repository.
 
+## What the clock manuals do not pin (read before making the timer count)
+
+The clock tree from OSCIN to the Timer64P input and the McASP transmit clocks
+is now derived and cited (see BUILD.md, "Derived clock tree"). These are the
+relationships the documentation does **not** define. A later wave must not
+assert any of them as a manual-backed number.
+
+* **CPU issue cycles have no documented relationship to any clock.** This
+  core's `cpu->cycles` is an issue count with no stall, memory-latency or
+  cache-miss model, so it is not SYSCLK1 periods and no page of SPRUH91D or
+  SPRS377F relates the two. SYSCLK1 is a frequency; `cpu->cycles` is a count of
+  modelled issues. The existing `cdj_c6747_pll_tick()` already converts one
+  CPU-cycle callback into OSCIN periods through the active divider ratios, and
+  that conversion is an emulator abstraction, not a datasheet fact. **A timer
+  that advances once per N CPU cycles is implementing a counter, not a rate.**
+  The honest way to make the Timer64P count at its real rate is to drive it from
+  the same oscillator-period accumulator the PLL already maintains
+  (`oscin_cycles` / `oscin_phase`), because that is the only quantity in this
+  model with a cited unit — and then to say plainly that the *wall-clock* rate
+  at which those periods are produced is still set by host scheduling.
+* **TM64P_IN12's frequency.** CLKSRC12 = 1 and TIEN12 = 1 both depend on a board
+  signal; SPRUH91D bounds it only by "no greater than the timer peripheral
+  reference clock" (28.1.5.2.2 printed page 1229). The query refuses instead of
+  guessing, and the gate condition for TIEN12 is not modelled at all.
+* **Timer 3:4 in 64-bit, watchdog and chained modes.** There TIM34 advances off
+  the 1:2 side at a rate PRD12 sets, which is not a PLLC-defined clock, so there
+  is no input frequency to report.
+* **What a disabled divider does.** SPRUH91D Table 7-24 printed page 137 makes
+  DnEN = 0 mean the SYSCLK is off, but no page gives a frequency for that state,
+  and no page says what PREDEN = 0 or POSTDEN = 0 do. The new queries refuse.
+  Note the pre-existing `ratio()` helper inside `cdj_c6747_pll_tick()` treats a
+  disabled divider as divide-by-one; that assumption is now contradicted by
+  printed page 137 for PLLDIVn and should be revisited deliberately, not as a
+  side effect of timer work — changing it changes recorded bypass timing.
+* **CKEN.AUXEN gating.** CKEN and CKSTAT (7.4.20/7.4.21 printed pages 135 and
+  136) are outside the PLL model's register window, so AUXCLK can never be
+  turned off here. Writes to `0x01c11148` fail closed, which is why this is safe
+  rather than silent, but a firmware that disables AUXCLK would diverge.
+* **McASP AFSX outside internally generated TDM.** Burst mode (XMOD = 0), DIT
+  mode (XMOD = 180h) and an external frame sync have no stated
+  frame-rate formula. The TDM formula itself rests on printed page 1011's
+  bits-per-frame identity (XSSZ x XMOD), which the manual states as an
+  ASYNC = 0 constraint rather than as an AFSX frequency equation.
+* **Receive-side McASP clocks** (AHCLKR/ACLKR/AFSR) are not implemented; the
+  model stores no receive clock registers.
+* **PLL lock, analog settling and the custom chip.** Unchanged from earlier
+  checkpoints: the lock-wait bound is SPRS377F Table 6-4 printed page 73 catalog
+  arithmetic applied to the custom D810K013, not measured lock.
+
 ## Current checkpoint
 
 Network work resumed at user request. The read-only network_inventory tool
