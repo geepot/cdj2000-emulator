@@ -154,6 +154,84 @@ interrupt/resume and memory paths, not instruction families.
 20,550 once checkpoints are included — the DSP program lives in SDRAM pages only
 checkpoints carry, so a scan restricted to L2 would measure almost nothing.
 
+### 0.2 The recorded memory-map faults are already closed
+
+§10 task 2 asked for the 12 recorded "unaligned or unmapped scalar memory access"
+occurrences to be classified, each with a manual citation. They are classified
+here, and the answer is that **none of them needs a code change**: every one was a
+missing peripheral register window, and `2a6daef` ("Expand C6747 execution and
+audio transport") added all of them — before `3da5ff2`, so they were already stale
+when this backlog was written. §0.1 warns that a recorded fault may name an
+instruction implemented since; the same caveat applies to every other fault class,
+and `reachability.json` does not re-run the fault to check. Read
+`recorded_unsupported_faults` as a list of addresses to re-test, not of open bugs.
+
+Every faulting address is word aligned, so the alignment arm of the check —
+`!nonaligned && (address & (size - 1))` in `cdj_c674x.c` — never applied to any of
+them. All 12 were bus-callback refusals, which makes this a map question end to
+end. The base register value came out of each run's own `stop` record (it carries
+the full A/B file, post-rollback, which is the pre-packet state) and, for the
+stores, out of the `rejected_write` trace line that records the exact address.
+
+Sweeping all 977 JSON artifacts under `runs/` for the fault string finds **six**
+distinct faults, not four: `reachability.json`'s work list reads only the
+`unsupported` key, and two later runs record theirs under `faults`.
+
+| Fault pc | Access | Address | Register, and where SPRUH91D says so |
+|---|---|---|---|
+| `0xc004dbe8` | store 1 | `0x01c0451c` | EDMA3CC PaRAM set 40 `CCNT`. PaRAM is 4000h-4FFFh (Table 16-20, printed page 509); `CCNT` is offset 1Ch of a 32-byte set (Table 16-11, printed page 500) |
+| `0xc004e28e` | store `0xffffffff` | `0x01c01028` | EDMA3CC `EECR`, offset 1028h (Table 16-20, which starts on printed page 507); semantics Table 16-45, printed page 534 |
+| `0xc004e33c` | load | `0x01c14110` | SYSCFG `MSTPRI0`, offset 110h (Table 10-1, printed page 172); reset `0x44442222` and writable fields `DSP_CFG`/`DSP_MDMA` from Figure 10-15 and Table 10-19, printed page 186 |
+| `0xc004e52c` | load | `0x01c00314` | EDMA3CC `QEMCR`, offset 314h (Table 16-20, printed page 507); bits 31-8 Reserved per Table 16-30, printed page 518 |
+| `0xc004e618` | store 0 | `0x01d04044` | McASP1 `GBLCTL`, offset 44h (Table 24-7, printed page 1037) |
+| `0xc004f42c` | store `0x1ff` | `0x01e1203c` | SPI1 `SPIDAT1`, offset 3Ch (Table 27-2, printed page 1175) |
+
+All six are therefore **category (a)**: regions the C6747 really has that our map
+was missing. None is an unbacked hole — each address resolves to modelled register
+state, and the narrow guards around it stay closed (`QEMCR` still rejects a write
+above bit 7; `MSTPRI0` still rejects a write that disturbs a reserved field;
+`SPIDAT1` still fails closed when the controller is enabled with no endpoint).
+
+Four of the six are confirmed closed by **replay**: resuming each recorded
+checkpoint at `4259e82` runs 2,000,000 packets past the recorded fault address with
+no fault and no `rejected_write` of any kind. Two — `0xc004e33c` and `0xc004e52c` —
+could not be re-run, because their checkpoints no longer restore (below); they are
+confirmed closed by direct assertion on the bus model instead.
+`tests/test_dsp_transaction_mapping.py::test_recorded_unmapped_fault_addresses_are_real_c6747_registers`
+pins all six with the citations above, so the windows cannot be lost again.
+
+**A checkpoint-restore gap found on the way, and left alone.** Three schema-7
+checkpoints — `dsp-mcasp-functional-1`, `dsp-edma-functional-1` and
+`dsp-syscfg-priority-functional-1` — are rejected as "incompatible, corrupt, or
+incomplete" at `4259e82`. Their ninth component sizes are 1900, 7080 and 7092
+bytes, while `schema7_component_sizes()` computes 2188 from the current structures,
+so at most one schema-7 layout can ever match: the schema number was not bumped
+when the captured device state grew. This is §10 task 4's territory — it is
+checkpoint ABI, not the memory map, and two recorded faults are unverifiable by
+replay because of it — so it is reported rather than touched.
+
+**The two conflict faults do not share a cause with these six, and do share one
+with each other.** Both survive `2a6daef` and both still reproduce at `4259e82`.
+
+- The "parallel register write conflict" at `0xc004f306` is a **software-loop**
+  fault. Its fetch packet's compact header is `0xeb600002`: layout `0x5b` and
+  p-bits `0x0002`, so by Figure 3-5 and Table 3-16 (printed pages 92 and 95 of
+  SPRUFE8B) only one p-bit is set and the four compact instructions at
+  `0xc004f300`, `0xc004f302`, `0xc004f304` and `0xc004f306` form three execute
+  packets — which is exactly how TI's own disassembler reads them. Instrumenting
+  `cdj_c674x_execute` shows our core issuing a three-instruction packet built from
+  `0xc004f300`, `0xc004f304` and `0xc004f306` while `loop_active` is 1, dropping
+  `0xc004f302` (`0xdc66`, the software-loop word `DSP_BOOT_MILESTONE_AUDIT.md`
+  analyses). The collision is B4, written by both `0xc004f300` and `0xc004f306`.
+  The conflict check is right; the **packet composition** under an active SPLOOP
+  buffer is what disagrees with the header, which puts it in §10 task 1.
+- The two "delayed-result write conflict" faults (`0x11800108` and `0x118001e8`,
+  reported at their `0x008xxxxx` local aliases) are the same shape as each other:
+  an L2 interrupt-vector trampoline of the form push-B0, build an address into B0,
+  branch through B0, and reload B0 from the stack inside the branch's delay slots.
+  The fault fires because the in-flight load result lands at E5 on a register the
+  current execute packet also writes at E1. Same pipeline class, no map content.
+
 ## 1. References
 
 Both manuals are proprietary TI documents. They are downloaded into git-ignored
@@ -636,6 +714,10 @@ behind it, and it is the gate on replay depth — which in turn is what limits e
 reachability conclusion in §0.1.
 
 **2. Unaligned and unmapped scalar memory accesses.** *(implementation; 12 faults)*
+**DONE — see §0.2.** All six distinct faults (the sweep finds six, not four) were
+missing peripheral register windows that `2a6daef` had already added; none is an
+alignment question and none needs a code change. Classified with citations and
+pinned by a test in §0.2. The text below is the original item.
 Scope: the 12 recorded "unaligned or unmapped scalar memory access" faults. Decide
 per case whether the address is genuinely illegal (the core is right, and the
 firmware is doing something we model wrongly upstream) or whether our alignment or
