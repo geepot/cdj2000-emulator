@@ -55,9 +55,11 @@ a player. It is not a way to use a CDJ-2000 on a desktop.
 
 ## What does not
 
-* **No audio.** The DSP (a Pioneer custom LSI with no public instruction set)
-  is modelled from MAIN's side only: request words, buffer levels, position.
-  There is no signal path, and PLAY changes nothing audible.
+* **No audio.** The DSP is a TI Aureus DA710 with a TMS320C674x core (see
+  `RUNNING.md`), and `emulator/qemu/cdj_c674x.c` executes its instruction set
+  from TI's published SPRUFE8B - partially: see `DSP_ARCHITECTURE_COVERAGE.md`
+  for what is and is not implemented. What is missing is the signal path, not
+  the instruction set: PLAY changes nothing audible.
 * **No jog**, no pitch. The position report runs at nominal speed.
 * The detail waveform and beat grid reach the GUI through the link proxy
   (`tools/cdj_main/link_inject.py`), which also injects the browse and load

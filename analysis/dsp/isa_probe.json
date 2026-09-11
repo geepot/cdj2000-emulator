@@ -43772,14 +43772,16 @@
   },
   "provenance": {
     "assembler": "TI asm6x -mv6740",
-    "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 17:50:10 2026",
+    "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 20:19:04 2026",
     "core_sources": {
-      "emulator/qemu/cdj_c674x.c": "797bc1695883c9dbb4cfd0afaf8515aff0823b852eec2b433ad47e5258295d11",
+      "emulator/qemu/cdj_c674x.c": "1331093d1a7172c4b687aff56ff5169b7627c74023f8a4c680f1f83ec72df075",
+      "emulator/qemu/cdj_c674x_control.c": "c8a93a14d99c9c65e78e32e47b4238f1f8a4a7486708fc43d9b6d8c817e9b86c",
       "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
       "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+      "emulator/qemu/cdj_c674x_sp.c": "d75148b3244349fcedd4257a4b29fae761dd79e354063d765b856b79ee95b800",
       "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
     },
-    "generator_sha256": "9153754df4c60f3cfd28dfc8ebadf6997f1e697a0e6670e58b48ac29035a2b2a",
+    "generator_sha256": "0f6f64f6687a6a1857159a2047afe6f68d0f2c1e9e72de5b06a0596050569c01",
     "manual_inventory": "analysis/dsp/isa_manual_inventory.json",
     "manual_inventory_sha256": "001a9980353a3e1e8e52e2e774abe20f34b22c45045c0735c0da60f5f0f3160c",
     "probe_source": "tests/cstub/c674x-isa-probe.c",

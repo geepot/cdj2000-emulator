@@ -66,12 +66,14 @@
   "generated_from": {
     "audit_sweeps_provenance": {
       "core_sources": {
-        "emulator/qemu/cdj_c674x.c": "797bc1695883c9dbb4cfd0afaf8515aff0823b852eec2b433ad47e5258295d11",
+        "emulator/qemu/cdj_c674x.c": "1331093d1a7172c4b687aff56ff5169b7627c74023f8a4c680f1f83ec72df075",
+        "emulator/qemu/cdj_c674x_control.c": "c8a93a14d99c9c65e78e32e47b4238f1f8a4a7486708fc43d9b6d8c817e9b86c",
         "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
         "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+        "emulator/qemu/cdj_c674x_sp.c": "d75148b3244349fcedd4257a4b29fae761dd79e354063d765b856b79ee95b800",
         "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
       },
-      "generator_sha256": "1a9f972db39e364af7cd15754c74f7b1a54dd780e8478b93554db89fd44d7c82",
+      "generator_sha256": "b878315d7881fff3c5ca39cad5c624e8c1155035f0355420efbeaf15d1c91b05",
       "probe_source": "tests/cstub/c674x-isa-probe.c",
       "probe_source_sha256": "565f14cc09c631c461898a06f2ff72cd5a9dc6c19c5fa65f78b375399c109aa2"
     },
@@ -97,14 +99,16 @@
     },
     "isa_probe_provenance": {
       "assembler": "TI asm6x -mv6740",
-      "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 17:50:10 2026",
+      "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 20:19:04 2026",
       "core_sources": {
-        "emulator/qemu/cdj_c674x.c": "797bc1695883c9dbb4cfd0afaf8515aff0823b852eec2b433ad47e5258295d11",
+        "emulator/qemu/cdj_c674x.c": "1331093d1a7172c4b687aff56ff5169b7627c74023f8a4c680f1f83ec72df075",
+        "emulator/qemu/cdj_c674x_control.c": "c8a93a14d99c9c65e78e32e47b4238f1f8a4a7486708fc43d9b6d8c817e9b86c",
         "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
         "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+        "emulator/qemu/cdj_c674x_sp.c": "d75148b3244349fcedd4257a4b29fae761dd79e354063d765b856b79ee95b800",
         "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
       },
-      "generator_sha256": "9153754df4c60f3cfd28dfc8ebadf6997f1e697a0e6670e58b48ac29035a2b2a",
+      "generator_sha256": "0f6f64f6687a6a1857159a2047afe6f68d0f2c1e9e72de5b06a0596050569c01",
       "manual_inventory": "analysis/dsp/isa_manual_inventory.json",
       "manual_inventory_sha256": "001a9980353a3e1e8e52e2e774abe20f34b22c45045c0735c0da60f5f0f3160c",
       "probe_source": "tests/cstub/c674x-isa-probe.c",
@@ -119,7 +123,7 @@
       "analysis/dsp/tracks/packet-pipeline.md"
     ]
   },
-  "head": "44c25755e5abf950dd3ff2b04dae6be49c1650bb",
+  "head": "f36ab57d150222795b52707d0f5fb4316b0cd6e4",
   "how_to_read_a_row": {
     "fidelity": "strict | approximation | unknown",
     "implementation": "supported | partial | unsupported | unknown",
@@ -141,7 +145,7 @@
       "The compact accepted total is not quoted as coverage: it moves with the probe register profiles. The not-implemented count does not.",
       "No percentage of \"the ISA\" is defensible from these numbers and none is given."
     ],
-    "compact_words_rejected_as_not_implemented": 6944,
+    "compact_words_rejected_as_not_implemented": 104,
     "compact_words_swept": 65536,
     "distinct_base_mnemonics": 227,
     "documented_32bit_format_figures_appendices_c_to_h": 29,
@@ -2065,6 +2069,11 @@
       "next_acceptance_test": "Floating-point track: whether unreserved-bit masking matters and whether the MVC path and the instruction path agree.",
       "open_questions": "Should reserved bits in FADCR/FAUCR/FMCR be masked on write?",
       "requirement": "FADCR, FAUCR, FMCR reachable by MVC",
+      "superseded_by": {
+        "commits": "323f7e0",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "FADCR/FAUCR/FMCR reserved bits 31-27 and 15-11 are masked on read and on write; the read-back mask is 0x07ff07ff."
+      },
       "tests": [],
       "track": "interrupts-control",
       "track_report": "analysis/dsp/tracks/interrupts-control.md",
@@ -3079,6 +3088,11 @@
       "next_acceptance_test": "None applicable until implemented. When implemented, the 0x8000 x 0x8000 case (the only input that saturates) must be in the table together with the delayed CSR.SAT effect.",
       "open_questions": "",
       "requirement": "Saturating/left-shifted 16x16 multiplies: SMPY SMPYH SMPYHL SMPYLH SMPY2 (5 rows)",
+      "superseded_by": {
+        "commits": "44c2575",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "SMPY, SMPYH, SMPYHL, SMPYLH and SMPY2 are implemented as pure functions in cdj_c674x_mpy.c, with the saturation case hand-checked against printed page 461."
+      },
       "tests": [],
       "track": "isa-encoding",
       "track_report": "analysis/dsp/tracks/isa-encoding.md",
@@ -3365,6 +3379,11 @@
       "next_acceptance_test": "Assert that 0x1280043C (ADDAB .D1 B14,4,A5) and the ADDAH/ADDAW equivalents are either executed per printed pages 115/120/123 or rejected with a reason naming the ADDAB long-immediate form - not 'reserved predicate'; and assert they are never executed as STB.",
       "open_questions": "Whether any C674x firmware in scope actually emits the B14/B15+ucst15 form; the TI assembler does emit it for large stack offsets, so it is reachable.",
       "requirement": "Address arithmetic in byte/halfword/word/doubleword addressing modes: ADDAB ADDAD ADDAH ADDAW SUBAB SUBAH SUBAW (7 rows)",
+      "superseded_by": {
+        "commits": "d7937e7",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "The ADDAB/ADDAH/ADDAW \"B14/B15, ucst15, dst\" long-immediate form is implemented; 0x1280043c no longer aliases into the store arm."
+      },
       "tests": [
         {
           "establishes": "the scaled add/subtract with AMR circular wrap for the .D register and ucst5 forms",
@@ -3440,6 +3459,11 @@
       "next_acceptance_test": "Assert 0x0001E000 is rejected with a reason that names IDLE (not 'reserved NOP count'), and separately assert src=9..14 are rejected as reserved counts - today the two cases are indistinguishable to a reader of the fault string.",
       "open_questions": "What the correct architectural model for IDLE is in this core (an infinite wait terminated by an interrupt or by a branch in whose delay slots it sits) was not designed here; it is a genuine unimplemented instruction, not just a diagnostic defect.",
       "requirement": "Control-register move, interrupt gating, NOP/IDLE, software exceptions and the delayed .M move: MVC DINT RINT NOP IDLE SWE SWENR MVD (8 rows)",
+      "superseded_by": {
+        "commits": "c48f886, d7937e7",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "IDLE is implemented using a sentinel in the existing idle_cycles field, so the checkpoint ABI is unchanged. SWE/SWENR are now reachable but still unimplemented."
+      },
       "tests": [
         {
           "establishes": "SSR masks to six bits, functional-unit sets win a simultaneous MVC clear, CSR.SAT is clear-only",
@@ -3506,6 +3530,11 @@
       "next_acceptance_test": "Commit the compact acceptance map as a regression artefact so a future decoder change cannot silently close or open a format, and assert specifically that (a) a compact M3 word is either executed per Figure E-5 or rejected with a reason naming the compact .M format, (b) a compact Sx2op word likewise, (c) BNOP .S1 B<n>, N3 with s=0 executes.",
       "open_questions": "Figure D-6 'Ltbd' identity (see track open questions).",
       "requirement": "ENCODING SCOPE (not a Table A-1 row): the complete 16-bit compact instruction space - 48 formats in SPRUFE8B Appendices C.4, D.4, E.4, F.4, G.3 and H.4, of which 47 are referenced by at least one instruction, covering 58 of the 240 Table A-1 rows",
+      "superseded_by": {
+        "commits": "e3314af, 44c2575",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "Figure F-29 Sx2op and Figure E-5 M3 are decoded. Figure F-32 Sx1b s=0 stays fail-closed on an unresolved manual contradiction. The compact gap is 104 words, not 6,944 - see DSP_ARCHITECTURE_COVERAGE.md section 0.1."
+      },
       "tests": [
         {
           "establishes": "compact .D memory lowering is cycle-by-cycle equivalent to the full-width form for II 1..7 with both RS banks, and compact L3/S3/Ssh5/S2sh saturating forms share the full-width semantic path including delayed CSR.SAT",
@@ -3555,6 +3584,11 @@
       "next_acceptance_test": "Sweep all six legal creg values x both z polarities on one cheap opcode (e.g. MVK .S), asserting write and no-write, plus an explicit rejection assertion for creg=000/z=1 on an otherwise-valid opcode - which is exactly the case the ADDAB long-immediate bug hides behind.",
       "open_questions": "",
       "requirement": "ENCODING SCOPE (not a Table A-1 row): creg/z predication in the full-width formats, the two reserved combinations, and the compact predicate forms",
+      "superseded_by": {
+        "commits": "d7937e7",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "The blanket creg=000/z=1 gate is narrowed, so the 25 nonconditional rows are reachable and report \"instruction not implemented\". None of the 22 is implemented."
+      },
       "tests": [
         {
           "establishes": "creg=001 (B0) true and false for every SADD/SSUB/SSHL form; line 75 asserts c.r[side][3] == (enabled ? expected : 0x11223344u) with expected from an in-test reference model",
@@ -5505,6 +5539,11 @@
       "next_acceptance_test": "Thread the first multicycle NOP's count through the packet loop and allow a second NOP n only when the counts are equal; assert NOP4||NOP4 is accepted with cycles==4 while NOP4||NOP2 and NOP4||BNOP,3 still fault.",
       "open_questions": "Whether IDLE is reachable in the NXS firmware - it is a legitimate power-management instruction and its absence is a real coverage gap, but assessing reachability needs a firmware image.",
       "requirement": "Multicycle-NOP constraints: two multicycle-NOP generators (NOP n>1, IDLE, BNOP target,n, ADDKPC label,reg,n) cannot share an execute packet, with an explicit exception for two NOP n of equal count; a multicycle NOP delays the whole packet's results",
+      "superseded_by": {
+        "commits": "c48f886",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "NOP n in parallel with another NOP n of the same count is accepted per printed page 83; unequal counts still reject."
+      },
       "tests": [
         {
           "establishes": "NOP 8 advances exactly 8 cycles and 8 board ticks; a following invalid word faults with no cycle or tick advance.",
@@ -5545,6 +5584,11 @@
       "next_acceptance_test": "Treat PROT as a per-packet property rather than a per-instruction multicycle contributor: set elapsed=5 once for the packet and allow additional protected loads; assert two parallel LDW in a PROT packet execute with cycles==5 and two queued loads, while PROT + explicit NOP n still faults.",
       "open_questions": "Whether the NXS firmware actually emits a dual-.D-load PROT packet. BUILD.md:996 puts a protected LDW inside a software-pipelined loop at 0x11802ea8, which makes this plausible, but the surrounding fetch packet was not disassembled.",
       "requirement": "The PROT fetch-packet header bit adds four cycles of NOP after each LD in the fetch packet, in 16-bit compact or 32-bit form",
+      "superseded_by": {
+        "commits": "c48f886",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "A PROT fetch packet with parallel loads is charged once per packet rather than once per load. Whether that is 5 cycles or 4+4 is an open question the manual does not settle."
+      },
       "tests": [
         {
           "establishes": "Over ii 1-7 x masked x enabled x compact x RS, the PROT form and the explicit NOP 4 form produce identical registers, load queues, loop cycle/length/sealed/tags and predicate history at every one of 24 cycles, with RAM mutated between E1/E3/E5 to check actual sampling.",
@@ -5626,6 +5670,11 @@
       "next_acceptance_test": "Derive and assert an upper bound on simultaneous in-flight entries from the E1-E5 window (at most two loads per cycle over four cycles plus delayed control effects) to show the 24/40 bounds cannot be reached by legal code, or document them as a real fail-closed ceiling.",
       "open_questions": "No proof that stores[24]/loads[40] cannot be exceeded by legal code.",
       "requirement": "Delayed results: E1 compute address, E2 send address, E3 memory read/write, E4 data at CPU boundary, E5 data to register; delayed writebacks must not collide with a same-cycle E1 write",
+      "superseded_by": {
+        "commits": "668b8dd",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "Unchanged in behaviour, but the arms moved into a dispatch table; the delayed-result queues are untouched and proven identical across 67,427 probe verdicts."
+      },
       "tests": [
         {
           "establishes": "RAM is mutated between E1, E3 and E5 so the test checks the actual sampling cycle rather than a final value.",

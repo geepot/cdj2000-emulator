@@ -4,8 +4,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "cdj_c674x_loop.h"
-/* Partial interpreter. Encodings/semantics: TI SPRUFE8B, instruction entries
- * MVK, MVKH, MVC, AND, B, ADDKPC and NOP; no third-party decoder code. */
+/* Partial interpreter. Encodings and semantics come from TI SPRUFE8B; no
+ * third-party decoder code. Coverage is far wider than the seven instructions
+ * this comment used to name: DSP_ARCHITECTURE_COVERAGE.md holds the measured
+ * position against the manual's 240 Table A-1 rows, and
+ * analysis/dsp/isa_probe.json is regenerated from TI's own assembler. Do not
+ * infer coverage from this header. */
 typedef struct {
     uint64_t due, value;
     uint32_t address;

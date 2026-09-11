@@ -286,6 +286,12 @@ Measured, reproducible, and independent of the emulator:
 
 ## 5. The most consequential gaps
 
+> **Read section 0 first.** Everything below is the audit as it stood at commit
+> `3da5ff2` and is deliberately not rewritten, because an audit whose baseline is
+> edited away stops being evidence. Several of these gaps have since been closed
+> and two of the numbers here have been superseded: §0 lists what landed and §0.1
+> replaces the compact figures. Do not act on a §5 finding without checking §0.
+
 ### 5.1 One check makes 25 instruction rows unreachable
 
 `cdj_c674x.c:1531` rejects `creg == 0 && z == 1` as "reserved predicate" **before
@@ -533,15 +539,19 @@ of every SPRUH91D peripheral and must not be read as one.**
 
 43 items are recorded across the track reports. The ones that matter:
 
-1. **`README.md:57` is actively false.** It calls the DSP "a Pioneer custom LSI
-   with no public instruction set", refuted by the repository's own
-   `RUNNING.md:603-604` and by a ~3,000-line TI-derived C674x interpreter. This
-   is the one affirmatively wrong claim in the corpus.
+1. ~~**`README.md:57` is actively false.**~~ **FIXED** (`f36ab57`+). It called the
+   DSP "a Pioneer custom LSI with no public instruction set", refuted by the
+   repository's own `RUNNING.md:603-604` and by a ~3,000-line TI-derived C674x
+   interpreter. It was the one affirmatively wrong claim in the corpus; it now
+   names the part and points here for coverage.
 2. **`BUILD.md` understates SPLOOP coverage by a wide margin** — the software-loop
-   implementation is far more complete than the document describes.
-3. **`cdj_c674x.h` claims a seven-instruction interpreter.** The header comment
-   lists "MVK, MVKH, MVC, AND, B, ADDKPC and NOP"; 122 rows accept at least one
-   encoding. A reader trusting the header would badly misjudge the core.
+   implementation is far more complete than the document describes. **Still open**
+   for the SPLOOP text; BUILD.md's "Partial C674x execution core" section was
+   rewritten by the dispatch refactor (`668b8dd`) and is current.
+3. ~~**`cdj_c674x.h` claims a seven-instruction interpreter.**~~ **FIXED**
+   (`f36ab57`+). The header listed "MVK, MVKH, MVC, AND, B, ADDKPC and NOP" while
+   123 rows accept at least one encoding. It now refuses to state coverage at all
+   and points at this document and `analysis/dsp/isa_probe.json`.
 4. **Test-count drift**: docs quote 403/27, then 407/27, then 427/29, then
    506/31. None is an architectural-completeness measure and the report says so
    wherever they appear.
@@ -551,7 +561,11 @@ of every SPRUH91D peripheral and must not be read as one.**
 
 Documentation is, on the whole, **careful and well-qualified** — heavily hedged,
 explicit about what evidence does not establish. The corpus's failure mode is
-staleness and volume, not overclaiming. `PCM_EXECUTION_EVIDENCE.md` and
+staleness and volume, not overclaiming. The two affirmatively wrong claims are
+now fixed, `PERFORMANCE.md` records the dispatch change and its ~9% cost, and the
+nine coverage rows that implementation work has since superseded carry a
+`superseded_by` field naming the commit, so a reader cannot mistake the audit
+baseline for the current position. `PCM_EXECUTION_EVIDENCE.md` and
 `DSP_BOOT_MILESTONE_AUDIT.md` are models of honest scoping.
 
 ## 9. Open questions, left open

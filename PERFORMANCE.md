@@ -68,3 +68,22 @@ The loop regression test compares against the frozen original algorithm across
 state. CPU tests cover retained-tail preservation on branch retirement and
 rollback after a conflicting parallel write. Core, circular-addressing, and
 scheduler harnesses also passed AddressSanitizer and UndefinedBehaviorSanitizer.
+
+## Dispatch table (2026-09-10)
+
+`cdj_c674x_execute`'s if/else-if decode ladder became a table of 114 rows plus
+one `arm_*` function each, and the function went from 1,679 lines to 805. The
+transactional copy described above is unchanged - still one
+`memcpy(&out, cpu, offsetof(CdjC674x, loop))` with commit only on success - and
+the change was held to a byte-identical proof rather than to a passing suite:
+all 65,536 compact verdicts, 1,854 decode verdicts, 32 control-register rows and
+5 packet-atomicity cases are identical before and after.
+
+It costs about **9% on the synthetic dispatch benchmark**: selection is now a
+linear scan of 114 rows where the ladder short-circuited on its common cases.
+That is a measured regression on an isolated workload, not an end-to-end one, and
+it is recorded here rather than hidden because the obvious fix does not work as
+stated - several rows constrain no bits in 6:2 (masks 0x0000000c, 0x0000001c,
+0x0000003c, 0x0000010c, 0x0ffffffe, 0x0f830ffe), so they would belong in every
+bucket of a `w & 0x7c` bucketing. Anyone optimising this should re-run
+`tools/cdj_dsp/benchmark_core.c` and the probe sweeps together.
