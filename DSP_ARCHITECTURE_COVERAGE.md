@@ -33,6 +33,7 @@ the section it supersedes.
 | Timer64P counts: TIM12/TIM34 advance, PRD match, ENAMODE one-shot/continuous/reload, the PSC34 prescaler, TGCR TIMMODE 0/1h/3h and the INTCTLSTAT period-status bit. Watchdog (TIMMODE = 2h), CLKSRC12/TIEN12 external clocking and event capture stay fail-closed | *wave 4, `timer-events`* | §5.5 first two bullets, §10 "Next" |
 | T64P0/1 TINT12, TINT34 and CMPINT0-7 reach the INTC from `cdj_c6747_timer.c` and appear as CPU interrupts, so 22 of Table 2-1's events are generated instead of 2 | *wave 4, `timer-events`* | §5.5, `IC-DEV-EVENT-SOURCES` |
 | Timer64P review fixes: the PSC34 prescale counter no longer advances while `ENAMODE34 = 0`; Read Reset Mode now captures TIM12/TIM34 into CAP12/CAP34 and reloads PRDn from RELn at `ENAMODEn = 3h`, and is confined to 32-bit unchained mode; chained mode reloads PRD34 from REL34. The step-to-tick approximation is now declared in the **QEMU board** manifest too, not only the replay manifest | *wave 4 review* | §0.2 |
+| Wave 5: 91 of the 115 unimplemented rows implemented across six pure semantics files (dot products, packed 8-bit, packed 16-bit, pack/shuffle/bit-manipulation, 32-bit multiply with Galois and 40-bit long forms, double-precision). Probe: not-implemented 115 -> 24, fully accepted 120 -> 211, partially rejected 8 -> 0. **The 15 double-precision rows carry a validation caveat - see §0.4** | `4d484a0` | §5, §10 |
 
 Measured after those five commits, by the same tools:
 
@@ -80,6 +81,45 @@ change. A 45 s connected firmware boot
 (`runs/nxs-smoke-timer64p`) reports `gui_exit: 0` and **zero faults** across
 116,092 events, with the same 27 boot phases as the pre-patch baseline; stock
 firmware does not arm Timer64P in that window.
+
+### §0.4 The double-precision family's reported evidence was not real
+
+**Implementation is present; the evidence claimed for it is not, so these 15
+rows are recorded as validation NOT ASSESSED rather than reference-backed.**
+The rows are `ABSDP`, `ADDDP`, `SUBDP`, `MPYDP`, `MPYSPDP`, `MPYSP2DP`,
+`CMPEQDP`, `CMPGTDP`, `CMPLTDP`, `SPDP`, `DPSP`, `DPINT`, `DPTRUNC`, `INTDP`
+and `INTDPU`.
+
+Two independent adversarial reviews of the same patch, and a direct check
+afterwards, agree on what is wrong. The implementation report certified the
+family with a randomized host-FPU oracle harness and a pytest test named
+`test_c674x_double_precision_is_correctly_rounded`, claiming 24,000 oracle
+samples for each of six instructions, and a fourth mutation-testing round of 10
+mutants run against that harness. **None of it exists in the patch.** Grepping
+the committed tree finds no such test, no oracle harness, and no randomized
+sampling. Eight of the twelve values the report itself flags as derived rather
+than transcribed have no corresponding case in `tests/cstub/c674x-dp.c` either.
+
+What DOES exist is `tests/cstub/c674x-dp.c`: 930 lines, 113 assertions, which
+passes. That is real but it is much less than was claimed, and because the
+report overstated its own evidence it cannot be used to certify the rest. The
+specific semantic questions the reviewers raised are therefore open, not
+settled:
+
+- `ADDDP`/`SUBDP` note 1 says these set the warning bits in FADCR "not in the
+  floating-point auxiliary configuration register (FAUCR) as for other .S unit
+  instructions". That rule is unpinned - a mutant that breaks it survives.
+- `MPYDP` pins four special-case results (LFPN x LFPN under RMODE 0 and 1) for
+  which SPRUFE8B gives no basis in that instruction's entry.
+- `DPINT`/`DPTRUNC` pin a sign-selected NaN answer, while note 1 on printed
+  pages 258 and 262 states the maximum signed integer without selecting by sign.
+- The `RCPDP`/`RCPSP`/`RSQRDP`/`RSQRSP` refusals are correct in outcome, but the
+  stated justification misquotes what those pages do and do not fix.
+
+**Do not quote the 211-accepted figure as 211 validated rows.** Acceptance is a
+decoder measurement; for these 15 rows the semantic dimension is unknown. They
+need a re-verification pass with values traced to the manual one at a time, or
+the real oracle harness actually written, before their validation status moves.
 
 Still deliberately **not** done, and why:
 
