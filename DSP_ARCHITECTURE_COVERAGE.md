@@ -583,71 +583,82 @@ firmware-development and correct-audio value, dependencies, risk and effort.
 
 ### Top five, with scope and acceptance criteria
 
-**1. Measure firmware reachability of the unimplemented set.** *(validation;
-hours; no dependencies)*
-Scope: scan the 100 `dsp-l2.bin` images in `runs/` for the 113 unimplemented
-rows, the four closed compact formats, the `ADDAB`/`ADDAH`/`ADDAW` long-immediate
-pattern, `IDLE`, and the 25 `creg`-hole encodings; add a reachability column to
-`analysis/dsp/coverage_inventory.json`.
-Acceptance: a committed tool regenerates the reachability column from the images;
-every row in the inventory carries `reached` / `not-reached` / `not-scanned`; no
-firmware bytes are committed.
-Why first: it reprioritises everything below it, collapses several deferred open
-questions, and is the difference between "latent defect" and "active blocker".
-Proposed by no track — all four technical tracks deferred it to each other.
+**Superseded once already.** The original top five, written before reachability
+was measured, led with "measure firmware reachability" and ranked instruction-family
+work above everything else. Reachability is now done (§0.1), four of those five
+items have landed (§0), and the evidence reordered what is left. This list is the
+revised one; the original is in git history at `fc26043` rather than edited away.
 
-**2. Fix the two fail-closed halts ordinary TI codegen triggers.**
-*(implementation; ~1 day)*
-Scope: (a) overlapping parallel load/store with equal base registers;
-(b) count protected loads once per packet rather than once per instruction, in
-both `cdj_c674x_execute` and the SPLOOP path; (c) free rider: accept `Sx1b`
-`s = 0` (one bit at `cdj_c674x.c:1355`); (d) `NOP n || NOP n` with equal counts,
-which SPRUFE8B printed page 83 explicitly permits.
-Acceptance: a test asserting each case executes with the manual's cycle count —
-5 cycles for a PROT dual-load packet, citing printed page 93 — plus the existing
-suite unchanged. No strict check weakened: each fix must narrow the rejection
-condition, never remove it.
+What the evidence changed: **no unimplemented instruction, compact or full width,
+has confirmed-executed evidence in the captured firmware**, and all 27 instruction
+groups sit at or below their noise floors. The firmware's demonstrable needs are
+the recorded faults, which are pipeline and software-loop features, not
+instructions.
 
-**3. Remove the blanket reserved-predicate gate.** *(implementation; ~0.5 day;
-unblocks 25 rows)*
-Scope: classify bits 31-28 = `0001` as an opcode field before applying the
-`creg`/`z` reserved test at `cdj_c674x.c:1531`, so the 25 unconditional C64x+
-encodings reach a decoder arm. Implement none of them yet — they must reject with
-"instruction not implemented", which is the honest diagnostic.
-Acceptance: all 25 encodings report "instruction not implemented" rather than
-"reserved predicate"; `0x1280043C` is **not** executed as `STB` (§5.1); genuinely
-predicable instructions still reject `creg=0/z=1`; `analysis/dsp/isa_probe.json`
-regenerates with `probe_rows_rejected_only_as_reserved_predicate` at 0.
-This is a prerequisite for implementing any of those 25 instructions.
+**1. Software-loop interrupt and resume.** *(implementation; the largest real
+item)*
+Scope: the three fault classes the firmware actually hit — 4 nested-SPLOOP
+("nested SPLOOP would overwrite retained buffer"), 2 SPLOOPW interrupt drain, 2
+SPLOOP SPMASK resume. Read SPRUFE8B chapter 7 on reload, early exit and
+interrupting a loop in progress, and §5.5.2 (printed page 648) on multicycle NOPs
+under interrupt.
+Acceptance: each fault no longer occurs on the recorded checkpoint that produced
+it, with the replay reaching further than the fault address; tests with
+expected values derived from chapter 7 rather than from our own trace; and the
+four self-referential software-loop tests the audit identified (§7) replaced with
+manual-derived expectations, since this is the area where circular validation is
+concentrated.
+Why first: it is the only implementation work with confirmed firmware evidence
+behind it, and it is the gate on replay depth — which in turn is what limits every
+reachability conclusion in §0.1.
 
-**4. One table test over the multiply and pack families.** *(validation; ~1 day)*
-Scope: 16 `MPY` permutations, 4 `MPY32` variants, 8 `MPYHI`/`MPYIL` variants and
-6 pack opfields, expected values hand-computed. Operands `src1 = 0x8001FFFF`,
-`src2 = 0x7FFF8000` — every halfword-selection and signedness reading yields a
-distinct product, so a wrong permutation cannot pass.
-Acceptance: every opfield asserted with a hand-derived expected value and the
-documented E2/E4 latency; the row `ISA-MPY16` moves from `untested` to
-`reference-backed-tests` with expected values marked independent.
-Why high: these are the instructions an audio kernel uses most, they are
-currently **untested** (the audit downgraded them), and a halfword or signedness
-error among 16 near-identical permutations yields plausible-but-wrong samples
-rather than a fault — the hardest class of bug to see from audio output.
-`mpyli`, `mpyus`, `mpysu`, `pack2` and `packl4` are reached by real firmware with
-no assertion covering them.
+**2. Unaligned and unmapped scalar memory accesses.** *(implementation; 12 faults)*
+Scope: the 12 recorded "unaligned or unmapped scalar memory access" faults. Decide
+per case whether the address is genuinely illegal (the core is right, and the
+firmware is doing something we model wrongly upstream) or whether our alignment or
+mapping rule is too strict. The related overlapping parallel load/store halt stays
+fail-closed until SPRUFE8B defines an order (§5.4, §9).
+Acceptance: each of the 12 classified with its manual citation, and any that are
+our error fixed with a test. A fault that is genuinely the firmware's belongs in
+the report, not in the code.
 
-**5. Audit `cdj_dsp_checkpoint.c` field-by-field, and gate eligibility on
+**3. The 104-word compact decode gap.** *(implementation; small and bounded)*
+Scope: `addaw` 32, `subaw` 32, predicated `[a0]`/`[b0]` 32, `mvc` 8 — the genuine
+remainder after §0.1 separated undefined encodings and the loop family out of the
+6,944.
+Acceptance: the `genuine-gap` bucket in `analysis/dsp/audit_sweeps.json` reaches 0
+with the other three buckets unchanged, and the per-mnemonic assertion in
+`test_dsp_isa_audit.py` updated to match. Note `addaw`/`subaw` compact forms pair
+naturally with the long-immediate work already done in `d7937e7`.
+
+**4. Audit `cdj_dsp_checkpoint.c` field-by-field, and gate eligibility on
 completeness.** *(validation + small implementation; ~1 day)*
-Scope: compare every `CdjC674x` field against what the serializer writes and
-reads, including loop-buffer metadata, FP status registers, the delayed
-load/store queues and retained circular widths; make
-`architectural_validation_eligible` require `complete == true`; write
-`manifest.json` *after* execution, not before.
-Acceptance: a round-trip test that populates every field with a distinct value
-and asserts bit-identical restore; the two aborted runs currently on disk claiming
-`architectural_validation_eligible` no longer do.
-Why: 506 unaudited lines carry every resumed run, including the repository's
-strongest PCM evidence. A dropped field corrupts state with no fault.
-Excluded by name by three tracks.
+Unchanged from the original list and still unowned. 506 lines carry every resumed
+run, including the strongest PCM evidence; a dropped field corrupts state with no
+fault. Also: write `manifest.json` after execution, not before, so an aborted run
+cannot claim `architectural_validation_eligible`.
+Acceptance: a round-trip test populating every `CdjC674x` field with a distinct
+value and asserting bit-identical restore; the two aborted runs on disk no longer
+claim eligibility.
+Why still high: it underpins the replay depth that task 1 extends and that §0.1
+depends on.
+
+**5. Replay depth itself.** *(validation)*
+Scope: the reachability conclusion rests on 900 executed fetch packets. "Not
+found" is partly a statement about how far replay gets, and tasks 1 and 4 are what
+would extend it. After they land, re-run `tools.cdj_dsp.reachability` and see
+whether any unimplemented family acquires confirmed-executed evidence.
+Acceptance: executed fetch packets materially above 900, and a re-run reachability
+artifact committed beside the current one for comparison.
+This is the honest closing of the loop: the current negative result is evidence
+about what we have observed, not proof about the firmware.
+
+**Explicitly demoted by the evidence.** Packed 2×16 and 4×8, double-precision
+floating point and its conversions, dot-product and complex-multiply,
+bit-manipulation, Galois, dual-result — roughly 106 rows. All at or below their
+noise floors with no confirmed-executed evidence. Implementing them would be
+building to a specification nobody has shown the firmware uses. Revisit only if
+task 5 changes the picture.
 
 ### Next, not top five
 
