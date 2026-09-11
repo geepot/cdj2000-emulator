@@ -127,6 +127,72 @@ static void legacy_component_sizes(uint32_t sizes[CHECKPOINT_COMPONENTS])
     sizes[8] = sizeof(CdjC6747Emifb);
 }
 
+/* Every size above is derived from the CURRENT structure layout, so growing or
+ * reordering any serialised structure silently redefines what an older schema
+ * was, and every checkpoint already written under that schema number stops
+ * matching its recorded header.  That has happened: 146 checkpoints in runs/
+ * carry schema-7/8 headers whose component tail is 1900, 7080, 7092 or 7096
+ * bytes where the derivations below now produce 2188 and 7712, and the reader
+ * refuses them.  The numbers below are the ones recorded in every loadable
+ * run's manifest, so pin them: a layout change now fails the build instead of
+ * orphaning checkpoints.  Update one only together with a new schema and its
+ * own migration path, never to make a derivation match a changed struct. */
+_Static_assert(sizeof(CdjC674x) == 6592, "CdjC674x ABI is checkpoint-bound");
+_Static_assert(sizeof(CdjC6747Syscfg) == 112, "component 1 size changed");
+_Static_assert(sizeof(CdjC6747Psc) == 784, "component 2 size changed");
+_Static_assert(sizeof(CdjC6747Mcasp) == 36, "component 3 size changed");
+_Static_assert(sizeof(CdjC6747Gpio) == 84, "component 4 size changed");
+_Static_assert(sizeof(CdjC6747I2c) == 32, "component 5 size changed");
+_Static_assert(sizeof(CdjC6747Pll) == 144, "component 6 size changed");
+_Static_assert(sizeof(CdjC6747Hpi) == 6, "component 7 size changed");
+/* Component 8 is one lumped total, so these pin its members individually. */
+_Static_assert(sizeof(CdjC6747Emifb) == 28, "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747Intc) == 60, "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747Timer) * CDJ_C6747_TIMER_COUNT == 200,
+               "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747Spi) * CDJ_C6747_SPI_COUNT == 168,
+               "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747Cache) == 1072, "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747McaspControl) == 1912,
+               "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747Edma) == 4256, "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747SyscfgPriority) == 12,
+               "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747IntcDelivery) == 4,
+               "component 8 member size changed");
+_Static_assert(sizeof(CdjWm8740) == 32, "component 8 member size changed");
+_Static_assert(sizeof(CdjC6747SpiTransfer) == 40,
+               "component 8 member size changed");
+_Static_assert(sizeof(CdjDspScheduler) == 32, "component 8 member size changed");
+/* State sizes every recorded schema's header carries.  SCHEMA7_MCASP_CONTROL_SIZE
+ * is the one migration constant taken from a member offset rather than a member
+ * size; 660 is the value the four loadable schema-7 checkpoints were written
+ * with.  (The "Schema-7 state ends above" comment in cdj_c6747_mcasp.h sits
+ * before xrsr, which would give 1300 and match no recorded file.) */
+_Static_assert(SCHEMA7_MCASP_CONTROL_SIZE == 660, "schema-7 prefix moved");
+_Static_assert(sizeof(CdjDspCheckpointState) == 15808, "schema-11 state size");
+_Static_assert(_Alignof(CdjDspCheckpointState) == 8, "state alignment changed");
+/* The reader rounds each prefix up to the structure's alignment, exactly as
+ * below, because appending INTC reused schema-2's trailing padding. */
+#define CHECKPOINT_ROUND(bytes) \
+    (((bytes) + _Alignof(CdjDspCheckpointState) - 1) / \
+     _Alignof(CdjDspCheckpointState) * _Alignof(CdjDspCheckpointState))
+#define CHECKPOINT_PREFIX(member) \
+    CHECKPOINT_ROUND(offsetof(CdjDspCheckpointState, member))
+_Static_assert(CHECKPOINT_PREFIX(intc) == 8024, "schema-1/2 state size");
+_Static_assert(CHECKPOINT_PREFIX(timers) == 8080, "schema-3 state size");
+_Static_assert(CHECKPOINT_PREFIX(spis) == 8280, "schema-4 state size");
+_Static_assert(CHECKPOINT_PREFIX(cache) == 8448, "schema-5 state size");
+_Static_assert(CHECKPOINT_PREFIX(mcasp_control) == 9520, "schema-6 state size");
+_Static_assert(CHECKPOINT_ROUND(offsetof(CdjDspCheckpointState, mcasp_control) +
+                                SCHEMA7_MCASP_CONTROL_SIZE) == 10184,
+               "schema-7 state size");
+_Static_assert(CHECKPOINT_PREFIX(wm8740) == 15704, "schema-8 state size");
+_Static_assert(CHECKPOINT_PREFIX(spi_transfer) == 15736, "schema-9 state size");
+_Static_assert(CHECKPOINT_PREFIX(scheduler) == 15776, "schema-10 state size");
+#undef CHECKPOINT_PREFIX
+#undef CHECKPOINT_ROUND
+
 void cdj_dsp_checkpoint_prepare(CdjDspCheckpointState *state,
                                 const char *reason)
 {

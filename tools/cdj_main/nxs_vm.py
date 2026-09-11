@@ -303,17 +303,22 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                ROOT / 'emulator/qemu/cdj_dsp_scheduler.c',
                ROOT / 'emulator/qemu/cdj_dsp_scheduler.h',
                ROOT / 'emulator/qemu/cdj2000_nxs_hpi.c']
+    # Eligibility is a claim about a capture that produced checkpoints and a
+    # transcript, so it cannot outrank `complete`.  Three recorded capture
+    # manifests still claim it while complete is false: nxs-browse-blocker-
+    # control-1, nxs-dsp-batch-strict-2 and optimization-11-profile.
+    capture_complete = bool(checkpoints and events.is_file() and
+                            (not capture_dsp_tx or tx_capture is not None))
     manifest = dict(schema=11, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA, SYSCFG priority, WM8740 control, timed SPI1 transfer and declared DSP activation-scheduler state, '
                                      'L2 and shared RAM plus sparse zero-default SDRAM pages'),
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
         dsp_audio_mode=('coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
         dsp_scheduler_mode=dsp_scheduler_mode,
-        architectural_validation_eligible=not (
+        architectural_validation_eligible=capture_complete and not (
             functional_dsp_timing or functional_dsp_audio or
             dsp_scheduler_mode != 'legacy'),
         byte_order=sys.byteorder,
-        complete=bool(checkpoints and events.is_file() and
-                      (not capture_dsp_tx or tx_capture is not None)),
+        complete=capture_complete,
         checkpoints=checkpoints, latest=checkpoints[-1]['file'] if checkpoints else None,
         event_transcript=dict(file=events.name, sha256=sha256(events) if events.is_file() else None,
                               events=last_sequence, counts=dict(sorted(event_counts.items())),

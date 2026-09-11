@@ -6,9 +6,55 @@ import subprocess
 import sys
 import pytest
 
+from tools.cdj_dsp.replay import write_manifest
 from tools.cdj_dsp.tx_capture import tx_capture_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_manifest_never_claims_eligibility_for_an_unfinished_run(tmp_path):
+    """Six run directories were left claiming this by a pre-execution write."""
+    for complete in (None, False):
+        manifest = dict(architectural_validation_eligible=True)
+        if complete is not None:
+            manifest['complete'] = complete
+        write_manifest(tmp_path, manifest)
+        written = json.loads((tmp_path / 'manifest.json').read_text())
+        assert written['architectural_validation_eligible'] is False
+    manifest = dict(complete=True, architectural_validation_eligible=True)
+    write_manifest(tmp_path, manifest)
+    written = json.loads((tmp_path / 'manifest.json').read_text())
+    assert written['architectural_validation_eligible'] is True
+
+
+def test_aborted_replay_leaves_no_manifest(tmp_path, monkeypatch):
+    """A replay binary that exits non-zero must leave no manifest behind.
+
+    The manifest used to be written before execution, so an aborted run kept a
+    manifest that claimed architectural validation eligibility.
+    """
+    from tools.cdj_dsp import replay as replay_module
+
+    data = bytearray(0x40000)
+    struct.pack_into('<I', data, 0, 0x00800020)
+    struct.pack_into('<I', data, 0x20, (3 << 23) | (123 << 7) | 0x28)
+    dump = tmp_path / 'dump.bin'
+    dump.write_bytes(data)
+    output = tmp_path / 'aborted'
+    real_run = replay_module.subprocess.run
+
+    def fail_the_replay(command, *args, **kwargs):
+        # Leave the compiler alone; only the replay binary itself fails.
+        if Path(command[0]).name == 'replay':
+            return subprocess.CompletedProcess(command, 1)
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(replay_module.subprocess, 'run', fail_the_replay)
+    monkeypatch.setattr(sys, 'argv', ['replay', str(dump), str(output),
+                                      '--steps', '1'])
+    with pytest.raises(subprocess.CalledProcessError):
+        replay_module.main()
+    assert output.is_dir() and not (output / 'manifest.json').exists()
 
 
 def test_compact_trace_preserves_execution_and_coverage(tmp_path, monkeypatch):

@@ -189,6 +189,23 @@ def checkpoint_provenance(path: Path, data: bytes, info: dict) -> dict:
     raise ValueError('checkpoint is absent from a complete connected manifest or replay provenance')
 
 
+def write_manifest(output: Path, manifest: dict):
+    """Persist the run manifest, never claiming eligibility for an unfinished run.
+
+    `architectural_validation_eligible` is a claim about a run that ran to a
+    recorded stop, so it cannot outrank `complete`.  The manifest used to be
+    written once before the replay binary started and again afterwards, which
+    left six aborted runs in runs/ (dsp-interrupt-entry-fixed-events-1/3/4,
+    dsp-schema5-strict-migration-1, dsp-spi-gap-connected-replay-1 and
+    dsp-spkernel-h7-candidate-2) claiming eligibility with no output checkpoint,
+    no coverage and no terminal stop record.  The pre-execution write is gone;
+    this gate keeps the claim honest for whatever write sites come later.
+    """
+    if not manifest.get('complete'):
+        manifest['architectural_validation_eligible'] = False
+    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+
+
 def exploratory_ancestry(manifest):
     """Execution mode changes cannot undo approximate state already captured."""
     return bool(manifest and (
@@ -412,6 +429,7 @@ def main():
                       packet_cycle_origin='input checkpoint counters',
                       boundary_semantics='checked between successful core steps; multicycle steps may cross a cycle ceiling')
         manifest = dict(build=build, trace_mode=args.trace_mode,
+                        complete=False,
                         dump_sha256=hashlib.sha256(data).hexdigest(),
                         dump_path=str(args.dump.resolve()), steps=args.steps,
                         limits=limits, approximations=approximations,
@@ -466,7 +484,8 @@ def main():
                                for path, content in analysis_data.items()},
                             str(args.formats.resolve()): hashlib.sha256(format_data).hexdigest(),
                         })
-        (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        # No manifest is written before execution: a manifest on disk is a
+        # record of a finished run, and a crashed replay must leave none.
         command = [str(binary), str(snapshot), str(args.steps), str(args.packets),
                    str(args.cycles), str(args.break_pc), str(args.boot_phase),
                    str(args.output / 'final.cdjdsp')]
@@ -527,8 +546,7 @@ def main():
                     'sha256': hashlib.sha256(failure_bytes).hexdigest(),
                 },
             )
-            (args.output / 'manifest.json').write_text(
-                json.dumps(manifest, indent=2) + '\n')
+            write_manifest(args.output, manifest)
             if args.verify_repeat or expected is not None:
                 gate = dict(
                     scope='bounded event replay did not reach a connected boundary',
@@ -653,7 +671,7 @@ def main():
             'distinct_unsupported_encodings': len(unsupported_encodings),
         }
     manifest['complete'] = True
-    (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    write_manifest(args.output, manifest)
     print(json.dumps(stop, separators=(',', ':')))
     if args.verify_repeat or expected is not None:
         actual = (args.output / 'trace.jsonl').read_bytes()

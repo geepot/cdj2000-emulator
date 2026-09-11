@@ -149,7 +149,12 @@ def test_dsp_artifact_manifest_records_scheduler_validation_scope(
         run, firmware, False, False, False, mode)
     manifest = json.loads((run / 'dsp-checkpoints/manifest.json').read_text())
     assert manifest['dsp_scheduler_mode'] == mode
-    assert manifest['architectural_validation_eligible'] is eligible
+    # This fixture writes no checkpoint and no event transcript, so the capture
+    # is incomplete.  Eligibility is a claim about a capture that produced
+    # artifacts and cannot outrank `complete` in either scheduler mode; it used
+    # to be reported from the scheduler mode alone.
+    assert manifest['complete'] is False
+    assert manifest['architectural_validation_eligible'] is False
     scheduling = [item for item in manifest['approximations']
                   if 'deferred-v1' in item]
     assert bool(scheduling) is not eligible
