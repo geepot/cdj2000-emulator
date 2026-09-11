@@ -1,0 +1,11 @@
+{
+  "callbacks": 398,
+  "execution_seconds": 67.716264,
+  "reporting_seconds": 0.83825,
+  "last_packets_cycles": [
+    "385099500",
+    "707162471"
+  ],
+  "gui_budget_seconds": 70,
+  "note": "Profiled baseline only; no speedup, CPU reduction, or panel latency comparison."
+}

@@ -1,0 +1,2 @@
+MAIN 65260, GUI 65388; logs: /Users/gpotvin/Git/cdj2000-emulator/runs/optimization-13-copy-profile
+{"gui_exit": 0, "viewer_closed": false, "main_exit_before_teardown": null, "timed_out": false, "frame_exists": true}

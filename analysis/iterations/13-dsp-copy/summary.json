@@ -1,0 +1,38 @@
+[
+  {
+    "sample": "sh4-0.sample.txt",
+    "thread_samples": 3475,
+    "copy_in": 521,
+    "copy_out": 485,
+    "temporary_clear": 474,
+    "copy_fraction": 0.28949640287769784,
+    "clear_fraction": 0.13640287769784173,
+    "halve_copy_speedup_model": 1.1692462987886945,
+    "remove_copy_speedup_ceiling": 1.4074524098825436,
+    "remove_clear_speedup_ceiling": 1.1579473508830391
+  },
+  {
+    "sample": "sh4-1.sample.txt",
+    "thread_samples": 3972,
+    "copy_in": 559,
+    "copy_out": 573,
+    "temporary_clear": 559,
+    "copy_fraction": 0.2849949647532729,
+    "clear_fraction": 0.1407351460221551,
+    "halve_copy_speedup_model": 1.1661773341162656,
+    "remove_copy_speedup_ceiling": 1.3985915492957746,
+    "remove_clear_speedup_ceiling": 1.1637855259302667
+  },
+  {
+    "sample": "sh4-2.sample.txt",
+    "thread_samples": 3887,
+    "copy_in": 580,
+    "copy_out": 571,
+    "temporary_clear": 552,
+    "copy_fraction": 0.2961152559814767,
+    "clear_fraction": 0.14201183431952663,
+    "halve_copy_speedup_model": 1.173788313453118,
+    "remove_copy_speedup_ceiling": 1.420687134502924,
+    "remove_clear_speedup_ceiling": 1.1655172413793105
+  }
+]

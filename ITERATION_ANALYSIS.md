@@ -795,3 +795,51 @@ The installed Blackfin binary and scheduler are unchanged. Next, correct the
 exposed IDLE resumption state before optimizing the parked loop; actual timer
 ISR, live link delivery and Windows wake behavior still need integration gates.
 Unrelated in-progress DSP source and coverage work was left untouched.
+
+## Iteration 13 — estimate remaining DSP transaction cost
+
+A fresh 70-second strict connected diagnostic used a private copy of the
+installed QEMU binary (`fb5f9523…780ab`) and unchanged Blackfin (`f2456de5…96535`).
+The source checkout was `781131b`; the prepared and repository C674x source
+matched. No runtime source or installed executable was modified. Three separate
+5-second macOS stack samples at 1 ms intervals covered the SH4 execution thread.
+Raw samples, commands, provenance, disassembly and summaries are in
+`analysis/iterations/13-dsp-copy/`; the complete run is
+`runs/optimization-13-copy-profile`.
+
+The entry/commit copies at `cdj_c674x_execute` lines 2024/2840 accounted for
+28.50–29.61% of SH4 thread samples (1,006/3,475, 1,132/3,972 and 1,151/3,887).
+The temporary's initialization at line 2023 added 13.64–14.20%. These are disjoint
+call-site counts, not sums of parents and children. Disassembly confirms that
+QEMU's `-ftrivial-auto-var-init=zero` clears the **3,568-byte loop tail**, then
+copies the 3,024-byte scalar/pipeline prefix. It does not redundantly clear the
+prefix. The successful packet then copies the prefix back: 6,048 bytes copied
+per packet. The source contract says helpers receiving this temporary must not
+inspect its loop tail.
+
+Under an unchanged-workload Amdahl model, halving the measured copy cost would
+yield **1.166–1.174× execution throughput**; eliminating it entirely has an
+optimistic **1.399–1.421× ceiling**. Eliminating just the tail clear has a
+**1.158–1.166× ceiling**. These are conditional estimates from samples, not
+implemented or measured speedups. Do not add speedup percentages. Replacement
+bookkeeping, cache effects, host scheduling, workload changes and other emulator
+constraints can reduce the return. Boot and panel response do not necessarily
+scale with execution throughput.
+
+The smaller first candidate is avoiding unused-tail auto-initialization for
+this one temporary, after auditing every helper's accesses; keep global compiler
+initialization enabled. A genuine prefix working-state type is a more structural
+alternative. Further copy reduction needs pre-packet operand visibility,
+delayed effects, transaction failure and loop/interrupt rollback tests; simply
+mutating the live CPU is not equivalent. Nested loop transactions are another
+candidate, but this profile supports the normal packet path first.
+
+The baseline completed with GUI exit 0, no timeout, a framebuffer and zero
+reported dropped milliseconds. Its 398 DSP callbacks consumed 67.716 seconds
+of execution plus 0.838 seconds of reporting, reaching 385,099,500 packets and
+707,162,471 cycles. Sampling adds observer overhead. This probe contains no
+candidate comparison, panel interaction test or CPU-saving measurement, and
+must not be compared directly with older binaries as a performance regression.
+**Cumulative measured gains are unchanged.** This result establishes that a
+bounded implementation experiment is worthwhile, not that an optimization has
+already been validated.

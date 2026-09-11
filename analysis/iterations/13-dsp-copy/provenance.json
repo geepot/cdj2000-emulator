@@ -1,0 +1,9 @@
+{
+  "head": "781131b42f626be6bb56ffca3b0dd49508f119b1",
+  "qemu_sha256": "fb5f9523e4437750ef4a89b913f7a7af37e4b13611f121272cbcf9cf57b780ab",
+  "blackfin_before": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+  "sample_scope": "three 5-second 1ms stack samples, observer overhead; no candidate",
+  "exit": 0,
+  "blackfin_after": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+  "saved_qemu_after": "fb5f9523e4437750ef4a89b913f7a7af37e4b13611f121272cbcf9cf57b780ab"
+}
