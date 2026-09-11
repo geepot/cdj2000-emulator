@@ -134,6 +134,30 @@ Still deliberately **not** done, and why:
 - **Overlapping parallel load/store to one address stays fail-closed.** SPRUFE8B
   does not define the ordering; inventing one would be worse than a halt.
 - **Figure D-6 `Ltbd` remains unexplained** and referenced by no instruction.
+- **`ABS`'s effect on `CSR.SAT` and `SSR` is unresolved**, and the core leaves
+  both alone. The whole `ABS` entry (printed pages 101-102) contains no
+  occurrence of "SAT", "CSR" or "SSR"; the sentence an earlier comment cited
+  from "page 102" is actually `ABS2`'s, on printed page 105, and it is the
+  *packed* forms that carry that exemption note. The general rule points the
+  other way: CSR Table 2-9 (printed page 33) defines bit 9 SAT as set when "one
+  or more functional units performed an arithmetic operation which resulted in
+  saturation", SSR 2.9.13 (printed page 54) says instructions resulting in
+  saturation set the unit flag, and `ABS` rule 3 (-2^31 -> 2^31-1,
+  -2^39 -> 2^39-1) is such a saturation. Setting the flags would be a short
+  reuse of the `CDJ_C674X_DELAYED_SAT` sentinel `arm_sat40` already uses, but
+  the manual never states it positively for `ABS`, so it is not done on
+  likelihood alone.
+- **`B NRP` refuses a restorable `TSR`.** The instruction page (157-158) gives
+  only NRP -> PFC and the NMIE set, but 5.3.4.2 (printed page 639) adds "The
+  NTSR register will be copied back into the TSR register during the transfer of
+  control out of the interrupt" - the counterpart of the ITSR -> TSR restore
+  `B IRP` performs. NTSR is control register 28, which this core neither reads,
+  writes nor models, so there is nothing to restore from and performing the
+  restore would zero `TSR`: a fabricated effect, not a conservative one. `B NRP`
+  therefore works where the restore would be a no-op (reset `TSR`) and stops
+  with "B NRP with a restorable TSR and no modelled NTSR" anywhere it would be
+  observable - which includes any maskable ISR, since this core's own interrupt
+  entry sets `TSR` bits 9 and 15.
 
 Two ambiguities were found while implementing and are now open questions:
 

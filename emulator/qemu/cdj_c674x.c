@@ -2765,9 +2765,25 @@ static bool arm_subc(CdjC674xArm *x)
 static bool arm_abs(CdjC674xArm *x)
 {
     /* ABS, printed pages 101-102: single cycle, 0 delay slots, E1 write.
-     * Opfield 001 1010 is the sint form and 011 1000 the slong form; printed
-     * page 102 notes neither affects CSR.SAT, and the sint form's three cases
-     * are the slong form's at 32 bits. */
+     * Opfield 001 1010 is the sint form and 011 1000 the slong form, and the
+     * sint form's three cases are the slong form's at 32 bits.
+     *
+     * CSR.SAT AND SSR ARE UNRESOLVED HERE, NOT DECIDED.  An earlier version of
+     * this comment claimed printed page 102 says neither is affected.  It does
+     * not: the whole ABS entry contains no occurrence of "SAT", "CSR" or "SSR".
+     * That sentence belongs to ABS2 (printed page 105), and the packed forms
+     * are the ones that carry the exemption note.  The general rule points the
+     * other way - CSR Table 2-9 (printed page 33) defines bit 9 SAT as "one or
+     * more functional units performed an arithmetic operation which resulted in
+     * saturation", and SSR 2.9.13 (printed page 54) says instructions resulting
+     * in saturation set the unit flag - and ABS rule 3 (-2^31 -> 2^31-1,
+     * -2^39 -> 2^39-1) is such a saturation.
+     *
+     * The manual never states it positively for ABS, so the answer is unknown
+     * and this leaves the flags alone: that is the status quo, not a finding.
+     * Setting CSR.SAT and SSR[side] would be a short reuse of the
+     * CDJ_C674X_DELAYED_SAT sentinel arm_sat40 already uses, but it is not done
+     * on likelihood alone.  Recorded in DSP_ARCHITECTURE_COVERAGE.md. */
     bool pair = ((x->w >> 5) & 0x7f) == 0x38;
     if (!pair) {
         x->value = cdj_c674x_abs32(x->cpu->r[x->cross][x->b]);
@@ -2872,9 +2888,29 @@ static bool arm_b_nrp(CdjC674xArm *x)
      * unchanged."  Five delay slots, so the branch completes in the sixth cycle
      * exactly as B IRP and B displacement do here.  NRP is control register 7
      * and NMIE is IER bit 1 (cdj_c674x_control_read and the MVC IER write mask
-     * below both treat them that way). */
+     * below both treat them that way).
+     *
+     * THE INSTRUCTION PAGE IS NOT THE WHOLE RULE.  5.3.4.2 (printed page 639)
+     * adds "The NTSR register will be copied back into the TSR register during
+     * the transfer of control out of the interrupt" - the exact counterpart of
+     * the ITSR -> TSR restore arm_b_irp performs above.  NTSR is control
+     * register 28, which cdj_c674x_control_read_supported and
+     * write_supported both exclude and which nothing in this core ever writes,
+     * so there is no NTSR here to restore FROM.  Writing the restore anyway
+     * would zero TSR, which is a fabricated architectural effect, not a
+     * conservative one.
+     *
+     * So this fails closed instead: with TSR at its reset value the restore is
+     * a no-op and B NRP behaves exactly as the instruction page describes,
+     * while any state where the restore would be observable is refused rather
+     * than silently diverging.  This core's own interrupt entry sets TSR bits
+     * 9 and 15, so a B NRP reached from inside a maskable ISR lands here.  The
+     * mask is arm_b_irp's, the restorable TSR bits. */
     x->reg_write = false;
     if (x->enabled) {
+        if (x->cpu->control[26] & 0x0000c6deu)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "B NRP with a restorable TSR and no modelled NTSR");
         if (x->controls[4])
             return stop(x->cpu, x->pc, x->insn->word,
                         "B NRP parallel IER write conflict");

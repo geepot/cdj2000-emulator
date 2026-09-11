@@ -17,6 +17,7 @@
  * emulator.
  */
 #include <assert.h>
+#include <string.h>
 #include <stdio.h>
 #include "cdj_c674x.h"
 
@@ -552,6 +553,18 @@ static void shift_long(void)
     assert(j.r[0][5] == 0x00f12363u);       /* printed page 458, Example 1 */
 }
 
+/* Execute one B NRP on an already-configured CPU, returning whether it was
+ * accepted.  Unlike rejects() this keeps the caller's control state, which is
+ * the whole point when the refusal depends on TSR. */
+static bool b_nrp_executes(CdjC674x *c)
+{
+    CdjC674xPacket p = {
+        .instructions = {{.word = 0x001c00e2u, .pc = c->pc}},
+        .count = 1, .next_pc = c->pc + 4,
+    };
+    return cdj_c674x_execute(c, &p, NULL, NULL, NULL);
+}
+
 /* ---- B NRP, printed pages 157-158 --------------------------------------- */
 static void b_nrp(void)
 {
@@ -587,6 +600,45 @@ static void b_nrp(void)
     issue(&e, 0x001800e2u);
     cycles(&e, 5);
     assert(e.pc == 0x00002000u);
+
+    /* The instruction page is not the whole rule.  5.3.4.2 (printed page 639)
+     * adds "The NTSR register will be copied back into the TSR register during
+     * the transfer of control out of the interrupt", the counterpart of the
+     * ITSR -> TSR restore B IRP performs.  NTSR is control register 28, which
+     * this core neither reads, writes nor models, so there is nothing to
+     * restore from and performing the restore would zero TSR - a fabricated
+     * effect.  B NRP therefore refuses exactly the states where the restore
+     * would be observable, and stays available where it would be a no-op.
+     *
+     * Reset TSR is 0, so the case above already proves the no-op path works.
+     * Here TSR carries the bits this core's own interrupt entry sets (9 and
+     * 15), which is what a B NRP inside a maskable ISR would see. */
+    CdjC674x f; cdj_c674x_reset(&f, 0x20);
+    f.control[7] = 0x00001000u;
+    f.control[26] = (1u << 15) | (1u << 9);
+    assert(!b_nrp_executes(&f));
+    assert(f.fault && strstr(f.fault, "NTSR"));
+    assert(f.pc != 0x00001000u);
+
+    /* Every restorable TSR bit must trigger the refusal, not just those two:
+     * the mask is B IRP's restorable set. */
+    for (unsigned bit = 0; bit < 32; ++bit) {
+        if (!((0x0000c6deu >> bit) & 1u)) continue;
+        CdjC674x g; cdj_c674x_reset(&g, 0x20);
+        g.control[7] = 0x00001000u;
+        g.control[26] = 1u << bit;
+        assert(!b_nrp_executes(&g));
+        assert(g.fault && strstr(g.fault, "NTSR"));
+    }
+
+    /* A TSR bit OUTSIDE that mask is not restorable, so it must NOT refuse. */
+    CdjC674x h; cdj_c674x_reset(&h, 0x20);
+    h.control[7] = 0x00001000u;
+    h.control[26] = ~0x0000c6deu & 0xffffffffu;
+    issue(&h, 0x001c00e2u);
+    assert(!h.fault);
+    cycles(&h, 5);
+    assert(h.pc == 0x00001000u);
 }
 
 /* ---- BPOS, printed pages 170-171 ---------------------------------------- */
