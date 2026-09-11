@@ -125,7 +125,15 @@ def sha256(path: Path) -> str:
 # The NXS panel puts the SOURCE contacts one bit above the CDJ-2000's, which is
 # why boot_vm's SOURCE_KEYS does not apply here: NXS_PANEL_MAP.md and the
 # runs/nxs-track-load-sd-1 evidence both record SD as 19/08 and USB as 19/04.
-NXS_SOURCE_KEYS = {'usb': (19, 0x04), 'sd': (19, 0x08)}
+# Imported, never re-typed.  This was a private copy until it was found to have
+# the SD and DISC bits swapped: `--sd` pressed DISC (19.3) and `--usb` pressed
+# SD (19.2), so MAIN switched to a source that had no medium and never probed
+# the card.  That is the SAME reversal panel_control.BUTTON_NAMES carries a
+# warning about - "THIS TABLE WAS REVERSED UNTIL 2026-08-07, and it cost the
+# project weeks" - reintroduced here because this file kept its own copy of a
+# table whose whole point was to be singular.  The fix is the import, not a
+# corrected literal, so the two cannot drift apart a second time.
+from tools.cdj_main.panel_control import BUTTON_NAMES as NXS_SOURCE_KEYS
 
 
 def input_metadata(path: Path) -> dict:
