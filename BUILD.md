@@ -154,6 +154,24 @@ frontend batches exact addresses via stdin instead of linear sweeping across
 data. Reports preserve provenance hashes and remain non-validating: canonical
 disassembly does not prove execution, semantic correctness or test completeness.
 
+Instruction reachability — whether the captured firmware contains what the core
+cannot execute. Reuses the same frontend, and runs without it (every static
+verdict then reads `not-scanned`):
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.reachability analysis/dsp/reachability.json \
+  --disassembler /tmp/cdj-tic6x-disasm
+C6X_DISASSEMBLER=/tmp/cdj-tic6x-disasm .venv/bin/python -m pytest -q \
+  tests/test_dsp_reachability.py
+```
+
+It answers two questions and keeps them apart: `confirmed_executed` counts
+replay-confirmed addresses and recorded unsupported-encoding faults, while
+`static_candidates` counts fetch-packet-aligned disassembly hits in captured
+memory, which is presence and not execution. Read `static_scan.noise_floor`
+before any candidate count: the same pipeline over control blobs of the same
+size is how many hits that mnemonic gets from bytes that are not code.
+
 AMR/circular-addressing validation:
 
 ```sh

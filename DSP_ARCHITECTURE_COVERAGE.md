@@ -72,6 +72,71 @@ loop equivalence test pins page 93's equivalence between a protected load and an
 explicit `LD; NOP 4`, but the absolute values it compares are our own trace of the
 second program, so a shared error in `NOP 4` handling would not be caught.
 
+### 0.1 Reachability is measured, and it is negative
+
+The audit's highest-leverage missing task — does the firmware contain the
+instructions we do not implement — is answered by
+`python -m tools.cdj_dsp.reachability`, recorded in
+`analysis/dsp/reachability.json`. Two evidence classes, never added together:
+
+| | Result |
+|---|---|
+| Unimplemented manual rows with **confirmed-executed** evidence | **0 of 115** |
+| Unimplemented **instruction groups** with static candidates above their noise floor | **0 of 27** |
+| Unimplemented rows with any candidate above floor | **1** (`INTDP`, whose floor is 0) |
+| Recorded `instruction not implemented` / nonconditional-alias faults across 153 coverage artifacts | 2, decoding to `ADDK` and `DINT`, **both implemented since** |
+
+**Why "0 confirmed" is forced, and what carries the evidence instead.**
+`coverage.py` only confirms a source packet that completed *without* an
+unsupported fault, so an unimplemented instruction can never appear in the
+confirmed set — it would have faulted. Recorded faults are therefore the only
+channel, and there were two. One of them is the `DINT` nonconditional alias of
+§5.1, which commit `d7937e7` fixed: direct evidence that wave 1 unblocked a path
+the firmware actually took.
+
+**The static side is normalised, and normalising it changed the answer.** The
+first run of this tool compared raw per-mnemonic hit counts between the firmware
+and two control blobs. That comparison is biased: the firmware decodes 96,956
+instruction positions while the controls decode 8,552 and 6,281, so the firmware
+gets roughly 11× the exposure and is credited accordingly. Scaling each control
+to the firmware's exposure and requiring a three-sigma margin — a count near a
+floor of 9 has a standard deviation of about 3, so a one-count margin says
+nothing — moves **33 rows to 1 and flips nine of ten family groups** from
+"candidate present" to not-found, including double-precision floating point,
+which the biased comparison had made the headline survivor at "180 vs 50". Its
+scaled floor is 603. **The previous framing was wrong and is retracted here
+rather than quietly edited away.**
+
+Packed 2×16, packed 4×8, dot-product/complex-multiply, bit-manipulation, Galois,
+dual-result and both floating-point families are all at or below their scaled
+floors. The 22 nonconditional extensions have no candidate at all.
+
+**The one positive signal is in the compact space, and it is not statistical.**
+Of the 6,944 unimplemented 16-bit words, 33 distinct words appear in captured
+memory, **11 of them inside fetch packets the replay demonstrably executed**, and
+8 sit at confirmed-executed compact addresses. "Inside a packet we watched
+execute" needs no noise floor. Those 8 also bound the 6,944 itself: the sweep
+rejects them under all 13 of its header configurations, so either the real
+fetch-packet header is outside that set or the word means something else under
+it. **6,944 is an upper bound on unimplemented compact words, not a count.**
+Note the distinct-word comparison against a control floor of 6 is still
+exposure-unadjusted and is not relied on here.
+
+**What this means for the plan.** Waves 3-6 as scoped — roughly 106 instruction
+rows of packed SIMD, double precision, dot products and bit manipulation — have
+**no evidence of firmware presence**. Building them would be speculation. The
+work the firmware demonstrably needs is elsewhere, in the recorded faults: 12
+unaligned/unmapped scalar accesses, 4 nested-SPLOOP, 2 SPLOOPW interrupt drain,
+2 SPLOOP SPMASK resume, 2 delayed-result write conflicts and 1 parallel register
+write conflict (11 distinct faults across 27 artifact-occurrences). Software-loop
+interrupt/resume and memory paths, not instruction families.
+
+**Two limits bound all of it.** The replay reached 900 fetch packets, so
+"not found" is partly a statement about replay depth; and after deduplication the
+113 `dsp-l2.bin` captures hold only 1,466 distinct non-zero fetch packets against
+20,550 once checkpoints are included — the DSP program lives in SDRAM pages only
+checkpoints carry, so a scan restricted to L2 would measure almost nothing.
+
 ## 1. References
 
 Both manuals are proprietary TI documents. They are downloaded into git-ignored

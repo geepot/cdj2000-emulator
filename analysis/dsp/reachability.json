@@ -1,0 +1,4610 @@
+{
+  "caveats": [
+    "confirmed_executed and static_candidates are different evidence classes and must never be added together.",
+    "A confirmed address is a source fetch of its execute packet, not a predicate-body execution.",
+    "The confirmed set is biased against unimplemented instructions: a packet that faults is never confirmed, so recorded_unsupported_faults is the only confirmed-executed evidence an unimplemented instruction can have.",
+    "static_candidates is byte-pattern presence in captured memory. Probable code and unclassified memory are not promoted to confirmed code.",
+    "Captured images cover L2, shared RAM and the SDRAM pages a checkpoint happened to hold; code in uncaptured SDRAM is invisible to the scan, so not-found means not found here, not absent from the firmware.",
+    "Disassembly decides what a word names; the core decides what it executes. The two disagree where a format is decoded but unimplemented."
+  ],
+  "compact_encoding_space": {
+    "confirmed_executed_caveat": "These 16-bit words sit at confirmed-executed compact addresses yet the sweep rejects them under all 13 of its header configurations. Either the real fetch-packet header is outside the swept set or the word means something else under it, so 6,944 is an upper bound on unimplemented compact words, not a verified count.",
+    "confirmed_executed_word_count": 8,
+    "confirmed_executed_words": [
+      3174,
+      3175,
+      3303,
+      3559,
+      7270,
+      7271,
+      7398,
+      56422
+    ],
+    "distinct_compact_words_seen": 3757,
+    "noise_floor": 6,
+    "noise_floor_definition": "distinct unimplemented compact words a control blob of the same size yields through the identical pipeline",
+    "note": "A 16-bit word present at a compact position is presence, not execution; the core rejects all of these words today.",
+    "state": "scanned",
+    "static_candidate_positions": 331,
+    "static_candidate_words": 33,
+    "static_candidate_words_in_executed_fetch_packets": 11,
+    "sweep_rejection_reasons": {
+      "compact instruction not implemented": 6944,
+      "reserved compact LSDx1 instruction": 64,
+      "unaligned stack access or invalid register pair": 64
+    },
+    "unimplemented_words": 6944,
+    "verdict": "reached-confirmed"
+  },
+  "confirmed_executed_by_mnemonic": {
+    "abssp": {
+      "addresses": 5,
+      "compact_addresses": 0,
+      "fetch_packets": 5,
+      "long40_addresses": 0,
+      "source_fetch_observations": 6654
+    },
+    "add": {
+      "addresses": 316,
+      "compact_addresses": 144,
+      "fetch_packets": 200,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1512049
+    },
+    "addad": {
+      "addresses": 41,
+      "compact_addresses": 0,
+      "fetch_packets": 33,
+      "long40_addresses": 0,
+      "source_fetch_observations": 4398
+    },
+    "addah": {
+      "addresses": 2,
+      "compact_addresses": 0,
+      "fetch_packets": 2,
+      "long40_addresses": 0,
+      "source_fetch_observations": 62
+    },
+    "addaw": {
+      "addresses": 13,
+      "compact_addresses": 5,
+      "fetch_packets": 11,
+      "long40_addresses": 0,
+      "source_fetch_observations": 13
+    },
+    "addk": {
+      "addresses": 9,
+      "compact_addresses": 2,
+      "fetch_packets": 9,
+      "long40_addresses": 0,
+      "source_fetch_observations": 4094
+    },
+    "addkpc": {
+      "addresses": 57,
+      "compact_addresses": 0,
+      "fetch_packets": 53,
+      "long40_addresses": 0,
+      "source_fetch_observations": 2264226
+    },
+    "addsp": {
+      "addresses": 14,
+      "compact_addresses": 0,
+      "fetch_packets": 12,
+      "long40_addresses": 0,
+      "source_fetch_observations": 18374
+    },
+    "and": {
+      "addresses": 78,
+      "compact_addresses": 13,
+      "fetch_packets": 68,
+      "long40_addresses": 0,
+      "source_fetch_observations": 3038507
+    },
+    "andn": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 511
+    },
+    "b": {
+      "addresses": 101,
+      "compact_addresses": 0,
+      "fetch_packets": 91,
+      "long40_addresses": 0,
+      "source_fetch_observations": 5986181
+    },
+    "bnop": {
+      "addresses": 262,
+      "compact_addresses": 88,
+      "fetch_packets": 234,
+      "long40_addresses": 0,
+      "source_fetch_observations": 8880015
+    },
+    "callp": {
+      "addresses": 156,
+      "compact_addresses": 34,
+      "fetch_packets": 104,
+      "long40_addresses": 0,
+      "source_fetch_observations": 563265
+    },
+    "clr": {
+      "addresses": 12,
+      "compact_addresses": 6,
+      "fetch_packets": 10,
+      "long40_addresses": 0,
+      "source_fetch_observations": 12
+    },
+    "cmpeq": {
+      "addresses": 111,
+      "compact_addresses": 32,
+      "fetch_packets": 84,
+      "long40_addresses": 0,
+      "source_fetch_observations": 5308938
+    },
+    "cmpeqsp": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 2048
+    },
+    "cmpgt": {
+      "addresses": 18,
+      "compact_addresses": 7,
+      "fetch_packets": 14,
+      "long40_addresses": 0,
+      "source_fetch_observations": 126272
+    },
+    "cmpgtsp": {
+      "addresses": 9,
+      "compact_addresses": 0,
+      "fetch_packets": 7,
+      "long40_addresses": 0,
+      "source_fetch_observations": 10211
+    },
+    "cmpgtu": {
+      "addresses": 7,
+      "compact_addresses": 1,
+      "fetch_packets": 6,
+      "long40_addresses": 0,
+      "source_fetch_observations": 198471
+    },
+    "cmplt": {
+      "addresses": 10,
+      "compact_addresses": 4,
+      "fetch_packets": 10,
+      "long40_addresses": 0,
+      "source_fetch_observations": 4653
+    },
+    "cmpltsp": {
+      "addresses": 4,
+      "compact_addresses": 0,
+      "fetch_packets": 4,
+      "long40_addresses": 0,
+      "source_fetch_observations": 6116
+    },
+    "cmpltu": {
+      "addresses": 2,
+      "compact_addresses": 0,
+      "fetch_packets": 2,
+      "long40_addresses": 0,
+      "source_fetch_observations": 7030
+    },
+    "dint": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1
+    },
+    "ext": {
+      "addresses": 4,
+      "compact_addresses": 1,
+      "fetch_packets": 3,
+      "long40_addresses": 0,
+      "source_fetch_observations": 169
+    },
+    "extu": {
+      "addresses": 28,
+      "compact_addresses": 6,
+      "fetch_packets": 22,
+      "long40_addresses": 0,
+      "source_fetch_observations": 235779
+    },
+    "intsp": {
+      "addresses": 9,
+      "compact_addresses": 0,
+      "fetch_packets": 9,
+      "long40_addresses": 0,
+      "source_fetch_observations": 3588
+    },
+    "intspu": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 998
+    },
+    "ldb": {
+      "addresses": 5,
+      "compact_addresses": 0,
+      "fetch_packets": 3,
+      "long40_addresses": 0,
+      "source_fetch_observations": 96164
+    },
+    "ldbu": {
+      "addresses": 31,
+      "compact_addresses": 0,
+      "fetch_packets": 24,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1240992
+    },
+    "lddw": {
+      "addresses": 47,
+      "compact_addresses": 41,
+      "fetch_packets": 28,
+      "long40_addresses": 0,
+      "source_fetch_observations": 344029
+    },
+    "ldh": {
+      "addresses": 16,
+      "compact_addresses": 3,
+      "fetch_packets": 14,
+      "long40_addresses": 0,
+      "source_fetch_observations": 236589
+    },
+    "ldhu": {
+      "addresses": 11,
+      "compact_addresses": 0,
+      "fetch_packets": 10,
+      "long40_addresses": 0,
+      "source_fetch_observations": 30028
+    },
+    "ldndw": {
+      "addresses": 5,
+      "compact_addresses": 1,
+      "fetch_packets": 5,
+      "long40_addresses": 0,
+      "source_fetch_observations": 3148
+    },
+    "ldnw": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 31
+    },
+    "ldw": {
+      "addresses": 537,
+      "compact_addresses": 239,
+      "fetch_packets": 298,
+      "long40_addresses": 0,
+      "source_fetch_observations": 4439991
+    },
+    "mpyli": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1
+    },
+    "mpysp": {
+      "addresses": 33,
+      "compact_addresses": 0,
+      "fetch_packets": 24,
+      "long40_addresses": 0,
+      "source_fetch_observations": 34631
+    },
+    "mpysu": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 998
+    },
+    "mpyus": {
+      "addresses": 6,
+      "compact_addresses": 0,
+      "fetch_packets": 6,
+      "long40_addresses": 0,
+      "source_fetch_observations": 135504
+    },
+    "mv": {
+      "addresses": 215,
+      "compact_addresses": 215,
+      "fetch_packets": 156,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1311702
+    },
+    "mvc": {
+      "addresses": 54,
+      "compact_addresses": 16,
+      "fetch_packets": 35,
+      "long40_addresses": 0,
+      "source_fetch_observations": 3240283
+    },
+    "mvk": {
+      "addresses": 958,
+      "compact_addresses": 286,
+      "fetch_packets": 478,
+      "long40_addresses": 0,
+      "source_fetch_observations": 13330302
+    },
+    "mvkh": {
+      "addresses": 363,
+      "compact_addresses": 0,
+      "fetch_packets": 281,
+      "long40_addresses": 0,
+      "source_fetch_observations": 3135091
+    },
+    "nop": {
+      "addresses": 439,
+      "compact_addresses": 248,
+      "fetch_packets": 284,
+      "long40_addresses": 0,
+      "source_fetch_observations": 4865578
+    },
+    "or": {
+      "addresses": 178,
+      "compact_addresses": 3,
+      "fetch_packets": 147,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1617654
+    },
+    "pack2": {
+      "addresses": 4,
+      "compact_addresses": 0,
+      "fetch_packets": 4,
+      "long40_addresses": 0,
+      "source_fetch_observations": 6035
+    },
+    "packl4": {
+      "addresses": 2,
+      "compact_addresses": 0,
+      "fetch_packets": 2,
+      "long40_addresses": 0,
+      "source_fetch_observations": 6033
+    },
+    "rint": {
+      "addresses": 1,
+      "compact_addresses": 0,
+      "fetch_packets": 1,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1
+    },
+    "set": {
+      "addresses": 50,
+      "compact_addresses": 17,
+      "fetch_packets": 46,
+      "long40_addresses": 0,
+      "source_fetch_observations": 10171
+    },
+    "shl": {
+      "addresses": 11,
+      "compact_addresses": 5,
+      "fetch_packets": 10,
+      "long40_addresses": 0,
+      "source_fetch_observations": 9679
+    },
+    "shr": {
+      "addresses": 4,
+      "compact_addresses": 2,
+      "fetch_packets": 4,
+      "long40_addresses": 0,
+      "source_fetch_observations": 544
+    },
+    "shru": {
+      "addresses": 9,
+      "compact_addresses": 1,
+      "fetch_packets": 9,
+      "long40_addresses": 0,
+      "source_fetch_observations": 6385
+    },
+    "spkernel": {
+      "addresses": 34,
+      "compact_addresses": 17,
+      "fetch_packets": 34,
+      "long40_addresses": 0,
+      "source_fetch_observations": 9675
+    },
+    "sploop": {
+      "addresses": 4,
+      "compact_addresses": 3,
+      "fetch_packets": 4,
+      "long40_addresses": 0,
+      "source_fetch_observations": 6064
+    },
+    "sploopd": {
+      "addresses": 15,
+      "compact_addresses": 12,
+      "fetch_packets": 15,
+      "long40_addresses": 0,
+      "source_fetch_observations": 3061
+    },
+    "sploopw": {
+      "addresses": 15,
+      "compact_addresses": 0,
+      "fetch_packets": 15,
+      "long40_addresses": 0,
+      "source_fetch_observations": 566
+    },
+    "spmask": {
+      "addresses": 34,
+      "compact_addresses": 32,
+      "fetch_packets": 26,
+      "long40_addresses": 0,
+      "source_fetch_observations": 2172
+    },
+    "sptrunc": {
+      "addresses": 6,
+      "compact_addresses": 0,
+      "fetch_packets": 6,
+      "long40_addresses": 0,
+      "source_fetch_observations": 516
+    },
+    "stb": {
+      "addresses": 58,
+      "compact_addresses": 8,
+      "fetch_packets": 38,
+      "long40_addresses": 0,
+      "source_fetch_observations": 1138458
+    },
+    "stdw": {
+      "addresses": 74,
+      "compact_addresses": 44,
+      "fetch_packets": 44,
+      "long40_addresses": 0,
+      "source_fetch_observations": 360106
+    },
+    "sth": {
+      "addresses": 120,
+      "compact_addresses": 7,
+      "fetch_packets": 61,
+      "long40_addresses": 0,
+      "source_fetch_observations": 21653
+    },
+    "stndw": {
+      "addresses": 30,
+      "compact_addresses": 6,
+      "fetch_packets": 17,
+      "long40_addresses": 0,
+      "source_fetch_observations": 12125
+    },
+    "stnw": {
+      "addresses": 2,
+      "compact_addresses": 0,
+      "fetch_packets": 2,
+      "long40_addresses": 0,
+      "source_fetch_observations": 6063
+    },
+    "stw": {
+      "addresses": 696,
+      "compact_addresses": 285,
+      "fetch_packets": 327,
+      "long40_addresses": 0,
+      "source_fetch_observations": 2632445
+    },
+    "sub": {
+      "addresses": 23,
+      "compact_addresses": 7,
+      "fetch_packets": 21,
+      "long40_addresses": 0,
+      "source_fetch_observations": 20343
+    },
+    "subaw": {
+      "addresses": 13,
+      "compact_addresses": 2,
+      "fetch_packets": 13,
+      "long40_addresses": 0,
+      "source_fetch_observations": 170
+    },
+    "subsp": {
+      "addresses": 8,
+      "compact_addresses": 0,
+      "fetch_packets": 6,
+      "long40_addresses": 0,
+      "source_fetch_observations": 7111
+    },
+    "xor": {
+      "addresses": 10,
+      "compact_addresses": 7,
+      "fetch_packets": 10,
+      "long40_addresses": 0,
+      "source_fetch_observations": 106326
+    }
+  },
+  "counts": {
+    "confirmed_executed_addresses": 5396,
+    "confirmed_executed_mnemonics": 68,
+    "executed_fetch_packets": 900,
+    "rows_not_found": 113,
+    "rows_not_scanned": 1,
+    "rows_reached_candidate_only": 1,
+    "rows_reached_confirmed": 0,
+    "unimplemented_rows": 115
+  },
+  "encoding_forms": {
+    "long40_compare_and_shift": {
+      "confirmed_executed": 0,
+      "derivation": "register-pair src operand on cmpeq/cmpgt/cmpgtu/cmplt/cmpltu/shl/shr/shru - an operand shape, not a Table A-1 row",
+      "noise_floor": 30,
+      "static_candidates": 43,
+      "verdict": "not-found"
+    },
+    "nonconditional_extensions": {
+      "confirmed_executed": 0,
+      "derivation": "unimplemented rows whose every rejected probe encoding carries TI's unconditional bits 31-28 = 0001 (audit section 5.1)",
+      "row_count": 22,
+      "rows": [
+        "ADDSUB",
+        "ADDSUB2",
+        "CMPY",
+        "CMPYR",
+        "CMPYR1",
+        "DDOTP4",
+        "DDOTPH2",
+        "DDOTPH2R",
+        "DDOTPL2",
+        "DDOTPL2R",
+        "DPACK2",
+        "DPACKX2",
+        "GMPY",
+        "MPY2IR",
+        "RPACK2",
+        "SADDSUB",
+        "SADDSUB2",
+        "SHFL3",
+        "SMPY32",
+        "SWE",
+        "SWENR",
+        "XORMPY"
+      ],
+      "static_candidates": 0,
+      "verdict": "not-found"
+    }
+  },
+  "groups": {
+    "ISA-ADDR": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 7,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "ADDAB",
+        "ADDAD",
+        "ADDAH",
+        "ADDAW",
+        "SUBAB",
+        "SUBAH",
+        "SUBAW"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 7,
+      "requirement": "Address arithmetic in byte/halfword/word/doubleword addressing modes",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-BITFIELD": {
+      "audit_implementation": "supported",
+      "confirmed_executed": 0,
+      "declared_rows": 4,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "CLR",
+        "SET",
+        "EXT",
+        "EXTU"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 4,
+      "requirement": "Constant and register bit-field operations",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-BITMANIP": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 10,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "LMBD",
+        "NORM",
+        "BITR",
+        "BITC4",
+        "DEAL",
+        "SHFL",
+        "SHFL3",
+        "XPND2",
+        "XPND4",
+        "SUBC"
+      ],
+      "noise_floor": 393.14795359637344,
+      "parsed_rows": 10,
+      "requirement": "Bit manipulation and division support",
+      "static_candidates": 79,
+      "unimplemented_member_count": 10,
+      "unimplemented_members": [
+        "BITC4",
+        "BITR",
+        "DEAL",
+        "LMBD",
+        "NORM",
+        "SHFL",
+        "SHFL3",
+        "SUBC",
+        "XPND2",
+        "XPND4"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-BRANCH": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 10,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "B",
+        "B",
+        "B",
+        "IRP",
+        "B",
+        "NRP",
+        "BNOP",
+        "BNOP",
+        "BDEC",
+        "BPOS",
+        "CALLP",
+        "ADDKPC"
+      ],
+      "noise_floor": 736.9200187090739,
+      "parsed_rows": 12,
+      "requirement": "Branches and PC arithmetic",
+      "static_candidates": 7,
+      "unimplemented_member_count": 2,
+      "unimplemented_members": [
+        "B NRP",
+        "BPOS"
+      ],
+      "unresolvable_members": [
+        "B NRP"
+      ],
+      "verdict": "not-found"
+    },
+    "ISA-CTRL-MISC": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 8,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "MVC",
+        "DINT",
+        "RINT",
+        "NOP",
+        "IDLE",
+        "SWE",
+        "SWENR",
+        "MVD"
+      ],
+      "noise_floor": 22.67446211412535,
+      "parsed_rows": 8,
+      "requirement": "Control-register move, interrupt gating, NOP/IDLE, software exceptions and the delayed .M move",
+      "static_candidates": 0,
+      "unimplemented_member_count": 2,
+      "unimplemented_members": [
+        "SWE",
+        "SWENR"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-DUALRESULT": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 7,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "ADDSUB",
+        "ADDSUB2",
+        "SADDSUB",
+        "SADDSUB2",
+        "DPACK2",
+        "DPACKX2",
+        "DMV"
+      ],
+      "noise_floor": 99.85643950626036,
+      "parsed_rows": 7,
+      "requirement": "Dual-result compound .L/.S operations",
+      "static_candidates": 0,
+      "unimplemented_member_count": 7,
+      "unimplemented_members": [
+        "ADDSUB",
+        "ADDSUB2",
+        "DMV",
+        "DPACK2",
+        "DPACKX2",
+        "SADDSUB",
+        "SADDSUB2"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-ENC-COMPACT16": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": null,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "SPRUFE8B",
+        "A",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "T",
+        "A"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 10,
+      "requirement": "ENCODING SCOPE (not a Table A-1 row)",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-ENC-CROSSPATH": {
+      "audit_implementation": "supported",
+      "confirmed_executed": 0,
+      "declared_rows": null,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "X",
+        "X",
+        "D"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 3,
+      "requirement": "ENCODING SCOPE (not a Table A-1 row)",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-FP-DP": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 11,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "ABSDP",
+        "ADDDP",
+        "SUBDP",
+        "MPYDP",
+        "CMPEQDP",
+        "CMPGTDP",
+        "CMPLTDP",
+        "RCPDP",
+        "RSQRDP",
+        "MPYSPDP",
+        "MPYSP2DP"
+      ],
+      "noise_floor": 603.7540326454127,
+      "parsed_rows": 11,
+      "requirement": "Double-precision floating-point arithmetic and compares",
+      "static_candidates": 180,
+      "unimplemented_member_count": 11,
+      "unimplemented_members": [
+        "ABSDP",
+        "ADDDP",
+        "CMPEQDP",
+        "CMPGTDP",
+        "CMPLTDP",
+        "MPYDP",
+        "MPYSP2DP",
+        "MPYSPDP",
+        "RCPDP",
+        "RSQRDP",
+        "SUBDP"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-FP-DP-CONV": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 5,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "INTDP",
+        "INTDPU",
+        "DPINT",
+        "DPTRUNC",
+        "DPSP"
+      ],
+      "noise_floor": 367.85082045440026,
+      "parsed_rows": 5,
+      "requirement": "Double-precision conversions",
+      "static_candidates": 97,
+      "unimplemented_member_count": 5,
+      "unimplemented_members": [
+        "DPINT",
+        "DPSP",
+        "DPTRUNC",
+        "INTDP",
+        "INTDPU"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-FP-SP": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 9,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "ABSSP",
+        "ADDSP",
+        "SUBSP",
+        "MPYSP",
+        "CMPEQSP",
+        "CMPGTSP",
+        "CMPLTSP",
+        "RCPSP",
+        "RSQRSP"
+      ],
+      "noise_floor": 34.01169317118803,
+      "parsed_rows": 9,
+      "requirement": "Single-precision floating-point arithmetic and compares",
+      "static_candidates": 24,
+      "unimplemented_member_count": 2,
+      "unimplemented_members": [
+        "RCPSP",
+        "RSQRSP"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-FP-SP-CONV": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 5,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "INTSP",
+        "INTSPU",
+        "SPINT",
+        "SPTRUNC",
+        "SPDP"
+      ],
+      "noise_floor": 147.38400374181478,
+      "parsed_rows": 5,
+      "requirement": "Single-precision conversions",
+      "static_candidates": 61,
+      "unimplemented_member_count": 1,
+      "unimplemented_members": [
+        "SPDP"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-GALOIS": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 3,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "GMPY",
+        "GMPY4",
+        "XORMPY"
+      ],
+      "noise_floor": 138.92755930584303,
+      "parsed_rows": 3,
+      "requirement": "Galois field multiply",
+      "static_candidates": 10,
+      "unimplemented_member_count": 3,
+      "unimplemented_members": [
+        "GMPY",
+        "GMPY4",
+        "XORMPY"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-INT-ALU32": {
+      "audit_implementation": "supported",
+      "confirmed_executed": 0,
+      "declared_rows": 17,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "ADD",
+        "ADDU",
+        "SUB",
+        "SUBU",
+        "AND",
+        "ANDN",
+        "OR",
+        "XOR",
+        "NEG",
+        "NOT",
+        "MV",
+        "ZERO",
+        "MVK",
+        "MVKL",
+        "MVKH",
+        "MVKLH",
+        "ADDK"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 17,
+      "requirement": "32-bit integer add/sub/logic/move on .L/.S/.D",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-INT-CMP32": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 5,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "CMPEQ",
+        "CMPGT",
+        "CMPGTU",
+        "CMPLT",
+        "CMPLTU"
+      ],
+      "noise_floor": 150,
+      "parsed_rows": 5,
+      "requirement": "Integer compares producing 0/1",
+      "static_candidates": 28,
+      "unimplemented_member_count": 5,
+      "unimplemented_members": [
+        "CMPEQ",
+        "CMPGT",
+        "CMPGTU",
+        "CMPLT",
+        "CMPLTU"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-INT-SAT": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 5,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "SADD",
+        "SSUB",
+        "SSHL",
+        "SAT",
+        "ABS"
+      ],
+      "noise_floor": 45.3489242282507,
+      "parsed_rows": 5,
+      "requirement": "Scalar saturating integer arithmetic and saturate",
+      "static_candidates": 21,
+      "unimplemented_member_count": 2,
+      "unimplemented_members": [
+        "ABS",
+        "SAT"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-INT-SHIFT": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 6,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "SHL",
+        "SHR",
+        "SHRU",
+        "SSHVL",
+        "SSHVR",
+        "ROTL"
+      ],
+      "noise_floor": 522.219073395956,
+      "parsed_rows": 6,
+      "requirement": "Non-saturating and variable-saturating shifts and rotate",
+      "static_candidates": 68,
+      "unimplemented_member_count": 6,
+      "unimplemented_members": [
+        "ROTL",
+        "SHL",
+        "SHR",
+        "SHRU",
+        "SSHVL",
+        "SSHVR"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-MEM-15BIT": {
+      "audit_implementation": "supported",
+      "confirmed_executed": 0,
+      "declared_rows": 8,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "LDB",
+        "LDBU",
+        "LDH",
+        "LDHU",
+        "LDW",
+        "STB",
+        "STH",
+        "STW"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 8,
+      "requirement": "15-bit-offset loads and stores from B14/B15",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-MEM-SCALAR": {
+      "audit_implementation": "supported",
+      "confirmed_executed": 0,
+      "declared_rows": 14,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "LDB",
+        "LDBU",
+        "LDH",
+        "LDHU",
+        "LDW",
+        "LDDW",
+        "LDNW",
+        "LDNDW",
+        "STB",
+        "STH",
+        "STW",
+        "STDW",
+        "STNW",
+        "STNDW"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 14,
+      "requirement": "Scalar loads and stores including aligned/nonaligned and doubleword",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-MPY-PACKED": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 22,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "MPY2",
+        "MPY2IR",
+        "MPYU4",
+        "MPYSU4",
+        "MPYUS4",
+        "CMPY",
+        "CMPYR",
+        "CMPYR1",
+        "DOTP2",
+        "DOTPN2",
+        "DOTPRSU2",
+        "DOTPRUS2",
+        "DOTPNRSU2",
+        "DOTPNRUS2",
+        "DOTPSU4",
+        "DOTPU4",
+        "DOTPUS4",
+        "DDOTP4",
+        "DDOTPH2",
+        "DDOTPH2R",
+        "DDOTPL2",
+        "DDOTPL2R"
+      ],
+      "noise_floor": 1219.2893273684322,
+      "parsed_rows": 22,
+      "requirement": "Packed and complex multiplies and dot products",
+      "static_candidates": 95,
+      "unimplemented_member_count": 22,
+      "unimplemented_members": [
+        "CMPY",
+        "CMPYR",
+        "CMPYR1",
+        "DDOTP4",
+        "DDOTPH2",
+        "DDOTPH2R",
+        "DDOTPL2",
+        "DDOTPL2R",
+        "DOTP2",
+        "DOTPN2",
+        "DOTPNRSU2",
+        "DOTPNRUS2",
+        "DOTPRSU2",
+        "DOTPRUS2",
+        "DOTPSU4",
+        "DOTPU4",
+        "DOTPUS4",
+        "MPY2",
+        "MPY2IR",
+        "MPYSU4",
+        "MPYU4",
+        "MPYUS4"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-MPY16": {
+      "audit_implementation": "supported",
+      "confirmed_executed": 0,
+      "declared_rows": 16,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "MPY",
+        "MPYH",
+        "MPYHL",
+        "MPYLH",
+        "MPYU",
+        "MPYUS",
+        "MPYSU",
+        "MPYHU",
+        "MPYHSU",
+        "MPYHUS",
+        "MPYHLU",
+        "MPYHSLU",
+        "MPYHULS",
+        "MPYLHU",
+        "MPYLSHU",
+        "MPYLUHS"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 16,
+      "requirement": "Non-saturating 16x16 multiplies, all signedness and halfword-selection permutations",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-MPY16-SAT": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 5,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "SMPY",
+        "SMPYH",
+        "SMPYHL",
+        "SMPYLH",
+        "SMPY2"
+      ],
+      "noise_floor": 0,
+      "parsed_rows": 5,
+      "requirement": "Saturating/left-shifted 16x16 multiplies",
+      "static_candidates": 0,
+      "unimplemented_member_count": 0,
+      "unimplemented_members": [],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-MPY32": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 16,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "MPY32",
+        "MPY32",
+        "MPY32SU",
+        "MPY32U",
+        "MPY32US",
+        "MPYI",
+        "MPYID",
+        "SMPY32",
+        "MPYHI",
+        "MPYHIR",
+        "MPYIH",
+        "MPYIHR",
+        "MPYIL",
+        "MPYILR",
+        "MPYLI",
+        "MPYLIR"
+      ],
+      "noise_floor": 5207.888219613133,
+      "parsed_rows": 16,
+      "requirement": "32-bit multiplies",
+      "static_candidates": 67,
+      "unimplemented_member_count": 3,
+      "unimplemented_members": [
+        "MPYI",
+        "MPYID",
+        "SMPY32"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-PACK": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 15,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "PACK2",
+        "PACKH2",
+        "PACKHL2",
+        "PACKLH2",
+        "PACKH4",
+        "PACKL4",
+        "SWAP2",
+        "SWAP4",
+        "UNPKHU4",
+        "UNPKLU4",
+        "SPACK2",
+        "SPACKU4",
+        "RPACK2",
+        "SHLMB",
+        "SHRMB"
+      ],
+      "noise_floor": 721.4114230647048,
+      "parsed_rows": 15,
+      "requirement": "Pack, unpack, swap and saturating-pack",
+      "static_candidates": 51,
+      "unimplemented_member_count": 8,
+      "unimplemented_members": [
+        "RPACK2",
+        "SHLMB",
+        "SHRMB",
+        "SPACK2",
+        "SPACKU4",
+        "SWAP4",
+        "UNPKHU4",
+        "UNPKLU4"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-PACK16": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 15,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "ADD2",
+        "SUB2",
+        "SADD2",
+        "SSUB2",
+        "SADDUS2",
+        "SADDSU2",
+        "ABS2",
+        "AVG2",
+        "MAX2",
+        "MIN2",
+        "CMPEQ2",
+        "CMPGT2",
+        "CMPLT2",
+        "SHR2",
+        "SHRU2"
+      ],
+      "noise_floor": 2833.9052483405417,
+      "parsed_rows": 15,
+      "requirement": "Packed 2x16 arithmetic, compare, min/max and shift",
+      "static_candidates": 147,
+      "unimplemented_member_count": 15,
+      "unimplemented_members": [
+        "ABS2",
+        "ADD2",
+        "AVG2",
+        "CMPEQ2",
+        "CMPGT2",
+        "CMPLT2",
+        "MAX2",
+        "MIN2",
+        "SADD2",
+        "SADDSU2",
+        "SADDUS2",
+        "SHR2",
+        "SHRU2",
+        "SSUB2",
+        "SUB2"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-PACK8": {
+      "audit_implementation": "unsupported",
+      "confirmed_executed": 0,
+      "declared_rows": 10,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "ADD4",
+        "SUB4",
+        "SADDU4",
+        "SUBABS4",
+        "AVGU4",
+        "MAXU4",
+        "MINU4",
+        "CMPEQ4",
+        "CMPGTU4",
+        "CMPLTU4"
+      ],
+      "noise_floor": 646.6662012731166,
+      "parsed_rows": 10,
+      "requirement": "Packed 4x8 arithmetic, compare and min/max",
+      "static_candidates": 47,
+      "unimplemented_member_count": 10,
+      "unimplemented_members": [
+        "ADD4",
+        "AVGU4",
+        "CMPEQ4",
+        "CMPGTU4",
+        "CMPLTU4",
+        "MAXU4",
+        "MINU4",
+        "SADDU4",
+        "SUB4",
+        "SUBABS4"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    },
+    "ISA-SPLOOP": {
+      "audit_implementation": "partial",
+      "confirmed_executed": 0,
+      "declared_rows": 7,
+      "in_executed_fetch_packet": 0,
+      "mnemonics": [
+        "SPLOOP",
+        "SPLOOPD",
+        "SPLOOPW",
+        "SPKERNEL",
+        "SPKERNELR",
+        "SPMASK",
+        "SPMASKR"
+      ],
+      "noise_floor": 22.67446211412535,
+      "parsed_rows": 7,
+      "requirement": "Software-loop buffer instructions",
+      "static_candidates": 0,
+      "unimplemented_member_count": 1,
+      "unimplemented_members": [
+        "SPMASKR"
+      ],
+      "unresolvable_members": [],
+      "verdict": "not-found"
+    }
+  },
+  "inputs": {
+    "analyzer_sha256": "98fcf77f5ee9dda97d8e7f6fce8009b28477ca88a3cafc137af6126d14661c83",
+    "coverage_artifacts": 153,
+    "coverage_inventory": "analysis/dsp/coverage_inventory.json",
+    "disassembler_sha256": "2449e6a4ea0ed5c8cfeae3981b829c671a89f938865492e390b9878492ffdf89",
+    "image_inputs": 224,
+    "image_patterns": [
+      "runs/*/dsp-l2.bin",
+      "runs/*/final.cdjdsp"
+    ],
+    "probe": "analysis/dsp/isa_probe.json",
+    "semantic_inventory": "runs/dsp-semantic-inventory-3.json",
+    "semantic_inventory_sha256": "c6cfe963e0d6e85a2d2fb2177ec79dc9078004402836d50c113d7b1a353f0c47"
+  },
+  "recorded_fault_mnemonics": {
+    "addk": 1,
+    "dint": 1
+  },
+  "recorded_unsupported_fault_note": "The only confirmed-executed evidence an unimplemented instruction can carry. decoded_mnemonic names the encoding; check it against confirmed_executed_by_mnemonic, because a fault recorded by an older coverage schema may name an instruction implemented since.",
+  "recorded_unsupported_faults": [
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": null,
+      "pc": 293601544,
+      "reason": "delayed-result write conflict",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": false,
+      "word": 0
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": null,
+      "pc": 293610650,
+      "reason": "nested SPLOOP would overwrite retained buffer",
+      "run_artifacts": 4,
+      "unimplemented_instruction_evidence": false,
+      "word": 3303
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": "dint",
+      "pc": 3221468316,
+      "reason": "reserved predicate",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": true,
+      "word": 268451840
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": "addk",
+      "pc": 3221468376,
+      "reason": "instruction not implemented",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": true,
+      "word": 125832274
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": null,
+      "pc": 3221530604,
+      "reason": "SPLOOPW interrupt drain not implemented",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": false,
+      "word": 0
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": null,
+      "pc": 3221530604,
+      "reason": "SPLOOP interrupt SPMASK resume not implemented",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": false,
+      "word": 0
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": "stw",
+      "pc": 3221545614,
+      "reason": "unaligned or unmapped scalar memory access",
+      "run_artifacts": 6,
+      "unimplemented_instruction_evidence": false,
+      "word": 4213
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": "ldw",
+      "pc": 3221545788,
+      "reason": "unaligned or unmapped scalar memory access",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": false,
+      "word": 34341476
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": "sth",
+      "pc": 3221546284,
+      "reason": "unaligned or unmapped scalar memory access",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": false,
+      "word": 4189
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": "stw",
+      "pc": 3221546520,
+      "reason": "unaligned or unmapped scalar memory access",
+      "run_artifacts": 2,
+      "unimplemented_instruction_evidence": false,
+      "word": 44565110
+    },
+    {
+      "coverage_schemas": [
+        1
+      ],
+      "decoded_mnemonic": null,
+      "pc": 3221549830,
+      "reason": "parallel register write conflict",
+      "run_artifacts": 1,
+      "unimplemented_instruction_evidence": false,
+      "word": 9767
+    }
+  ],
+  "rows": {
+    "ABS": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "abs",
+      "noise_floor": 34.01169317118803,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 21,
+        "compact_positions": 0,
+        "elsewhere": 19,
+        "fetch_packets": 19,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 2,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 21,
+      "verdict": "not-found"
+    },
+    "ABS2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "abs2",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "ABSDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "absdp",
+      "noise_floor": 30.872790956854004,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 1,
+        "compact_positions": 0,
+        "elsewhere": 1,
+        "fetch_packets": 1,
+        "images": 58,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 1,
+      "verdict": "not-found"
+    },
+    "ADD2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "add2",
+      "noise_floor": 1122.3858746492049,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 6,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 29,
+        "compact_positions": 0,
+        "elsewhere": 29,
+        "fetch_packets": 23,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 29,
+      "verdict": "not-found"
+    },
+    "ADD4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "add4",
+      "noise_floor": 61.74558191370801,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 3,
+        "compact_positions": 0,
+        "elsewhere": 3,
+        "fetch_packets": 2,
+        "images": 84,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 3,
+      "verdict": "not-found"
+    },
+    "ADDDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "adddp",
+      "noise_floor": 56.686155285313376,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 16,
+        "compact_positions": 0,
+        "elsewhere": 16,
+        "fetch_packets": 12,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 16,
+      "verdict": "not-found"
+    },
+    "ADDSUB": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "addsub",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "ADDSUB2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "addsub2",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "AVG2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "avg2",
+      "noise_floor": 61.74558191370801,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 7,
+        "compact_positions": 0,
+        "elsewhere": 7,
+        "fetch_packets": 5,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 7,
+      "verdict": "not-found"
+    },
+    "AVGU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "avgu4",
+      "noise_floor": 77.18197739213501,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 4,
+        "compact_positions": 0,
+        "elsewhere": 4,
+        "fetch_packets": 2,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 4,
+      "verdict": "not-found"
+    },
+    "B NRP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 101,
+      "confirmed_executed_note": "this row shares its mnemonic with forms the core does implement, so neither disassembly nor the confirmed set can attribute evidence to the unimplemented form; confirmed_executed_mnemonic_total is the whole mnemonic",
+      "mnemonic": "b",
+      "noise_floor": 4750.299812909261,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 1,
+      "resolution": "mnemonic-shared",
+      "static_candidate_detail": {
+        "candidate_positions": 4176,
+        "compact_positions": 0,
+        "elsewhere": 3739,
+        "fetch_packets": 3381,
+        "images": 224,
+        "in_executed_fetch_packet": 182,
+        "in_executed_neighbourhood": 255,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 4176,
+      "verdict": "not-scanned"
+    },
+    "BITC4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "bitc4",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "BITR": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "bitr",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "BPOS": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "bpos",
+      "noise_floor": 736.9200187090739,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 7,
+        "compact_positions": 0,
+        "elsewhere": 7,
+        "fetch_packets": 5,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 7,
+      "verdict": "not-found"
+    },
+    "CMPEQ": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 111,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "cmpeq",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 1927,
+        "compact_positions": 414,
+        "elsewhere": 1570,
+        "fetch_packets": 1464,
+        "images": 224,
+        "in_executed_fetch_packet": 185,
+        "in_executed_neighbourhood": 172,
+        "long40_positions": 14,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 14,
+      "verdict": "not-found"
+    },
+    "CMPEQ2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpeq2",
+      "noise_floor": 92.61837287056201,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 6,
+        "compact_positions": 0,
+        "elsewhere": 6,
+        "fetch_packets": 5,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 6,
+      "verdict": "not-found"
+    },
+    "CMPEQ4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpeq4",
+      "noise_floor": 79.36061739943872,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 5,
+        "compact_positions": 0,
+        "elsewhere": 5,
+        "fetch_packets": 5,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000"
+        ]
+      },
+      "static_candidates": 5,
+      "verdict": "not-found"
+    },
+    "CMPEQDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpeqdp",
+      "noise_floor": 22.67446211412535,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 7,
+        "compact_positions": 0,
+        "elsewhere": 6,
+        "fetch_packets": 4,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 1,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 7,
+      "verdict": "not-found"
+    },
+    "CMPGT": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 18,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "cmpgt",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 531,
+        "compact_positions": 65,
+        "elsewhere": 491,
+        "fetch_packets": 487,
+        "images": 224,
+        "in_executed_fetch_packet": 25,
+        "in_executed_neighbourhood": 15,
+        "long40_positions": 3,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 3,
+      "verdict": "not-found"
+    },
+    "CMPGT2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpgt2",
+      "noise_floor": 92.61837287056201,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 21,
+        "compact_positions": 0,
+        "elsewhere": 21,
+        "fetch_packets": 15,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 21,
+      "verdict": "not-found"
+    },
+    "CMPGTDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpgtdp",
+      "noise_floor": 46.309186435281006,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 60,
+        "compact_positions": 0,
+        "elsewhere": 60,
+        "fetch_packets": 41,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 60,
+      "verdict": "not-found"
+    },
+    "CMPGTU": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 7,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "cmpgtu",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 172,
+        "compact_positions": 15,
+        "elsewhere": 152,
+        "fetch_packets": 161,
+        "images": 224,
+        "in_executed_fetch_packet": 8,
+        "in_executed_neighbourhood": 12,
+        "long40_positions": 4,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 4,
+      "verdict": "not-found"
+    },
+    "CMPGTU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpgtu4",
+      "noise_floor": 90.6978484565014,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 2,
+        "compact_positions": 0,
+        "elsewhere": 2,
+        "fetch_packets": 2,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 2,
+      "verdict": "not-found"
+    },
+    "CMPLT": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 10,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "cmplt",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 706,
+        "compact_positions": 98,
+        "elsewhere": 657,
+        "fetch_packets": 638,
+        "images": 224,
+        "in_executed_fetch_packet": 15,
+        "in_executed_neighbourhood": 34,
+        "long40_positions": 3,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 3,
+      "verdict": "not-found"
+    },
+    "CMPLT2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmplt2",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "CMPLTDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpltdp",
+      "noise_floor": 45.3489242282507,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 52,
+        "compact_positions": 0,
+        "elsewhere": 51,
+        "fetch_packets": 42,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 1,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 52,
+      "verdict": "not-found"
+    },
+    "CMPLTU": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 2,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "cmpltu",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 188,
+        "compact_positions": 33,
+        "elsewhere": 171,
+        "fetch_packets": 162,
+        "images": 224,
+        "in_executed_fetch_packet": 6,
+        "in_executed_neighbourhood": 11,
+        "long40_positions": 4,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 4,
+      "verdict": "not-found"
+    },
+    "CMPLTU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpltu4",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "CMPY": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpy",
+      "noise_floor": 15.436395478427002,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "CMPYR": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpyr",
+      "noise_floor": 15.436395478427002,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "CMPYR1": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "cmpyr1",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DDOTP4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "ddotp4",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DDOTPH2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "ddotph2",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DDOTPH2R": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "ddotph2r",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DDOTPL2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "ddotpl2",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DDOTPL2R": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "ddotpl2r",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DEAL": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "deal",
+      "noise_floor": 15.436395478427002,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DMV": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dmv",
+      "noise_floor": 77.18197739213501,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DOTP2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotp2",
+      "noise_floor": 200.67314121955104,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 8,
+        "compact_positions": 0,
+        "elsewhere": 8,
+        "fetch_packets": 6,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 8,
+      "verdict": "not-found"
+    },
+    "DOTPN2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotpn2",
+      "noise_floor": 185.23674574112403,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 18,
+        "compact_positions": 0,
+        "elsewhere": 18,
+        "fetch_packets": 12,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 18,
+      "verdict": "not-found"
+    },
+    "DOTPNRSU2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotpnrsu2",
+      "noise_floor": 154.36395478427002,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 13,
+        "compact_positions": 0,
+        "elsewhere": 13,
+        "fetch_packets": 9,
+        "images": 84,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 13,
+      "verdict": "not-found"
+    },
+    "DOTPNRUS2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotpnrus2",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DOTPRSU2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotprsu2",
+      "noise_floor": 56.686155285313376,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 5,
+        "compact_positions": 0,
+        "elsewhere": 5,
+        "fetch_packets": 3,
+        "images": 58,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 5,
+      "verdict": "not-found"
+    },
+    "DOTPRUS2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotprus2",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DOTPSU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotpsu4",
+      "noise_floor": 170.05846585594014,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 23,
+        "compact_positions": 0,
+        "elsewhere": 23,
+        "fetch_packets": 15,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 23,
+      "verdict": "not-found"
+    },
+    "DOTPU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotpu4",
+      "noise_floor": 61.74558191370801,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 5,
+        "compact_positions": 0,
+        "elsewhere": 5,
+        "fetch_packets": 3,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 5,
+      "verdict": "not-found"
+    },
+    "DOTPUS4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dotpus4",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DPACK2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dpack2",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DPACKX2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dpackx2",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "DPINT": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dpint",
+      "noise_floor": 79.36061739943872,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 3,
+        "compact_positions": 0,
+        "elsewhere": 3,
+        "fetch_packets": 3,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 3,
+      "verdict": "not-found"
+    },
+    "DPSP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dpsp",
+      "noise_floor": 61.74558191370801,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 32,
+        "compact_positions": 0,
+        "elsewhere": 32,
+        "fetch_packets": 27,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 32,
+      "verdict": "not-found"
+    },
+    "DPTRUNC": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "dptrunc",
+      "noise_floor": 226.7446211412535,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 12,
+        "compact_positions": 0,
+        "elsewhere": 12,
+        "fetch_packets": 10,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 12,
+      "verdict": "not-found"
+    },
+    "GMPY": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "gmpy",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "GMPY4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "gmpy4",
+      "noise_floor": 138.92755930584303,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 10,
+        "compact_positions": 0,
+        "elsewhere": 10,
+        "fetch_packets": 7,
+        "images": 84,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 10,
+      "verdict": "not-found"
+    },
+    "INTDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "intdp",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 48,
+        "compact_positions": 0,
+        "elsewhere": 47,
+        "fetch_packets": 47,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 1,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 48,
+      "verdict": "reached-candidate-only"
+    },
+    "INTDPU": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "intdpu",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 2,
+        "compact_positions": 0,
+        "elsewhere": 0,
+        "fetch_packets": 1,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 2,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 2,
+      "verdict": "not-found"
+    },
+    "LMBD": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "lmbd",
+      "noise_floor": 216.10953669797803,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 35,
+        "compact_positions": 0,
+        "elsewhere": 35,
+        "fetch_packets": 32,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 35,
+      "verdict": "not-found"
+    },
+    "MAX2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "max2",
+      "noise_floor": 169.800350262697,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 11,
+        "compact_positions": 0,
+        "elsewhere": 11,
+        "fetch_packets": 6,
+        "images": 84,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 11,
+      "verdict": "not-found"
+    },
+    "MAXU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "maxu4",
+      "noise_floor": 90.6978484565014,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 7,
+        "compact_positions": 0,
+        "elsewhere": 7,
+        "fetch_packets": 6,
+        "images": 84,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 7,
+      "verdict": "not-found"
+    },
+    "MIN2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "min2",
+      "noise_floor": 324.16430504696706,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 13,
+        "compact_positions": 0,
+        "elsewhere": 13,
+        "fetch_packets": 7,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 13,
+      "verdict": "not-found"
+    },
+    "MINU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "minu4",
+      "noise_floor": 30.872790956854004,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 6,
+        "compact_positions": 0,
+        "elsewhere": 6,
+        "fetch_packets": 2,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000"
+        ]
+      },
+      "static_candidates": 6,
+      "verdict": "not-found"
+    },
+    "MPY2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpy2",
+      "noise_floor": 249.41908325537887,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 10,
+        "compact_positions": 0,
+        "elsewhere": 10,
+        "fetch_packets": 8,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 10,
+      "verdict": "not-found"
+    },
+    "MPY2IR": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpy2ir",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "MPYDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpydp",
+      "noise_floor": 249.41908325537887,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 15,
+        "compact_positions": 0,
+        "elsewhere": 13,
+        "fetch_packets": 10,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 2,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 15,
+      "verdict": "not-found"
+    },
+    "MPYI": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpyi",
+      "noise_floor": 3525.878858746492,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 55,
+        "compact_positions": 0,
+        "elsewhere": 55,
+        "fetch_packets": 38,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 55,
+      "verdict": "not-found"
+    },
+    "MPYID": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpyid",
+      "noise_floor": 1666.5729653882133,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 12,
+        "compact_positions": 0,
+        "elsewhere": 12,
+        "fetch_packets": 9,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 12,
+      "verdict": "not-found"
+    },
+    "MPYSP2DP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpysp2dp",
+      "noise_floor": 15.436395478427002,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 1,
+        "compact_positions": 0,
+        "elsewhere": 1,
+        "fetch_packets": 1,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000"
+        ]
+      },
+      "static_candidates": 1,
+      "verdict": "not-found"
+    },
+    "MPYSPDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpyspdp",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 2,
+        "compact_positions": 0,
+        "elsewhere": 2,
+        "fetch_packets": 2,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 2,
+      "verdict": "not-found"
+    },
+    "MPYSU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpysu4",
+      "noise_floor": 30.872790956854004,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 7,
+        "compact_positions": 0,
+        "elsewhere": 7,
+        "fetch_packets": 5,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 7,
+      "verdict": "not-found"
+    },
+    "MPYU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpyu4",
+      "noise_floor": 68.02338634237606,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 6,
+        "compact_positions": 0,
+        "elsewhere": 6,
+        "fetch_packets": 4,
+        "images": 58,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 6,
+      "verdict": "not-found"
+    },
+    "MPYUS4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "mpyus4",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "NORM": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "norm",
+      "noise_floor": 22.67446211412535,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 4,
+        "compact_positions": 0,
+        "elsewhere": 2,
+        "fetch_packets": 2,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 2,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 4,
+      "verdict": "not-found"
+    },
+    "RCPDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "rcpdp",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 4,
+        "compact_positions": 0,
+        "elsewhere": 4,
+        "fetch_packets": 2,
+        "images": 58,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 4,
+      "verdict": "not-found"
+    },
+    "RCPSP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "rcpsp",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 11,
+        "compact_positions": 0,
+        "elsewhere": 11,
+        "fetch_packets": 11,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 11,
+      "verdict": "not-found"
+    },
+    "ROTL": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "rotl",
+      "noise_floor": 154.36395478427002,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 36,
+        "compact_positions": 0,
+        "elsewhere": 36,
+        "fetch_packets": 30,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 36,
+      "verdict": "not-found"
+    },
+    "RPACK2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "rpack2",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "RSQRDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "rsqrdp",
+      "noise_floor": 46.309186435281006,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "RSQRSP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "rsqrsp",
+      "noise_floor": 22.67446211412535,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 13,
+        "compact_positions": 0,
+        "elsewhere": 13,
+        "fetch_packets": 10,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 13,
+      "verdict": "not-found"
+    },
+    "SADD2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "sadd2",
+      "noise_floor": 154.36395478427002,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 8,
+        "compact_positions": 0,
+        "elsewhere": 8,
+        "fetch_packets": 6,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 8,
+      "verdict": "not-found"
+    },
+    "SADDSU2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "saddsu2",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SADDSUB": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "saddsub",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SADDSUB2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "saddsub2",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SADDU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "saddu4",
+      "noise_floor": 46.309186435281006,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 13,
+        "compact_positions": 0,
+        "elsewhere": 13,
+        "fetch_packets": 9,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 13,
+      "verdict": "not-found"
+    },
+    "SADDUS2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "saddus2",
+      "noise_floor": 90.6978484565014,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 4,
+        "compact_positions": 0,
+        "elsewhere": 4,
+        "fetch_packets": 2,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 4,
+      "verdict": "not-found"
+    },
+    "SAT": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "sat",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SHFL": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "shfl",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SHFL3": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "shfl3",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SHL": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 11,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "shl",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 952,
+        "compact_positions": 150,
+        "elsewhere": 814,
+        "fetch_packets": 772,
+        "images": 224,
+        "in_executed_fetch_packet": 30,
+        "in_executed_neighbourhood": 108,
+        "long40_positions": 8,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 8,
+      "verdict": "not-found"
+    },
+    "SHLMB": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "shlmb",
+      "noise_floor": 262.41872313325905,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 8,
+        "compact_positions": 0,
+        "elsewhere": 8,
+        "fetch_packets": 6,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 8,
+      "verdict": "not-found"
+    },
+    "SHR": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 4,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "shr",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 201,
+        "compact_positions": 39,
+        "elsewhere": 181,
+        "fetch_packets": 182,
+        "images": 224,
+        "in_executed_fetch_packet": 6,
+        "in_executed_neighbourhood": 14,
+        "long40_positions": 2,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 2,
+      "verdict": "not-found"
+    },
+    "SHR2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "shr2",
+      "noise_floor": 200.67314121955104,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 18,
+        "compact_positions": 0,
+        "elsewhere": 18,
+        "fetch_packets": 11,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 18,
+      "verdict": "not-found"
+    },
+    "SHRMB": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "shrmb",
+      "noise_floor": 246.98232765483203,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 30,
+        "compact_positions": 0,
+        "elsewhere": 30,
+        "fetch_packets": 20,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 30,
+      "verdict": "not-found"
+    },
+    "SHRU": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 9,
+      "confirmed_executed_note": "confirmed addresses of this mnemonic carrying a register-pair operand, i.e. the 40-bit long form only",
+      "mnemonic": "shru",
+      "noise_floor": 30,
+      "nonconditional": false,
+      "probe_status": "some-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "operand-shape",
+      "static_candidate_detail": {
+        "candidate_positions": 332,
+        "compact_positions": 9,
+        "elsewhere": 315,
+        "fetch_packets": 283,
+        "images": 224,
+        "in_executed_fetch_packet": 9,
+        "in_executed_neighbourhood": 8,
+        "long40_positions": 5,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 5,
+      "verdict": "not-found"
+    },
+    "SHRU2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "shru2",
+      "noise_floor": 169.800350262697,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 5,
+        "compact_positions": 0,
+        "elsewhere": 5,
+        "fetch_packets": 3,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 5,
+      "verdict": "not-found"
+    },
+    "SMPY32": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "smpy32",
+      "noise_floor": 15.436395478427002,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SPACK2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "spack2",
+      "noise_floor": 92.61837287056201,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 5,
+        "compact_positions": 0,
+        "elsewhere": 5,
+        "fetch_packets": 3,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 5,
+      "verdict": "not-found"
+    },
+    "SPACKU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "spacku4",
+      "noise_floor": 92.61837287056201,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 6,
+        "compact_positions": 0,
+        "elsewhere": 6,
+        "fetch_packets": 4,
+        "images": 58,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 6,
+      "verdict": "not-found"
+    },
+    "SPDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "spdp",
+      "noise_floor": 147.38400374181478,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 61,
+        "compact_positions": 0,
+        "elsewhere": 61,
+        "fetch_packets": 57,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 61,
+      "verdict": "not-found"
+    },
+    "SPMASKR": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "spmaskr",
+      "noise_floor": 22.67446211412535,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 1,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SSHVL": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "sshvl",
+      "noise_floor": 185.23674574112403,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 14,
+        "compact_positions": 0,
+        "elsewhere": 14,
+        "fetch_packets": 9,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 14,
+      "verdict": "not-found"
+    },
+    "SSHVR": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "sshvr",
+      "noise_floor": 92.61837287056201,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 3,
+        "compact_positions": 0,
+        "elsewhere": 3,
+        "fetch_packets": 1,
+        "images": 58,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 3,
+      "verdict": "not-found"
+    },
+    "SSUB2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "ssub2",
+      "noise_floor": 77.18197739213501,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 3,
+        "compact_positions": 0,
+        "elsewhere": 3,
+        "fetch_packets": 3,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 3,
+      "verdict": "not-found"
+    },
+    "SUB2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "sub2",
+      "noise_floor": 277.85511861168607,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 6,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 22,
+        "compact_positions": 0,
+        "elsewhere": 22,
+        "fetch_packets": 16,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 22,
+      "verdict": "not-found"
+    },
+    "SUB4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "sub4",
+      "noise_floor": 92.61837287056201,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 2,
+        "compact_positions": 0,
+        "elsewhere": 2,
+        "fetch_packets": 2,
+        "images": 84,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 2,
+      "verdict": "not-found"
+    },
+    "SUBABS4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "subabs4",
+      "noise_floor": 77.18197739213501,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 5,
+        "compact_positions": 0,
+        "elsewhere": 5,
+        "fetch_packets": 3,
+        "images": 84,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 5,
+      "verdict": "not-found"
+    },
+    "SUBC": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "subc",
+      "noise_floor": 138.92755930584303,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 39,
+        "compact_positions": 0,
+        "elsewhere": 37,
+        "fetch_packets": 17,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 2,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000",
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 39,
+      "verdict": "not-found"
+    },
+    "SUBDP": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "subdp",
+      "noise_floor": 68.02338634237606,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 22,
+        "compact_positions": 0,
+        "elsewhere": 22,
+        "fetch_packets": 22,
+        "images": 111,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 22,
+      "verdict": "not-found"
+    },
+    "SWAP4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "swap4",
+      "noise_floor": 15.436395478427002,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SWE": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "swe",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 1,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "SWENR": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "swenr",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 1,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "UNPKHU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "unpkhu4",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "UNPKLU4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "unpklu4",
+      "noise_floor": 11.337231057062676,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 4,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 2,
+        "compact_positions": 0,
+        "elsewhere": 2,
+        "fetch_packets": 2,
+        "images": 2,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0xc0000000"
+        ]
+      },
+      "static_candidates": 2,
+      "verdict": "not-found"
+    },
+    "XORMPY": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "xormpy",
+      "noise_floor": 0,
+      "nonconditional": true,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "XPND2": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "xpnd2",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": null,
+      "static_candidates": 0,
+      "verdict": "not-found"
+    },
+    "XPND4": {
+      "confirmed_executed": 0,
+      "confirmed_executed_mnemonic_total": 0,
+      "confirmed_executed_note": "decoded confirmed addresses for this mnemonic; 0 is expected for an unimplemented row because a faulting packet is never confirmed - see recorded_unsupported_faults",
+      "mnemonic": "xpnd4",
+      "noise_floor": 0,
+      "nonconditional": false,
+      "probe_status": "all-probed-forms-rejected",
+      "recorded_not_implemented_faults": 0,
+      "rejected_encodings": 2,
+      "resolution": "row",
+      "static_candidate_detail": {
+        "candidate_positions": 1,
+        "compact_positions": 0,
+        "elsewhere": 1,
+        "fetch_packets": 1,
+        "images": 224,
+        "in_executed_fetch_packet": 0,
+        "in_executed_neighbourhood": 0,
+        "long40_positions": 0,
+        "regions": [
+          "0x11800000"
+        ]
+      },
+      "static_candidates": 1,
+      "verdict": "not-found"
+    }
+  },
+  "schema": 1,
+  "scope": "Reachability only: which unimplemented instructions the captured firmware executed, and which merely appear in captured bytes.",
+  "static_scan": {
+    "calibration": {
+      "mnemonics": {
+        "gmpy": {
+          "control_candidate_positions": 0,
+          "firmware_candidate_positions": 0,
+          "firmware_in_executed_fetch_packet": 0
+        },
+        "gmpy4": {
+          "control_candidate_positions": 138.92755930584303,
+          "firmware_candidate_positions": 10,
+          "firmware_in_executed_fetch_packet": 0
+        },
+        "swe": {
+          "control_candidate_positions": 11.337231057062676,
+          "firmware_candidate_positions": 0,
+          "firmware_in_executed_fetch_packet": 0
+        },
+        "swenr": {
+          "control_candidate_positions": 11.337231057062676,
+          "firmware_candidate_positions": 0,
+          "firmware_in_executed_fetch_packet": 0
+        },
+        "xormpy": {
+          "control_candidate_positions": 0,
+          "firmware_candidate_positions": 0,
+          "firmware_in_executed_fetch_packet": 0
+        }
+      },
+      "rationale": "Instruction-level calibration: these are almost certainly absent from a bare-metal audio decoder (Galois multiply is channel ECC done in dedicated silicon; SWE/SWENR are OS supervisor entry). Whatever they score in the firmware is this method spurious-hit rate for a narrow opcode, alongside their control-blob counts."
+    },
+    "executed_cross_check": {
+      "executed_fetch_packets": 900,
+      "note": "The cross-check can only speak for executed fetch packets the captured images actually contain; the rest of the replayed code lives in SDRAM pages no checkpoint holds.",
+      "present_in_scanned_images": 900
+    },
+    "images": 224,
+    "neighbourhood_bytes": 128,
+    "noise_floor": {
+      "controls": {
+        "shuffled-firmware-bytes": {
+          "candidate_positions": {
+            "abs": 3,
+            "absdp": 2,
+            "add": 289,
+            "add2": 99,
+            "add4": 2,
+            "addab": 64,
+            "addad": 7,
+            "addah": 17,
+            "addaw": 29,
+            "adddp": 5,
+            "addk": 140,
+            "addkpc": 7,
+            "addsp": 12,
+            "addu": 4,
+            "and": 27,
+            "andn": 6,
+            "avg2": 2,
+            "avgu4": 3,
+            "b": 419,
+            "bdec": 9,
+            "bnop": 21,
+            "bpos": 65,
+            "callp": 26,
+            "clr": 55,
+            "cmpeq": 26,
+            "cmpeq2": 5,
+            "cmpeq4": 7,
+            "cmpeqdp": 2,
+            "cmpeqsp": 8,
+            "cmpgt": 20,
+            "cmpgt2": 6,
+            "cmpgtdp": 3,
+            "cmpgtsp": 8,
+            "cmpgtu": 12,
+            "cmpgtu4": 8,
+            "cmplt": 17,
+            "cmpltdp": 4,
+            "cmpltsp": 8,
+            "cmpltu": 7,
+            "dmv": 1,
+            "dotp2": 10,
+            "dotpn2": 3,
+            "dotpnrsu2": 3,
+            "dotprsu2": 5,
+            "dotpsu4": 15,
+            "dotpu4": 3,
+            "dpack2": 1,
+            "dpint": 7,
+            "dpsp": 4,
+            "dptrunc": 20,
+            "ext": 57,
+            "extu": 272,
+            "gmpy4": 5,
+            "ldb": 223,
+            "ldbu": 239,
+            "lddw": 48,
+            "ldh": 182,
+            "ldhu": 545,
+            "ldndw": 54,
+            "ldnw": 34,
+            "ldw": 318,
+            "ll": 1,
+            "lmbd": 19,
+            "max2": 10,
+            "maxu4": 8,
+            "min2": 8,
+            "minu4": 1,
+            "mpy": 192,
+            "mpy2": 22,
+            "mpy2ir": 1,
+            "mpy32": 237,
+            "mpy32su": 35,
+            "mpy32u": 1,
+            "mpy32us": 2,
+            "mpydp": 22,
+            "mpyh": 98,
+            "mpyhi": 2,
+            "mpyhir": 7,
+            "mpyhl": 12,
+            "mpyhlu": 16,
+            "mpyhslu": 8,
+            "mpyhsu": 20,
+            "mpyhu": 20,
+            "mpyhuls": 10,
+            "mpyhus": 27,
+            "mpyi": 311,
+            "mpyid": 147,
+            "mpylh": 24,
+            "mpylhu": 8,
+            "mpyli": 2,
+            "mpylir": 2,
+            "mpylshu": 13,
+            "mpyluhs": 13,
+            "mpysp": 81,
+            "mpysp2dp": 1,
+            "mpyspdp": 1,
+            "mpysu": 138,
+            "mpysu4": 2,
+            "mpyu": 22,
+            "mpyu4": 6,
+            "mpyus": 10,
+            "mv": 28,
+            "mvc": 3,
+            "mvk": 309,
+            "mvkh": 167,
+            "nop": 19,
+            "norm": 2,
+            "or": 39,
+            "pack2": 30,
+            "packh2": 15,
+            "packh4": 5,
+            "packhl2": 20,
+            "packl4": 4,
+            "packlh2": 20,
+            "rcpdp": 1,
+            "rcpsp": 1,
+            "rotl": 3,
+            "rsqrdp": 1,
+            "rsqrsp": 2,
+            "sadd": 60,
+            "sadd2": 2,
+            "saddsub2": 1,
+            "saddu4": 4,
+            "saddus2": 8,
+            "sat": 1,
+            "set": 73,
+            "shl": 55,
+            "shlmb": 12,
+            "shr": 38,
+            "shr2": 15,
+            "shrmb": 15,
+            "shru": 10,
+            "shru2": 9,
+            "smpy": 156,
+            "smpy2": 14,
+            "smpyh": 166,
+            "smpyhl": 88,
+            "smpylh": 77,
+            "spack2": 1,
+            "spacku4": 5,
+            "spdp": 13,
+            "spmask": 19,
+            "spmaskr": 2,
+            "sptrunc": 1,
+            "sshl": 34,
+            "sshvl": 5,
+            "sshvr": 1,
+            "ssub": 48,
+            "ssub2": 4,
+            "stb": 940,
+            "stdw": 24,
+            "sth": 136,
+            "stndw": 40,
+            "stnw": 39,
+            "stw": 390,
+            "sub": 146,
+            "sub2": 23,
+            "sub4": 7,
+            "subab": 8,
+            "subabs4": 6,
+            "subah": 8,
+            "subaw": 21,
+            "subc": 1,
+            "subdp": 6,
+            "subsp": 27,
+            "subu": 6,
+            "swe": 1,
+            "swenr": 1,
+            "unpklu4": 1,
+            "xor": 52
+          },
+          "distinct_compact_words": 448,
+          "long40_positions": 30,
+          "totals": {
+            "decoded_instruction_positions": 8552,
+            "fully_decoding_fetch_packets": 1048,
+            "unique_fetch_packets": 20550
+          }
+        },
+        "uniform-pseudo-random": {
+          "candidate_positions": {
+            "abs": 1,
+            "absdp": 2,
+            "add": 182,
+            "add2": 13,
+            "add4": 4,
+            "addab": 25,
+            "addad": 8,
+            "addah": 18,
+            "addaw": 33,
+            "adddp": 2,
+            "addk": 210,
+            "addkpc": 1,
+            "addsp": 12,
+            "addu": 2,
+            "and": 46,
+            "andn": 15,
+            "avg2": 4,
+            "avgu4": 5,
+            "b": 209,
+            "bdec": 4,
+            "bnop": 63,
+            "bpos": 4,
+            "callp": 22,
+            "clr": 126,
+            "cmpeq": 34,
+            "cmpeq2": 6,
+            "cmpeq4": 4,
+            "cmpeqdp": 1,
+            "cmpeqsp": 9,
+            "cmpgt": 24,
+            "cmpgt2": 6,
+            "cmpgtdp": 3,
+            "cmpgtsp": 10,
+            "cmpgtu": 19,
+            "cmpgtu4": 5,
+            "cmplt": 36,
+            "cmpltdp": 2,
+            "cmpltsp": 6,
+            "cmpltu": 25,
+            "cmpy": 1,
+            "cmpyr": 1,
+            "deal": 1,
+            "dmv": 5,
+            "dotp2": 13,
+            "dotpn2": 12,
+            "dotpnrsu2": 10,
+            "dotprsu2": 3,
+            "dotpsu4": 8,
+            "dotpu4": 4,
+            "dpint": 3,
+            "dpsp": 4,
+            "dptrunc": 3,
+            "ext": 103,
+            "extu": 122,
+            "gmpy4": 9,
+            "ldb": 303,
+            "ldbu": 295,
+            "lddw": 49,
+            "ldh": 309,
+            "ldhu": 290,
+            "ldndw": 101,
+            "ldnw": 79,
+            "ldw": 331,
+            "lmbd": 14,
+            "max2": 11,
+            "maxu4": 3,
+            "min2": 21,
+            "minu4": 2,
+            "mpy": 20,
+            "mpy2": 3,
+            "mpy32": 13,
+            "mpy32su": 1,
+            "mpy32u": 2,
+            "mpy32us": 3,
+            "mpyh": 13,
+            "mpyhi": 2,
+            "mpyhir": 3,
+            "mpyhl": 13,
+            "mpyhlu": 13,
+            "mpyhslu": 10,
+            "mpyhsu": 8,
+            "mpyhu": 7,
+            "mpyhuls": 4,
+            "mpyhus": 7,
+            "mpyi": 10,
+            "mpyid": 8,
+            "mpylh": 8,
+            "mpylhu": 7,
+            "mpyli": 2,
+            "mpylir": 5,
+            "mpylshu": 7,
+            "mpyluhs": 4,
+            "mpysp": 5,
+            "mpysp2dp": 1,
+            "mpysu": 9,
+            "mpysu4": 2,
+            "mpyu": 4,
+            "mpyu4": 2,
+            "mpyus": 5,
+            "mv": 130,
+            "mvc": 2,
+            "mvk": 287,
+            "mvkh": 203,
+            "nop": 1,
+            "or": 42,
+            "pack2": 19,
+            "packh2": 13,
+            "packh4": 9,
+            "packhl2": 12,
+            "packl4": 6,
+            "packlh2": 12,
+            "rotl": 10,
+            "rsqrdp": 3,
+            "sadd": 49,
+            "sadd2": 10,
+            "saddu4": 3,
+            "saddus2": 5,
+            "set": 145,
+            "shl": 49,
+            "shlmb": 17,
+            "shr": 40,
+            "shr2": 13,
+            "shrmb": 16,
+            "shru": 20,
+            "shru2": 11,
+            "smpy": 10,
+            "smpy2": 2,
+            "smpy32": 1,
+            "smpyh": 17,
+            "smpyhl": 10,
+            "smpylh": 18,
+            "spack2": 6,
+            "spacku4": 6,
+            "sploop": 1,
+            "sploopd": 2,
+            "spmask": 1,
+            "sshl": 15,
+            "sshvl": 12,
+            "sshvr": 6,
+            "ssub": 35,
+            "ssub2": 5,
+            "stb": 315,
+            "stdw": 62,
+            "sth": 303,
+            "stndw": 105,
+            "stnw": 82,
+            "stw": 363,
+            "sub": 127,
+            "sub2": 18,
+            "sub4": 6,
+            "subab": 6,
+            "subabs4": 5,
+            "subah": 7,
+            "subaw": 6,
+            "subc": 9,
+            "subdp": 4,
+            "subsp": 24,
+            "subu": 2,
+            "swap4": 1,
+            "xor": 50
+          },
+          "distinct_compact_words": 1168,
+          "long40_positions": 26,
+          "totals": {
+            "decoded_instruction_positions": 6281,
+            "fully_decoding_fetch_packets": 730,
+            "unique_fetch_packets": 20550
+          }
+        }
+      },
+      "definition": "per-mnemonic control hits SCALED to the firmware decoded-position exposure, max over the control blobs, then compared with a three-sigma margin.  Raw counts are not comparable: the control blobs decode far fewer positions than the firmware, which biases a raw comparison toward crediting the firmware."
+    },
+    "regions_by_base": {
+      "0x11800000": 224,
+      "0x80000000": 80,
+      "0xc0000000": 111
+    },
+    "state": "scanned",
+    "totals": {
+      "decoded_instruction_positions": 96956,
+      "fully_decoding_fetch_packets": 11677,
+      "unique_fetch_packets": 20550
+    },
+    "unreadable_inputs": []
+  },
+  "validation_eligible": false
+}
