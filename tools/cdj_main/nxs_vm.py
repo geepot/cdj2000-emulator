@@ -338,6 +338,15 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
             'SDRAM command timing, arbitration and retention are not modeled',
             'PSC transition ticks and PLL divider GO latency remain deterministic approximations',
             'physical HPI pins, FIFO/HRDY timing and DSP interrupt delivery are not modeled',
+            # Unconditional: the Timer64P counter advances from the CPU's
+            # cycle_tick in every mode, strict and functional alike, so this
+            # board asserts the same step-to-tick fiction the replay manifest
+            # declares. SPRUH91D 28.1.5.2.1 binds the count unit to the
+            # PLL-derived internal clock, so substituting an emulated issue
+            # cycle diverges from a documented relation rather than filling a
+            # gap the manual leaves open - which is why it is declared here and
+            # not only in tools/cdj_dsp/replay.py.
+            'Timer64P counts one input clock per emulated CPU cycle (SPRUH91D chapter 28 register order, not rate); the step-to-tick ratio is unrelated to AUXCLK, so no elapsed-time, frequency or audio-rate conclusion may be drawn from a timer period expiring',
             *(['functional run-ahead adds two SPLOOPD epilog cycles; not cycle-validation evidence']
               if functional_dsp_timing else []),
             *(['functional run-ahead collapses each evidence-backed SPI1/WM8740 transfer to its committing write; not SPI timing evidence']

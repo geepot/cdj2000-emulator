@@ -1,5 +1,6 @@
 """The replay tool must distinguish faults, limits and pre-execution stops."""
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -90,6 +91,75 @@ def run(dump, output, *args):
                           text=True, capture_output=True, timeout=20)
 
 
+def _ti_text_words(asm, tmp_path):
+    """Assemble one tests/ti program with cl6x and return its .text words.
+
+    --no_compress keeps every instruction 32 bits wide, so the section can be
+    laid straight into an L2 image.  Nothing about the encodings comes from this
+    emulator.
+    """
+    directory = os.environ.get('C6X_TI_BIN')
+    if not directory:
+        pytest.skip('set C6X_TI_BIN to assemble the TI reference program')
+    subprocess.run([str(Path(directory) / 'cl6x'), '-mv6740', '--no_compress',
+                    '--abi=eabi', '-c', str(ROOT / 'tests/ti' / asm)],
+                   cwd=tmp_path, check=True, timeout=60)
+    data = (tmp_path / asm.replace('.asm', '.obj')).read_bytes()
+    assert data[:4] == b'\x7fELF' and data[4] == 1 and data[5] == 1
+    shoff, = struct.unpack_from('<I', data, 0x20)
+    shentsize, shnum, shstrndx = struct.unpack_from('<HHH', data, 0x2e)
+
+    def section(index):
+        base = shoff + index * shentsize
+        name, _type, _flags, _addr, off, size = struct.unpack_from(
+            '<IIIIII', data, base)
+        return name, off, size
+
+    strings = section(shstrndx)[1]
+    for index in range(shnum):
+        name, off, size = section(index)
+        label = data[strings + name:data.index(b'\x00', strings + name)]
+        if label == b'.text' and size:
+            return list(struct.unpack_from('<%dI' % (size // 4), data, off))
+    raise AssertionError('no .text in ' + asm)
+
+
+def test_timer64p_period_interrupt_reaches_the_cpu_in_replay(tmp_path):
+    """T64P0_TINT12 must travel the whole shipped path, not just the unit test.
+
+    The DSP program is tests/ti/timer-tint12.asm, assembled by cl6x, and it
+    performs SPRUH91D's own unchained-mode setup procedure (printed page 1238)
+    through real MMIO.  What must then happen is fixed by the manuals:
+    SPRUH91D Table 2-1 printed page 70 makes the period interrupt event 4
+    (T64P0_TINT12); the INTC's reset INTMUX1 selects event 4 for CPUINT4; and
+    CSR.GIE is 0 out of reset, so SPRUFE8B 5.4.1 requires the request to LATCH
+    in IFR bit 4 rather than vector.  Masked is not dropped.
+
+    This asserts ORDER, never rate.  The counter advances once per emulated CPU
+    cycle - an approximation the manifest declares - so the number of cycles the
+    run needed to get here carries no timing meaning and is deliberately not
+    asserted.
+    """
+    words = _ti_text_words('timer-tint12.asm', tmp_path)
+    data = bytearray(0x40000)
+    struct.pack_into('<I', data, 0, 0x11800020)
+    for index, word in enumerate(words):
+        struct.pack_into('<I', data, 0x20 + 4 * index, word)
+    dump = tmp_path / 'timer.bin'
+    dump.write_bytes(data)
+    output = tmp_path / 'replay'
+    result = run(dump, output, '--steps', '4000')
+    assert result.returncode == 0, result.stderr
+    stop = json.loads(result.stdout.strip().splitlines()[-1])
+    assert stop['reason'] == 'step_limit', stop
+    assert not stop['fault'], stop
+    assert stop['control']['ifr'] & (1 << 4), stop['control']
+    assert not stop['control']['csr'] & 1, 'GIE must still be masked'
+    manifest = json.loads((output / 'manifest.json').read_text())
+    assert any('Timer64P counts one input clock per emulated CPU cycle' in entry
+               for entry in manifest['approximations'])
+
+
 def test_replay_records_false_and_true_source_predicates(tmp_path):
     data = bytearray(0x40000)
     struct.pack_into('<I', data, 0, 0x00800020)
@@ -146,8 +216,13 @@ def test_replay_determinism_breakpoints_and_limits(tmp_path):
     assert manifest['limits']['packets'] == 0 and manifest['limits']['cycles'] == 0
     # The interrupted-SPLOOP resume caveat is unconditional: SPRUFE8B
     # 7.7.3.1 rebuilds the loop buffer from program memory in every mode.
+    # So is the Timer64P one: the counter advances once per CPU cycle_tick in
+    # every mode, and cpu->cycles is an issue count no TI page relates to Hz,
+    # so a manifest consumer may read a timer period expiring as evidence of
+    # SPRUH91D chapter 28 register ORDER and of nothing about elapsed time.
     assert manifest['approximations'] == [
-        'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check']
+        'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check',
+        'Timer64P counts one input clock per emulated CPU cycle (SPRUH91D chapter 28 register order, not rate); the step-to-tick ratio is unrelated to AUXCLK, so no elapsed-time, frequency or audio-rate conclusion may be drawn from a timer period expiring']
     assert manifest['output_checkpoint']['file'] == 'final.cdjdsp'
     assert (tmp_path / 'first/coverage.json').is_file()
     failure = json.loads((tmp_path / 'first/failure.json').read_text())
@@ -226,7 +301,8 @@ def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
     assert 'not architectural correctness or boot' in gate['scope']
     assert gate['limits']['steps'] == 10000
     assert gate['approximations'] == [
-        'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check']
+        'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check',
+        'Timer64P counts one input clock per emulated CPU cycle (SPRUH91D chapter 28 register order, not rate); the step-to-tick ratio is unrelated to AUXCLK, so no elapsed-time, frequency or audio-rate conclusion may be drawn from a timer period expiring']
     # An exactly repeated final checkpoint is a provenance-bearing resume
     # point; normal iteration must not fall back to a connected checkpoint.
     chained = tmp_path / 'chained'

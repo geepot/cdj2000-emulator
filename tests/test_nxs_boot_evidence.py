@@ -160,6 +160,19 @@ def test_dsp_artifact_manifest_records_scheduler_validation_scope(
     assert bool(scheduling) is not eligible
     if scheduling:
         assert 'not a DSP timing fix' in scheduling[0]
+    # The Timer64P counter advances from the CPU's cycle_tick on this board in
+    # every mode, so the step-to-tick approximation must be declared here
+    # unconditionally - not only in the replay manifest.  Without this a
+    # consumer could see a timer period expire, find no timer entry in the
+    # approximations list, and infer the counter is clocked from the modelled
+    # clock tree.  SPRUH91D 28.1.5.2.1 binds the count unit to the PLL-derived
+    # internal clock, so the substitution is a divergence, not an open gap.
+    timer = [item for item in manifest['approximations']
+             if 'Timer64P counts one input clock per emulated CPU cycle' in item]
+    assert len(timer) == 1, manifest['approximations']
+    assert 'not rate' in timer[0]
+    assert 'unrelated to AUXCLK' in timer[0]
+    assert 'no elapsed-time, frequency or audio-rate conclusion' in timer[0]
 
 
 def test_modified_main_provenance_does_not_hash_stock_in_its_place(tmp_path):

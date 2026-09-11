@@ -1611,7 +1611,8 @@ Reproduce the focused tests and sanitizer harnesses:
   tests/test_dsp_checkpoint_replay.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/c6747-intc.c \
-  emulator/qemu/cdj_c6747_intc.c -o /tmp/cdj-c6747-intc-san
+  emulator/qemu/cdj_c6747_intc.c emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_loop.c \
+  -o /tmp/cdj-c6747-intc-san
 /tmp/cdj-c6747-intc-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/dsp-checkpoint.c \

@@ -329,6 +329,16 @@ static void cycle_tick(void *unused)
         printf("{\"event\":\"wm8740_latch\",\"word\":%u,\"transfers\":%" PRIu64 "}\n",
                wm8740.last_word, wm8740.transfers);
     cdj_c6747_pll_tick(&pll);
+    /* SPRUH91D chapter 28 counts on the timer input clock; this callback is
+     * the only per-cycle hook the core offers, so one call is one input clock
+     * period - an approximation of nothing measurable, declared in the replay
+     * manifest beside the other approximations.  The events themselves are
+     * Table 2-1's, mapped by cdj_c6747_timer_event(). */
+    uint32_t timer_outputs = cdj_c6747_timers_tick(timers);
+    for (unsigned bit = 0; timer_outputs >> bit; ++bit)
+        if (timer_outputs & (1u << bit))
+            cdj_c6747_intc_deliver_event(&intc, &intc_delivery,
+                                         cdj_c6747_timer_event(bit));
 }
 static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }

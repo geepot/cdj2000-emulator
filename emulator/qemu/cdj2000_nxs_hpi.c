@@ -694,6 +694,20 @@ static void dsp_cycle_tick(void *opaque)
         info_report("nxs-spi: timed WM8740 latch word=%#x transfers=%" PRIu64,
                     s->wm8740.last_word, s->wm8740.transfers);
     cdj_c6747_pll_tick(&s->pll);
+    /* SPRUH91D chapter 28 counts on the timer input clock; this callback is
+     * the only per-cycle hook the core offers, so one call is one input clock
+     * period - an approximation of nothing measurable.  It is declared in BOTH
+     * provenance artifacts, because both reach this line: tools/cdj_dsp/replay.py
+     * for replay runs and tools/cdj_main/nxs_vm.py for the QEMU firmware boots
+     * that write runs/<run>/dsp-checkpoints/manifest.json.  This is the board a
+     * "firmware delay loop terminated" observation would be made on, so the
+     * declaration there is load-bearing, not decorative.  The events themselves
+     * are Table 2-1's, mapped by cdj_c6747_timer_event(). */
+    uint32_t timer_outputs = cdj_c6747_timers_tick(s->timers);
+    for (unsigned bit = 0; timer_outputs >> bit; ++bit)
+        if (timer_outputs & (1u << bit))
+            cdj_c6747_intc_deliver_event(&s->intc, &s->intc_delivery,
+                                         cdj_c6747_timer_event(bit));
 }
 
 static void report_dsp(NxsHpi *s, const char *reason)

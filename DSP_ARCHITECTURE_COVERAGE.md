@@ -30,6 +30,9 @@ the section it supersedes.
 | SMPY/SMPYH/SMPYHL/SMPYLH/SMPY2 and compact Figure E-5 `M3` | `44c2575` | §5.2, §5.3 |
 | The 104-word "genuine" compact gap re-measured: 72 of it was never a gap, and the remaining 32 are Figure H-6 SPLOOP reload. No core change — see §0.1 | *wave 3, `compact-gap`* | §0.1 |
 | Software-loop interrupt drain, SPMASK resume and ISR-local ("nested") SPLOOP applied in strict timing, not only in breadth mode; masked protected LD keeps its four PROT cycles on return | *this patch* | §10 task 1, §7 circular validation |
+| Timer64P counts: TIM12/TIM34 advance, PRD match, ENAMODE one-shot/continuous/reload, the PSC34 prescaler, TGCR TIMMODE 0/1h/3h and the INTCTLSTAT period-status bit. Watchdog (TIMMODE = 2h), CLKSRC12/TIEN12 external clocking and event capture stay fail-closed | *wave 4, `timer-events`* | §5.5 first two bullets, §10 "Next" |
+| T64P0/1 TINT12, TINT34 and CMPINT0-7 reach the INTC from `cdj_c6747_timer.c` and appear as CPU interrupts, so 22 of Table 2-1's events are generated instead of 2 | *wave 4, `timer-events`* | §5.5, `IC-DEV-EVENT-SOURCES` |
+| Timer64P review fixes: the PSC34 prescale counter no longer advances while `ENAMODE34 = 0`; Read Reset Mode now captures TIM12/TIM34 into CAP12/CAP34 and reloads PRDn from RELn at `ENAMODEn = 3h`, and is confined to 32-bit unchained mode; chained mode reloads PRD34 from REL34. The step-to-tick approximation is now declared in the **QEMU board** manifest too, not only the replay manifest | *wave 4 review* | §0.2 |
 
 Measured after those five commits, by the same tools:
 
@@ -43,6 +46,40 @@ Measured after those five commits, by the same tools:
 | …of which a **genuine** gap (see §0.1) | not measured | **32** |
 | Control registers reading back unmasked | 6, 7, 13, 14, 18, 19, 20 | **6, 7, 13, 14** (all correct: full 32-bit R/W) |
 | Packet-rollback failures | 0 | **0** |
+
+**The Timer64P counter is an order, not a rate.** It advances once per CPU
+`cycle_tick`, which is one modelled VLIW issue. `cpu->cycles` has no stall,
+memory-latency or cache model and no TI page relates it to Hz, so a passing
+timer test establishes the SPRUH91D chapter 28 register and interrupt
+**sequence** and nothing about elapsed time, AUXCLK, or what a firmware delay
+loop would measure on hardware. `cdj_c6747_timer_input_hz()` remains the only
+place that answers the rate question, and it still refuses where the manuals fix
+nothing. **Both** provenance artifacts declare the ratio beside the other
+approximations — `tools/cdj_dsp/replay.py` for replay runs and
+`tools/cdj_main/nxs_vm.py` for the QEMU firmware boots that write
+`runs/<run>/dsp-checkpoints/manifest.json` — and `tests/test_dsp_replay.py` and
+`tests/test_nxs_boot_evidence.py` each pin their own. The QEMU board matters
+most: it is where a "firmware delay loop terminated" observation would actually
+be made. No test pins the ratio as a rate; one pins it as a *one-sided liveness
+bound* (the replay test tolerates roughly 370× coarsening, measured, with no
+upper bound), which `cdj_c6747_timer.h` now states so a future reader does not
+misread that failure as a timer bug.
+
+**Making the counter advance does not change how any recorded checkpoint
+resumes.** Arming a timer across a checkpoint was the one behavioural risk the
+implementation named and could not test. Measured: all 61,219 `runs/**.cdjdsp`
+checkpoints were loaded through `cdj_dsp_checkpoint_read` and their Timer64P
+state inspected. 146 are unreadable (the same 146 §7 already records), 109,046
+timer instances do have a TGCR half out of reset — so the fast-path early-out
+does *not* always fire and `tick_one` really does run on recorded state — but
+**zero** have the combination that counts: a released half, a non-zero period
+and a non-zero `ENAMODEn`. Every one is the manual's own "enabled but the timer
+period is 0" case, which `advance()` refuses. The risk is real but first
+materializes when firmware actually arms a timer, which is the point of the
+change. A 45 s connected firmware boot
+(`runs/nxs-smoke-timer64p`) reports `gui_exit: 0` and **zero faults** across
+116,092 events, with the same 27 boot phases as the pre-patch baseline; stock
+firmware does not arm Timer64P in that window.
 
 Still deliberately **not** done, and why:
 

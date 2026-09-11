@@ -47,7 +47,15 @@ def test_c6747_interrupt_controller(tmp_path):
     binary = tmp_path / 'intc-test'
     subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-intc.c'),
-        str(ROOT / 'emulator/qemu/cdj_c6747_intc.c'), '-o', str(binary)], check=True)
+        str(ROOT / 'emulator/qemu/cdj_c6747_intc.c'),
+        str(ROOT / 'emulator/qemu/cdj_c6747_timer.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
+        '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
 def test_c6747_emifb_configuration(tmp_path):

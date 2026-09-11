@@ -406,6 +406,15 @@ def main():
             # works rather than a timing mode, and the caveat applies to every
             # run that interrupts a software loop, strict or breadth.
             'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check',
+            # Timer64P0/1 advance one input clock per CPU cycle_tick, which is
+            # one modelled VLIW issue.  cpu->cycles has no stall, memory
+            # latency or cache model and no TI page relates it to Hz, so this
+            # is a counter and an ORDER, never a rate: a run in which a timer
+            # period expired says the register sequence of SPRUH91D chapter 28
+            # is correct and says nothing whatever about how long it took, how
+            # it relates to AUXCLK or cdj_c6747_timer_input_hz(), or what a
+            # firmware delay loop would measure on hardware.
+            'Timer64P counts one input clock per emulated CPU cycle (SPRUH91D chapter 28 register order, not rate); the step-to-tick ratio is unrelated to AUXCLK, so no elapsed-time, frequency or audio-rate conclusion may be drawn from a timer period expiring',
             *(['interrupt entry retires already-issued results with minimum empty cycles; exact interrupt pipeline latency is not modeled']
                if args.functional_dsp_timing else []),
             *(['coarse packet-driven McASP slots; not audio-rate or cycle-accurate']
