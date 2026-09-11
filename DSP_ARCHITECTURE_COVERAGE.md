@@ -37,7 +37,8 @@ Measured after those five commits, by the same tools:
 | Rows where every probed encoding is rejected | 113 | **107** |
 | …rejected only as "reserved predicate" | 22 | **0** |
 | …rejected only as "reserved NOP count" (IDLE) | 1 | **0** |
-| Compact words rejected "not implemented" | 11,440 | **6,944** |
+| Compact words refused "not implemented" (raw) | 11,440 | **6,944** |
+| …of which a **genuine** decode gap (see §0.1) | not measured | **104** |
 | Control registers reading back unmasked | 6, 7, 13, 14, 18, 19, 20 | **6, 7, 13, 14** (all correct: full 32-bit R/W) |
 | Packet-rollback failures | 0 | **0** |
 
@@ -111,16 +112,32 @@ Packed 2×16, packed 4×8, dot-product/complex-multiply, bit-manipulation, Galoi
 dual-result and both floating-point families are all at or below their scaled
 floors. The 22 nonconditional extensions have no candidate at all.
 
-**The one positive signal is in the compact space, and it is not statistical.**
-Of the 6,944 unimplemented 16-bit words, 33 distinct words appear in captured
-memory, **11 of them inside fetch packets the replay demonstrably executed**, and
-8 sit at confirmed-executed compact addresses. "Inside a packet we watched
-execute" needs no noise floor. Those 8 also bound the 6,944 itself: the sweep
-rejects them under all 13 of its header configurations, so either the real
-fetch-packet header is outside that set or the word means something else under
-it. **6,944 is an upper bound on unimplemented compact words, not a count.**
-Note the distinct-word comparison against a control floor of 6 is still
-exposure-unadjusted and is not relied on here.
+**The compact "positive signal" was also an artifact, and it is retracted.**
+An earlier draft of this section reported 11 unimplemented compact words inside
+executed fetch packets and 8 at confirmed-executed addresses as the one piece of
+firmware evidence in the study. Disassembling those 8 settles it: they are
+`sploop`, `sploopd` and `spkernel` — the compact **software-loop family, which
+this core implements** and validates in `tests/cstub/c674x-spkernel-fields.c`.
+`0xdc66` is the very word `DSP_BOOT_MILESTONE_AUDIT.md` analyses. The compact
+sweep refuses them only because a one-instruction probe packet has no active
+software loop around it, which is exactly why `isa_probe.py` excludes that family
+from the 32-bit sweep. The compact sweep never had that exclusion.
+
+**So the compact gap is 104 words, not 6,944.** Classifying every refused word
+with GNU libopcodes (`audit_sweeps.py --disassembler`):
+
+| Bucket | Words | A gap? |
+|---|---|---|
+| Encodings the architecture does not define | **6,616** | No — refusing them is correct |
+| Figure F-32 `Sx1b` `s = 0` | 128 | No — deliberately fail-closed, §0 |
+| Compact software-loop family | 96 | No — implemented, needs loop context |
+| **Genuine decode gap** | **104** | **Yes** |
+
+The 104 are four small families: `addaw` 32, `subaw` 32, predicated `[a0]`/`[b0]`
+32, `mvc` 8. The raw figure was quoted as a coverage number through three commits
+— 11,440, then 10,928, then 6,944 — before anyone disassembled what it contained.
+It overstated the compact gap by about 98%. `tests/test_dsp_isa_audit.py` now
+asserts the four buckets, so the raw count cannot be mistaken for a gap again.
 
 **What this means for the plan.** Waves 3-6 as scoped — roughly 106 instruction
 rows of packed SIMD, double precision, dot products and bit manipulation — have

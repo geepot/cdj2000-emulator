@@ -8,7 +8,8 @@
     "Disassembly decides what a word names; the core decides what it executes. The two disagree where a format is decoded but unimplemented."
   ],
   "compact_encoding_space": {
-    "confirmed_executed_caveat": "These 16-bit words sit at confirmed-executed compact addresses yet the sweep rejects them under all 13 of its header configurations. Either the real fetch-packet header is outside the swept set or the word means something else under it, so 6,944 is an upper bound on unimplemented compact words, not a verified count.",
+    "confirmed_executed_are_loop_family": true,
+    "confirmed_executed_caveat": "RESOLVED, and not in this measurement's favour. All of these words disassemble to the compact software-loop family - sploop, sploopd and spkernel - which this core IMPLEMENTS and validates in tests/cstub/c674x-spkernel-fields.c; 0xdc66 is the very word DSP_BOOT_MILESTONE_AUDIT.md analyses. The compact sweep refuses them only because a one-instruction probe packet has no active software loop around them, which is the same reason tools/cdj_dsp/isa_probe.py excludes that family from the 32-bit sweep. So these are NOT evidence of an executed unimplemented instruction, and the verdict below is an artifact of the sweep rather than a finding. See analysis/dsp/audit_sweeps.json compact.not_implemented_breakdown: of the 6,944 raw refusals, 6,616 are encodings the architecture does not define, 96 are this loop family, 128 are a deliberate fail-closed decision, and 104 are the genuine gap.",
     "confirmed_executed_word_count": 8,
     "confirmed_executed_words": [
       3174,
@@ -34,7 +35,7 @@
       "unaligned stack access or invalid register pair": 64
     },
     "unimplemented_words": 6944,
-    "verdict": "reached-confirmed"
+    "verdict": "reached-candidate-only"
   },
   "confirmed_executed_by_mnemonic": {
     "abssp": {
@@ -1389,7 +1390,7 @@
     }
   },
   "inputs": {
-    "analyzer_sha256": "98fcf77f5ee9dda97d8e7f6fce8009b28477ca88a3cafc137af6126d14661c83",
+    "analyzer_sha256": "bf040158ca517b1af418084999cc2ab9ba08126464cc81a0f6bc2a21a8d5cffc",
     "coverage_artifacts": 153,
     "coverage_inventory": "analysis/dsp/coverage_inventory.json",
     "disassembler_sha256": "2449e6a4ea0ed5c8cfeae3981b829c671a89f938865492e390b9878492ffdf89",

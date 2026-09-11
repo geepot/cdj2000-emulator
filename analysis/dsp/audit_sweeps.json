@@ -8,11 +8,39 @@
       "rs/pointer": 128
     },
     "defensible_coverage_figure": {
-      "metric": "16-bit words rejected as \"compact instruction not implemented\"",
+      "metric": "16-bit words that are a genuine compact decode gap",
       "of": 65536,
-      "value": 6944,
-      "why": "Independent of the probe's memory window and register values, unlike the accepted total."
+      "value": 104,
+      "why": "The raw not-implemented count conflates undefined encodings, which the core is right to refuse, with real gaps. Only the genuine-gap bucket is a coverage figure."
     },
+    "not_implemented_breakdown": {
+      "buckets": {
+        "deliberately-fail-closed": 128,
+        "genuine-gap": 104,
+        "software-loop-family": 96,
+        "undefined-encoding": 6616
+      },
+      "by_mnemonic": {
+        "<undefined>": 6616,
+        "[a0]": 16,
+        "[b0]": 16,
+        "addaw": 32,
+        "bnop": 128,
+        "mvc": 8,
+        "sploop": 16,
+        "sploopd": 16,
+        "spmaskr": 64,
+        "subaw": 32
+      },
+      "classified_by": "GNU libopcodes TI C6x disassembler, one word per compact fetch packet",
+      "what_each_means": {
+        "deliberately-fail-closed": "refused on purpose while a manual self-contradiction is unresolved",
+        "genuine-gap": "an instruction the architecture defines, that we do not decode",
+        "software-loop-family": "implemented, but needs an active software loop that a one-instruction probe packet cannot provide",
+        "undefined-encoding": "the disassembler names no instruction; the architecture does not define it and refusing it is correct, not a gap"
+      }
+    },
+    "not_implemented_raw": 6944,
     "rejected": 7072,
     "rejection_reasons": {
       "compact instruction not implemented": 6944,
@@ -277,12 +305,14 @@
   },
   "provenance": {
     "core_sources": {
-      "emulator/qemu/cdj_c674x.c": "797bc1695883c9dbb4cfd0afaf8515aff0823b852eec2b433ad47e5258295d11",
+      "emulator/qemu/cdj_c674x.c": "1331093d1a7172c4b687aff56ff5169b7627c74023f8a4c680f1f83ec72df075",
+      "emulator/qemu/cdj_c674x_control.c": "c8a93a14d99c9c65e78e32e47b4238f1f8a4a7486708fc43d9b6d8c817e9b86c",
       "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
       "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+      "emulator/qemu/cdj_c674x_sp.c": "d75148b3244349fcedd4257a4b29fae761dd79e354063d765b856b79ee95b800",
       "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
     },
-    "generator_sha256": "1a9f972db39e364af7cd15754c74f7b1a54dd780e8478b93554db89fd44d7c82",
+    "generator_sha256": "b878315d7881fff3c5ca39cad5c624e8c1155035f0355420efbeaf15d1c91b05",
     "probe_source": "tests/cstub/c674x-isa-probe.c",
     "probe_source_sha256": "565f14cc09c631c461898a06f2ff72cd5a9dc6c19c5fa65f78b375399c109aa2"
   },

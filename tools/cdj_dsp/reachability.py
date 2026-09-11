@@ -479,11 +479,21 @@ def build_report(args):
                 confirmed_executed_words=sorted(confirmed_words),
                 confirmed_executed_word_count=len(confirmed_words),
                 confirmed_executed_caveat=(
-                    'These 16-bit words sit at confirmed-executed compact addresses yet the '
-                    'sweep rejects them under all 13 of its header configurations. Either '
-                    'the real fetch-packet header is outside the swept set or the word means '
-                    'something else under it, so 6,944 is an upper bound on unimplemented '
-                    'compact words, not a verified count.'),
+                    'RESOLVED, and not in this measurement\'s favour. All of these words '
+                    'disassemble to the compact software-loop family - sploop, sploopd and '
+                    'spkernel - which this core IMPLEMENTS and validates in '
+                    'tests/cstub/c674x-spkernel-fields.c; 0xdc66 is the very word '
+                    'DSP_BOOT_MILESTONE_AUDIT.md analyses. The compact sweep refuses them '
+                    'only because a one-instruction probe packet has no active software loop '
+                    'around them, which is the same reason tools/cdj_dsp/isa_probe.py '
+                    'excludes that family from the 32-bit sweep. So these are NOT evidence '
+                    'of an executed unimplemented instruction, and the verdict below is an '
+                    'artifact of the sweep rather than a finding. See '
+                    'analysis/dsp/audit_sweeps.json compact.not_implemented_breakdown: of '
+                    'the 6,944 raw refusals, 6,616 are encodings the architecture does not '
+                    'define, 96 are this loop family, 128 are a deliberate fail-closed '
+                    'decision, and 104 are the genuine gap.'),
+                confirmed_executed_are_loop_family=True,
                 distinct_compact_words_seen=len(compact_hits),
                 static_candidate_words=len(present),
                 static_candidate_words_in_executed_fetch_packets=in_executed,
@@ -491,7 +501,10 @@ def build_report(args):
                 noise_floor=floor,
                 noise_floor_definition='distinct unimplemented compact words a control blob '
                                        'of the same size yields through the identical pipeline',
-                verdict=verdict(len(confirmed_words), compact_hits != {}, len(present),
+                # Pass 0 for the confirmed count: every confirmed word is loop
+                # family (see the caveat), so crediting them would report an
+                # implemented instruction as an executed unimplemented one.
+                verdict=verdict(0, compact_hits != {}, len(present),
                                 floor, in_executed),
                 note='A 16-bit word present at a compact position is presence, not '
                      'execution; the core rejects all of these words today.')

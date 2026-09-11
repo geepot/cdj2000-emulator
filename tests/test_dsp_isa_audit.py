@@ -15,6 +15,7 @@ git-ignored build/references and the TI assembler is not part of the repository.
 """
 from pathlib import Path
 import json
+import os
 import shutil
 import subprocess
 
@@ -140,15 +141,13 @@ def test_compact_decode_gap_is_exactly_the_measured_set(tmp_path):
     result = compact(text)
     assert result["words_swept"] == 0x10000
     # Decoder-only figure: independent of the probe's registers and memory window.
-    # Was 11,440 when the audit was written.  Two formats account for the whole
-    # drop and nothing else:
-    #   Figure F-29 Sx2op, (w & 0x047e) == 0x002e - 9 free bits, 512 words;
-    #   Figure E-5 M3, the compact .M multiply format - 4,096 words, of which 112
-    #     are already claimed by Figure G-4 LSDx1 (unit field 11b), so it adds
-    #     3,984.
-    # 11,440 - 512 - 3,984 = 6,944.  Figure F-32 Sx1b with s = 0 is deliberately
-    # NOT opened - whether it is architecturally legal is an open question, see
-    # the Sx1b arm in cdj_c674x.c - so its 128 words remain in this count.
+    # Without a disassembler the sweep can only report an UPPER BOUND, because
+    # "compact instruction not implemented" lumps together three different things:
+    # encodings the architecture never defines (which the core is right to refuse),
+    # the software-loop family (implemented, but needing a loop this one-instruction
+    # probe cannot provide), and real gaps.  6,944 is that upper bound; the genuine
+    # gap is 104 and is asserted separately below.
+    assert result["not_implemented_raw"] == 6944
     assert result["defensible_coverage_figure"]["value"] == 6944
     # Nothing may be rejected for reasons that are properties of the probe.
     assert set(result["rejection_reasons"]) == {
@@ -229,3 +228,38 @@ def test_single_precision_rounding_against_an_independent_oracle(tmp_path):
     result = subprocess.run([str(binary)], capture_output=True, text=True,
                             timeout=120, check=True)
     assert "failures=0" in result.stdout, result.stdout
+
+
+def test_compact_not_implemented_separates_undefined_from_real_gaps(tmp_path):
+    """The compact gap is 104 words, not 6,944, and the difference matters.
+
+    The raw count was quoted as a coverage figure through three commits before
+    anyone disassembled what it contained.  6,616 of those words are encodings GNU
+    libopcodes does not recognise at all, so refusing them is correct behaviour and
+    not a gap; 96 are the compact software-loop family, which is implemented and
+    validated by tests/cstub/c674x-spkernel-fields.c but cannot decode in a
+    one-instruction packet; 128 are the Figure F-32 Sx1b s = 0 words this core
+    refuses on purpose.  What is left is the real work.
+    """
+    if not shutil.which("cc"):
+        pytest.skip("requires C compiler")
+    disassembler = os.environ.get("C6X_DISASSEMBLER")
+    if not disassembler or not Path(disassembler).exists():
+        pytest.skip("set C6X_DISASSEMBLER to the built tools/cdj_dsp/tic6x_disasm.c frontend")
+    from tools.cdj_dsp.audit_sweeps import build, compact, run
+
+    result = compact(run(build(tmp_path), "compact"), Path(disassembler), tmp_path)
+    buckets = result["not_implemented_breakdown"]["buckets"]
+    assert buckets == {
+        "undefined-encoding": 6616,
+        "deliberately-fail-closed": 128,
+        "software-loop-family": 96,
+        "genuine-gap": 104,
+    }, buckets
+    assert sum(buckets.values()) == result["not_implemented_raw"] == 6944
+    assert result["defensible_coverage_figure"]["value"] == 104
+    # The genuine gap is four small families, not an encoding space.
+    names = result["not_implemented_breakdown"]["by_mnemonic"]
+    assert {k: v for k, v in names.items()
+            if k not in ("<undefined>", "bnop", "sploop", "sploopd", "spmaskr")} == {
+        "addaw": 32, "subaw": 32, "[a0]": 16, "[b0]": 16, "mvc": 8}
