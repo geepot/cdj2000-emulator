@@ -1646,13 +1646,16 @@ int main(void)
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][6] == 0xbf800000 && c.control[18] == 0x88);
 
-    /* A later unknown compact instruction rolls back the whole packet. */
+    /* A later unknown compact instruction rolls back the whole packet.
+     * fff7h is not an instruction at all: TI's own disassembler prints it as
+     * ".word 0x0000fff7".  (ffffh used to serve here, but it is the Figure E-5
+     * M3 word MPYHL .M2X B7,A7,B6 and is now executed.) */
     memset(memory, 0, sizeof(memory));
     cdj_c674x_reset(&c, 0x1000);
     memory[0] = mvk(0, 0, 99) | 1;
-    memory[1] = 0xffff; memory[7] = 0xe0400000;
+    memory[1] = 0xfff7; memory[7] = 0xe0400000;
     assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(c.fault_pc == 0x1004 && c.fault_word == 0xffff);
+    assert(c.fault_pc == 0x1004 && c.fault_word == 0xfff7);
     assert(c.r[0][0] == 0 && c.pc == 0x1000 && c.cycles == 0);
     /* Stack stores sample old registers and update B15 in E1, RAM in E3.
      * RS is ignored by Dpp. Two pushes can be in flight simultaneously. */
@@ -1735,10 +1738,11 @@ int main(void)
     assert(c.r[1][20] == 0xface1234 && c.r[1][4] == 0 &&
            c.r[1][15] == 0x10e8);
 
-    /* Unsupported parallel operation must not enqueue the earlier store. */
+    /* Unsupported parallel operation must not enqueue the earlier store.
+     * fff7h, not ffffh: see the M3 note above. */
     memset(memory, 0, sizeof(memory));
     cdj_c674x_reset(&c, 0x1000); c.r[1][15] = 0x10f8;
-    memory[0] = 0xffff3577; memory[7] = 0xe0200001;
+    memory[0] = 0xfff73577; memory[7] = 0xe0200001;
     assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(c.r[1][15] == 0x10f8 && !c.store_count && !c.cycles && !memory[62]);
 
@@ -1978,10 +1982,11 @@ int main(void)
     assert(memory[48] == 0x11223344 && memory[49] == 0xaabbccdd &&
            !c.store_count);
 
-    /* A later packet failure rolls compact base updates and queues back. */
+    /* A later packet failure rolls compact base updates and queues back.
+     * fff7h, not ffffh: see the M3 note above. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.r[1][6] = 0x10c0; c.r[1][4] = 0x12345678;
-    memory[0] = 0xffff3d45; memory[7] = 0xe0240001;
+    memory[0] = 0xfff73d45; memory[7] = 0xe0240001;
     assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(c.r[1][6] == 0x10c0 && !c.store_count && !c.cycles);
     /* LDW postincrement updates its pointer in E1, samples RAM in E3,
@@ -2432,7 +2437,6 @@ int main(void)
     const unsigned reserved_lsdx1[] = {
         4u << 13 | 0x1866,                 /* op 4 on .L */
         2u << 13 | 2u << 3 | 0x1866,      /* op 2 on .D */
-        0u << 13 | 3u << 3 | 0x1866,      /* reserved unit */
     };
     for (unsigned j = 0; j < sizeof(reserved_lsdx1) /
                               sizeof(reserved_lsdx1[0]); ++j) {
@@ -2441,6 +2445,21 @@ int main(void)
         assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
         assert(!c.cycles);
     }
+    /* Figure G-4's unit field (printed page 761, bits 4-3) has no 11b
+     * encoding, and 11b there puts 1111b in bits 4-1, which is exactly the
+     * Figure E-5 M3 signature (printed page 744).  So what used to look like a
+     * reserved LSDx1 unit is really a compact multiply, and TI's disassembler
+     * agrees: 187eh inside a .fphead-framed packet is "MPYHL.M1X A0,B0,A4".
+     * The reserved-unit guard in the core is therefore unreachable, not gone.
+     * A0 x B0 is 0 x 0, so the product is 0 and the register is already 0;
+     * what this asserts is that the packet is executed rather than rejected. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0u << 13 | 3u << 3 | 0x1866; memory[7] = 0xe0200000;
+    c.r[0][4] = 0xdeadbeef;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.cycles == 1 && c.load_count == 1 && c.r[0][4] == 0xdeadbeefu);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][4] == 0);
     /* The genuine blocker is MVK .D2 0,B5 in a mixed fetch packet. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1010);
     c.r[1][5] = 99; memory[4] = 0x1af7; memory[7] = 0xe2000200;

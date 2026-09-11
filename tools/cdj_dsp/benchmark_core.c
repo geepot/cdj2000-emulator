@@ -2,7 +2,8 @@
 /* Synthetic CPU-time benchmark; not a firmware or end-to-end speed test.
  * Build from the repository root:
  * cc -O3 -I emulator/qemu tools/cdj_dsp/benchmark_core.c \
- *   emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
+ *   emulator/qemu/cdj_c674x.c \
+ *   emulator/qemu/emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_uncond.c \
  *   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-core-bench
  * Run alternating baseline/candidate binaries on an otherwise idle host. */
 #include <stdio.h>

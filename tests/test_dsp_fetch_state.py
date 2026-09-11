@@ -61,6 +61,7 @@ int main(void) {
                     '-I', str(ROOT / 'emulator/qemu'), str(source),
                     str(ROOT / 'emulator/qemu/cdj_c674x.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+                    str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
                     '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
@@ -127,6 +128,7 @@ int main(void) {
                     '-I', str(ROOT / 'emulator/qemu'), str(source),
                     str(ROOT / 'emulator/qemu/cdj_c674x.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+                    str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
                     '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

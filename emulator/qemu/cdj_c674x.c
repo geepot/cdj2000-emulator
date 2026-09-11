@@ -4,6 +4,7 @@
 #include "cdj_c674x.h"
 #include "cdj_c674x_multicycle.h"
 #include "cdj_c674x_uncond.h"
+#include "cdj_c674x_mpy.h"
 
 #define CDJ_C674X_TSR_SPLX (1u << 14)
 #define CDJ_C674X_LOOP_RETURNING (1u << 3)
@@ -1182,6 +1183,26 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             } else if ((w & 0x1c7e) == 0x1c62) {
                 w = right << 23 | right << 18 | left << 13 | 0x8e0 | s << 1;
                 compact = false;
+            } else if ((w & 0x001e) == 0x001e) {
+                /* SPRUFE8B Figure E-5 "M3", printed page 744: the only
+                 * compact .M format.  src1 bits 15-13, x bit 12, dst bits
+                 * 11-10, src2 bits 9-7, op bits 6-5.  The header SAT bit
+                 * picks the non-saturating half of the table (MPY, MPYH,
+                 * MPYLH, MPYHL) or the saturating one (SMPY, SMPYH, SMPYLH,
+                 * SMPYHL).  dst is two bits of an even register - [A0, A2,
+                 * A4, A6] with RS = 0 and [A16, A18, A20, A22] with RS = 1
+                 * per the figure's note - while src1 and src2 are the usual
+                 * three-bit compact fields.  Every mnemonic, opfield and
+                 * register mapping here was read back from TI's own
+                 * disassembler (dis6x -i on .fphead-framed words). */
+                static const unsigned m3_op[2][4] = {
+                    {0x19, 0x01, 0x11, 0x09},   /* MPY MPYH MPYLH MPYHL */
+                    {0x1a, 0x02, 0x12, 0x0a},   /* SMPY SMPYH SMPYLH SMPYHL */
+                };
+                w = ((((w >> 10) & 3) * 2) + rs) << 23 | right << 18 |
+                    left << 13 | (w & 0x1000) |
+                    m3_op[sat][(w >> 5) & 3] << 7 | s << 1;
+                compact = false;
             }
         }
         unsigned side = (w >> 1) & 1, dst = (w >> 23) & 31;
@@ -1338,7 +1359,12 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                  * increment and XOR-one forms.  Unit-specific op 2 is
                  * integer negation on .L/.S and reserved on .D; op 3 is
                  * decrement on every unit.  Op 6 is the separate .S2 MVC
-                 * to ILC handled below. */
+                 * to ILC handled below.
+                 * The unit == 3 arm is kept but is now unreachable: Figure
+                 * G-4 has no 11b unit encoding, and 11b there sets bits 4-1
+                 * to 1111b, which is the Figure E-5 M3 signature lowered to a
+                 * full-width multiply above (TI's disassembler decodes those
+                 * 112 words as MPY/SMPY, not as an LSDx1 form). */
                 unsigned unit = (w >> 3) & 3;
                 unsigned op = (w >> 13) & 7;
                 if (unit == 3 || op == 4 || (op == 2 && unit == 2))
@@ -2031,6 +2057,59 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                     .due = due, .value = result, .bank = side, .dst = dst,
                     .size = 0
                 };
+            }
+        } else if (((w & 0x7c) == 0 &&
+                    (((w >> 7) & 31) == 0x1a || ((w >> 7) & 31) == 0x02 ||
+                     ((w >> 7) & 31) == 0x0a || ((w >> 7) & 31) == 0x12)) ||
+                   ((w & 0x83c) == 0x30 && ((w >> 6) & 31) == 0x01)) {
+            /* Saturating 16x16 .M family: SMPY (SPRUFE8B printed page 461,
+             * opfield 1a), SMPYH (463, 02), SMPYHL (464, 0a), SMPYLH (466,
+             * 12) and packed SMPY2 (468, Figure E-1 op 01).  All five
+             * opfields came out of asm6x -mv6740.  As in the non-saturating
+             * family just above, op bit 4 selects src1's low halfword and op
+             * bit 3 src2's low halfword.  Scalar forms are single-cycle and
+             * write dst in E2 (one delay slot); SMPY2 is four-cycle and
+             * writes dst_o:dst_e in E4 (three delay slots).  Saturation sets
+             * CSR.SAT and SSR.M1/M2 one cycle after dst is written
+             * (SPRUFE8B 2.9.13, printed page 54: SSR bit 4 is M1, bit 5 M2). */
+            unsigned op = (w >> 7) & 31;
+            bool packed = (w & 0x7c) != 0;
+            reg_write = false;
+            if (packed && (dst & 1))
+                return stop(cpu, pc, insn->word,
+                            "invalid multiply result register pair");
+            if (enabled) {
+                uint32_t left_word = cpu->r[side][a];
+                uint32_t right_word = cpu->r[cross][b];
+                CdjC674xMpyResult low = cdj_c674x_smpy16(
+                    left_word, right_word,
+                    !packed && !(op & 0x10), !packed && !(op & 8));
+                CdjC674xMpyResult high = packed ?
+                    cdj_c674x_smpy16(left_word, right_word, true, true) : low;
+                unsigned count = packed ? 2 : 1;
+                uint64_t due = cpu->cycles + (packed ? 4 : 2);
+                bool saturated = low.saturated || high.saturated;
+                if (out.load_count + (saturated ? 2u : 1u) > 40)
+                    return stop(cpu, pc, insn->word, "delayed-result queue full");
+                for (unsigned j = 0; j < out.load_count; ++j) {
+                    unsigned old_count = queued_result_registers(&out.loads[j]);
+                    if (out.loads[j].due == due && out.loads[j].bank == side &&
+                        out.loads[j].dst < dst + count &&
+                        dst < out.loads[j].dst + old_count)
+                        return stop(cpu, pc, insn->word,
+                                    "parallel delayed-result write conflict");
+                }
+                out.loads[out.load_count++] = (CdjC674xLoad){
+                    .due = due,
+                    .value = packed ? ((uint64_t)high.value << 32) | low.value
+                                    : low.value,
+                    .bank = side, .dst = dst, .size = packed ? 16u : 0u
+                };
+                if (saturated)
+                    out.loads[out.load_count++] = (CdjC674xLoad){
+                        .due = due + 1, .address = 1u << (4 + side),
+                        .size = CDJ_C674X_DELAYED_SAT
+                    };
             }
         } else if ((w & 0x83c) == 0x30 &&
                    (((w >> 6) & 31) == 0x0e ||

@@ -70,6 +70,7 @@ def test_probe_classifies_encodings_we_can_reason_about_independently(tmp_path):
          "-I", str(ROOT / "emulator/qemu"), str(PROBE),
          str(ROOT / "emulator/qemu/cdj_c674x.c"),
          str(ROOT / "emulator/qemu/cdj_c674x_uncond.c"),
+         str(ROOT / "emulator/qemu/cdj_c674x_mpy.c"),
          str(ROOT / "emulator/qemu/cdj_c674x_loop.c"), "-o", str(binary)],
         check=True)
     words = ["02988078", "0280022a", "ffffffff"]
@@ -137,13 +138,16 @@ def test_compact_decode_gap_is_exactly_the_measured_set(tmp_path):
     result = compact(text)
     assert result["words_swept"] == 0x10000
     # Decoder-only figure: independent of the probe's registers and memory window.
-    # Was 11,440 when the audit was written.  Opening Figure F-29 Sx2op -
-    # (w & 0x047e) == 0x002e, 9 free bits, 512 words - accounts for the whole
-    # drop and nothing else.  Figure F-32 Sx1b with s = 0 is deliberately NOT
-    # opened: whether it is architecturally legal is an open question (see the
-    # comment at the Sx1b arm in cdj_c674x.c) and it stays fail-closed, so its
-    # 128 words remain in this count.
-    assert result["defensible_coverage_figure"]["value"] == 10928
+    # Was 11,440 when the audit was written.  Two formats account for the whole
+    # drop and nothing else:
+    #   Figure F-29 Sx2op, (w & 0x047e) == 0x002e - 9 free bits, 512 words;
+    #   Figure E-5 M3, the compact .M multiply format - 4,096 words, of which 112
+    #     are already claimed by Figure G-4 LSDx1 (unit field 11b), so it adds
+    #     3,984.
+    # 11,440 - 512 - 3,984 = 6,944.  Figure F-32 Sx1b with s = 0 is deliberately
+    # NOT opened - whether it is architecturally legal is an open question, see
+    # the Sx1b arm in cdj_c674x.c - so its 128 words remain in this count.
+    assert result["defensible_coverage_figure"]["value"] == 6944
     # Nothing may be rejected for reasons that are properties of the probe.
     assert set(result["rejection_reasons"]) == {
         "compact instruction not implemented",
@@ -215,6 +219,7 @@ def test_single_precision_rounding_against_an_independent_oracle(tmp_path):
          "-I", str(ROOT / "emulator/qemu"), str(source),
          str(ROOT / "emulator/qemu/cdj_c674x.c"),
          str(ROOT / "emulator/qemu/cdj_c674x_uncond.c"),
+         str(ROOT / "emulator/qemu/cdj_c674x_mpy.c"),
          str(ROOT / "emulator/qemu/cdj_c674x_loop.c"), "-o", str(binary)],
         check=True)
     result = subprocess.run([str(binary)], capture_output=True, text=True,
