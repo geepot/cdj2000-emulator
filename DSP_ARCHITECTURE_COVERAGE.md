@@ -1002,9 +1002,24 @@ anyone remembering it. Each says what would close it.
   the expected sizes are derived from today's struct layout, so growing
   `CdjC6747McaspControl` / `CdjC6747Edma` retroactively redefined what those
   schema numbers mean and orphaned four `(state_size, comp[8])` variants.
-  Reader-side fix only: freeze the per-schema sizes as literal constants and
-  register the four historical variants. Note the corpus has since grown to
-  **61,900** files; the 146 figure still reproduces exactly. Checkpoint
+  **They should nevertheless stay unreadable.** The obvious remedy - freeze the
+  per-schema sizes as constants and register the four orphaned
+  `(state_size, comp[8])` tuples - is NOT safe, and measurement says why:
+  `offsetof(CdjDspCheckpointState, mcasp_control)` is **9520** today, while 140
+  of the 146 record state prefixes of **15088** or **15072**. Those are larger
+  than the whole current schema-7 prefix and near `sizeof(state)` = 15808, so
+  the divergence sits *before* `mcasp_control`, in the early part of the struct
+  that holds the CPU and the timers. Accepting such a file would `memcpy` a
+  materially different layout into today's fields and silently misplace nearly
+  all of them - a checkpoint that loads and is wrong, which is worse than one
+  that refuses. Making them loadable needs a recorded layout for each historical
+  variant, and none exists; the schema numbers were only ever pinned to sizes
+  derived from the live struct. Registering the tuples without that translation
+  would be forcing an artifact to load, which is the failure mode this document
+  exists to prevent.
+  So: cause closed, remedy deliberately declined, and the 146 stay a known and
+  explained exclusion rather than an open question. Note the corpus has since
+  grown to **61,900** files; the 146 figure still reproduces exactly. Checkpoint
   round-trip zero-byte coverage stands at 7,147 of 15,808.
 - **No instruction-timing oracle exists.** `cpu->cycles` is an issue count with
   no stall, memory or cache model; nothing relates it to Hz. The Timer64P
