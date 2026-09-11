@@ -351,8 +351,11 @@ def main():
     expected = args.expect_trace.read_bytes() if args.expect_trace is not None else None
     # Compile the exact source/header bytes whose hashes are recorded. A later
     # worktree edit must not make the manifest describe a different binary.
+    # Headers are derived from SOURCES by suffix, so any header with no matching
+    # .c has to be listed explicitly or the standalone build cannot find it.
     inputs = (SOURCES + [p.with_suffix('.h') for p in SOURCES[1:]] +
-              [ROOT / 'emulator/qemu/cdj_c6747_spi_clock.h'])
+              [ROOT / 'emulator/qemu/cdj_c6747_spi_clock.h',
+               ROOT / 'emulator/qemu/cdj_c674x_multicycle.h'])
     source_data = {p: p.read_bytes() for p in inputs}
     format_data = args.formats.read_bytes()
     analysis_data = {path: path.read_bytes() for path in ANALYSIS_SOURCES}

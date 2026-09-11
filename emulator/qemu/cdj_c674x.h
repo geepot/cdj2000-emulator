@@ -32,6 +32,8 @@ typedef struct {
 #define CDJ_C674X_DELAYED_IFR_CLEAR 33u
 /* No GPR write: address is the SSR unit mask, with CSR.SAT set in parallel. */
 #define CDJ_C674X_DELAYED_SAT 34u
+/* idle_cycles sentinel for the IDLE instruction's unbounded wait. */
+#define CDJ_C674X_IDLE_FOREVER (~0u)
 typedef struct {
     uint32_t word, pc, header;
     bool compact;
@@ -65,6 +67,12 @@ typedef struct {
     CdjC674xLoad loads[40];
     unsigned load_count;
     bool loop_active;
+    /* idle_cycles counts issue cycles in which no packet is fetched: the
+     * interrupt pipe-down interval and the padding of a single-cycle packet.
+     * CDJ_C674X_IDLE_FOREVER is the IDLE instruction's unbounded wait
+     * (SPRUFE8B printed page 274, "infinite multicycle NOP"), held in this
+     * existing field so that sizeof(CdjC674x) - and with it the checkpoint
+     * ABI, which stores this struct verbatim - does not change. */
     unsigned idle_cycles, loop_wait, loop_tags, loop_packets;
     unsigned loop_pred_bank, loop_pred_reg, loop_pred_history;
     bool loop_pred_invert;

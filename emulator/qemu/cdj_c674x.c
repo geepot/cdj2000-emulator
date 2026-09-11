@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "cdj_c674x.h"
+#include "cdj_c674x_multicycle.h"
 #include "cdj_c674x_uncond.h"
 
 #define CDJ_C674X_TSR_SPLX (1u << 14)
@@ -148,7 +149,14 @@ static bool interrupt_pipe_down(CdjC674x *cpu)
     for (unsigned i = 0; i < cpu->store_count; ++i)
         if (cpu->stores[i].due > latest) latest = cpu->stores[i].due;
     uint64_t drain = latest - cpu->cycles;
-    if (drain > UINT32_MAX) return false;
+    /* >= , not > : a drain of exactly UINT32_MAX would alias
+     * CDJ_C674X_IDLE_FOREVER and stop counting down. */
+    if (drain >= UINT32_MAX) return false;
+    /* SPRUFE8B printed page 274: IDLE "terminates upon servicing an
+     * interrupt", so its unbounded wait is replaced by the entry interval
+     * rather than kept as the larger of the two. Ordinary idle padding still
+     * survives, because only the sentinel is cleared here. */
+    if (cpu->idle_cycles == CDJ_C674X_IDLE_FOREVER) cpu->idle_cycles = 0;
     if (cpu->idle_cycles < drain) cpu->idle_cycles = drain;
     return true;
 }
@@ -1047,7 +1055,11 @@ bool cdj_c674x_fetch(CdjC674x *cpu, CdjC674xRead read, void *opaque,
 bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                        CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
-    unsigned elapsed = 1, memory_count = 0;
+    unsigned memory_count = 0;
+    /* Multicycle-NOP duration and conflict state for this execute packet.
+     * cdj_c674x_multicycle.h holds the SPRUFE8B rules; timing.cycles replaces
+     * the old local "elapsed". */
+    CdjC674xPacketTiming timing = CDJ_C674X_PACKET_TIMING_INIT;
     bool nonaligned_memory = false, bdec_issued = false;
     /* Packet execution changes only the scalar/pipeline prefix. The loop
      * schedule and retained instructions are owned by loop_step/setup and
@@ -1070,23 +1082,32 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
         unsigned nop = nop_cycles(insn);
         if (nop) {
+            /* SPRUFE8B printed page 274 gives IDLE bits 16-13 = 1111 with
+             * every other bit zero except p, which nop_cycles reports as
+             * count 16.  NOP's own entry, printed page 388, says "The maximum
+             * value for count is 9", so src 9..14 stay reserved: this narrows
+             * the reserved-count rejection to those, it does not remove it.
+             * Compact Unop (Figure H-9) cannot reach src 15 at all. */
+            if (nop == 16 && !compact) {
+                if (!cdj_c674x_packet_idle(&timing))
+                    return stop(cpu, pc, insn->word,
+                                "multiple multicycle instructions");
+                continue;
+            }
             if (nop > 9) return stop(cpu, pc, insn->word, "reserved NOP count");
-            if (nop > 1 && elapsed > 1)
+            if (!cdj_c674x_packet_nop(&timing, nop))
                 return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-            if (nop > elapsed) elapsed = nop;
             continue;
         }
         /* Compact-header PROT inserts four cycles after every load in the
          * fetch packet, including Dpp/Dstk forms handled by early exits
          * below and 32-bit loads in a mixed packet.  Establish the packet's
          * multicycle duration before format-specific lowering so all load
-         * families receive identical timing. */
-        if (protected_load(insn)) {
-            if (elapsed > 1)
-                return stop(cpu, pc, insn->word,
-                            "multiple multicycle instructions");
-            elapsed = 5;
-        }
+         * families receive identical timing.  The four cycles are counted once
+         * per execute packet: see cdj_c674x_packet_protected_load. */
+        if (protected_load(insn) && !cdj_c674x_packet_protected_load(&timing))
+            return stop(cpu, pc, insn->word,
+                        "multiple multicycle instructions");
         /* Figures C-8 through C-15: lower the compact .D memory families to
          * the existing E1/E3/E5 scalar pipeline.  Pointer registers are
          * always A/B4-7 and ignore RS; data and register-offset operands use
@@ -1175,7 +1196,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
              * Compact BNOP is the branch family that uses halfword scaling. */
             int32_t offset = compact ? sx(w >> 6, 10) * 4
                                           : sx((w >> 7) & 0x1fffff, 21) * 4;
-            if (out.branch_due || elapsed > 1)
+            if (out.branch_due || !cdj_c674x_packet_multicycle(&timing, 6))
                 return stop(cpu, pc, insn->word, "CALLP with pending branch or multicycle instruction");
             for (unsigned j = 0; j < packet->count; ++j) {
                 if (j == i) continue;
@@ -1190,7 +1211,6 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             out.r[side][3] = packet->next_pc; written[side][3] = true;
             if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)offset))
                 return stop(cpu, pc, insn->word, "CALLP branch queue conflict");
-            elapsed = 6;
             continue;
         }
         if (compact) {
@@ -1387,8 +1407,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
              * one bit here and in compact_branch(). */
             if ((w & 0x187f) == 0x006f) {
                 unsigned n = w >> 13;
-                if (n && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-                if (n + 1 > elapsed) elapsed = n + 1;
+                if (!cdj_c674x_packet_multicycle(&timing, n + 1))
+                    return stop(cpu, pc, insn->word, "multiple multicycle instructions");
                 if (!queue_branch(&out, cpu->cycles + 6, cpu->r[1][(w >> 7) & 15]))
                     return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
                 continue;
@@ -1413,9 +1433,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                                                        : sx((w >> 6) & 127, 7);
                 bool enabled = !(w & 0x20) ||
                     ((cpu->r[w & 1][0] != 0) ^ ((w >> 4) & 1));
-                if (n > 0 && elapsed > 1)
+                if (!cdj_c674x_packet_multicycle(&timing, n + 1))
                     return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-                if (n + 1 > elapsed) elapsed = n + 1;
                 if (enabled) {
                     if (!queue_branch(&out, cpu->cycles + 6, (pc & ~31u) + (uint32_t)(displacement * 2)))
                     return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
@@ -2401,8 +2420,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
              * displacement units; without a header it uses words. */
             unsigned n = (w >> 13) & 7;
             reg_write = false;
-            if (n && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-            if (n + 1 > elapsed) elapsed = n + 1;
+            if (!cdj_c674x_packet_multicycle(&timing, n + 1))
+                return stop(cpu, pc, insn->word, "multiple multicycle instructions");
             if (enabled && !queue_branch(&out, cpu->cycles + 6,
                     (pc & ~31u) + (uint32_t)(sx((w >> 16) & 4095, 12) *
                                            (insn->header ? 2 : 4))))
@@ -2410,8 +2429,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         } else if ((w & 0x0f830ffe) == 0x00800362) {
             unsigned n = (w >> 13) & 7;
             reg_write = false;
-            if (n && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-            if (n + 1 > elapsed) elapsed = n + 1;
+            if (!cdj_c674x_packet_multicycle(&timing, n + 1))
+                return stop(cpu, pc, insn->word, "multiple multicycle instructions");
             if (enabled) {
                 if (!queue_branch(&out, cpu->cycles + 6, cpu->r[cross][b]))
                     return stop(cpu, pc, insn->word, "parallel taken branches or branch queue overflow");
@@ -2426,8 +2445,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             if (!side) return stop(cpu, pc, insn->word, "ADDKPC requires S2");
             value = (pc & ~31u) + (uint32_t)(sx((w >> 16) & 127, 7) * 4);
             unsigned n = 1 + ((w >> 13) & 7);
-            if (enabled && n > 1 && elapsed > 1) return stop(cpu, pc, insn->word, "multiple multicycle instructions");
-            if (enabled && n > elapsed) elapsed = n;
+            if (enabled && !cdj_c674x_packet_multicycle(&timing, n))
+                return stop(cpu, pc, insn->word, "multiple multicycle instructions");
         } else {
             return stop(cpu, pc, insn->word, "instruction not implemented");
         }
@@ -2502,7 +2521,18 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     if (nonaligned_memory && memory_count > 1)
         return stop(cpu, cpu->pc, 0, "parallel access with nonaligned memory instruction");
     /* Same-cycle overlapping RAM reads/writes need bus arbitration that
-     * this core does not yet model. Do not choose an invented ordering. */
+     * this core does not yet model. Do not choose an invented ordering.
+     * SPRUFE8B defines no order for them: Table 4-8 (printed page 590) puts a
+     * store's "memory write" in E3 and Table 4-10 (printed page 593) puts a
+     * load's "memory read at that address" in E3, so a parallel .D1 load and
+     * .D2 store to one address access memory in the same cycle.  Section 4.2.5
+     * (printed page 594) defines only the sequential case - "a load following a
+     * store accesses the value placed in memory by that store in the cycle
+     * after the store is completed" - and 3.8.5 (printed page 80), Table 4-40
+     * and Table 4-41 (printed pages 618-619) state no same-address rule.  The
+     * C6745/C6747 device manual SPRUH91D describes no L1D arbitration for it
+     * either.  Settling this needs hardware or a TI statement, not a reading of
+     * the CPU manual, so this halts rather than guess read-before-write. */
     for (unsigned j = 0; j < out.load_count; ++j) {
         if (!queued_memory_load(&out.loads[j])) continue;
         for (unsigned k = 0; k < out.store_count; ++k) {
@@ -2528,12 +2558,19 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             controls[out.loads[j].sign_extend ? 20 : 18])
             return stop(cpu, cpu->pc, 0, "delayed FP-status write conflict");
     }
-    if (packet->single_cycle && elapsed > 1) {
-        out.idle_cycles = elapsed - 1;
-        elapsed = 1;
+    if (packet->single_cycle && timing.cycles > 1) {
+        out.idle_cycles = timing.cycles - 1;
+        timing.cycles = 1;
     }
+    /* SPRUFE8B printed page 274: IDLE performs "an infinite multicycle NOP
+     * that terminates upon servicing an interrupt, or a branch occurs due to
+     * an IDLE instruction being in the delay slots of a branch".  The packet
+     * still issues its one cycle below; the unbounded wait afterwards is the
+     * sentinel, which the branch-completion arm clears and which
+     * interrupt_pipe_down replaces with the entry interval. */
+    if (timing.idle) out.idle_cycles = CDJ_C674X_IDLE_FOREVER;
     out.pc = packet->next_pc;
-    for (unsigned i = 0; i < elapsed; ++i) {
+    for (unsigned i = 0; i < timing.cycles; ++i) {
         ++out.cycles;
         if (out.cycle_tick) out.cycle_tick(out.cycle_opaque);
         for (unsigned j = 0; j < out.store_count;) {
@@ -2636,6 +2673,9 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
          * The 48-cycle, 112-tag and simultaneous-issue limits still apply. */
         ++out.loop_packets;
         bool finish = false;
+        /* The PROT expansion belongs to the execute packet, not to each load
+         * in it: see cdj_c674x_packet_protected_load and printed page 93. */
+        bool protect = false;
         unsigned delay = 0, count = 0;
         uint32_t tags[8];
         bool has_mask = spmask_decode(&source.instructions[0], &masking.mask);
@@ -2723,9 +2763,14 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
              * Do not reinsert fetch delays when the load is replayed. This
              * expansion applies even when predicated false or SPMASKed. */
             if (protected_load(&insn)) {
-                if (finish || out.loop_wait)
+                /* Parallel protected loads share the packet's one issue cycle
+                 * and therefore its single four-cycle expansion.  A wait left
+                 * by any other instruction, in this packet or an earlier one,
+                 * and SPKERNEL (printed page 481) still reject. */
+                if (finish || (out.loop_wait && !protect))
                     return stop(cpu, insn.pc, w, "invalid protected loop load packet");
                 out.loop_wait = 4;
+                protect = true;
                 insn.header &= ~(1u << 20);
             }
             if ((!insn.compact && ((w & 0x1ffe) == 0x162 || (w & 0x7c) == 0x10 ||
@@ -2790,7 +2835,9 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         }
         combined.next_pc = source.next_pc;
     } else if (out.idle_cycles) {
-        --out.idle_cycles;
+        /* The IDLE sentinel never counts down; only an interrupt or a branch
+         * ends it (SPRUFE8B printed page 274). */
+        if (out.idle_cycles != CDJ_C674X_IDLE_FOREVER) --out.idle_cycles;
     }
     uint32_t tags[8]; unsigned count; bool scheduler_post, drained;
     if (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING)
@@ -2863,7 +2910,9 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
     if (cpu->idle_cycles) {
         CdjC674x out = *cpu;
         CdjC674xPacket idle = {.next_pc = cpu->pc, .single_cycle = true};
-        --out.idle_cycles;
+        /* The IDLE sentinel never counts down; only an interrupt or a branch
+         * ends it (SPRUFE8B printed page 274). */
+        if (out.idle_cycles != CDJ_C674X_IDLE_FOREVER) --out.idle_cycles;
         if (!cdj_c674x_execute(&out, &idle, read, write, opaque))
             return stop(cpu, out.fault_pc, out.fault_word, out.fault);
         *cpu = out;

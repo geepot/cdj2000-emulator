@@ -118,10 +118,290 @@ static void test_packet_preserves_loop_storage(void)
     assert(!memcmp(&c, &before, sizeof(c)));
 }
 
+/* SPRUFE8B printed page 93, verbatim: "When PROT is 1, four cycles of NOP are
+ * added after each LD instruction within the fetch packet whether the LD is in
+ * 16-bit compact format or 32-bit format."  Both loads of a parallel pair issue
+ * in the execute packet's one cycle, so the four added cycles follow that one
+ * cycle once: the packet is 1 + 4 = 5 cycles, the same as a single protected
+ * load.  Loads in *different* execute packets of the same fetch packet issue in
+ * different cycles and so are expanded separately, once per execute packet.
+ *
+ * Encodings from asm6x -mv6740 (TMS320C6x Assembler v8.5.0):
+ *   LDW .D1 *+A4[0], A10   -> 05100264, with the p bit set 05100265
+ *   LDW .D2 *+B4[0], B10   -> 051002E6
+ *   STW .D2 B10, *+B4[0]   -> 051002F6
+ * The mixed fetch-packet header is built by hand from Figure 3-7 (printed page
+ * 93): top nibble 0xE marks the compact header, bit 20 is PROT.  asm6x emits
+ * compact headers only under compiler control, so the header word is the one
+ * value here not taken from the assembler. */
+static void test_protected_fetch_packet_expands_once(void)
+{
+    CdjC674x c;
+    for (unsigned pair = 0; pair < 2; ++pair) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[0] = pair ? 0x05100265u : 0x05100264u;
+        if (pair) memory[1] = 0x051002E6u;
+        memory[7] = 0xe0000000u | (1u << 20);
+        memory[16] = 0x11223344; /* 0x1040 */
+        memory[18] = 0x55667788; /* 0x1048 */
+        c.r[0][4] = 0x1040; c.r[1][4] = 0x1048;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        /* Hand-derived from printed page 93: one issue cycle plus four. */
+        assert(c.cycles == 5 && c.pc == (pair ? 0x1008u : 0x1004u));
+        /* Table 4-10, printed page 593: a load writes dst in E5, four delay
+         * slots after E1, so both results are architectural by cycle 5. */
+        assert(c.r[0][10] == 0x11223344 && !c.load_count);
+        assert(c.r[1][10] == (pair ? 0x55667788u : 0u));
+    }
+    /* The narrowed guard still rejects a PROT packet that also holds a
+     * genuinely conflicting multicycle instruction: printed page 82 forbids two
+     * multicycle-NOP generators in one execute packet, and printed page 481
+     * counts protected loads among the instructions that initiate them. */
+    const uint32_t conflicts[] = {
+        0x00002000u,        /* NOP 2, asm6x */
+        0x00006000u,        /* NOP 4, asm6x */
+        0x0001E000u,        /* IDLE, asm6x */
+        (3u << 13) | 0x120u /* BNOP label, 3 */
+    };
+    for (unsigned i = 0; i < sizeof(conflicts) / sizeof(conflicts[0]); ++i)
+    for (unsigned order = 0; order < 2; ++order) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[order] = 0x05100264u | (order ? 0u : 1u);
+        memory[order ^ 1] = conflicts[i] | (order ? 1u : 0u);
+        memory[7] = 0xe0000000u | (1u << 20);
+        c.r[0][4] = 0x1040;
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 0 && !c.load_count);
+    }
+}
+
+/* METAMORPHIC TEST, not an absolute reference-backed one.  What comes from
+     * SPRUFE8B printed page 93 is the EQUIVALENCE: a protected LD expands to the
+     * same thing as that LD followed by an explicit NOP 4.  The absolute values
+     * compared below (register files, loop.cycle/length/sealed, loop_tags,
+     * load_count) are this emulator's own trace of the unprotected-plus-NOP-4
+     * program, captured into reference[] in this same test.  So if our handling
+     * of NOP 4 inside an SPLOOP body were itself wrong, both sides would be
+     * wrong together and this test would still pass.  It is load-bearing -
+     * reverting the per-packet protected-load fix fails this test and only this
+     * test - but it pins a relation to the manual, not a number.  The coverage
+     * inventory records its expected values as "mixed" for that reason.
+     */
+    /* The same rule inside a software-pipelined loop body, which is the case
+ * BUILD.md:996 records the NXS firmware hitting at 0x11802ea8.  SPRUFE8B
+ * printed page 93 again: the four cycles follow the execute packet's one issue
+ * cycle, so a protected body packet holding two parallel loads is cycle-for-
+ * cycle the same program as the unprotected pair followed by an explicit NOP 4.
+ *
+ * Encodings from asm6x -mv6740:
+ *   SPLOOP 5             -> 02038000
+ *   LDW .D1 *A4, A5      -> 02900264, p bit set 02900265
+ *   LDW .D2 *B4, B5      -> 029002E6
+ *   NOP 4                -> 00006000
+ *   SPKERNEL 0, 0        -> 00034001
+ *   ADD .L1 A5, A5, A6   -> 0314A078
+ * asm6x accepts that whole body, two parallel loads included. */
+static void test_protected_loop_body_expands_once(void)
+{
+    CdjC674x c, reference[20];
+    for (unsigned prot = 0; prot < 2; ++prot) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[0] = 0x02038000u;
+        memory[1] = 0x02900265u;
+        memory[2] = 0x029002E6u;
+        unsigned slot = 3;
+        if (!prot) memory[slot++] = 0x00006000u; /* explicit NOP 4 */
+        memory[slot++] = 0;                      /* NOP */
+        memory[slot++] = 0x00034001u;            /* SPKERNEL 0,0 */
+        memory[slot] = 0x0314A078u;              /* || ADD .L1 A5,A5,A6 */
+        memory[7] = 0xe0000000u | (prot ? (1u << 20) : 0u);
+        memory[16] = 0x00000101; /* 0x1040 */
+        memory[18] = 0x00000202; /* 0x1048 */
+        c.r[0][4] = 0x1040; c.r[1][4] = 0x1048;
+        c.control[13] = 3; /* ILC */
+        for (unsigned cycle = 0; cycle < 20; ++cycle) {
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(c.cycles == cycle + 1);
+            if (!prot) reference[cycle] = c;
+            else {
+                const CdjC674x *r = &reference[cycle];
+                assert(!memcmp(c.r, r->r, sizeof(c.r)));
+                assert(c.loop.cycle == r->loop.cycle &&
+                       c.loop.length == r->loop.length);
+                assert(c.loop.sealed == r->loop.sealed &&
+                       c.loop_tags == r->loop_tags);
+                assert(c.load_count == r->load_count);
+                /* loop_wait itself is deliberately not compared: the protected
+                 * form consumes the load's own issue cycle as the first of the
+                 * five, so its countdown leads the explicit NOP 4 by one
+                 * cycle while the program state matches. */
+            }
+        }
+        /* The expansion is four cycles, counted once for the pair. */
+        if (prot) assert(c.r[0][5] == 0x101 && c.r[1][5] == 0x202);
+    }
+    /* The narrowed loop-path guard still rejects the cases printed page 481
+     * forbids: SPKERNEL in the protected packet, and a second multicycle-NOP
+     * generator in it. */
+    const uint32_t conflicts[] = {0x00034001u /* SPKERNEL */, 0x00002000u /* NOP 2 */};
+    for (unsigned i = 0; i < sizeof(conflicts) / sizeof(conflicts[0]); ++i) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[0] = 0x02038000u;
+        memory[1] = 0x02900265u;
+        memory[2] = 0x029002E7u; /* second protected load, p bit set */
+        memory[3] = conflicts[i];
+        memory[7] = 0xe0000000u | (1u << 20);
+        c.r[0][4] = 0x1040; c.r[1][4] = 0x1048;
+        c.control[13] = 3;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL)); /* setup */
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.loop_tags == 0 && c.loop.length == 0);
+    }
+}
+
+/* SPRUFE8B 3.8.11.5, printed page 83, verbatim: "A NOP n (with n > 1)
+ * instruction cannot be placed in parallel with other multicycle NOP counts
+ * (ADDKPC, BNOP, CALLP) with the exception of another NOP n where the NOP count
+ * is the same."  asm6x agrees: NOP 2 || NOP 2 assembles, while NOP 4 || NOP 2
+ * is rejected with "[E0801] Multiple multi-cycle NOP ... instructions not
+ * allowed in the same execute packet".
+ *
+ * NOP encodings are from printed page 388 (src = count - 1 at bits 16-13) and
+ * confirmed by asm6x: NOP 2 -> 00002000, NOP 4 -> 00006000, NOP 9 -> 00010000. */
+static void test_equal_count_parallel_nops(void)
+{
+    CdjC674x c;
+    for (unsigned count = 2; count <= 9; ++count) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[0] = ((count - 1) << 13) | 1u;
+        memory[1] = (count - 1) << 13;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        /* Printed page 388: "For src + 1 cycles, no operation is performed." */
+        assert(c.cycles == count && c.pc == 0x1008);
+    }
+    /* Unequal counts remain a fault in both orders. */
+    for (unsigned order = 0; order < 2; ++order) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[order] = 0x00006000u | (order ? 0u : 1u);     /* NOP 4 */
+        memory[order ^ 1] = 0x00002000u | (order ? 1u : 0u); /* NOP 2 */
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 0);
+    }
+    /* A BNOP whose count happens to match is still forbidden: printed page 83
+     * grants the exception to another NOP n only. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0x00002001u;          /* NOP 2 */
+    memory[1] = (1u << 13) | 0x120u;  /* BNOP label, 1 -> two cycles */
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 0);
+}
+
+/* SPRUFE8B IDLE, printed page 274: opcode bits 16-13 = 1111 with every other
+ * bit zero except p, i.e. 0001E000 - confirmed by asm6x, which assembles IDLE
+ * to 0001E000 and IDLE || NOP to 0001E001 / 00000000.  Description, verbatim:
+ * "Performs an infinite multicycle NOP that terminates upon servicing an
+ * interrupt, or a branch occurs due to an IDLE instruction being in the delay
+ * slots of a branch."  Delay Slots: 0.
+ *
+ * NOP's own entry, printed page 388: "The maximum value for count is 9", so
+ * src 9..14 stay reserved and must still be rejected. */
+static void test_idle_waits_for_an_interrupt_or_a_branch(void)
+{
+    CdjC674x c;
+    /* src 9..14 -> count 10..15: still reserved, still rejected. */
+    for (unsigned src = 9; src <= 14; ++src) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[0] = src << 13;
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 0);
+    }
+    /* Zero delay slots: the packet issues one cycle, then waits. */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0x0001E000u;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 1 && c.pc == 0x1004);
+    assert(c.idle_cycles == CDJ_C674X_IDLE_FOREVER);
+    /* The wait does not count down, however long the core is stepped. */
+    for (unsigned i = 0; i < 64; ++i) {
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.pc == 0x1004 && c.cycles == 2 + i);
+        assert(c.idle_cycles == CDJ_C674X_IDLE_FOREVER);
+    }
+    /* Servicing an interrupt terminates it.  Table 5-3 / section 5.4.4: IRP is
+     * the first annulled execute packet, which is the one after the IDLE. */
+    c.control[1] |= 1u;                /* CSR.GIE */
+    c.control[4] |= (1u << 4) | 2u;    /* IER.IE4, NMIE */
+    assert(cdj_c674x_interrupt(&c, 1u << 4));
+    assert(c.control[6] == 0x1004 && c.pc == 0x00700080);
+    finish_interrupt_entry(&c);
+    /* The entry interval is the documented nine cycles, not the sentinel, so
+     * the core resumes at the vector instead of idling forever. */
+    assert(!c.idle_cycles && c.pc == 0x00700080);
+
+    /* An IDLE in the delay slots of a branch ends when the branch completes
+     * (printed page 274).  B .S2 B3 is 0x000C0362 by the branch-register
+     * encoding; five delay slots put the target in E1 on cycle 6 (Table 4-11,
+     * printed page 594). */
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0x00000362u | (3u << 18);
+    memory[1] = 0x0001E000u;
+    c.r[1][3] = 0x1080;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.branch_due == 6);
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 2 && c.idle_cycles == CDJ_C674X_IDLE_FOREVER);
+    while (c.cycles < 6) assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.pc == 0x1080 && !c.idle_cycles && !c.branch_due);
+
+    /* Printed page 83, 3.8.11.4: IDLE "can be placed in parallel with the NOP
+     * instruction" and with ordinary single-cycle work, but with no other
+     * multicycle-NOP generator. */
+    const uint32_t legal[] = {0x00000000u, 0x008000A8u /* MVK .S1 1,A1 */};
+    for (unsigned i = 0; i < sizeof(legal) / sizeof(legal[0]); ++i) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[0] = 0x0001E001u; memory[1] = legal[i];
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 1 && c.idle_cycles == CDJ_C674X_IDLE_FOREVER);
+        assert(c.r[0][1] == (i ? 1u : 0u));
+    }
+    const uint32_t illegal[] = {
+        0x00002000u,          /* NOP 2 */
+        0x0001E000u,          /* IDLE */
+        (3u << 13) | 0x120u,  /* BNOP label, 3 */
+        (1u << 13) | 0x162u,  /* ADDKPC label, B3, 1 */
+        0x10004000u,          /* DINT */
+        0x10006000u,          /* RINT */
+    };
+    for (unsigned i = 0; i < sizeof(illegal) / sizeof(illegal[0]); ++i)
+    for (unsigned order = 0; order < 2; ++order) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[order] = 0x0001E000u | (order ? 0u : 1u);
+        memory[order ^ 1] = illegal[i] | (order ? 1u : 0u);
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.cycles == 0 && !c.idle_cycles);
+    }
+}
+
 int main(void)
 {
     test_fetch_headers();
     test_packet_preserves_loop_storage();
+    test_protected_fetch_packet_expands_once();
+    test_protected_loop_body_expands_once();
+    test_equal_count_parallel_nops();
+    test_idle_waits_for_an_interrupt_or_a_branch();
     CdjC674x c;
     /* Board clocks advance on every cycle, including PROT/NOP delays;
      * E3 captures the value on that edge, not the step's final value. */
