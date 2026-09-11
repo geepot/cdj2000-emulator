@@ -107,18 +107,33 @@ differently from how they were reported:
   FADCR bit 7 set and FAUCR clear on an inexact sum, on `.S` as well as `.L`.
   FAUCR was already asserted clear in 15 existing places. The review overstated
   this: nothing was broken. A test naming the note explicitly has been added.
-- **`MPYDP` overflow rounding — REAL, and now labelled.** The four LFPN cases
-  are derived by analogy from `ADDDP`'s rounding table. The word LFPN does not
+- **`MPYDP` overflow rounding — REAL, and the silence is structured.** The four
+  LFPN cases are derived by analogy from `ADDDP`'s rounding table. LFPN does not
   occur anywhere in the `MPYDP` entry, whose notes 1-5 cover only NaN, signed
   infinity, signed zero, denormals and rounding-sets-INEX. The old comment
   claimed ADDDP's tables were "the only statement the manual makes about them
-  for .M"; the manual makes no such statement. Behaviour kept and pinned so the
-  choice is visible, now labelled an analogy.
-- **`DPINT`/`DPTRUNC` NaN result — REAL, and now labelled.** Note 1 reads "the
-  maximum signed integer (7FFF FFFFh or 8000 0000h) is placed in dst" and does
-  not say which. The cstub pins a sign-selected answer, mirroring note 2's
-  signed-infinity case where the sign is meaningful. A NaN's sign is not, so
-  this is a reading of the note, not the note.
+  for .M"; the manual makes no such statement. Confirmed by enumeration: the
+  "Overflow Output Rounding Mode" table appears on exactly **five** entries -
+  `ADDDP` 125, `ADDSP` 127, `DPSP` 260, `SUBDP` 541, `SUBSP` 544 - every one an
+  adder or convert form, and on **no** `.M`-unit entry; `MPYDP` and `MPYSP` have
+  no overflow note at all. FMCR (printed page 63) does define `OVER` and a
+  four-mode `RMODE` for `.M`, so the unit has both a rounding mode and an
+  overflow flag while the manual never states the resulting value. Behaviour
+  kept and pinned so the choice is visible, labelled an analogy. Closing it:
+  `MPYDP` of two large doubles under each of the four FMCR `RMODE` settings.
+- **`DPINT`/`DPTRUNC` NaN result — REAL, and now labelled. The comparison with
+  note 2 does not help, contrary to what was recorded here.** Note 2 is
+  *character-identical* to note 1, including in the signed-infinity case where a
+  sign demonstrably exists and TI could have written the two values out. It did
+  not. The same sentence pair appears on exactly four entries (`DPINT` 258,
+  `DPTRUNC` 262, `SPINT` 479, `SPTRUNC` 491) and nowhere else, no special-case
+  table for integer conversion exists in any of the four documents, and
+  "minimum signed integer" appears **zero** times in all of them - so "the
+  maximum signed integer (...or...)" reads as *the saturated extreme, whichever
+  end*. The cstub pins a sign-selected answer; that remains a reading.
+  Cheapest probe: run `DPINT` on -infinity. `8000 0000h` means the parenthetical
+  is sign-dependent and NaN follows the sign bit; `7FFF FFFFh` means it is a
+  literal constant.
 - **`RCPDP`/`RCPSP`/`RSQRDP`/`RSQRSP` refusal — right outcome, false reason.**
   The old justification said those pages give no example with a concrete
   result. They do: printed page 410 gives `RCPDP` 4.00 -> 0.25. That example
@@ -145,19 +160,33 @@ Still deliberately **not** done, and why:
 - **Overlapping parallel load/store to one address stays fail-closed.** SPRUFE8B
   does not define the ordering; inventing one would be worse than a halt.
 - **Figure D-6 `Ltbd` remains unexplained** and referenced by no instruction.
-- **`ABS`'s effect on `CSR.SAT` and `SSR` is unresolved**, and the core leaves
-  both alone. The whole `ABS` entry (printed pages 101-102) contains no
-  occurrence of "SAT", "CSR" or "SSR"; the sentence an earlier comment cited
-  from "page 102" is actually `ABS2`'s, on printed page 105, and it is the
-  *packed* forms that carry that exemption note. The general rule points the
-  other way: CSR Table 2-9 (printed page 33) defines bit 9 SAT as set when "one
-  or more functional units performed an arithmetic operation which resulted in
-  saturation", SSR 2.9.13 (printed page 54) says instructions resulting in
-  saturation set the unit flag, and `ABS` rule 3 (-2^31 -> 2^31-1,
-  -2^39 -> 2^39-1) is such a saturation. Setting the flags would be a short
-  reuse of the `CDJ_C674X_DELAYED_SAT` sentinel `arm_sat40` already uses, but
-  the manual never states it positively for `ABS`, so it is not done on
-  likelihood alone.
+- **`ABS` sets `CSR.SAT` and the `SSR` unit flag when it saturates.** The `ABS`
+  entry is silent - it contains no occurrence of "SAT", "CSR" or "SSR" - so this
+  rests on a general rule chained with two stated facts, not on the entry.
+  Table 4-1 (printed page **581**), phase E2: *"Single-cycle instructions that
+  saturate results set the SAT bit in the control status register (CSR) if
+  saturation occurs."* `ABS` is stated `Single-cycle` (printed page 102) and its
+  rule 3 saturates (printed page 101). SSR 2.9.13 (printed page 54) is
+  unqualified in the same direction, and Table 2-22 (printed page 55) puts L1 at
+  bit 0 and L2 at bit 1.
+  The exemption notes support rather than oppose this. All **eight** "does not
+  affect the SAT bit" notes in the manual are on packed forms - `ABS2` (printed
+  page **103**), `SADD2` 425, `SADDSUB2` 429, `SADDUS2` 433, `SADDU4` 435,
+  `SPACK2` 472, `SPACKU4` 474, `SSUB2` 502 - and each justifies itself the same
+  way, that the operation is performed on each lane separately, which does not
+  transfer to a scalar form. Every non-packed saturating instruction states
+  positively that it DOES set SAT (`SADD` 423, `SAT` 437, `SSUB` 499, `SSHL`
+  493, `SMPY` 461, `SADDSUB` 427, `SSHVL` 495, `SSHVR` 497); `ABS` is the only
+  scalar saturating instruction with neither. Packedness alone is not
+  sufficient for exemption - `SMPY2` (printed page 468) is packed and sets SAT -
+  so the implication runs one way only.
+  **This reverses an earlier position recorded here.** That entry left both
+  flags alone and called it the conservative choice; it was not. Doing nothing
+  diverges from a stated general rule, which is the *less* conservative option.
+  It also cited two pages wrongly - `ABS2`'s note as page 105 (it is 103) and
+  CSR Table 2-9 as page 33 (the SAT row is on 39) - both off by enough to fail a
+  search. Still not stated for `ABS` by name, so it stays an inference; closing
+  it needs an ISS or EVM run, or a TI statement.
 - **`B NRP` refuses a restorable `TSR`.** The instruction page (157-158) gives
   only NRP -> PFC and the NMIE set, but 5.3.4.2 (printed page 639) adds "The
   NTSR register will be copied back into the TSR register during the transfer of
@@ -947,10 +976,36 @@ anyone remembering it. Each says what would close it.
   `generated_from`, and its `PER-TIMER64P` and `IC-DEV-EVENT-SOURCES` rows still
   read "it will fail today" and "2 of 124 events" although both landed in wave 4.
   Regenerate it rather than hand-editing.
-- **Two recorded faults remain unexplained**: `parallel register write conflict`
-  at `0xc004f306` and `delayed-result write conflict` at `0x11800108`.
-- **146 checkpoints are unreadable** out of 61,219, and checkpoint round-trip
-  zero-byte coverage stands at 7,147 of 15,808.
+- **Two recorded faults remain unexplained**, but both are now characterised.
+  `0x11800108` was never an odd address: it is a **normalization**. The raw
+  record says `0x00800108`, and the coverage builder adds `0x11000000` to map
+  the DSP's local L2 alias into the global view (`cdj2000_nxs_hpi.c` folds
+  `0x00800000`-`0x0083ffff` that way, pinned by `tests/test_dsp_coverage.py`),
+  matching SPRS377F printed page 22's `0x1180 0000 ... DSP L2 RAM`.
+  `parallel register write conflict` is **bit-identical across 26 runs** - 72
+  records, every one at `pc=0xc004f306`, `word=0x2627`, `packets=25,364,865`,
+  `cycles=60,779,972` - so it is cheap to reproduce; the reading is a
+  SPLOOP-vs-compact-header packet-composition bug, not a conflict-rule bug.
+  `delayed-result write conflict` occurs at two PCs and every record carries
+  `fault_word: 0` because the raise site passes `word = 0`, so **the
+  instruction word is dropped**; recovering it is a one-line instrumentation
+  change and is the cheapest next step.
+- **The core is inconsistent about which SPRUFE8B 3.8 constraints it enforces.**
+  It fails closed on 3.8.8 (parallel register writes) and **open** on 3.8.1
+  (functional-unit occupancy): eight parallel `MVK .S1` all execute in one
+  cycle, although printed page 78 says *"Two instructions using the same
+  functional unit cannot be issued in the same execute packet."* Same manual
+  section, equal authority, opposite dispositions. Worth resolving deliberately.
+- **146 checkpoints are unreadable, and the cause is now known and singular.**
+  Not corruption: all 146 are byte-perfect, payload-complete and
+  checksum-verified. They are rejected by a **stale schema-7/8 ABI size gate** -
+  the expected sizes are derived from today's struct layout, so growing
+  `CdjC6747McaspControl` / `CdjC6747Edma` retroactively redefined what those
+  schema numbers mean and orphaned four `(state_size, comp[8])` variants.
+  Reader-side fix only: freeze the per-schema sizes as literal constants and
+  register the four historical variants. Note the corpus has since grown to
+  **61,900** files; the 146 figure still reproduces exactly. Checkpoint
+  round-trip zero-byte coverage stands at 7,147 of 15,808.
 - **No instruction-timing oracle exists.** `cpu->cycles` is an issue count with
   no stall, memory or cache model; nothing relates it to Hz. The Timer64P
   counter is an order, not a rate (§0).

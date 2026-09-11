@@ -2824,6 +2824,23 @@ static bool arm_subc(CdjC674xArm *x)
     return true;
 }
 
+/* Queue the CSR.SAT / SSR[unit] effect of a saturating .L instruction.
+ * CSR Table 2-9 (printed page 39): "The SAT bit is set one full cycle (one
+ * delay slot) after a saturate occurs."  SSR 2.9.13 (printed page 54) sets the
+ * unit flag "in the cycle following the writing of the result".  address is the
+ * SSR unit mask, L1 = bit 0 and L2 = bit 1 (Table 2-22, printed page 55), which
+ * is what 1u << side gives for a .L instruction. */
+static bool queue_saturation(CdjC674xArm *x)
+{
+    if (x->out->load_count == 40)
+        return stop(x->cpu, x->pc, x->insn->word, "delayed-status queue full");
+    x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+        .due = x->cpu->cycles + 2, .address = 1u << x->side,
+        .size = CDJ_C674X_DELAYED_SAT
+    };
+    return true;
+}
+
 static bool arm_abs(CdjC674xArm *x)
 {
     /* ABS, printed pages 101-102: single cycle, 0 delay slots, E1 write.
@@ -2841,14 +2858,41 @@ static bool arm_abs(CdjC674xArm *x)
      * in saturation set the unit flag - and ABS rule 3 (-2^31 -> 2^31-1,
      * -2^39 -> 2^39-1) is such a saturation.
      *
-     * The manual never states it positively for ABS, so the answer is unknown
-     * and this leaves the flags alone: that is the status quo, not a finding.
-     * Setting CSR.SAT and SSR[side] would be a short reuse of the
-     * CDJ_C674X_DELAYED_SAT sentinel arm_sat40 already uses, but it is not done
-     * on likelihood alone.  Recorded in DSP_ARCHITECTURE_COVERAGE.md. */
+     * SO THE ANSWER COMES FROM A GENERAL RULE, NOT THE ENTRY.  Table 4-1
+     * (printed page 581), phase E2: "Single-cycle instructions that saturate
+     * results set the SAT bit in the control status register (CSR) if
+     * saturation occurs."  ABS is stated Single-cycle (printed page 102) and
+     * its rule 3 saturates (printed page 101), so the three stated facts chain.
+     * SSR 2.9.13 (printed page 54) is unqualified in the same direction:
+     * "Instructions resulting in saturation set the appropriate unit flag in
+     * SSR in the cycle following the writing of the result to the register
+     * file."
+     *
+     * The exemption notes point the same way rather than against it.  All EIGHT
+     * "does not affect the SAT bit" notes in the manual are on packed forms
+     * (ABS2 103, SADD2 425, SADDSUB2 429, SADDUS2 433, SADDU4 435, SPACK2 472,
+     * SPACKU4 474, SSUB2 502) and every one justifies itself the same way - the
+     * operation is performed on each lane separately, so there is no single
+     * result to flag.  That rationale does not transfer to a scalar form.
+     * Meanwhile every non-packed saturating instruction states positively that
+     * it DOES set SAT (SADD 423, SAT 437, SSUB 499, SSHL 493, SMPY 461,
+     * SADDSUB 427, SSHVL 495, SSHVR 497); ABS is the only scalar saturating
+     * instruction with neither a positive statement nor an exemption.
+     * Packedness alone is not sufficient for exemption - SMPY2 (printed page
+     * 468) is packed and sets SAT - so the implication runs only one way.
+     *
+     * An earlier version of this comment left both flags alone and called that
+     * the status quo.  It was not: doing nothing diverges from a stated general
+     * rule, which is the less conservative choice, not the safer one.  Still
+     * not stated for ABS by name, and recorded as an inference in
+     * DSP_ARCHITECTURE_COVERAGE.md. */
     bool pair = ((x->w >> 5) & 0x7f) == 0x38;
     if (!pair) {
-        x->value = cdj_c674x_abs32(x->cpu->r[x->cross][x->b]);
+        uint32_t src2 = x->cpu->r[x->cross][x->b];
+        x->value = cdj_c674x_abs32(src2);
+        /* Rule 3, printed page 101: only -2^31 saturates. */
+        if (x->enabled && src2 == 0x80000000u && !queue_saturation(x))
+            return false;
         return true;
     }
     x->reg_write = false;
@@ -2857,9 +2901,12 @@ static bool arm_abs(CdjC674xArm *x)
     if (x->w & 0x1000)
         return stop(x->cpu, x->pc, x->insn->word,
                     "cross-path long operand not supported");
-    if (x->enabled)
-        return write_long40(x, cdj_c674x_abs40(
-                                   register_long40(x->cpu, x->side, x->b)));
+    if (x->enabled) {
+        uint64_t src2 = register_long40(x->cpu, x->side, x->b);
+        if (!write_long40(x, cdj_c674x_abs40(src2))) return false;
+        /* The slong rule 3 saturates only at -2^39. */
+        if (src2 == (UINT64_C(1) << 39) && !queue_saturation(x)) return false;
+    }
     return true;
 }
 

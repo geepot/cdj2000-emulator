@@ -300,6 +300,42 @@ static void abs_forms(void)
     issue(&c, word_of(5, 1, 0, 0, 0x358, 0));
     assert(c.r[0][5] == 0x7fffb1c3u);
 
+    /* ABS SETS CSR.SAT AND SSR WHEN IT SATURATES.  The ABS entry itself is
+     * silent - it contains no occurrence of "SAT", "CSR" or "SSR" - so this
+     * comes from a general rule chained with two stated facts about ABS:
+     *
+     *   Table 4-1, printed page 581, phase E2: "Single-cycle instructions that
+     *   saturate results set the SAT bit in the control status register (CSR)
+     *   if saturation occurs."
+     *   ABS is "Instruction Type Single-cycle" (printed page 102) and its
+     *   rule 3 saturates at -2^31 (printed page 101).
+     *
+     * SSR 2.9.13 (printed page 54) is unqualified in the same direction, and
+     * Table 2-22 (printed page 55) puts L1 at bit 0 and L2 at bit 1.  CSR
+     * Table 2-9 (printed page 39) gives the timing: "The SAT bit is set one
+     * full cycle (one delay slot) after a saturate occurs."
+     *
+     * DERIVED, not transcribed: the manual prints no ABS example whose input
+     * is -2^31, so there is no worked example of this case to copy.  The
+     * non-saturating half of each pair is what makes the assertion meaningful -
+     * a flag set unconditionally would pass the first check and fail here. */
+    for (unsigned side = 0; side < 2; ++side) {
+        CdjC674x s1; cdj_c674x_reset(&s1, 0x1000);
+        s1.r[side][1] = 0x80000000u;
+        issue(&s1, word_of(5, 1, 0, 0, 0x358, side));
+        cycles(&s1, 2);
+        assert(s1.r[side][5] == 0x7fffffffu);
+        assert((s1.control[1] >> 9) & 1u);          /* CSR.SAT   */
+        assert(s1.control[21] == (1u << side));     /* SSR L1/L2 */
+
+        CdjC674x s2; cdj_c674x_reset(&s2, 0x1000);
+        s2.r[side][1] = 0xfffffffeu;                /* -2, no saturation */
+        issue(&s2, word_of(5, 1, 0, 0, 0x358, side));
+        cycles(&s2, 2);
+        assert(s2.r[side][5] == 2u);
+        assert(!((s2.control[1] >> 9) & 1u) && !s2.control[21]);
+    }
+
     /* Manual example 2, printed page 102: A1 = 3FF6 0010h gives
      * A5 = 3FF6 0010h. */
     CdjC674x d; cdj_c674x_reset(&d, 0x1000);
