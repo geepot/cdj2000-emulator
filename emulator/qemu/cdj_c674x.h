@@ -111,4 +111,25 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
  * not observe loop-buffer source fetches. No extra bus reads or CPU effects. */
 bool cdj_c674x_step_capture_direct(CdjC674x *, CdjC674xRead, CdjC674xWrite,
                                   void *, CdjC674xPacket *);
+
+/* Introspection of the conditional-instruction dispatch table, for the one
+ * test that proves no two rows can claim the same instruction word.
+ *
+ * Selection is first-match-wins over cdj_c674x_arms[], so a new row whose
+ * mask/match overlaps an existing row's is silently shadowed by whichever comes
+ * first and nothing in the build complains.  That is the failure mode these two
+ * functions exist to make mechanical instead of a matter of careful reading:
+ * rows i and j can both match some word exactly when
+ *
+ *     ((match_i ^ match_j) & mask_i & mask_j) == 0
+ *
+ * which is a closed-form check over every pair, needing no instruction sweep.
+ * Only the three scalars a shadow check needs are exposed - never the row's
+ * predicate or arm pointers, and nothing that reaches CPU state.  `has_also`
+ * reports whether the row carries an `also` predicate, which is the documented
+ * way two overlapping rows are legitimately disambiguated.  Row order is the
+ * table's own.  Returns false for an out-of-range index. */
+unsigned cdj_c674x_arm_table_rows(void);
+bool cdj_c674x_arm_table_row(unsigned index, uint32_t *mask, uint32_t *match,
+                             bool *has_also);
 #endif

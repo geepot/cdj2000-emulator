@@ -2007,6 +2007,22 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00001ffe, 0x00000162, NULL,                  arm_addkpc },
 };
 
+unsigned cdj_c674x_arm_table_rows(void)
+{
+    return sizeof(cdj_c674x_arms) / sizeof(cdj_c674x_arms[0]);
+}
+
+bool cdj_c674x_arm_table_row(unsigned index, uint32_t *mask, uint32_t *match,
+                             bool *has_also)
+{
+    if (index >= cdj_c674x_arm_table_rows()) return false;
+    const CdjC674xArmEntry *entry = &cdj_c674x_arms[index];
+    if (mask) *mask = entry->mask;
+    if (match) *match = entry->match;
+    if (has_also) *has_also = entry->also != NULL;
+    return true;
+}
+
 static const CdjC674xArmEntry *cdj_c674x_arm_lookup(const CdjC674xArm *x)
 {
     for (unsigned i = 0; i < sizeof(cdj_c674x_arms) /

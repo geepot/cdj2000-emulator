@@ -207,3 +207,53 @@ def test_c6747_syscfg_unlock_and_pipeline(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
+
+
+def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
+    """No row of cdj_c674x_arms[] may be unreachable behind an earlier row.
+
+    Arm selection is first-match-wins, so a new row whose mask/match overlaps an
+    earlier row's never runs and nothing in the build complains - the
+    instruction it was added for keeps reporting whatever the earlier row does.
+    The table comment asks for an instruction sweep before adding a row; overlap
+    has a closed form instead, checked here over every pair:
+
+        ((match_i ^ match_j) & mask_i & mask_j) == 0  =>  some word matches both
+
+    An overlapping pair is legitimate only when one row carries an `also`
+    predicate, which is how the ladder's remaining condition is expressed.  A
+    pair where NEITHER row is predicated is a hard shadow and fails.
+
+    This is the gate for adding instructions to the table: it turns a silent
+    mis-ordering into a red test.  The predicated-overlap count is asserted too,
+    so a new unpredicated row cannot hide by being miscategorised.
+    """
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'arm-table-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'),
+        str(ROOT / 'tests/cstub/c674x-arm-table.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
+        '-o', str(binary)], check=True)
+    out = subprocess.run([str(binary)], check=True, timeout=30,
+                         capture_output=True, text=True).stdout
+    lines = out.splitlines()
+    shadows = [line for line in lines if line.startswith('shadow ')]
+    assert not shadows, 'shadowed dispatch rows:\n' + '\n'.join(shadows)
+    assert 'hard-shadows 0' in lines, out
+    # 91 pairs overlap on mask/match alone and are separated only by an `also`
+    # predicate.  That is consistent with the table comment's sweep, which
+    # evaluated `also` and found no word claimed twice; this check deliberately
+    # does not evaluate `also`, so it over-reports rather than under-reports.
+    # The count is pinned as a ratchet: a new row that overlaps and is NOT
+    # predicated pushes hard-shadows above 0 and fails outright, while a new
+    # predicated row moves this number and must be changed here deliberately,
+    # together with the `also` predicate that justifies the overlap.
+    predicated = [line for line in lines if line.startswith('predicated-overlaps ')]
+    assert predicated == ['predicated-overlaps 91'], out
