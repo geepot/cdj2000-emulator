@@ -29,6 +29,7 @@ the section it supersedes.
 | PROT dual-load, equal-count `NOP n`, and IDLE | `c48f886` | §5.4 (a), (b), (d) |
 | SMPY/SMPYH/SMPYHL/SMPYLH/SMPY2 and compact Figure E-5 `M3` | `44c2575` | §5.2, §5.3 |
 | The 104-word "genuine" compact gap re-measured: 72 of it was never a gap, and the remaining 32 are Figure H-6 SPLOOP reload. No core change — see §0.1 | *wave 3, `compact-gap`* | §0.1 |
+| Software-loop interrupt drain, SPMASK resume and ISR-local ("nested") SPLOOP applied in strict timing, not only in breadth mode; masked protected LD keeps its four PROT cycles on return | *this patch* | §10 task 1, §7 circular validation |
 
 Measured after those five commits, by the same tools:
 
@@ -279,6 +280,77 @@ with each other.** Both survive `2a6daef` and both still reproduce at `4259e82`.
   branch through B0, and reload B0 from the stack inside the branch's delay slots.
   The fault fires because the in-flight load result lands at E5 on a register the
   current execute packet also writes at E1. Same pipeline class, no map content.
+
+### 0.3 Software-loop interrupt and resume: what landed and what did not
+
+§10's task 1 is done for the three recorded fault classes, and the way it is done
+matters, because all three were already implemented and were refused **only**
+when `cdj_c674x_loop_functional_timing()` was false. That switch is a *timing*
+approximation (the interrupt-entry interval and the two-cycle SPLOOPD epilog
+run-ahead); the three refusals it gated are *semantics*, each stated outright in
+SPRUFE8B chapter 7. Conditioning them on the timing switch made strict mode
+refuse behaviour the manual defines, and made breadth mode the only place the
+manual's rule was applied. The refusals are gone; the rules are applied in both
+modes; nothing else was relaxed.
+
+| Recorded fault | PC | Manual basis | Outcome |
+|---|---|---|---|
+| `SPLOOPW interrupt drain not implemented` | `0xc004a7ec` | §7.13.1, §7.13.4 (printed pages 697-698); §7.10.3 (printed page 691) for SPLOOPW terminating while draining | Already fixed before this patch, by `4557a13`; the string exists nowhere in the tree. The strict replay at `4259e82` got past it and stopped at the next refusal on the same PC. |
+| `SPLOOP interrupt SPMASK resume not implemented` | `0xc004a7ec` | §7.13.1 (printed page 697) enumerates every condition that blocks interrupt draining and an SPMASK in the loop is not one of them; §7.7.3.3 (printed page 679), §7.11.5 (printed page 696) and §7.13.2 (printed page 698) state the resume rule in full | Refusal removed. The firmware loop here is a `SPLOOPW` with `ii = 14` whose body carries a compact SPMASK masking `.L2` - the §7.11.1 shape, Example 7-14, where the masked operation "is executed only once and is not loaded to the SPLOOP buffer" (printed page 693). |
+| `nested SPLOOP would overwrite retained buffer` | `0x1180249a` | §7.7.3.1 (printed page 678): on return "execution is resumed at the address of the SPLOOP(D/W) instruction, and the loop is piped back up by executing a prolog"; §7.13.1 (printed page 697) gives the ISR's whole save/restore contract as "the ITSR or NTSR, ILC, and RILC registers", with no loop buffer in it | Legal, so the refusal was wrong. The resume rebuilds the buffer from program memory, so an interrupt service routine may use the loop buffer. §7.7.3.3's assembler error for "Another SPLOOP(D) instruction is encountered" is about one appearing while a loop is *loading*; this path is only reached with the buffer idle. |
+
+One real gap was found while reading §7.7.3.3 and is now implemented: "The NOP
+cycles associated with ADDKPC, BNOP, or protected LD instructions that are
+masked, are always executed when resuming an interrupted SPLOOP(D)" (printed page
+679). A masked protected LD on return was skipped along with its four cycles of
+PROT expansion. It now keeps them;
+`tests/cstub/c674x.c` asserts dynlen 7 against 3 and fails if the expansion is
+removed.
+
+What is **still** an approximation, now declared unconditionally in every replay
+manifest rather than only in breadth mode: the resume rebuilds from the *current*
+program image, so a loop body changed between the interrupt and the return is not
+detected once an ISR software loop has replaced this core's retained
+cross-check. The retained metadata is a consistency check, not architectural
+state, and where it survives it is still checked.
+
+**Evidence, on the recorded checkpoints.** Each `runs/dsp-wm8740-*/final.cdjdsp`
+is the fail-closed checkpoint the fault produced, and `replay.py` retries the same
+PC against the current core. At `4259e82`, strict timing reproduces the recorded
+stop exactly — fault `SPLOOP interrupt SPMASK resume not implemented`, pc
+`0xc004a7ec`, packets 27,120,649, cycles 66,198,869, the same three numbers as
+`runs/dsp-wm8740-fault-replay-1/failure.json` and
+`runs/dsp-wm8740-sploopw-replay-1/failure.json`. With this patch the same command
+at `--steps 5000000` stops only on the step limit, at packets 32,120,649 and
+cycles 75,075,663, with no fault: five million further packets, against the 126
+the breadth-mode run managed before hitting the nested refusal. The two
+nested-fault checkpoints behave the same way. A 20,000-step strict trace from the
+first checkpoint shows the `SPLOOPW` setup packet at `0xc004a7b4` re-entered 4
+times and the ISR's compact `SPLOOPD` at `0x1180249a` executed 3 times, so the
+drain, the SPMASK pipe-up and the ISR-local loop are all exercised rather than
+merely unreached.
+
+```sh
+.venv/bin/python -m tools.cdj_dsp.replay \
+  runs/dsp-wm8740-fault-replay-1/final.cdjdsp OUT --steps 5000000 \
+  --trace-mode compact
+```
+
+Sanitizers: the core and `tests/cstub/c674x.c` are clean under
+`-fsanitize=address,undefined`. `tools/cdj_dsp/replay.c:393` reports
+`index ... out of bounds` under UBSan in breadth mode — `ram + address - base`
+pointer arithmetic, where `ram + address` alone leaves the object. It reproduces
+identically at `4259e82`, is in the replay harness rather than the core, and is
+left for whoever owns that file.
+
+Circular validation (§7): `test_dsp_scheduler` cannot be de-circularised - the
+bounded deferred scheduler is a host-side step-quota policy with no TI
+specification - and its cstub now says so. `compare_field`'s post/end-cycle
+arithmetic is derived from §7.9.4, §7.9.5 (printed page 686), §7.7.3 and
+§7.7.3.2 (printed pages 678-679) in the test itself; the II=2 overlap case the
+same way. `compare_schedulers` is labelled **metamorphic**: it pins the
+equivalence of linear and strided enumeration of the §7.7.3.4 LBC dispatch, with
+every absolute value generated by the test.
 
 ## 1. References
 
@@ -745,7 +817,9 @@ the recorded faults, which are pipeline and software-loop features, not
 instructions.
 
 **1. Software-loop interrupt and resume.** *(implementation; the largest real
-item)*
+item)* — **done, see §0.2.** Scope and acceptance below are as written when the
+list was made; §0.2 records what landed, the manual basis for each of the three
+faults, and the one approximation that remains.
 Scope: the three fault classes the firmware actually hit — 4 nested-SPLOOP
 ("nested SPLOOP would overwrite retained buffer"), 2 SPLOOPW interrupt drain, 2
 SPLOOP SPMASK resume. Read SPRUFE8B chapter 7 on reload, early exit and

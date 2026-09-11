@@ -570,10 +570,16 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
         if (!(context & CDJ_C674X_LOOP_CONTEXT_VALID))
             return stop(cpu, cpu->pc, 0,
                         "SPLOOP interrupt setup address unavailable");
-        if ((context & CDJ_C674X_LOOP_HAS_SPMASK) &&
-            !cdj_c674x_loop_functional_timing())
-            return stop(cpu, cpu->pc, 0,
-                        "SPLOOP interrupt SPMASK resume not implemented");
+        /* SPRUFE8B 7.13.1 (printed page 697) enumerates every condition that
+         * blocks interrupt draining and an SPMASK in the loop is not one of
+         * them, so CDJ_C674X_LOOP_HAS_SPMASK is recorded state and no longer
+         * a refusal. The resume rule it used to stand in for is stated in
+         * full by 7.11.5 (printed page 696) and 7.13.2 (printed page 698) and
+         * is applied in loop_step: the SPMASKed program-memory operation is a
+         * NOP while the loop-buffer operation on the masked unit executes. An
+         * SPMASK whose unit this core cannot classify still fails closed
+         * during loading ("SPMASK unit not implemented"), and the reload form
+         * of the substitution (7.11.3) is still refused with reload itself. */
         if (!loop_capture_retained(cpu))
             return stop(cpu, cpu->pc, 0,
                         "SPLOOP retained buffer state invalid");
@@ -2788,6 +2794,35 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
              * Do not clear the special idle SPLX state restored by B IRP;
              * section 7.7.3.2 requires it until the return SPLOOP starts. */
             if (out.loop_active) {
+                /*
+                 * One corner the manual does not settle, kept fail-closed.
+                 *
+                 * If an interrupted loop is still pending return (its retained
+                 * metadata is live) while the handler's OWN loop buffer is
+                 * active, idling that buffer here clears TSR.SPLX - this core's
+                 * only return-window proxy.  The interrupted loop would then
+                 * resume down the non-returning path and silently lose all five
+                 * differences 7.13.2 and 7.13.5 (printed page 698) require on a
+                 * return: the packet parallel with SPLOOP would execute, the
+                 * SPMASKed program-memory operations would not be annulled, the
+                 * buffer SPMASK would not be ignored, BNOP would not be
+                 * neutralised, and SPLOOPD would re-add its four-cycle count
+                 * delay.  7.7.3.2 does not say whether SPLX survives a taken
+                 * branch out of a nested loop, so there is no defensible
+                 * behaviour to implement and a silent divergence is the worst
+                 * available option.  Refuse instead.
+                 *
+                 * This is narrower than the "nested SPLOOP would overwrite
+                 * retained buffer" refusal it replaces: that one rejected every
+                 * ISR-local SPLOOP, which 7.7.3.1 and 7.13.1 permit.  A scan of
+                 * 400,000 traced strict steps from runs/dsp-wm8740-fault-replay-1
+                 * finds no step with both loop_active and branch_due, so the
+                 * firmware this was fixed for does not reach it.
+                 */
+                if (loop_retained_valid(&out))
+                    return stop(cpu, out.pc, 0,
+                                "taken branch out of a nested loop with an "
+                                "interrupted loop pending");
                 loop_set_active(&out, false);
                 loop_clear_interrupt_phase(&out);
             }
@@ -2836,11 +2871,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 CDJ_C674X_LOOP_HAS_SPMASK;
         bool returning =
             (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) != 0;
-        if (returning && has_mask &&
-            !cdj_c674x_loop_functional_timing())
-            return stop(cpu, source.instructions[0].pc,
-                        source.instructions[0].word,
-                        "SPLOOP interrupt-return SPMASK not implemented");
+        /* The interrupt-return SPMASK rule is not a timing approximation: it
+         * is stated outright by SPRUFE8B 7.7.3.3 (printed page 679), 7.11.5
+         * (printed page 696) and 7.13.2 (printed page 698), and is applied
+         * below in both timing modes. */
         for (unsigned i = 0; i < source.count; ++i) {
             CdjC674xInstruction insn = source.instructions[i];
             uint32_t w = insn.word;
@@ -2901,13 +2935,32 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 unsigned unit = instruction_unit(&insn);
                 if (!unit) return stop(cpu, insn.pc, w, "SPMASK unit not implemented");
                 spmasked = (unit & masking.mask) != 0;
-                /* Section 7.13.2 reverses SPMASK while the interrupted loop
-                 * pipes up: the program-memory operation is a NOP, and
-                 * matching loop-buffer operations execute normally.
-                 * Functional timing reconstructs that pipe-up from the
-                 * unchanged program image instead of claiming retained
-                 * buffer timing. Strict mode stopped above. */
-                if (spmasked && returning) continue;
+                /* Section 7.7.3.3 (printed page 679): "When returning to an
+                 * SPLOOP(D) instruction with the SPLX bit in TSR set to 1,
+                 * SPMASKed instructions from program memory execute like a
+                 * NOP", and they are not stored in the loop buffer either
+                 * way; 7.13.2 adds that the loop-buffer operation on the
+                 * masked unit then executes normally (the masking.mask = 0
+                 * below). For the 7.11.1 shape - an SPMASK inside the loop
+                 * body, whose masked operation "is executed only once and is
+                 * not loaded to the SPLOOP buffer" (printed page 693) - the
+                 * one-shot setup already ran before the interrupt. */
+                if (spmasked && returning) {
+                    /* Same paragraph: "The NOP cycles associated with
+                     * ADDKPC, BNOP, or protected LD instructions that are
+                     * masked, are always executed when resuming an
+                     * interrupted SPLOOP(D)." The operation is annulled, its
+                     * four loading cycles are not. Multicycle NOPs already
+                     * took the branch above, before masking is consulted. */
+                    if (protected_load(&insn)) {
+                        if (finish || (out.loop_wait && !protect))
+                            return stop(cpu, insn.pc, w,
+                                        "invalid protected loop load packet");
+                        out.loop_wait = 4;
+                        protect = true;
+                    }
+                    continue;
+                }
             }
             /* SPRUFE8B 3.10 and 7.7.3.3: PROT expands the program stream
              * with four empty loading cycles. Buffered instructions continue
@@ -3090,24 +3143,40 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
     if (full_sploop || compact_sploop || full_sploopd ||
         compact_sploopd || while_loop) {
         uint32_t w = first.word;
-        /* There is one currently implemented architectural idle/SPLX=1
-         * state: B IRP has
-         * restored a task interrupted in SPLOOP.  This partial interpreter
-         * uses that hardware-only bit as its return-window proxy because it
-         * has no separate pipeline provenance in the checkpoint ABI.  MVC
-         * cannot write TSR.SPLX, and all normal loop-idle paths clear it.
-         * Full retained-buffer reload is intentionally not claimed here. */
+        /* SPRUFE8B 7.7.3.2, printed page 679: "There is one case where the
+         * SPLX bit is set to 1 when the loop buffer is idle" - B IRP (or B
+         * NRP) restoring a task interrupted in SPLOOP - and hardware consults
+         * SPLX only for a loop started "in the branch delay slots" of such a
+         * branch. This partial interpreter uses the bit itself as its
+         * return-window proxy because it has no separate pipeline provenance
+         * in the checkpoint ABI; that is sound here because MVC cannot write
+         * TSR.SPLX, all normal loop-idle paths clear it, and an active buffer
+         * never reaches this path. Loop-buffer *reload* (7.9.6, printed page
+         * 686) is a different feature and is still not claimed: see the
+         * SPLOOPD reload refusal above and the SPKERNELR rejection. */
         bool returning = (cpu->control[26] & CDJ_C674X_TSR_SPLX) != 0;
         bool delayed_loop = (full_sploopd || compact_sploopd) && !returning;
         unsigned pred = first.compact ? 0 : w >> 29;
-        if (!returning && loop_retained_valid(cpu) &&
-            !cdj_c674x_loop_functional_timing())
-            return stop(cpu, cpu->pc, w,
-                        "nested SPLOOP would overwrite retained buffer");
-        if (returning && !loop_retained_valid(cpu) &&
-            !cdj_c674x_loop_functional_timing())
-            return stop(cpu, cpu->pc, w,
-                        "SPLOOP interrupt-return buffer unavailable");
+        /* An interrupt service routine may use the loop buffer itself, and
+         * resuming the interrupted loop does not depend on the buffer's
+         * contents surviving. SPRUFE8B 7.7.3.1 (printed page 678): on return
+         * "execution is resumed at the address of the SPLOOP(D/W)
+         * instruction, and the loop is piped back up by executing a prolog" -
+         * a prolog out of program memory, which is why 7.13.2 has to
+         * neutralise the packet parallel with SPLOOP, the SPMASKed
+         * program-memory operations and BNOP, and why its note requires the
+         * ISR to restore ILC 4 cycles ahead. 7.13.1 (printed page 697) states
+         * the whole contract an ISR owes - "must save and restore the ITSR or
+         * NTSR, ILC, and RILC registers" - with no loop buffer in it.
+         * (7.7.3.3's assembler error for "Another SPLOOP(D) instruction is
+         * encountered" is about one appearing while a loop is *loading*;
+         * this path is only reached with the loop buffer idle.) So nothing
+         * needs retaining: loop_set_setup below drops this core's retained
+         * metadata for a non-returning setup and a later return rebuilds from
+         * program memory. That metadata is a cross-check, not architectural
+         * state, and where it does survive it is still checked ("SPLOOP
+         * retained instruction mismatch", "SPLOOP retained schedule
+         * mismatch", "SPLOOP interrupt-return interval mismatch"). */
         if (while_loop ? (!pred || pred == 7) : (!first.compact && (w >> 28) != 0))
             return stop(cpu, cpu->pc, w, "unsupported loop predicate");
         if (!while_loop && !delayed_loop &&

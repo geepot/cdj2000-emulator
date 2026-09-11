@@ -401,10 +401,11 @@ def main():
                if args.functional_dsp_timing else []),
             *(['SPI1 WM8740 control transfers complete at commit; serial timing is not modeled']
                if args.functional_dsp_timing else []),
-            *(['interrupt-return SPMASK pipe-up is reconstructed from the stable program image; retained-buffer timing is not modeled']
-               if args.functional_dsp_timing else []),
-            *(['an ISR SPLOOP may replace retained loop validation state; a later SPLX return is reconstructed from the current program image and self-modifying loop bodies are unsupported']
-               if args.functional_dsp_timing else []),
+            # SPRUFE8B 7.7.3.1 resumes an interrupted loop by re-executing
+            # its prolog from program memory, so this is how the hardware
+            # works rather than a timing mode, and the caveat applies to every
+            # run that interrupts a software loop, strict or breadth.
+            'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check',
             *(['interrupt entry retires already-issued results with minimum empty cycles; exact interrupt pipeline latency is not modeled']
                if args.functional_dsp_timing else []),
             *(['coarse packet-driven McASP slots; not audio-rate or cycle-accurate']

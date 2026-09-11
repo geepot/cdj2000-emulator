@@ -144,7 +144,10 @@ def test_replay_determinism_breakpoints_and_limits(tmp_path):
     assert manifest['complete'] and manifest['progress']['packet_delta'] == 1
     assert manifest['progress']['cycle_delta'] == 1
     assert manifest['limits']['packets'] == 0 and manifest['limits']['cycles'] == 0
-    assert manifest['approximations'] == []
+    # The interrupted-SPLOOP resume caveat is unconditional: SPRUFE8B
+    # 7.7.3.1 rebuilds the loop buffer from program memory in every mode.
+    assert manifest['approximations'] == [
+        'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check']
     assert manifest['output_checkpoint']['file'] == 'final.cdjdsp'
     assert (tmp_path / 'first/coverage.json').is_file()
     failure = json.loads((tmp_path / 'first/failure.json').read_text())
@@ -221,7 +224,9 @@ def test_replay_gate_preserves_faults_and_rejects_changed_baseline(tmp_path):
     assert not gate['coverage_validation_eligible']
     assert gate['trace_sha256'] == gate['repeat_sha256']
     assert 'not architectural correctness or boot' in gate['scope']
-    assert gate['limits']['steps'] == 10000 and gate['approximations'] == []
+    assert gate['limits']['steps'] == 10000
+    assert gate['approximations'] == [
+        'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check']
     # An exactly repeated final checkpoint is a provenance-bearing resume
     # point; normal iteration must not fall back to a connected checkpoint.
     chained = tmp_path / 'chained'

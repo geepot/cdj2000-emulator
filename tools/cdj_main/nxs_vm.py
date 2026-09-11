@@ -342,10 +342,10 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
               if functional_dsp_timing else []),
             *(['functional run-ahead collapses each evidence-backed SPI1/WM8740 transfer to its committing write; not SPI timing evidence']
               if functional_dsp_timing else []),
-            *(['interrupt-return SPMASK pipe-up is reconstructed from the stable program image; retained-buffer timing is not modeled']
-              if functional_dsp_timing else []),
-            *(['an ISR SPLOOP may replace retained loop validation state; a later SPLX return is reconstructed from the current program image and self-modifying loop bodies are unsupported']
-              if functional_dsp_timing else []),
+            # SPRUFE8B 7.7.3.1 resumes an interrupted loop by re-executing
+            # its prolog from program memory, so this is not a timing mode and
+            # the caveat applies in strict timing too.
+            'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check',
             *(['interrupt entry retires already-issued results with minimum empty cycles; exact interrupt pipeline latency is not modeled']
               if functional_dsp_timing else []),
             *(['functional McASP scheduling advances one slot every 1024 executed DSP packets; '

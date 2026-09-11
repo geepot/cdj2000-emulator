@@ -66,14 +66,14 @@
   "generated_from": {
     "audit_sweeps_provenance": {
       "core_sources": {
-        "emulator/qemu/cdj_c674x.c": "1331093d1a7172c4b687aff56ff5169b7627c74023f8a4c680f1f83ec72df075",
+        "emulator/qemu/cdj_c674x.c": "777e10f28850d0c3bb8eb55bfcb4b225bd1c6b542e49ca5b19dc4c27c6d23c09",
         "emulator/qemu/cdj_c674x_control.c": "c8a93a14d99c9c65e78e32e47b4238f1f8a4a7486708fc43d9b6d8c817e9b86c",
         "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
         "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
         "emulator/qemu/cdj_c674x_sp.c": "d75148b3244349fcedd4257a4b29fae761dd79e354063d765b856b79ee95b800",
         "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
       },
-      "generator_sha256": "b878315d7881fff3c5ca39cad5c624e8c1155035f0355420efbeaf15d1c91b05",
+      "generator_sha256": "9cb894490699d460c3397af4ac8f0d93c83a3c127fe5946fa093ecd1eeceeecc",
       "probe_source": "tests/cstub/c674x-isa-probe.c",
       "probe_source_sha256": "565f14cc09c631c461898a06f2ff72cd5a9dc6c19c5fa65f78b375399c109aa2"
     },
@@ -99,9 +99,9 @@
     },
     "isa_probe_provenance": {
       "assembler": "TI asm6x -mv6740",
-      "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 20:19:04 2026",
+      "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 21:28:25 2026",
       "core_sources": {
-        "emulator/qemu/cdj_c674x.c": "1331093d1a7172c4b687aff56ff5169b7627c74023f8a4c680f1f83ec72df075",
+        "emulator/qemu/cdj_c674x.c": "777e10f28850d0c3bb8eb55bfcb4b225bd1c6b542e49ca5b19dc4c27c6d23c09",
         "emulator/qemu/cdj_c674x_control.c": "c8a93a14d99c9c65e78e32e47b4238f1f8a4a7486708fc43d9b6d8c817e9b86c",
         "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
         "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
@@ -123,7 +123,7 @@
       "analysis/dsp/tracks/packet-pipeline.md"
     ]
   },
-  "head": "f36ab57d150222795b52707d0f5fb4316b0cd6e4",
+  "head": "4d562c7f6ba919d95bd87a7ac05be9a82fb7fc73",
   "how_to_read_a_row": {
     "fidelity": "strict | approximation | unknown",
     "implementation": "supported | partial | unsupported | unknown",
@@ -145,7 +145,7 @@
       "The compact accepted total is not quoted as coverage: it moves with the probe register profiles. The not-implemented count does not.",
       "No percentage of \"the ISA\" is defensible from these numbers and none is given."
     ],
-    "compact_words_rejected_as_not_implemented": 104,
+    "compact_words_rejected_as_not_implemented": 32,
     "compact_words_swept": 65536,
     "distinct_base_mnemonics": 227,
     "documented_32bit_format_figures_appendices_c_to_h": 29,
@@ -347,6 +347,11 @@
       "manual_section": "Chapter 7 (software pipelined loop buffer), 7.10.3, 7.15",
       "next_acceptance_test": "Rewrite the sentence to the two residual returned-SPMASK cases plus SPLOOPD reload, and mark the whole \"Unconditional SPLOOP execution\" section with the date of the batch it records.",
       "requirement": "BUILD.md limitation claim: \"SPMASK, reload/nested loops, SPLOOPD/W, protected/control instructions in the body, interrupt draining and restart remain unsupported and must not be counted as complete loop emulation.\"",
+      "superseded_by": {
+        "commits": "wave 3 sploop-interrupt",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "BUILD.md's SPLOOP limitations are further out of date than the audit recorded: several named refusals no longer exist. The audit's stale-doc finding 2 remains open."
+      },
       "tests": [],
       "track": "doc-claims",
       "track_report": "analysis/dsp/tracks/doc-claims.md",
@@ -377,6 +382,11 @@
       "next_acceptance_test": "Have the loop/interrupt track state which of the four listed items remain; then split BUILD.md's sentence so the implemented drain is not listed alongside the unimplemented returned-SPMASK cases.",
       "open_questions": "Whether \"full retained-buffer state\" and \"SPLOOPW return\" are implemented at HEAD.",
       "requirement": "BUILD.md schema-8 limitation claim: \"Returned SPMASK reversal, SPLOOPW return, full retained-buffer state, and interrupt-time loop drain still fail closed or remain unimplemented.\"",
+      "superseded_by": {
+        "commits": "wave 3 sploop-interrupt",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "Same: the drain limitation described here was lifted."
+      },
       "tests": [],
       "track": "doc-claims",
       "track_report": "analysis/dsp/tracks/doc-claims.md",
@@ -6140,6 +6150,11 @@
       "next_acceptance_test": "Implement the 7.13.2 reversed masking in strict mode (masked buffer operations execute, masked program-memory operations are NOPs) using the retained metadata already captured, and promote the existing functional-mode test at tests/cstub/c674x.c:2498-2524 to strict.",
       "open_questions": "none",
       "requirement": "SPMASK/SPMASKR: must be the first instruction in its execute packet; masks L1/L2/S1/S2/D1/D2 (and M1/M2 in the full-width form); disables matching loop-buffer operations; masked program-memory operations execute but are not stored in the buffer; an SPMASK outside the loop mechanism is a NOP",
+      "superseded_by": {
+        "commits": "wave 3 sploop-interrupt",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "The entry-time SPMASK refusal is gone; 7.13.1 does not list an in-body SPMASK among the conditions that block interrupt draining. The unknown-SPMASK-unit refusal during loading is unchanged."
+      },
       "tests": [
         {
           "establishes": "Full-width and compact forms: the masked program-memory MVK executes (A4==101) and loop_tags==1 shows the masked operation was not stored.",
@@ -6200,6 +6215,11 @@
       "next_acceptance_test": "Before any implementation, add a decode-level cstub case asserting SPKERNELR (0x00036000) and predicated full-width SPLOOP each fault atomically with a named reason, so the boundary is pinned rather than incidental.",
       "open_questions": "Whether the NXS firmware uses nested software-pipelined loops at all. If it does, this is the largest single gap in the track.",
       "requirement": "Loop buffer reload for nested loops: predicated SPLOOP, SPKERNELR/SPMASKR triggering RILC->ILC, the reloading counter, two LBCs for simultaneous drain and reload, branch-while-reloading behaviour, and the hardware exception when drain and reload collide",
+      "superseded_by": {
+        "commits": "wave 3 sploop-interrupt",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "Still unimplemented and still refused as \"SPLOOPD reload not implemented\" - but note the 32 remaining genuine compact-gap words are exactly this feature (Figure H-6 predicated SPLOOPD), so this row and the compact gap are one item, not two."
+      },
       "tests": [
         {
           "establishes": "Both compact reload forms fault with 'SPLOOPD reload not implemented', cycles==0, loop inactive, and the parallel register untouched - the setup packet stays atomic.",
@@ -6284,6 +6304,11 @@
       "next_acceptance_test": "Implement the 7.13.2 SPMASK reversal in strict mode and promote tests/cstub/c674x.c:2498-2524 and :2529-2568 out of functional mode; separately assert that a return SPLOOP whose body image changed under the ISR is rejected rather than silently reloaded, documenting that as deliberate extra strictness.",
       "open_questions": "Whether hardware's retained buffer is genuinely discarded on idle (making re-fetch correct) in every case, or whether any path reuses buffer contents across the interrupt.",
       "requirement": "Returning to an SPLOOP(D/W) after an interrupt: B IRP copies ITSR to TSR with SPLX=1, the loop pipes back up by executing a prolog, operations parallel with the return SPLOOP(D/W) are NOPs, SPLOOPD executes as SPLOOP, BNOP label,n executes as NOP n+1, SPMASKed program-memory operations are NOPs and SPMASKed buffer operations execute normally",
+      "superseded_by": {
+        "commits": "wave 3 sploop-interrupt",
+        "note": "The row text above is the audit baseline, not the current state. Verify against the source before acting on it.",
+        "what_changed": "The interrupt drain, SPMASK resume and ISR-local (\"nested\") SPLOOP refusals no longer depend on the functional-timing switch: SPRUFE8B 7.7.3.1/7.7.3.3/7.11.5/7.13.2 state them as semantics, not timing. A masked protected LD now keeps its four PROT cycles on return (printed page 679). One corner stays fail-closed by design: a taken branch out of a nested loop while an interrupted loop is pending, which the manual does not settle."
+      },
       "tests": [
         {
           "establishes": "The restored SPLX bit survives the branch redirect; a return SPLOOPD has ordinary SPLOOP counting (delayed_count false, iterations==2, ILC==1) and its parallel setup operation is suppressed per 7.13.2. Functional-timing mode.",

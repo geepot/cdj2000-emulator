@@ -2927,21 +2927,45 @@ int main(void)
     }
     cdj_c674x_loop_set_functional_timing(false);
 
-    /* A legacy/partial checkpoint cannot provide the interrupted buffer.
-     * Strict mode fails at returned setup instead of silently reconstructing
-     * it from program memory. */
+    /* SPRUFE8B 7.13.2 (printed page 698) resumes an interrupted loop by
+     * re-executing the SPLOOP(D/W) and its prolog out of program memory, and
+     * 7.13.1 (printed page 697) lists the entire save/restore contract an ISR
+     * owes - "the ITSR or NTSR, ILC, and RILC registers" - with no loop
+     * buffer in it. So a return with no retained provenance at all (a legacy
+     * or partial checkpoint, or an ISR that ran its own SPLOOP) must rebuild,
+     * not fail. Expected values are read off 7.13.2's bullet list: the
+     * SPLOOPD "executes as an SPLOOP instruction", so no four-cycle count
+     * delay is added and the trip count is exactly ILC; and the rebuilt
+     * buffer starts empty because nothing was retained. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
     c.control[26] = 1u << 14; c.control[13] = 2;
-    memory[0] = 0x0003a000; memory[1] = 0x00030000;
-    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(!c.cycles &&
-           !strcmp(c.fault, "SPLOOP interrupt-return buffer unavailable"));
+    memory[0] = 0x0003a000;                 /* returned SPLOOPD 1 */
+    memory[1] = 3u << 23 | 3u << 18 | 1u << 13 |
+                0x12u << 7 | 0x40;          /* ADD .D1 A3,1,A3 */
+    memory[2] = 0x00034000;                 /* SPKERNEL 0,0 */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.fault && c.loop_active && !c.loop.delayed_count &&
+           c.loop.iterations == 2 && !c.loop_tags);
+    while (!c.loop.sealed)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.fault && c.loop_tags == 1 && c.loop.length == 2 &&
+           !(c.loop_pred_history & 8));
 
-    /* Breadth mode reconstructs the documented return reversal from retained
-     * tags: the D1 program operation beside SPMASK is a NOP, while the older
-     * overlapping D1 buffered ADD executes instead. */
+    /* SPMASK on both sides of an interrupt, in strict timing and in breadth.
+     * Every expected value here comes from SPRUFE8B chapter 7, not from a
+     * trace. Loading: 7.11.1/7.11.2 (printed pages 693-694) - the SPMASKed
+     * ADD .D1 A4 "is executed only once and is not loaded to the SPLOOP
+     * buffer", and on that one cycle the buffered .D1 operation does not
+     * issue (7.15.1 resource conflict), so after three loading cycles the
+     * buffered ADD .D1 A3 has run on cycles 0 and 2 only: A3 == 2, A4 == 7,
+     * one buffered tag. Return: 7.13.2/7.11.5 (printed pages 698, 696) -
+     * "SPMASKed instructions from program memory execute as a NOP" and
+     * "SPMASKed instructions in the loop buffer execute as normal", so A3
+     * advances on both pipe-up cycles while A4 never moves again. 7.13
+     * (printed page 697) puts the SPLOOP execute-packet address in IRP. */
+    for (unsigned breadth = 0; breadth < 2; ++breadth) {
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
-    cdj_c674x_loop_set_functional_timing(true);
+    cdj_c674x_loop_set_functional_timing(breadth != 0);
     c.control[5] = 0x1000;
     c.control[1] |= 1; c.control[4] = (1u << 7) | 3u;
     c.control[13] = 12;
@@ -2962,10 +2986,15 @@ int main(void)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(cdj_c674x_interrupt(&c, 0));
     assert(c.pc == 0x10e0 && c.control[6] == 0x1000);
-    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
-    for (unsigned i = 0; i < 5; ++i)
+    /* Strict timing inserts the fixed nine-cycle entry interval (5.5.1,
+     * printed page 648) ahead of the handler, so wait for the return rather
+     * than counting cycles: B IRP plus its five delay slots land on the
+     * SPLOOP packet, which activates the loop again. */
+    unsigned return_guard = 0;
+    while (!c.loop_active) {
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(cdj_c674x_step(&c, read_word, NULL, NULL)); /* returned setup */
+        assert(++return_guard < 40);
+    }
     uint32_t before_return_a3 = c.r[0][3], before_return_a4 = c.r[0][4];
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[0][3] == before_return_a3 + 1 &&
@@ -2975,7 +3004,111 @@ int main(void)
            c.r[0][4] == before_return_a4);
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.loop.sealed && !c.fault && !(c.loop_pred_history & 8));
+    }
     cdj_c674x_loop_set_functional_timing(false);
+
+    /* An interrupt service routine may use the loop buffer itself. SPRUFE8B
+     * 7.13.1 (printed page 697) states the whole contract - "Interrupt
+     * service routines must save and restore the ITSR or NTSR, ILC, and RILC
+     * registers" - and the loop buffer is not in it, because 7.13.2 (printed
+     * page 698) resumes by re-executing the SPLOOP(D/W) and its prolog from
+     * program memory. So the handler's own software loop overwrites the buffer
+     * and the interrupted loop still resumes, rebuilding from memory.
+     * Runs in strict timing and in breadth. */
+    for (unsigned breadth = 0; breadth < 2; ++breadth) {
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    cdj_c674x_loop_set_functional_timing(breadth != 0);
+    c.control[5] = 0x1000;
+    c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
+    c.control[13] = 12;
+    memory[0] = 0x00038000;                 /* SPLOOP 1 */
+    memory[1] = 3u << 23 | 3u << 18 | 1u << 13 |
+                0x12u << 7 | 0x40;          /* ADD .D1 A3,1,A3 */
+    memory[2] = 0x00034000;                 /* SPKERNEL 0,0 */
+    /* The handler uses SPLOOPW, because 7.10 (printed page 690) says a
+     * SPLOOPW "ILC and RILC are not accessed or modified" - so the handler
+     * honours 7.13.2's requirement to leave the interrupted loop's ILC alone
+     * without needing an explicit save/restore. B0 is zero, so by 7.10.1 and
+     * 7.10.2 (printed page 691) the loop must execute at least one iteration,
+     * the termination condition "is always false for the first 3 cycles of the
+     * loop", and the cycle-4 stage boundary - which evaluates the condition
+     * "3 cycles before the stage boundary", i.e. cycle 1 - terminates it. Four
+     * loop cycles execute, so A5 == 4. Execution then resumes at the
+     * instruction after the loop body (7.10.3), which is the return branch -
+     * and the loop buffer is
+     * already idle there, so 7.14's "taken branch idles the loop buffer" and
+     * B IRP's restore of TSR from ITSR cannot contend for TSR.SPLX. */
+    memory[32] = 0x2003e000;                /* INT4 handler: [B0] SPLOOPW 1 */
+    memory[33] = 5u << 23 | 5u << 18 | 1u << 13 |
+                 0x12u << 7 | 0x40;         /* ADD .D1 A5,1,A5 */
+    memory[34] = 0x00034000;                /* SPKERNEL 0,0 */
+    memory[35] = 0x001800e2;                /* B .S2 IRP */
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (!c.loop.sealed)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    while (c.loop.cycle < 5)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_interrupt(&c, 1u << 4));
+    while (c.loop_active)
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_interrupt(&c, 0));
+    assert(c.pc == 0x1080 && c.control[6] == 0x1000 &&
+           (c.control[27] & (1u << 14)));
+    /* The handler's loop runs, overwriting the buffer, and B IRP returns. */
+    unsigned nested_guard = 0;
+    uint32_t interrupted_a3 = c.r[0][3];
+    while (c.pc != 0x1000 || c.loop_active) {
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(++nested_guard < 200);
+    }
+    assert(!c.fault && c.r[0][5] == 4 && c.r[0][3] == interrupted_a3 &&
+           (c.control[26] & (1u << 14)));
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL)); /* returned setup */
+    assert(c.loop_active && !c.loop.delayed_count && !c.loop_tags);
+    uint32_t nested_a5 = c.r[0][5];
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.r[0][3] == interrupted_a3 + 1 && c.r[0][5] == nested_a5);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(!c.fault && c.loop.sealed && c.loop_tags == 1 &&
+           !(c.loop_pred_history & 8));
+    }
+    cdj_c674x_loop_set_functional_timing(false);
+
+    /* SPRUFE8B 7.7.3.3, printed page 679, verbatim: "The NOP cycles
+     * associated with ADDKPC, BNOP, or protected LD instructions that are
+     * masked, are always executed when resuming an interrupted SPLOOP(D)."
+     * So on return the masked protected LDW is annulled - page 679's "SPMASKed
+     * instructions from program memory execute like a NOP" - while its four
+     * cycles of PROT expansion (printed page 93) still lengthen the loop.
+     * Expected length is counted off the manual, not measured: loading cycle 0
+     * is the SPMASK/LDW packet, cycles 1-4 are the PROT expansion, cycle 5 is
+     * the ADD packet and cycle 6 the SPKERNEL, so dynlen is 7 against 3 for
+     * the same program without PROT. Encodings from asm6x -mv6740, as recorded
+     * at test_protected_loop_body_expands_once.
+     * SPMASK D1 || -> 00430001   LDW .D1 *A4,A5 -> 02900264
+     * ADD .L1 A5,A5,A6 -> 0314A078   SPKERNEL 0,0 -> 00034000 */
+    for (unsigned prot = 0; prot < 2; ++prot) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.control[26] = 1u << 14;           /* returning: ITSR.SPLX was 1 */
+        c.control[13] = 12;
+        memory[0] = 0x00038000u;            /* returned SPLOOP 1 */
+        memory[1] = 0x00430001u;            /* SPMASK D1 || */
+        memory[2] = 0x02900264u;            /* LDW .D1 *A4,A5 */
+        memory[3] = 0x0314A078u;            /* ADD .L1 A5,A5,A6 */
+        memory[4] = 0x00034000u;            /* SPKERNEL 0,0 */
+        memory[7] = 0xe0000000u | (prot ? (1u << 20) : 0u);
+        memory[16] = 0x00000101;            /* 0x1040 */
+        c.r[0][4] = 0x1040;
+        assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+        unsigned loading = 0;
+        while (!c.loop.sealed) {
+            assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(++loading < 16);
+        }
+        assert(loading == (prot ? 7u : 3u) && c.loop.length == loading);
+        /* The annulled load never reaches A5 and never enters the buffer. */
+        assert(!c.r[0][5] && !c.load_count && c.loop_tags == 1);
+    }
 
     /* In-flight results retire during entry, before handler instructions. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
@@ -3101,9 +3234,13 @@ int main(void)
     assert(!cdj_c674x_interrupt(&c, 1u << 4));
     assert(c.control[2] == (1u << 4));
 
-    /* Interrupt return reverses SPMASK program/buffer selection. Until that
-     * retained provenance exists, an otherwise eligible loop fails closed. */
+    /* A loop that contains an SPMASK is still interruptible: SPRUFE8B 7.13.1
+     * (printed page 697) enumerates every condition that blocks interrupt
+     * draining and the presence of an SPMASK is not one of them. The loop
+     * therefore drains its epilog, IRP names the SPLOOP execute packet and
+     * ITSR records SPLX (7.13, 7.13.4), in strict timing as in breadth. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.control[5] = 0x1000;
     c.control[1] |= 1; c.control[4] = (1u << 4) | 3u;
     c.control[13] = 12;
     memory[0] = 0x38000; memory[1] = 0x130001; /* SPLOOP; SPMASK S1. */
@@ -3113,8 +3250,16 @@ int main(void)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     while (c.loop.cycle < 3)
         assert(cdj_c674x_step(&c, read_word, NULL, NULL));
-    assert(!cdj_c674x_interrupt(&c, 1u << 4));
-    assert(!strcmp(c.fault, "SPLOOP interrupt SPMASK resume not implemented"));
+    assert(cdj_c674x_interrupt(&c, 1u << 4) && !c.fault);
+    assert(c.loop_active && c.control[2] == (1u << 4));
+    unsigned spmask_drain = 0;
+    while (c.loop_active) {
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(++spmask_drain < 32);
+    }
+    assert(cdj_c674x_interrupt(&c, 0) && !c.fault);
+    assert(c.pc == 0x1080 && c.control[6] == 0x1000 &&
+           (c.control[27] & (1u << 14)) && !(c.control[26] & (1u << 14)));
 
     /* A maskable interrupt detected on a legal SPLOOP boundary executes that
      * boundary, freezes ILC, drains only the buffered epilog and vectors only
