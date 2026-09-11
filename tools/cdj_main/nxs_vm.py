@@ -338,6 +338,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
             'SDRAM command timing, arbitration and retention are not modeled',
             'PSC transition ticks and PLL divider GO latency remain deterministic approximations',
             'physical HPI pins, FIFO/HRDY timing and DSP interrupt delivery are not modeled',
+            'the reciprocal approximations RCPSP/RCPDP/RSQRSP/RSQRDP deliver a correct exponent and a mantissa within the 2^-8 the manual specifies, but their bits below the eighth mantissa position are not hardware-exact; firmware that refines the seed (the documented Newton-Raphson use) converges regardless, firmware that consumes it directly may diverge',
             # Unconditional: the Timer64P counter advances from the CPU's
             # cycle_tick in every mode, strict and functional alike, so this
             # board asserts the same step-to-tick fiction the replay manifest

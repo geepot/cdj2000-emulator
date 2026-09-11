@@ -829,37 +829,68 @@ static void test_derived_conversions(void)
 static void test_rejections(void)
 {
     CdjC674x c;
-    /* RCPDP, RCPSP, RSQRDP and RSQRSP are deliberately NOT decoded.  The
-     * refusal stands, but an earlier version of this comment justified it by
-     * saying those pages give no example with a concrete result.  They do:
-     * printed page 410 prints RCPDP .S1 A1:A0,A3:A2 with A1:A0 = 4010 0000h
-     * 0000 0000h (4.00) giving A3:A2 = 3FD0 0000h 0000 0000h (0.25) two cycles
-     * later, and the other three entries print examples of their own.
+    /* RCPDP, RCPSP, RSQRDP and RSQRSP are now IMPLEMENTED as declared
+     * approximations.  They were refused until the reason was re-read: each
+     * entry fixes every special case exactly and leaves only the normal-number
+     * mantissa to a tolerance - "the mantissa is accurate to the eighth binary
+     * position (therefore, mantissa error is less than 2-8)" - and then frames
+     * the result as a Newton-Raphson seed whose accuracy the firmware doubles
+     * per iteration.  Meeting a specified tolerance is not inventing semantics.
      *
-     * The real reason is that those examples do not constrain the
-     * approximation.  1/4 is exactly representable, so 0.25 is what ANY
-     * correct implementation returns and the example reveals nothing about the
-     * low-order mantissa bits for an input whose reciprocal is not exact.
-     * What the pages do fix is only that "the mantissa is accurate to the
-     * eighth binary position (therefore, mantissa error is less than 2-8)" -
-     * a tolerance, not a value - and they hand the rest to a Newton-Raphson
-     * refinement whose seed they never specify bit for bit.  Two
-     * implementations can differ below bit 8 and both satisfy the manual, so
-     * producing any particular seed here would be invention, and firmware that
-     * refines it would carry our invented bits into its result.  They must
-     * stay a halt. */
-    static const uint32_t approximations[] = {
-        0x041C0B60,     /* RCPDP  .S1 A7:A6, A9:A8 */
-        0x02980F60,     /* RCPSP  .S1 A6, A5       */
-        0x041C0BA0,     /* RSQRDP .S1 A7:A6, A9:A8 */
-        0x02980FA0,     /* RSQRSP .S1 A6, A5       */
-    };
-    for (unsigned i = 0; i < 4; ++i) {
-        load(&c, approximations[i]);
-        assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
-        assert(c.fault && !strcmp(c.fault, "instruction not implemented"));
-        assert(c.fault_word == approximations[i] && !c.cycles);
+     * TRANSCRIBED.  Each entry prints one worked example, all four with
+     * src2 = 4.0, and all four are exact here because 1/4 and 1/2 are exactly
+     * representable: RCPSP printed page 412 gives 3E80 0000h; RSQRSP 421 gives
+     * 3F00 0000h; RCPDP 410 gives 3FD0 0000h 0000 0000h; RSQRDP 419 gives
+     * 3FE0 0000h 0000 0000h.  Latency is each entry's own: the SP forms are
+     * "Delay Slots 0" and the DP forms "Delay Slots 1". */
+    {
+        CdjC674x a;
+        load(&a, dp_word(5, 6, 0, 0, 0xf60, 0));       /* RCPSP .S1 A6,A5 */
+        a.r[0][6] = 0x40800000u;
+        run(&a, 1);
+        assert(a.r[0][5] == 0x3e800000u && !a.control[19]);
+
+        CdjC674x b;
+        load(&b, dp_word(5, 6, 0, 0, 0xfa0, 0));       /* RSQRSP .S1 A6,A5 */
+        b.r[0][6] = 0x40800000u;
+        run(&b, 1);
+        assert(b.r[0][5] == 0x3f000000u && !b.control[19]);
+
+        CdjC674x c2;
+        load(&c2, dp_word(8, 7, 0, 0, 0xb60, 0));      /* RCPDP .S1 A7:A6,A9:A8 */
+        set_pair(&c2, 0, 6, UINT64_C(0x4010000000000000));
+        run(&c2, 1);
+        assert(c2.r[0][8] == 0);                       /* dst_l on E1 */
+        run(&c2, 1);
+        assert(get_pair(&c2, 0, 8) == UINT64_C(0x3FD0000000000000));
+
+        CdjC674x d;
+        load(&d, dp_word(8, 7, 0, 0, 0xba0, 0));       /* RSQRDP .S1 A7:A6,A9:A8 */
+        set_pair(&d, 0, 6, UINT64_C(0x4010000000000000));
+        run(&d, 2);
+        assert(get_pair(&d, 0, 8) == UINT64_C(0x3FE0000000000000));
     }
+
+    /* The special cases the notes DO fix, checked by name.  RCPSP note 4: a
+     * signed zero gives signed infinity with DIV0 (FAUCR bit 10) and INFO
+     * (bit 5).  RSQRSP note 3: a negative nonzero nondenormal gives NaN_out
+     * with INVAL (bit 4). */
+    {
+        CdjC674x z;
+        load(&z, dp_word(5, 6, 0, 0, 0xf60, 0));
+        z.r[0][6] = 0;
+        run(&z, 1);
+        assert(z.r[0][5] == 0x7f800000u);
+        assert(z.control[19] == ((1u << 10) | (1u << 5)));
+
+        CdjC674x n;
+        load(&n, dp_word(5, 6, 0, 0, 0xfa0, 0));
+        n.r[0][6] = 0xc0000000u;                        /* -2.0 */
+        run(&n, 1);
+        assert(n.r[0][5] == 0x7fffffffu);
+        assert(n.control[19] == (1u << 4));
+    }
+
 
     /* Malformed register pairs halt rather than guess.  The manual's operand
      * tables give "dp" and "xdp" without defining a misaligned field, and

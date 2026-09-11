@@ -53,7 +53,7 @@ def test_c6747_interrupt_controller(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
         '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
@@ -102,7 +102,7 @@ def test_c6747_pll_cycle_clock(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-pll-clock.c'),
         *[str(ROOT / 'emulator/qemu' / name) for name in
           ('cdj_c6747_pll.c', 'cdj_c6747_timer.c', 'cdj_c6747_mcasp.c',
-           'cdj_c674x.c', 'cdj_c674x_uncond.c', 'cdj_c674x_mpy.c', 'cdj_c674x_dotp.c', 'cdj_c674x_packed8.c', 'cdj_c674x_packed16.c', 'cdj_c674x_packbits.c', 'cdj_c674x_mpy32.c', 'cdj_c674x_dp.c',
+           'cdj_c674x.c', 'cdj_c674x_uncond.c', 'cdj_c674x_mpy.c', 'cdj_c674x_dotp.c', 'cdj_c674x_packed8.c', 'cdj_c674x_packed16.c', 'cdj_c674x_packbits.c', 'cdj_c674x_mpy32.c', 'cdj_c674x_dp.c', 'cdj_c674x_approx.c',
            'cdj_c674x_sp.c', 'cdj_c674x_control.c', 'cdj_c674x_loop.c')],
         '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
@@ -160,7 +160,7 @@ def test_c674x_packets_and_branch_delays(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -175,7 +175,7 @@ def test_c674x_nonconditional_encodings(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -202,7 +202,7 @@ def test_c6747_syscfg_unlock_and_pipeline(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c6747_pll.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -238,7 +238,7 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
         '-o', str(binary)], check=True)
     out = subprocess.run([str(binary)], check=True, timeout=30,
@@ -247,7 +247,7 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
     shadows = [line for line in lines if line.startswith('shadow ')]
     assert not shadows, 'shadowed dispatch rows:\n' + '\n'.join(shadows)
     assert 'hard-shadows 0' in lines, out
-    # 273 pairs overlap on mask/match alone and are separated only by an `also`
+    # 277 pairs overlap on mask/match alone and are separated only by an `also`
     # predicate.  That is consistent with the table comment's sweep, which
     # evaluated `also` and found no word claimed twice; this check deliberately
     # does not evaluate `also`, so it over-reports rather than under-reports.
@@ -256,7 +256,7 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
     # predicated row moves this number and must be changed here deliberately,
     # together with the `also` predicate that justifies the overlap.
     predicated = [line for line in lines if line.startswith('predicated-overlaps ')]
-    assert predicated == ['predicated-overlaps 273'], out
+    assert predicated == ['predicated-overlaps 277'], out
 
 
 def test_c674x_packed_dot_products(tmp_path):
@@ -273,7 +273,7 @@ def test_c674x_packed_dot_products(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-dotp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -294,7 +294,7 @@ def test_c674x_packed_8bit(tmp_path):
         str(ROOT / 'tests/cstub/c674x-packed8.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -315,7 +315,7 @@ def test_c674x_packed16_arithmetic(tmp_path):
         str(ROOT / 'tests/cstub/c674x-packed16.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -333,7 +333,7 @@ def test_c674x_pack_unpack_shuffle_and_bit_manipulation(tmp_path):
         str(ROOT / 'tests/cstub/c674x-packbits.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -357,7 +357,7 @@ def test_c674x_double_precision(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-dp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -374,7 +374,7 @@ def test_c674x_32bit_multiply_galois_and_long_forms(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-mpy32.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -418,7 +418,7 @@ def test_c674x_no_word_reaches_two_dispatch_rows(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_approx.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
         '-o', str(binary)], check=True)
     out = subprocess.run([str(binary)], check=True, timeout=300,
@@ -431,4 +431,4 @@ def test_c674x_no_word_reaches_two_dispatch_rows(tmp_path):
     assert 'word-only-probes 4096' in lines, out
     # Pin the pair count so this stays tied to the mask/match check above: if
     # that one's 251 moves, this must be updated in the same change.
-    assert 'pairs-examined 273' in lines, out
+    assert 'pairs-examined 277' in lines, out

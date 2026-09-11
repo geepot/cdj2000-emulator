@@ -22,7 +22,7 @@ from .build_cache import build_native
 ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
     ROOT / 'emulator/qemu' / name for name in
-    ('cdj_c674x.c', 'cdj_c674x_mpy.c', 'cdj_c674x_dotp.c', 'cdj_c674x_packed8.c', 'cdj_c674x_packed16.c', 'cdj_c674x_packbits.c', 'cdj_c674x_mpy32.c', 'cdj_c674x_dp.c', 'cdj_c674x_uncond.c',
+    ('cdj_c674x.c', 'cdj_c674x_mpy.c', 'cdj_c674x_dotp.c', 'cdj_c674x_packed8.c', 'cdj_c674x_packed16.c', 'cdj_c674x_packbits.c', 'cdj_c674x_mpy32.c', 'cdj_c674x_dp.c', 'cdj_c674x_approx.c', 'cdj_c674x_uncond.c',
      'cdj_c674x_sp.c', 'cdj_c674x_control.c',
      'cdj_c674x_loop.c', 'cdj_c6747_syscfg.c', 'cdj_c6747_psc.c',
      'cdj_c6747_mcasp.c', 'cdj_c6747_gpio.c', 'cdj_c6747_i2c.c', 'cdj_c6747_pll.c',
@@ -414,6 +414,7 @@ def main():
             # is correct and says nothing whatever about how long it took, how
             # it relates to AUXCLK or cdj_c6747_timer_input_hz(), or what a
             # firmware delay loop would measure on hardware.
+            'the reciprocal approximations RCPSP/RCPDP/RSQRSP/RSQRDP deliver a correct exponent and a mantissa within the 2^-8 the manual specifies, but their bits below the eighth mantissa position are not hardware-exact; firmware that refines the seed (the documented Newton-Raphson use) converges regardless, firmware that consumes it directly may diverge',
             'Timer64P counts one input clock per emulated CPU cycle (SPRUH91D chapter 28 register order, not rate); the step-to-tick ratio is unrelated to AUXCLK, so no elapsed-time, frequency or audio-rate conclusion may be drawn from a timer period expiring',
             *(['interrupt entry retires already-issued results with minimum empty cycles; exact interrupt pipeline latency is not modeled']
                if args.functional_dsp_timing else []),

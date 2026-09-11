@@ -11,6 +11,7 @@
 #include "cdj_c674x_mpy32.h"
 #include "cdj_c674x_sp.h"
 #include "cdj_c674x_dp.h"
+#include "cdj_c674x_approx.h"
 #include "cdj_c674x_control.h"
 
 /* This scratch CPU is initialized by the prefix copy below.  Its loop tail
@@ -2358,6 +2359,55 @@ static bool arm_packbits_dual(CdjC674xArm *x)
     return true;
 }
 /* wave5-arms: double-precision floating point */
+/* Defined with the rest of the double-precision plumbing below; the
+ * approximation arm sits at this family's marker, which comes first. */
+static bool dp_queue(CdjC674xArm *x, uint64_t due, unsigned dst,
+                     uint32_t value, uint32_t status, bool multiplier);
+
+static bool arm_approx(CdjC674xArm *x)
+{
+    /* RCPSP (printed pages 411-412), RSQRSP (420-421), RCPDP (409-410) and
+     * RSQRDP (418-419): the .S-unit reciprocal and reciprocal-square-root
+     * APPROXIMATIONS.  Arithmetic and every special case in
+     * cdj_c674x_approx.c, which also carries the declaration that the mantissa
+     * below the eighth binary position is not hardware-exact.
+     *
+     * Latency differs between the two widths and is taken from each entry:
+     * the single-precision forms are "Delay Slots 0" and write dst on E1; the
+     * double-precision forms are "Delay Slots 1" with dst_l on E1 and dst_h on
+     * E2, the same shape arm_absdp uses. */
+    unsigned encoding = x->w & 0xffcu;
+    CdjC674xApproxKind kind = encoding == 0xf60u ? CDJ_C674X_RCPSP :
+                              encoding == 0xfa0u ? CDJ_C674X_RSQRSP :
+                              encoding == 0xb60u ? CDJ_C674X_RCPDP :
+                                                   CDJ_C674X_RSQRDP;
+    bool pair = cdj_c674x_approx(kind, 0).pair;
+    if (pair && ((x->dst & 1) || !(x->b & 1)))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision register pair");
+    uint64_t src2 = pair
+        ? (uint64_t)x->cpu->r[x->cross][x->b] << 32 | x->cpu->r[x->cross][x->b - 1]
+        : x->cpu->r[x->cross][x->b];
+    CdjC674xApproxResult r = cdj_c674x_approx(kind, src2);
+    x->value = (uint32_t)r.value;                 /* dst, or dst_l on E1 */
+    if (x->enabled) {
+        if (pair && !dp_queue(x, x->cpu->cycles + 2, x->dst + 1,
+                              (uint32_t)(r.value >> 32), 0, false))
+            return false;
+        /* The notes put every warning bit these four raise in FAUCR (Table
+         * 2-26, printed page 61), including DIV0, which is the one bit only
+         * these instructions set: "Source to reciprocal operation for .S1." */
+        if (r.status) {
+            if (x->controls[19])
+                return stop(x->cpu, x->pc, x->insn->word,
+                            "parallel FAUCR status write conflict");
+            x->out->control[19] |= r.status << (x->side ? 16 : 0);
+            x->controls[19] = true;
+        }
+    }
+    return true;
+}
+
 
 /* A 64-bit DP operand whose encoded register field names the EVEN register of
  * the pair.  Every instruction that reads src_l one cycle before src_h -
@@ -3254,6 +3304,10 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0xf0800ffc, 0x10000678, NULL,                  arm_packbits_dual },
     { 0xf0000ffc, 0x100006d8, NULL,                  arm_packbits_dual },
     /* wave5-rows: double-precision floating point */
+    { 0x00000ffc, 0x00000f60, NULL,                  arm_approx },
+    { 0x00000ffc, 0x00000fa0, NULL,                  arm_approx },
+    { 0x00000ffc, 0x00000b60, NULL,                  arm_approx },
+    { 0x00000ffc, 0x00000ba0, NULL,                  arm_approx },
     { 0x0003effc, 0x00000b20, NULL,                  arm_two_cycle_dp },
     { 0x0003effc, 0x000000a0, NULL,                  arm_two_cycle_dp },
     { 0x00000ffc, 0x00000a20, NULL,                  arm_cmpdp },

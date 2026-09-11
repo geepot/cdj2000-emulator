@@ -961,7 +961,20 @@ anyone remembering it. Each says what would close it.
   `CdjC674xUncondKind` for "nonconditional encoding the arm table implements",
   removing those opfields from `m_unit_op()`'s UNIMPLEMENTED list, and letting
   such a word fall through to `cdj_c674x_arm_lookup` with `enabled = true`.
-- **`RCPDP`/`RCPSP`/`RSQRDP`/`RSQRSP` stay refused** and should. See §0.4.
+- **`RCPDP`/`RCPSP`/`RSQRDP`/`RSQRSP` are implemented as DECLARED
+  APPROXIMATIONS**, reversing an earlier refusal. Each entry fixes every
+  special case exactly and leaves only the normal-number mantissa to a
+  tolerance - "the mantissa is accurate to the eighth binary position
+  (therefore, mantissa error is less than 2-8)" - then frames the result as a
+  Newton-Raphson seed whose accuracy the firmware doubles per iteration. Meeting
+  a stated tolerance is not inventing semantics, and refusing these blocked the
+  normalization step any ambisonic or vector-gain code needs.
+  Measured: all four worked examples exact, and worst-case relative error
+  0.0017 (`RCPDP`) and 0.0019 (`RSQRDP`) over 7,744 inputs spanning 2^-60 to
+  2^60, against the permitted 0.0039. The consequence that remains is declared
+  in both provenance manifests and pinned by their tests: bits below the eighth
+  mantissa position are not hardware-exact, so firmware that REFINES the seed
+  converges regardless while firmware consuming it DIRECTLY may diverge.
 - **`ABS`'s effect on `CSR.SAT` and `SSR` is unresolved** — see the list below.
   The structural argument that it SHOULD set them (the packed forms carry
   explicit exemption notes, which would be redundant if the default were "no

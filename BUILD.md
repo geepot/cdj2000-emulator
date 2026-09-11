@@ -178,7 +178,7 @@ AMR/circular-addressing validation:
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_circular.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-circular.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-circular-family-san
 /tmp/cdj-circular-family-san
 sh scripts/build-qemu-sh4.sh build/qemu
@@ -218,7 +218,7 @@ Saturating arithmetic batch validation:
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_saturation.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-saturation.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-saturation-family-san
 /tmp/cdj-saturation-family-san
 sh scripts/build-qemu-sh4.sh build/qemu
@@ -1057,7 +1057,7 @@ SPKERNEL restriction remain incomplete.
 
 ```sh
 .venv/bin/pytest -q
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-prot-loop-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-prot-loop-san
 /tmp/cdj-prot-loop-san
 .venv/bin/python -m tools.cdj_dsp.replay runs/nxs-bnop-immediate-connected/dsp-l2.bin runs/dsp-protected-loop-1 --verify-repeat
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1124,7 +1124,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu 
   tests/cstub/c6747-pll-clock.c emulator/qemu/cdj_c6747_pll.c \
   emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c6747_mcasp.c \
   emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
-  emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_sp.c \
+  emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_sp.c \
   emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-pll-clock-san
 /tmp/cdj-pll-clock-san
@@ -1246,7 +1246,7 @@ lockout. Privilege checking is not modeled.
 
 ```sh
 .venv/bin/pytest -q
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-syscfg.c emulator/qemu/cdj_c6747_syscfg.c emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-cfgchip-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-syscfg.c emulator/qemu/cdj_c6747_syscfg.c emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-cfgchip-san
 /tmp/cdj-cfgchip-san
 .venv/bin/python -m tools.cdj_dsp.replay runs/nxs-pll-enable-connected/dsp-l2.bin runs/dsp-cfgchip-1 --verify-repeat
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1398,7 +1398,7 @@ Reproduce focused and complete validation:
 
 ```sh
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_dsp_replay.py tests/test_dsp_inventory.py
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-fp-batch-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-fp-batch-san
 /tmp/cdj-fp-batch-san
 .venv/bin/python -m pytest -q
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1460,7 +1460,7 @@ Reproduce the focused and complete checks:
 
 ```sh
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-batch-san
 /tmp/cdj-c674x-batch-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1542,7 +1542,7 @@ Reproduce focused, complete and sanitizer validation:
   tests/test_dsp_inventory.py tests/test_dsp_coverage.py tests/test_dsp_replay.py
 .venv/bin/python -m pytest -q
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-coverage-san
 /tmp/cdj-c674x-coverage-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1553,7 +1553,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -o /tmp/cdj-checkpoint-coverage-san
 /tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c \
+  -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c \
   emulator/qemu/cdj_c674x_loop.c emulator/qemu/cdj_c6747_syscfg.c \
   emulator/qemu/cdj_c6747_psc.c emulator/qemu/cdj_c6747_mcasp.c \
   emulator/qemu/cdj_c6747_gpio.c emulator/qemu/cdj_c6747_i2c.c \
@@ -1611,7 +1611,7 @@ Reproduce the focused tests and sanitizer harnesses:
   tests/test_dsp_checkpoint_replay.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -I emulator/qemu tests/cstub/c6747-intc.c \
-  emulator/qemu/cdj_c6747_intc.c emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c6747_intc.c emulator/qemu/cdj_c6747_timer.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-c6747-intc-san
 /tmp/cdj-c6747-intc-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1819,7 +1819,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   emulator/qemu/cdj_c6747_cache.c -o /tmp/cdj-c6747-cache-san
 /tmp/cdj-c6747-cache-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-mpy-san
 /tmp/cdj-c674x-mpy-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -2086,7 +2086,7 @@ sh scripts/build-qemu-sh4.sh build/qemu
 cc -std=c11 -Wall -Wextra -Werror \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   -Iemulator/qemu tests/cstub/c674x.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_dotp.c emulator/qemu/cdj_c674x_packed8.c emulator/qemu/cdj_c674x_packed16.c emulator/qemu/cdj_c674x_packbits.c emulator/qemu/cdj_c674x_mpy32.c emulator/qemu/cdj_c674x_dp.c emulator/qemu/cdj_c674x_approx.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-c674x-san
 /tmp/cdj-c674x-san
 .venv/bin/python -m pytest -q
