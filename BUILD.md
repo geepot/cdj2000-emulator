@@ -2078,3 +2078,9 @@ assembly/link errors, timeouts and unrelated emulator failures still fail.
 A future fix produces a strict XPASS until the expected-failure annotation is
 removed. The pending-before-IDLE control must pass with maskable interrupts
 disabled. Runtime scheduling is unchanged by these tests.
+
+The deterministic POSIX suite has nine scenarios and six targeted negative
+controls. The combined Blackfin suite reports 37 passed and one expected
+failure locally; the Windows waiter and full SIC/CEC/SPORT integration remain
+outside this harness. Run the broader gate with
+`.venv/bin/python -m pytest -q -rxX tests/test_bfin_*.py tests/test_blackfin_parallel.py`.

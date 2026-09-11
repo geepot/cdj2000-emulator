@@ -1,0 +1,28 @@
+{
+  "base_commit": "323f7e0d72af014ffcda11fda2f79223d76cc772",
+  "sha256": {
+    "build/gdb-17.2/sim/bfin/interp.c": "99c4b09d4a928527699561f334d517f27a01730cff7cc71acdbcc5ab607dd636",
+    "build/gdb-17.2/sim/common/sim-events.c": "cd744780589de48bff441816dcfe2affd2aca556a4807f728c900d9bb391e399",
+    "build/gdb-17.2/sim/bfin/bfin-sim.c": "1107ddd2105bc2e7886076cc8b7b15b40d773d95fc0957faf6887e488d25297e",
+    "build/gdb-17.2/sim/bfin/dv-bfin_pll.c": "a19deb548f217d9ffe04adf95b01ca4f548b1896d3c45a146914c561e4c28efe",
+    "bin/cdj-run": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+    "tests/test_bfin_wake_timing.py": "3e76be4567f955a1815732ffc39bb2725a4e6ef3955b2446f373c0443bfbf27d",
+    "tests/test_bfin_wake_guest.py": "f2f7792fb48fb8063eeec281ec50cfeb1a88eedc469975d47772fa510b2c0a54",
+    "tests/cstub/bfin-wake-timing.c": "17f70351f72cb12c12c0048f1880f9aa7238ab522982012ec8c74e7c3d740644"
+  },
+  "runtime_changed": false,
+  "test_command": "DEVELOPER_DIR=/Library/Developer/CommandLineTools .venv/bin/python -m pytest -q -rxX tests/test_bfin_*.py tests/test_blackfin_parallel.py",
+  "result": {
+    "passed": 37,
+    "expected_failure": 1,
+    "skipped": 0
+  },
+  "expected_failure": "PLL lock during IDLE: immediate guest PLL_STAT assertion sees zero; strict XPASS requires graduation after a fix",
+  "sanitizers": "AddressSanitizer + UndefinedBehaviorSanitizer, all nine deterministic cases passed",
+  "limitations": [
+    "Controlled callback backend is not actual SIC/CEC interrupt delivery.",
+    "Mock select tests descriptor/deadline decisions, not host OS latency or full MAIN-link delivery.",
+    "POSIX waiter only; Windows path not covered.",
+    "Prepared source checks require current patches; installed guest probe separately tests the binary."
+  ]
+}

@@ -1,0 +1,10 @@
+ASan + UBSan, -O2 -Wall -Wextra -Werror
+PASS deadline
+PASS interrupt
+PASS pending
+PASS same_pc
+PASS prepaid
+PASS unpaid_lag
+PASS link
+PASS spin
+PASS hardware_loop

@@ -1,0 +1,4 @@
+....................x.................                                   [100%]
+=========================== short test summary info ============================
+XFAIL tests/test_bfin_wake_guest.py::test_pll_idle_wake[lock-during-idle] - known wall-clock IDLE early resume before PLL lock delivery; graduate this test when fixed
+37 passed, 1 xfailed in 5.13s
