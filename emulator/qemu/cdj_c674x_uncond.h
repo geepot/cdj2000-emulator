@@ -27,6 +27,10 @@ typedef enum {
     CDJ_C674X_UNCOND_ADDAW,
     /* A documented nonconditional instruction that is not implemented. */
     CDJ_C674X_UNCOND_UNIMPLEMENTED,
+    /* A nonconditional instruction the caller's own dispatch table implements.
+     * Classifying it is still necessary: without it the word falls into
+     * Table 3-9's reserved-predicate hole and never reaches that table. */
+    CDJ_C674X_UNCOND_ARM_TABLE,
 } CdjC674xUncondKind;
 /* CALLP (Figure F-12) and DINT/RINT (Figure H-1, op 0010/0011) share the same
  * 0001 opcode field and are dispatched by the caller before this point; they

@@ -5,7 +5,8 @@ import shutil
 import subprocess
 import pytest
 ROOT = Path(__file__).resolve().parents[1]
-HELPERS = ('uncond', 'mpy', 'sp', 'control', 'loop')
+HELPERS = ('uncond', 'mpy', 'dotp', 'packed8', 'packed16', 'packbits',
+           'mpy32', 'dp', 'sp', 'control', 'loop')
 
 @pytest.mark.parametrize('sanitize', [False, True])
 def test_transaction_matches_full_prefix(tmp_path, sanitize):

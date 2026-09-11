@@ -5,7 +5,7 @@
  * formats that carry creg; TI reuses the same bit pattern as a literal opcode
  * field in Figure C-3 (printed page 724), Figure D-3 (735), Figure E-3 (743),
  * Figure F-14 (749) and Figure H-1 (765).  These assertions fix three things:
- * the 22 documented-but-unimplemented extensions reject by name, the three
+ * the 19 documented-but-unimplemented extensions reject by name, the three
  * ADDAB/ADDAH/ADDAW long-immediate forms execute, and everything else in the
  * creg/z hole still rejects as a reserved predicate.
  *
@@ -94,9 +94,12 @@ static void adda(uint32_t word, unsigned side, unsigned dst,
     assert(c.r[side ^ 1][dst] == 0 || dst == 14 || dst == 15);
 }
 
-/* The 22 documented nonconditional instructions this decoder does not
- * implement.  They must be reachable and say so, never "reserved predicate".
- * Opfields read from each instruction's own Opcode figure, words from asm6x. */
+/* The documented nonconditional instructions this decoder does not implement.
+ * They must be reachable and say so, never "reserved predicate".  Opfields read
+ * from each instruction's own Opcode figure, words from asm6x.  DPACKX2
+ * (op 0x33), DPACK2 (0x34) and SHFL3 (0x36) have left this list: they are
+ * implemented and their semantics are covered by tests/cstub/c674x-packbits.c,
+ * which also re-checks these three words for reachability. */
 static void unimplemented_extensions(void)
 {
     static const struct { uint32_t word; const char *asm_line; } rows[] = {
@@ -105,9 +108,6 @@ static void unimplemented_extensions(void)
         {0x120821B8u, "ADDSUB2  .L1 A1,A2,A5:A4  op 0x0d, printed page 133"},
         {0x120821D8u, "SADDSUB  .L1 A1,A2,A5:A4  op 0x0e, printed page 427"},
         {0x120821F8u, "SADDSUB2 .L1 A1,A2,A5:A4  op 0x0f, printed page 429"},
-        {0x12082678u, "DPACKX2  .L1 A1,A2,A5:A4  op 0x33, printed page 256"},
-        {0x12082698u, "DPACK2   .L1 A1,A2,A5:A4  op 0x34, printed page 254"},
-        {0x120826D8u, "SHFL3    .L1 A1,A2,A5:A4  op 0x36, printed page 445"},
         /* Figure E-3, .M unit: bit 11 = 0, op = bits 10-6, bits 5-2 = 1100. */
         {0x120822B0u, "CMPY     .M1 A1,A2,A5:A4  op 0x0a, printed page 215"},
         {0x118822F0u, "CMPYR    .M1 A1,A2,A3     op 0x0b, printed page 217"},
@@ -127,7 +127,7 @@ static void unimplemented_extensions(void)
         {0x10000000u, "SWE                       op 0x0, printed page 557"},
         {0x10002000u, "SWENR                     op 0x1, printed page 558"},
     };
-    assert(sizeof(rows) / sizeof(rows[0]) == 22);
+    assert(sizeof(rows) / sizeof(rows[0]) == 19);
     for (unsigned i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
         /* p = 1 (parallel) must classify identically to p = 0. */
         rejects(rows[i].word, "instruction not implemented");

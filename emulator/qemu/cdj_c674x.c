@@ -5,7 +5,11 @@
 #include "cdj_c674x_multicycle.h"
 #include "cdj_c674x_uncond.h"
 #include "cdj_c674x_mpy.h"
+#include "cdj_c674x_packed8.h"
+#include "cdj_c674x_packbits.h"
+#include "cdj_c674x_mpy32.h"
 #include "cdj_c674x_sp.h"
+#include "cdj_c674x_dp.h"
 #include "cdj_c674x_control.h"
 
 /* This scratch CPU is initialized by the prefix copy below.  Its loop tail
@@ -193,7 +197,8 @@ static unsigned queued_result_registers(const CdjC674xLoad *load)
 {
     if (load->size == CDJ_C674X_DELAYED_IFR_SET ||
         load->size == CDJ_C674X_DELAYED_IFR_CLEAR ||
-        load->size == CDJ_C674X_DELAYED_SAT) return 0;
+        load->size == CDJ_C674X_DELAYED_SAT ||
+        load->size == CDJ_C674X_DELAYED_FAUCR) return 0;
     return (load->size & 255) == 8 || load->size == 16 ? 2 : 1;
 }
 
@@ -1901,11 +1906,1012 @@ static bool arm_addkpc(CdjC674xArm *x)
  * tests/test_c674x.py::test_c674x_dispatch_table_has_no_shadowed_rows - a row
  * that overlaps an existing one is otherwise silently unreachable. */
 /* wave5-arms: dot-product and complex-multiply */
+/* Included here rather than in the file's header block so that this family's
+ * whole edit to cdj_c674x.c stays inside its own anchor. */
+#include "cdj_c674x_dotp.h"
+
+/* The seven packed dot-product opfields of Figure E-1's compound .M format
+ * (bit 11 zero, opfield bits 10-6, bits 5-2 = 1100).  Disjoint from the
+ * opfields the earlier compound-.M rows claim - 01 SMPY2, 0e/10/14/15 the
+ * MPYIH/MPYHI/MPYIL/MPYLI family, 18/19 MPY32U/MPY32US, 03 MVD - so this row
+ * is reachable behind all of them. */
+static bool match_dotp(const CdjC674xArm *x)
+{
+    switch ((x->w >> 6) & 31) {
+    case CDJ_C674X_DOTPSU4:   /* printed page 249, also DOTPUS4 page 251 */
+    case CDJ_C674X_DOTPU4:    /* printed page 252 */
+    case CDJ_C674X_DOTPNRSU2: /* printed page 240, also DOTPNRUS2 page 242 */
+    case CDJ_C674X_DOTPN2:    /* printed page 238 */
+    case CDJ_C674X_DOTP2L:    /* printed page 235, dst_o:dst_e */
+    case CDJ_C674X_DOTP2:     /* printed page 235, 32-bit dst */
+    case CDJ_C674X_DOTPRSU2:  /* printed page 244, also DOTPRUS2 page 247 */
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool arm_dotp(CdjC674xArm *x)
+{
+    /* Every entry in this family reads src1 and src2 in E1 and writes dst in
+     * E4: "Instruction Type Four-cycle, Delay Slots 3" on printed pages 236,
+     * 238, 241, 243, 245, 247, 250, 251 and 253.  src1 is the local operand
+     * and src2 the cross-path one (operand types s2/xs2, s4/xu4, u4/xu4 in
+     * every opcode map). */
+    unsigned op = (x->w >> 6) & 31;
+    bool pair = op == CDJ_C674X_DOTP2L;
+    x->reg_write = false;
+    if (pair && (x->dst & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid multiply result register pair");
+    if (x->enabled) {
+        CdjC674xDotpResult r = cdj_c674x_dotp(op, x->cpu->r[x->side][x->a],
+                                              x->cpu->r[x->cross][x->b]);
+        if (!r.valid)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "dot-product opfield not implemented");
+        if (r.undefined)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "DOTPRSU2/DOTPNRSU2 intermediate overflows: SPRUFE8B "
+                        "printed page 244 leaves the result undefined");
+        uint64_t due = x->cpu->cycles + 4;
+        if (x->out->load_count == 40)
+            return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
+        unsigned count = pair ? 2 : 1;
+        for (unsigned j = 0; j < x->out->load_count; ++j) {
+            unsigned old_count = queued_result_registers(&x->out->loads[j]);
+            if (x->out->loads[j].due == due && x->out->loads[j].bank == x->side &&
+                x->out->loads[j].dst < x->dst + count &&
+                x->dst < x->out->loads[j].dst + old_count)
+                return stop(x->cpu, x->pc, x->insn->word,
+                            "parallel delayed-result write conflict");
+        }
+        x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+            .due = due,
+            .value = pair ? r.value : (uint32_t)r.value,
+            .bank = x->side, .dst = x->dst, .size = pair ? 16 : 0
+        };
+    }
+    return true;
+}
 /* wave5-arms: packed 16-bit */
+/* The family header is included here rather than at the top of the file so
+ * that the whole packed 16-bit change stays inside this family's anchor. */
+#include "cdj_c674x_packed16.h"
+
+static bool arm_packed16(CdjC674xArm *x)
+{
+    /* Packed 16-bit single-cycle operations.  Every one of these reads
+     * src1/src2 in E1 and writes dst in E1 with zero delay slots, and none
+     * of them touches CSR.SAT or SSR (SPRUFE8B printed pages: ABS2 103-104,
+     * ADD2 137-139, SUB2 548-550, SADD2 425-426, SSUB2 502-503,
+     * SADDUS2 433-434, MAX2 306-308, MIN2 311-313, SHR2 453-454,
+     * SHRU2 459-460, CMPEQ2 179-180, CMPGT2 191-192, SPACK2 472-473).
+     * src1 is always the local register file and src2 the cross path.
+     * ADD2 and SUB2 decode on .S, .L and .D; MAX2 and MIN2 on .L and .S. */
+    uint32_t left = x->cpu->r[x->side][x->a];
+    uint32_t right = x->cpu->r[x->cross][x->b];
+    switch (x->w & 0xffc) {
+    case 0x358:                                   /* ABS2  .L        p103 */
+        x->value = cdj_c674x_abs2(right); break;
+    case 0x060: case 0x0b8: case 0x930:           /* ADD2  .S/.L/.D  p137 */
+        x->value = cdj_c674x_add2(left, right); break;
+    case 0x460: case 0x098: case 0x970:           /* SUB2  .S/.L/.D  p548 */
+        x->value = cdj_c674x_sub2(left, right); break;
+    case 0xc30:                                   /* SADD2 .S        p425 */
+        x->value = cdj_c674x_sadd2(left, right); break;
+    case 0xc98:                                   /* SSUB2 .L        p502 */
+        x->value = cdj_c674x_ssub2(left, right); break;
+    case 0xc70:                                   /* SADDUS2 .S      p433 */
+        x->value = cdj_c674x_saddus2(left, right); break;
+    case 0x858: case 0xf70:                       /* MAX2  .L/.S     p306 */
+        x->value = cdj_c674x_max2(left, right); break;
+    case 0x838: case 0xf30:                       /* MIN2  .L/.S     p311 */
+        x->value = cdj_c674x_min2(left, right); break;
+    case 0xdf0:                                   /* SHR2  .S uint   p453 */
+        x->value = cdj_c674x_shr2(right, left); break;
+    case 0x620:                                   /* SHR2  .S ucst5  p453 */
+        x->value = cdj_c674x_shr2(right, x->a); break;
+    case 0xe30:                                   /* SHRU2 .S uint   p459 */
+        x->value = cdj_c674x_shru2(right, left); break;
+    case 0x660:                                   /* SHRU2 .S ucst5  p459 */
+        x->value = cdj_c674x_shru2(right, x->a); break;
+    case 0x760:                                   /* CMPEQ2 .S       p179 */
+        x->value = cdj_c674x_cmpeq2(left, right); break;
+    case 0x520:                                   /* CMPGT2 .S       p191 */
+        x->value = cdj_c674x_cmpgt2(left, right); break;
+    case 0xcb0:                                   /* SPACK2 .S       p472 */
+        x->value = cdj_c674x_spack2(left, right); break;
+    default:
+        /* Unreachable through cdj_c674x_arms[], whose rows match this
+         * opfield exactly.  Fail closed rather than silently computing some
+         * other member's arithmetic if a row is ever added without a case. */
+        return stop(x->cpu, x->pc, x->insn->word, "instruction not implemented");
+    }
+    return true;
+}
+
+static bool arm_packed16_m(CdjC674xArm *x)
+{
+    /* Two-cycle .M forms: AVG2 (printed pages 147-148) and SSHVL/SSHVR
+     * (495-498) read src1/src2 in E1 and write dst in E2, one delay slot.
+     * SSHVL/SSHVR saturate a left shift; printed page 495 NOTE: "If the
+     * shifted value is saturated, then the SAT bit is set in CSR one cycle
+     * after the result is written to dst."  SPRUFE8B 2.9.13 (printed page
+     * 54) makes the same cycle set this unit's SSR flag: bit 4 is M1 and
+     * bit 5 is M2.  AVG2 states "No overflow conditions exist". */
+    unsigned op = x->w & 0xffc;
+    x->reg_write = false;
+    if (x->enabled) {
+        uint32_t left = x->cpu->r[x->side][x->a];
+        uint32_t right = x->cpu->r[x->cross][x->b];
+        uint32_t value;
+        bool saturated = false;
+        if (op == 0x4f0) {                        /* AVG2  .M        p147 */
+            value = cdj_c674x_avg2(left, right);
+        } else {                       /* SSHVL 0x730 p495, SSHVR 0x6b0 p497 */
+            CdjC674xPacked16Sat shift =
+                cdj_c674x_sshv(right, left, op == 0x6b0);
+            value = shift.value;
+            saturated = shift.saturated;
+        }
+        uint64_t due = x->cpu->cycles + 2;
+        if (x->out->load_count + (saturated ? 2u : 1u) > 40)
+            return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
+        for (unsigned j = 0; j < x->out->load_count; ++j) {
+            unsigned count = queued_result_registers(&x->out->loads[j]);
+            if (x->out->loads[j].due == due && x->out->loads[j].bank == x->side &&
+                x->out->loads[j].dst <= x->dst && x->dst < x->out->loads[j].dst + count)
+                return stop(x->cpu, x->pc, x->insn->word,
+                            "parallel delayed-result write conflict");
+        }
+        x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+            .due = due, .value = value, .bank = x->side, .dst = x->dst,
+            .size = 0
+        };
+        if (saturated)
+            x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+                .due = due + 1, .address = 1u << (4 + x->side),
+                .size = CDJ_C674X_DELAYED_SAT
+            };
+    }
+    return true;
+}
 /* wave5-arms: packed 8-bit */
+/* Packed 8-bit (4x8) operands on .L, .S and .M.  The arithmetic is in
+ * cdj_c674x_packed8.c; what belongs here is the opfield-to-operation map, the
+ * register-pair rule and the pipeline latency, all of which differ between
+ * near-identical mnemonics in this family.
+ *
+ * Every entry in the family reads src1 and src2 in E1 (their Pipeline tables).
+ * The write stage is NOT uniform, so it is carried per opfield below:
+ *   E1, "Delay Slots 0"  ADD4 141, SUB4 552, SUBABS4 535, SADDU4 436,
+ *                        MAXU4 310, MINU4 315, CMPEQ4 182, CMPGTU4 200,
+ *                        SPACKU4 475
+ *   E2, "Delay Slots 1"  AVGU4 150 ("Two-cycle")
+ *   E4, "Delay Slots 3"  MPYU4 361, MPYSU4 358 ("Four-cycle"), which also
+ *                        write the 64-bit dst_o:dst_e register pair.
+ * The opfield values are bits 11-2 of each entry's 32-bit Opcode figure,
+ * which is also what the table rows below match on. */
+static bool arm_packed8(CdjC674xArm *x)
+{
+    uint32_t src1 = x->cpu->r[x->side][x->a];
+    uint32_t src2 = x->cpu->r[x->cross][x->b];
+    uint64_t result;
+    unsigned stage;
+    bool pair = false;
+    switch (x->w & 0xffc) {
+    case 0xcb8: result = cdj_c674x_add4(src1, src2);     stage = 1; break;
+    case 0xcd8: result = cdj_c674x_sub4(src1, src2);     stage = 1; break;
+    case 0xb58: result = cdj_c674x_subabs4(src1, src2);  stage = 1; break;
+    case 0xcf0: result = cdj_c674x_saddu4(src1, src2);   stage = 1; break;
+    case 0x878: result = cdj_c674x_maxu4(src1, src2);    stage = 1; break;
+    case 0x918: result = cdj_c674x_minu4(src1, src2);    stage = 1; break;
+    case 0x720: result = cdj_c674x_cmpeq4(src1, src2);   stage = 1; break;
+    case 0x560: result = cdj_c674x_cmpgtu4(src1, src2);  stage = 1; break;
+    case 0xd30: result = cdj_c674x_spacku4(src1, src2);  stage = 1; break;
+    case 0x4b0: result = cdj_c674x_avgu4(src1, src2);    stage = 2; break;
+    case 0x130: result = cdj_c674x_mpyu4(src1, src2);
+        stage = 4; pair = true; break;
+    case 0x170: result = cdj_c674x_mpysu4(src1, src2);
+        stage = 4; pair = true; break;
+    default:
+        /* Unreachable while the table rows below enumerate the opfields, and
+         * fail-closed rather than silently computing something else if a
+         * future row widens a mask. */
+        return stop(x->cpu, x->pc, x->insn->word, "instruction not implemented");
+    }
+    if (stage == 1) {              /* E1: the commit step writes x->value. */
+        x->value = (uint32_t)result;
+        return true;
+    }
+    x->reg_write = false;
+    /* MPYU4/MPYSU4 dst is dst_o:dst_e, an even/odd pair (printed pages 360,
+     * 357), so an odd dst names no architectural pair. */
+    if (pair && (x->dst & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid multiply result register pair");
+    if (x->enabled) {
+        uint64_t due = x->cpu->cycles + stage;
+        if (x->out->load_count == 40)
+            return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
+        unsigned count = pair ? 2 : 1;
+        for (unsigned j = 0; j < x->out->load_count; ++j) {
+            unsigned old_count = queued_result_registers(&x->out->loads[j]);
+            if (x->out->loads[j].due == due && x->out->loads[j].bank == x->side &&
+                x->out->loads[j].dst < x->dst + count &&
+                x->dst < x->out->loads[j].dst + old_count)
+                return stop(x->cpu, x->pc, x->insn->word,
+                            "parallel delayed-result write conflict");
+        }
+        x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+            .due = due, .value = pair ? result : (uint32_t)result,
+            .bank = x->side, .dst = x->dst, .size = pair ? 16 : 0
+        };
+    }
+    return true;
+}
 /* wave5-arms: pack, unpack, shuffle and bit manipulation */
+
+/* Queue one 32-bit result for the E2 write of a two-cycle .M instruction, the
+ * way the other E2 .M arms above do: SPRUFE8B gives BITC4 (printed page 162),
+ * BITR (163), DEAL (232), SHFL (444), XPND2 (569), XPND4 (571) and ROTL (415)
+ * all "Instruction Type Two-cycle / Delay Slots 1", with dst written in E2 and
+ * every Example headed "2 cycles after instruction". */
+static bool packbits_queue_e2(CdjC674xArm *x, uint32_t result)
+{
+    uint64_t due = x->cpu->cycles + 2;
+    if (x->out->load_count == 40)
+        return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
+    for (unsigned j = 0; j < x->out->load_count; ++j) {
+        unsigned count = queued_result_registers(&x->out->loads[j]);
+        if (x->out->loads[j].due == due && x->out->loads[j].bank == x->side &&
+            x->out->loads[j].dst < x->dst + 1 &&
+            x->dst < x->out->loads[j].dst + count)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "parallel delayed-result write conflict");
+    }
+    x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+        .due = due, .value = result, .address = 0,
+        .bank = x->side, .dst = x->dst, .size = 0
+    };
+    return true;
+}
+
+static bool arm_packbits_m(CdjC674xArm *x)
+{
+    /* The .M-unit src2-only group - bits 17-13 select the operation while bits
+     * 11-2 are the shared 0F0h - plus ROTL, whose opfield lives in bits 10-6.
+     * BITR 163, BITC4 161, DEAL 231, SHFL 443, XPND2 568, XPND4 570, ROTL 414.
+     * src2 is the cross-capable operand on all seven; ROTL's src1 is local. */
+    uint32_t src2 = x->cpu->r[x->cross][x->b], result;
+    if ((x->w & 0xffc) == 0x770 || (x->w & 0xffc) == 0x7b0) {
+        /* ROTL opfield 11101 reads src1 from a register, 11110 takes a ucst5
+         * in the same field (printed page 414 opcode map). */
+        uint32_t src1 = (x->w & 0xffc) == 0x770 ?
+            x->cpu->r[x->side][x->a] : x->a;
+        result = cdj_c674x_rotl(src2, src1);
+    } else switch ((x->w >> 13) & 31) {
+    case 0x1f: result = cdj_c674x_bitr(src2); break;
+    case 0x1e: result = cdj_c674x_bitc4(src2); break;
+    case 0x1d: result = cdj_c674x_deal(src2); break;
+    case 0x1c: result = cdj_c674x_shfl(src2); break;
+    case 0x19: result = cdj_c674x_xpnd2(src2); break;
+    default:   result = cdj_c674x_xpnd4(src2); break;
+    }
+    x->reg_write = false;
+    return !x->enabled || packbits_queue_e2(x, result);
+}
+
+static bool arm_packbits_unpack(CdjC674xArm *x)
+{
+    /* UNPKHU4 (printed page 559), UNPKLU4 (561) and SWAP4 (555).  All three are
+     * "Single cycle / Delay Slots 0" with src2 read and dst written in E1, so
+     * the ordinary E1 register write applies.  Bits 17-13 pick the operation
+     * and are identical between the .L and .S opcode figures. */
+    uint32_t src2 = x->cpu->r[x->cross][x->b];
+    switch ((x->w >> 13) & 31) {
+    case 3:  x->value = cdj_c674x_unpkhu4(src2); break;
+    case 2:  x->value = cdj_c674x_unpklu4(src2); break;
+    default: x->value = cdj_c674x_swap4(src2); break;
+    }
+    return true;
+}
+
+static bool arm_packbits_mergebyte(CdjC674xArm *x)
+{
+    /* SHLMB (printed page 449) and SHRMB (455) on .L and .S: single-cycle,
+     * zero delay slots, src1 local u4 and src2 the cross-capable xu4. */
+    uint32_t src1 = x->cpu->r[x->side][x->a];
+    uint32_t src2 = x->cpu->r[x->cross][x->b];
+    bool left = (x->w & 0xffc) == 0xc38 || (x->w & 0xffc) == 0xe70;
+    x->value = left ? cdj_c674x_shlmb(src1, src2)
+                    : cdj_c674x_shrmb(src1, src2);
+    return true;
+}
+
+static bool arm_packbits_lmbd(CdjC674xArm *x)
+{
+    /* LMBD .L (printed page 304): single-cycle, zero delay slots.  Only the
+     * register-src1 opfield 110 1011 is implemented here; the cst5 form
+     * (110 1010) has no row and keeps reporting "instruction not implemented". */
+    x->value = cdj_c674x_lmbd(x->cpu->r[x->side][x->a],
+                              x->cpu->r[x->cross][x->b]);
+    return true;
+}
+
+static bool arm_packbits_norm(CdjC674xArm *x)
+{
+    /* NORM .L (printed page 390): single-cycle, zero delay slots.  Opfield
+     * 110 0011 normalizes an xsint src2; 110 0000 normalizes a 40-bit slong in
+     * an even/odd pair. */
+    if (((x->w >> 5) & 0x7f) == 0x63) {
+        x->value = cdj_c674x_norm32(x->cpu->r[x->cross][x->b]);
+        return true;
+    }
+    if (x->b & 1)
+        return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    /* A 40-bit operand consumes the .L unit's local long-data input; a cross
+     * path carries only one 32-bit operand (SPRUFE8B 2.3), which is why the
+     * other long .L forms above refuse x = 1 rather than read the local pair. */
+    if (x->w & 0x1000)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "cross-path long operand not supported");
+    x->value = cdj_c674x_norm40(register_long40(x->cpu, x->side, x->b));
+    return true;
+}
+
+static bool arm_packbits_dual(CdjC674xArm *x)
+{
+    /* DPACK2 (printed page 254), DPACKX2 (256) and SHFL3 (445): nonconditional
+     * .L encodings - bits 31-28 are the literal 0001 opcode field, so creg is
+     * zero and the instruction always executes - that are "Single-cycle / Delay
+     * Slots 0" and write dst_o:dst_e in E1.  DPACK2 and DPACKX2 spend only bits
+     * 27-24 on dst and reserve bit 23 as 0, so the 5-bit dst the decoder hands
+     * us is already the even register of the pair; SHFL3 uses all five bits and
+     * must still name one. */
+    uint32_t src1 = x->cpu->r[x->side][x->a];
+    uint32_t src2 = x->cpu->r[x->cross][x->b];
+    uint64_t result;
+    x->reg_write = false;
+    if (x->dst & 1)
+        return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    switch (x->w & 0xffc) {
+    case 0x698: result = cdj_c674x_dpack2(src1, src2); break;
+    case 0x678: result = cdj_c674x_dpackx2(src1, src2); break;
+    default:    result = cdj_c674x_shfl3(src1, src2); break;
+    }
+    if (x->written[x->side][x->dst] || x->written[x->side][x->dst + 1])
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "parallel register write conflict");
+    x->out->r[x->side][x->dst] = (uint32_t)result;
+    x->out->r[x->side][x->dst + 1] = (uint32_t)(result >> 32);
+    x->written[x->side][x->dst] = x->written[x->side][x->dst + 1] = true;
+    return true;
+}
 /* wave5-arms: double-precision floating point */
+
+/* A 64-bit DP operand whose encoded register field names the EVEN register of
+ * the pair.  Every instruction that reads src_l one cycle before src_h -
+ * ADDDP, SUBDP, MPYDP, MPYSPDP and the DP compares - is encoded that way, as
+ * read back from TI's assembler (ADDDP .L1 A5:A4,A7:A6,A9:A8 = 04188318h has
+ * src1 = 4 and src2 = 6). */
+static uint64_t dp_pair(const CdjC674x *cpu, unsigned bank, unsigned reg)
+{
+    return (uint64_t)cpu->r[bank][reg + 1] << 32 | cpu->r[bank][reg];
+}
+
+/* Queue one already-computed 32-bit delayed result with the same
+ * parallel-write rejection every other multi-cycle arm performs.  status is
+ * the FP warning mask, already shifted into the unit's half; multiplier
+ * selects FMCR over FADCR, as CdjC674xLoad.sign_extend does for size 0. */
+static bool dp_queue(CdjC674xArm *x, uint64_t due, unsigned dst,
+                     uint32_t value, uint32_t status, bool multiplier)
+{
+    if (x->out->load_count == 40)
+        return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
+    for (unsigned j = 0; j < x->out->load_count; ++j) {
+        unsigned count = queued_result_registers(&x->out->loads[j]);
+        if (x->out->loads[j].due == due && x->out->loads[j].bank == x->side &&
+            x->out->loads[j].dst <= dst && dst < x->out->loads[j].dst + count)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "parallel delayed-result write conflict");
+    }
+    x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+        .due = due, .value = value, .address = status,
+        .bank = x->side, .dst = dst, .size = 0, .sign_extend = multiplier
+    };
+    return true;
+}
+
+/* Queue the low and high halves of a DP result at the two cycles the manual
+ * gives for them: dst_l on `low` and dst_h on the cycle after, with the
+ * warning bits accompanying dst_l.  That split is not cosmetic - every DP
+ * instruction page says "the number of delay slots can be reduced by one"
+ * for a consumer that reads the low word first, so publishing both halves
+ * together would make dst_h visible a cycle early. */
+static bool dp_queue_pair(CdjC674xArm *x, unsigned low,
+                          CdjC674xDpResult result, bool multiplier)
+{
+    unsigned shift = x->side ? 16 : 0;
+    return dp_queue(x, x->cpu->cycles + low, x->dst, (uint32_t)result.value,
+                    result.status << shift, multiplier) &&
+           dp_queue(x, x->cpu->cycles + low + 1, x->dst + 1,
+                    (uint32_t)(result.value >> 32), 0, multiplier);
+}
+
+static bool arm_two_cycle_dp(CdjC674xArm *x)
+{
+    /* ABSDP (printed pages 105-106) and SPDP (printed pages 477-478) are
+     * "Two-cycle DP" with 1 delay slot.  Table 4-12 (printed page 596) fixes
+     * the timing for the whole class: the sources are read on E1, dst_l is
+     * written on E1, dst_h on E2, and "the status is written to the FAUCR on
+     * E1" - so the warning bits land in the issue cycle, like ABSSP's.
+     *
+     * ABSDP's encoded src2 names the ODD register of the pair, because "the
+     * 64-bit double-precision operand is read in one cycle by using the src2
+     * port for the 32 MSBs and the src1 port for the 32 LSBs" (printed page
+     * 105); TI's assembler emits src2 = 7 for ABSDP .S1 A7:A6.  SPDP's src2
+     * is a plain single-precision register. */
+    unsigned encoding = x->w & 0xffc;
+    if (x->dst & 1)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision result register pair");
+    CdjC674xDpResult result;
+    if (encoding == 0xb20) {                      /* ABSDP */
+        if (!(x->b & 1))
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "invalid double-precision source register pair");
+        result = cdj_c674x_abs_dp(
+            (uint64_t)x->cpu->r[x->cross][x->b] << 32 |
+            x->cpu->r[x->cross][x->b - 1]);
+    } else {                                      /* SPDP */
+        result = cdj_c674x_sp_to_dp(x->cpu->r[x->cross][x->b]);
+    }
+    x->value = (uint32_t)result.value;            /* dst_l, written on E1 */
+    if (x->enabled) {
+        if (!dp_queue(x, x->cpu->cycles + 2, x->dst + 1,
+                      (uint32_t)(result.value >> 32), 0, false))
+            return false;
+        if (result.status) {
+            if (x->controls[19])
+                return stop(x->cpu, x->pc, x->insn->word,
+                            "parallel FAUCR status write conflict");
+            x->out->control[19] |= result.status << (x->side ? 16 : 0);
+            x->controls[19] = true;
+        }
+    }
+    return true;
+}
+
+static bool arm_cmpdp(CdjC674xArm *x)
+{
+    /* CMPEQDP (printed pages 184-185), CMPGTDP (193-194) and CMPLTDP
+     * (207-208).  Table 4-15 (printed page 598): src1_l/src2_l on E1,
+     * src1_h/src2_h on E2, dst written on E2, "the status is written to the
+     * floating-point auxiliary register (FAUCR) on E2".  Delay Slots 1 on
+     * all three pages, and CMPLTDP's example is headed "2 cycles after
+     * instruction"; the CMPEQDP and CMPGTDP examples are headed "7 cycles
+     * after instruction", which contradicts their own Delay Slots 1 and
+     * Table 4-15 and is taken as a transcription slip from the ADDDP page. */
+    unsigned relation = ((x->w >> 5) & 0x7f) == 0x51 ? 0 :
+                        ((x->w >> 5) & 0x7f) == 0x53 ? 1 : 2;
+    if ((x->a & 1) || (x->b & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision source register pair");
+    x->reg_write = false;
+    if (x->enabled) {
+        CdjC674xDpResult result = cdj_c674x_compare_dp(
+            dp_pair(x->cpu, x->side, x->a),
+            dp_pair(x->cpu, x->cross, x->b), relation);
+        uint64_t due = x->cpu->cycles + 2;
+        if (x->out->load_count + (result.status ? 2u : 1u) > 40)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "delayed-result queue full");
+        if (!dp_queue(x, due, x->dst, (uint32_t)result.value, 0, false))
+            return false;
+        if (result.status)
+            x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+                .due = due,
+                .address = result.status << (x->side ? 16 : 0),
+                .size = CDJ_C674X_DELAYED_FAUCR
+            };
+    }
+    return true;
+}
+
+static bool arm_addsubdp(CdjC674xArm *x)
+{
+    /* ADDDP (printed pages 125-126) and SUBDP (printed pages 541-543), on
+     * .L and .S alike.  Both take the rounding mode from and set the warning
+     * bits in FADCR, "not in the floating-point auxiliary configuration
+     * register (FAUCR) as for other .S unit instructions" (ADDDP note 1), so
+     * this reads control[18] on either unit.  Table 4-16 (printed page 599):
+     * sources on E1/E2, dst_l on E6, dst_h on E7, status to FADCR on E6;
+     * Delay Slots 6, and both examples are headed "7 cycles after
+     * instruction", which is the E7 high-word write.
+     *
+     * Opfields, read back from TI's assembler: ADDDP 001 1000 on .L and
+     * 111 0010 on .S; SUBDP 001 1001 and its cross-src1 reverse 001 1101 on
+     * .L, 111 0011 and the src2-src1 form 111 0111 on .S.  The reverse forms
+     * are the same shape as SUBSP's and are handled the same way: 001 1101
+     * cross-paths src1 instead of src2, and 111 0111 subtracts the encoded
+     * src1 from the encoded src2. */
+    unsigned encoding = x->w & 0xffc;
+    unsigned operation = encoding == 0x318 || encoding == 0xe58 ? 0 :
+                         encoding == 0xef8 ? 2 : 1;
+    if ((x->a & 1) || (x->b & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision source register pair");
+    if (x->dst & 1)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision result register pair");
+    x->reg_write = false;
+    if (x->enabled) {
+        uint64_t source1 = dp_pair(x->cpu, x->side, x->a);
+        uint64_t source2 = dp_pair(x->cpu, x->cross, x->b);
+        if (encoding == 0x3b8) {
+            source1 = dp_pair(x->cpu, x->cross, x->a);
+            source2 = dp_pair(x->cpu, x->side, x->b);
+        }
+        unsigned rmode = (x->cpu->control[18] >>
+                          ((x->side ? 16u : 0u) + 9)) & 3;
+        if (x->out->load_count + 2 > 40)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "delayed-result queue full");
+        if (!dp_queue_pair(x, 6, cdj_c674x_add_sub_dp(source1, source2,
+                                                      operation, rmode), false))
+            return false;
+    }
+    return true;
+}
+
+static bool arm_mpydp(CdjC674xArm *x)
+{
+    /* MPYDP (printed pages 318-319, Table 4-19 printed page 600): dst_l on
+     * E9, dst_h on E10, status to FMCR on E9, Delay Slots 9.
+     * MPYSPDP (printed pages 352-353, Table 4-20 printed page 601): src1 is
+     * single-precision, dst_l on E6, dst_h on E7, Delay Slots 6.
+     * MPYSP2DP (printed pages 354-355, Table 4-21 printed page 601): both
+     * sources single-precision, dst_l on E4, dst_h on E5, Delay Slots 4.
+     *
+     * Sections 4.2.15 and 4.2.16 do NOT say where MPYSPDP's and MPYSP2DP's
+     * warning bits go.  Section 2.10.3 (printed page 63) does fix the
+     * register - FMCR holds the status "for instructions that use the .M
+     * functional units", and these two are .M - so only the cycle is
+     * inferred: every stated case (MPYDP E9, INTDP E4, ADDDP/SUBDP E6, the
+     * four-cycle class E4, two-cycle DP E1) writes status in the dst_l
+     * cycle, and that rule is applied here.  This is the one inference in
+     * this family that the manual does not state outright. */
+    unsigned encoding = x->w & 0xffc;
+    bool pair_src1 = encoding == 0x700;           /* MPYDP only */
+    bool pair_src2 = encoding != 0x5f0;           /* not MPYSP2DP */
+    if ((pair_src1 && (x->a & 1)) || (pair_src2 && (x->b & 1)))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision source register pair");
+    if (x->dst & 1)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision result register pair");
+    x->reg_write = false;
+    if (x->enabled) {
+        uint64_t left = pair_src1 ? dp_pair(x->cpu, x->side, x->a)
+            : cdj_c674x_sp_operand_to_dp(x->cpu->r[x->side][x->a]);
+        uint64_t right = pair_src2 ? dp_pair(x->cpu, x->cross, x->b)
+            : cdj_c674x_sp_operand_to_dp(x->cpu->r[x->cross][x->b]);
+        unsigned rmode = (x->cpu->control[20] >>
+                          ((x->side ? 16u : 0u) + 9)) & 3;
+        unsigned low = encoding == 0x700 ? 9u : encoding == 0x5b0 ? 6u : 4u;
+        if (x->out->load_count + 2 > 40)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "delayed-result queue full");
+        if (!dp_queue_pair(x, low,
+                           cdj_c674x_multiply_dp(left, right, rmode), true))
+            return false;
+    }
+    return true;
+}
+
+static bool arm_dp_convert(CdjC674xArm *x)
+{
+    /* DPSP (printed pages 260-261), DPINT (258-259) and DPTRUNC (262-263)
+     * are four-cycle .L instructions: section 4.2.8 and Table 4-13 (printed
+     * page 597) read the sources on E1, write dst on E4 and write the status
+     * to FADCR on E4; Delay Slots 3 on all three pages.  DPTRUNC "operates
+     * like DPINT except that the rounding modes in the floating-point adder
+     * configuration register (FADCR) are ignored; round toward zero
+     * (truncate) is always used" (printed page 262).
+     *
+     * All three name the ODD register of the source pair, for the same
+     * reason ABSDP does: "the operand is read in one cycle by using the src2
+     * port for the 32 MSBs and the src1 port for the 32 LSBs". */
+    unsigned encoding = x->w & 0xffc;
+    if (!(x->b & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision source register pair");
+    x->reg_write = false;
+    if (x->enabled) {
+        unsigned shift = x->side ? 16u : 0u;
+        unsigned rmode = encoding == 0x038 ? 1u :
+            (x->cpu->control[18] >> (shift + 9)) & 3;
+        uint64_t source = (uint64_t)x->cpu->r[x->cross][x->b] << 32 |
+                          x->cpu->r[x->cross][x->b - 1];
+        CdjC674xDpResult result = encoding == 0x138 ?
+            cdj_c674x_dp_to_sp(source, rmode) :
+            cdj_c674x_dp_to_integer(source, rmode);
+        if (!dp_queue(x, x->cpu->cycles + 4, x->dst, (uint32_t)result.value,
+                      result.status << shift, false))
+            return false;
+    }
+    return true;
+}
+
+static bool arm_intdp(CdjC674xArm *x)
+{
+    /* INTDP (printed page 275) and INTDPU (printed page 276).  Section 4.2.9
+     * and Table 4-14 (printed page 598): src2 on E1, dst_l on E4, dst_h on
+     * E5, Delay Slots 4.  Both pages say "You cannot set configuration bits
+     * with this instruction", and every 32-bit integer is exact in a 53-bit
+     * significand, so nothing is written to FADCR despite 4.2.9's general
+     * sentence about it. */
+    if (x->dst & 1)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid double-precision result register pair");
+    x->reg_write = false;
+    if (x->enabled) {
+        uint64_t value = cdj_c674x_integer_to_dp(x->cpu->r[x->cross][x->b],
+                                                 (x->w & 0xffc) == 0x738);
+        if (x->out->load_count + 2 > 40)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "delayed-result queue full");
+        if (!dp_queue_pair(x, 4, (CdjC674xDpResult){value, 0}, false))
+            return false;
+    }
+    return true;
+}
 /* wave5-arms: 32-bit multiply, Galois, dual-result and 40-bit long forms */
+/* ---- 32-bit multiply, Galois, dual-result and 40-bit long forms ----------
+ *
+ * Arithmetic lives in cdj_c674x_mpy32.c; the arms below only move operands in
+ * and results out.  Printed pages are SPRUFE8B July 2010.
+ *
+ * Two opfields are deliberately rejected rather than implemented: MPYI 00110
+ * and MPYID 01100 take their src1 from a five-bit constant field that the
+ * opcode maps on printed pages 334 and 335 type as bare "cst5".  Table 3-2
+ * (printed page 68) defines "scstn" and "ucstn" but gives "cst" only as
+ * "constant", so the manual never fixes whether that field is sign extended -
+ * and the register forms of the same instructions, which it does fix, are
+ * unaffected.  Guessing would invent an architectural result.
+ */
+static bool match_mpyi(const CdjC674xArm *x)
+{
+    unsigned op = (x->w >> 7) & 31;
+    return op == 0x04 || op == 0x06 ||   /* MPYI  reg / cst5, page 334 */
+           op == 0x08 || op == 0x0c;     /* MPYID reg / cst5, page 335 */
+}
+
+static bool match_mpy2_gmpy4(const CdjC674xArm *x)
+{
+    unsigned op = (x->w >> 6) & 31;
+    return op == 0x00 ||                 /* MPY2,  printed page 365 */
+           op == 0x11;                   /* GMPY4, printed page 272 */
+}
+
+/* Queue one already-computed delayed result, rejecting a same-cycle overlap
+ * with another delayed write to the same registers exactly as the existing .M
+ * arms do.  count is 1 for a scalar result and 2 for a register pair. */
+static bool queue_delayed_result(CdjC674xArm *x, uint64_t due, uint64_t value,
+                                 unsigned dst, unsigned count)
+{
+    if (x->out->load_count == 40)
+        return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
+    for (unsigned j = 0; j < x->out->load_count; ++j) {
+        unsigned old_count = queued_result_registers(&x->out->loads[j]);
+        if (x->out->loads[j].due == due && x->out->loads[j].bank == x->side &&
+            x->out->loads[j].dst < dst + count &&
+            dst < x->out->loads[j].dst + old_count)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "parallel delayed-result write conflict");
+    }
+    x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+        .due = due, .value = value, .bank = x->side, .dst = dst,
+        .size = count == 2 ? 16u : 0u
+    };
+    return true;
+}
+
+/* Write a 40-bit long into an even/odd pair in E1, as arm_l_long_addsub does:
+ * the low register holds bits 31-0 and only bits 7-0 of the high register are
+ * architecturally part of the value. */
+static bool write_long40(CdjC674xArm *x, uint64_t result)
+{
+    if (x->written[x->side][x->dst] || x->written[x->side][x->dst + 1])
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "parallel register write conflict");
+    x->out->r[x->side][x->dst] = (uint32_t)result;
+    x->out->r[x->side][x->dst + 1] =
+        (uint32_t)((result & CDJ_C674X_LONG40_MASK) >> 32);
+    x->written[x->side][x->dst] = x->written[x->side][x->dst + 1] = true;
+    return true;
+}
+
+static bool arm_mpyi(CdjC674xArm *x)
+{
+    /* MPYI (printed page 334) and MPYID (335) sample src1 and src2 in E1-E4.
+     * MPYI has 8 delay slots and writes dst in E9; MPYID has 9 and writes
+     * dst_l in E9 and dst_h in E10, which its pipeline table spells out and
+     * its "10 cycles after instruction" example confirms.  The documented
+     * functional-unit latency of 4 is a scheduling constraint on following .M
+     * instructions that this core does not model, as for every other .M
+     * instruction here. */
+    unsigned op = (x->w >> 7) & 31;
+    bool pair = op == 0x08 || op == 0x0c;
+    x->reg_write = false;
+    if (op == 0x06 || op == 0x0c)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "MPYI constant operand signedness not specified");
+    if (pair && (x->dst & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid multiply result register pair");
+    if (x->enabled) {
+        uint64_t product = cdj_c674x_mpyi(x->cpu->r[x->side][x->a],
+                                          x->cpu->r[x->cross][x->b]);
+        if (!pair)
+            return queue_delayed_result(x, x->cpu->cycles + 9,
+                                        (uint32_t)product, x->dst, 1);
+        return queue_delayed_result(x, x->cpu->cycles + 9,
+                                    (uint32_t)product, x->dst, 1) &&
+               queue_delayed_result(x, x->cpu->cycles + 10,
+                                    product >> 32, x->dst + 1, 1);
+    }
+    return true;
+}
+
+static bool arm_mpy2_gmpy4(CdjC674xArm *x)
+{
+    /* MPY2 (printed pages 365-366) and GMPY4 (272-274) are both four-cycle .M
+     * instructions with 3 delay slots, writing in E4.  MPY2's destination is a
+     * register pair, GMPY4's a single register.
+     *
+     * GMPY4's opcode figure on printed page 272 prints a literal 1 where every
+     * other predicable .M figure prints z; ti-cgt-c6000 8.5.0 asm6x -mv6740
+     * emits 0 there for "GMPY4 .M1 A4, A6, A5" (02988470h), so that 1 is a
+     * transcription artifact and bit 28 is the ordinary z of Table 3-9.
+     *
+     * GFPGFR selects GMPY4's field size and polynomial (printed page 272), and
+     * "GFPGFR can only be set via the MVC instruction" (printed page 32).  This
+     * core does not model control register 24:
+     * cdj_c674x_control_write_supported rejects MVC to it, so GFPGFR provably
+     * still holds its reset value - field size 7h and polynomial 1Dh (printed
+     * page 32, and Figure 2-6 on printed page 40 marks the fields R/W-7h and
+     * R/W-1Dh) - for any program this core can execute.  The guard below keeps
+     * that reasoning honest if control[24] ever becomes writable. */
+    unsigned op = (x->w >> 6) & 31;
+    bool pair = op == 0x00;
+    x->reg_write = false;
+    if (pair && (x->dst & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid multiply result register pair");
+    if (!pair && x->cpu->control[24])
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "GMPY4 with a non-reset GFPGFR not implemented");
+    if (x->enabled) {
+        uint32_t src1 = x->cpu->r[x->side][x->a];
+        uint32_t src2 = x->cpu->r[x->cross][x->b];
+        uint64_t value = pair ? cdj_c674x_mpy2(src1, src2)
+                              : cdj_c674x_gmpy4(src1, src2, 0x1du, 7u);
+        return queue_delayed_result(x, x->cpu->cycles + 4, value, x->dst,
+                                    pair ? 2 : 1);
+    }
+    return true;
+}
+
+static bool arm_dmv(CdjC674xArm *x)
+{
+    /* DMV, printed page 234: "src2 -> dst_e; src1 -> dst_o", single cycle,
+     * 0 delay slots, so both halves are written in E1. */
+    x->reg_write = false;
+    if (x->dst & 1)
+        return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    if (x->enabled) {
+        if (x->written[x->side][x->dst] || x->written[x->side][x->dst + 1])
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "parallel register write conflict");
+        x->out->r[x->side][x->dst] = x->cpu->r[x->cross][x->b];
+        x->out->r[x->side][x->dst + 1] = x->cpu->r[x->side][x->a];
+        x->written[x->side][x->dst] = x->written[x->side][x->dst + 1] = true;
+    }
+    return true;
+}
+
+static bool arm_sat40(CdjC674xArm *x)
+{
+    /* SAT, printed pages 437-439: a 40-bit local pair saturated into a 32-bit
+     * dst in E1, with CSR.SAT and the per-unit SSR bit set one cycle after dst
+     * is written.  Example 1 on printed page 438 shows SSR 0000 0002h for
+     * SAT .L2, which is SSR.L2 (SPRUFE8B 2.9.13, printed page 54). */
+    if (x->b & 1)
+        return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    /* A cross path carries one 32-bit operand only (SPRUFE8B 2.3), so the
+     * otherwise format-shaped x = 1 words stay fail-closed rather than
+     * silently reading the local pair, as in arm_sat_long. */
+    if (x->w & 0x1000)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "cross-path long operand not supported");
+    if (x->enabled) {
+        bool saturated;
+        x->value = cdj_c674x_sat40(register_long40(x->cpu, x->side, x->b),
+                                   &saturated);
+        if (saturated) {
+            if (x->out->load_count == 40)
+                return stop(x->cpu, x->pc, x->insn->word,
+                            "delayed-status queue full");
+            x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+                .due = x->cpu->cycles + 2, .address = 1u << x->side,
+                .size = CDJ_C674X_DELAYED_SAT
+            };
+        }
+    }
+    return true;
+}
+
+static bool arm_subc(CdjC674xArm *x)
+{
+    /* SUBC, printed pages 539-540: unsigned, single cycle, E1 write. */
+    x->value = cdj_c674x_subc(x->cpu->r[x->side][x->a],
+                              x->cpu->r[x->cross][x->b]);
+    return true;
+}
+
+static bool arm_abs(CdjC674xArm *x)
+{
+    /* ABS, printed pages 101-102: single cycle, 0 delay slots, E1 write.
+     * Opfield 001 1010 is the sint form and 011 1000 the slong form; printed
+     * page 102 notes neither affects CSR.SAT, and the sint form's three cases
+     * are the slong form's at 32 bits. */
+    bool pair = ((x->w >> 5) & 0x7f) == 0x38;
+    if (!pair) {
+        x->value = cdj_c674x_abs32(x->cpu->r[x->cross][x->b]);
+        return true;
+    }
+    x->reg_write = false;
+    if ((x->dst & 1) || (x->b & 1))
+        return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    if (x->w & 0x1000)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "cross-path long operand not supported");
+    if (x->enabled)
+        return write_long40(x, cdj_c674x_abs40(
+                                   register_long40(x->cpu, x->side, x->b)));
+    return true;
+}
+
+static bool arm_cmp_long(CdjC674xArm *x)
+{
+    /* The 40-bit src2 forms of CMPEQ (printed pages 177-178), CMPGT (188-190),
+     * CMPGTU (197-198), CMPLT (202-204) and CMPLTU (211-212).  In each opcode
+     * map src2 is the local slong/ulong pair and src1 is the 32-bit operand
+     * that may cross (xsint/xuint) or be a five-bit constant - scst5 for the
+     * signed compares, ucst5 for CMPGTU/CMPLTU.  The opfield's low bit selects
+     * the register form, so both members of each pair land here.  Single cycle,
+     * 0 delay slots, E1 write.
+     *
+     * src1 is compared at the full 40-bit width: printed page 178's Example 3,
+     * CMPEQ .L2X A1,B3:B2,B1 with A1 = F23A 3789h and B3:B2 = 0000 00FFh
+     * F23A 3789h, writes 1 (true), which only holds if the 32-bit src1 is
+     * sign extended to 40 bits before the comparison.  That example is also
+     * why x has to route src1 here: see the guard below. */
+    unsigned op = (x->w >> 5) & 0x7f;
+    bool immediate = !(op & 1);
+    bool unsigned_compare = op == 0x4c || op == 0x4d ||  /* CMPGTU */
+                            op == 0x5c || op == 0x5d;    /* CMPLTU */
+    if (x->b & 1)
+        return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    /* No cross path can carry the 40-bit src2 (SPRUFE8B 2.3), so for these
+     * opfields x routes src1 instead - exactly as arm_sat_long does for SADD's
+     * xsint + slong form.  Printed page 178's Example 3, CMPEQ .L2X
+     * A1,B3:B2,B1, is that case, and ti-cgt-c6000 8.5.0 asm6x -mv6740 assembles
+     * it as 00883A3Ah with x = 1 and src1 = A1.  The constant-src1 opfields
+     * have nothing to cross, so x = 1 there stays fail-closed. */
+    if (immediate && (x->w & 0x1000))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "cross-path long operand not supported");
+    if (x->enabled) {
+        uint64_t raw = register_long40(x->cpu, x->side, x->b);
+        if (unsigned_compare) {
+            uint64_t left = immediate ? x->a : x->cpu->r[x->cross][x->a];
+            uint64_t right = raw & CDJ_C674X_LONG40_MASK;
+            x->value = (op == 0x4c || op == 0x4d) ? left > right : left < right;
+        } else {
+            int64_t left = immediate ? sx(x->a, 5) :
+                                       (int32_t)x->cpu->r[x->cross][x->a];
+            int64_t right = cdj_c674x_sx40(raw);
+            x->value = op == 0x50 || op == 0x51 ? left == right :
+                       op == 0x44 || op == 0x45 ? left > right : left < right;
+        }
+    }
+    return true;
+}
+
+static bool arm_shift_long(CdjC674xArm *x)
+{
+    /* The 40-bit forms of SHL (printed pages 447-448), SHR (451-452) and SHRU
+     * (457-458).  Opfields, reading bits 11-6: SHL 11 0000/11 0001 shift a
+     * slong pair into a slong pair, SHL 01 0010/01 0011 shift an xuint into a
+     * ulong pair, SHR 11 0100/11 0101 and SHRU 10 0100/10 0101 shift a
+     * slong/ulong pair into a pair.  As for the scalar .S shifts, the opfield's
+     * bit 0 (word bit 6) selects a register count over the ucst5 field, and a
+     * register count uses only its six low bits.  Single cycle, E1 write. */
+    unsigned op = (x->w >> 6) & 63;
+    bool pair_source = op != 0x12 && op != 0x13;
+    unsigned count = (x->w & 0x40) ? (x->cpu->r[x->side][x->a] & 63) : x->a;
+    unsigned operation = op == 0x34 || op == 0x35 ? CDJ_C674X_SHIFT40_ARITHMETIC
+                       : op == 0x24 || op == 0x25 ? CDJ_C674X_SHIFT40_LOGICAL
+                       : CDJ_C674X_SHIFT40_LEFT;
+    x->reg_write = false;
+    if ((x->dst & 1) || (pair_source && (x->b & 1)))
+        return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    /* No cross path can carry the 40-bit src2 (SPRUFE8B 2.3); the xuint source
+     * form does cross, so only the pair-source forms reject x = 1. */
+    if (pair_source && (x->w & 0x1000))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "cross-path long operand not supported");
+    if (x->enabled) {
+        /* The xuint source is zero extended into the 40-bit shifter: printed
+         * page 447's opcode map types it xuint with a ulong dst. */
+        uint64_t source = pair_source ?
+            register_long40(x->cpu, x->side, x->b) : x->cpu->r[x->cross][x->b];
+        return write_long40(x, cdj_c674x_shift40(source, count, operation));
+    }
+    return true;
+}
+
+static bool arm_b_nrp(CdjC674xArm *x)
+{
+    /* B NRP, printed pages 157-158: "NRP is placed in the program fetch
+     * counter (PFC).  This instruction also sets the NMIE bit.  The PGIE bit is
+     * unchanged."  Five delay slots, so the branch completes in the sixth cycle
+     * exactly as B IRP and B displacement do here.  NRP is control register 7
+     * and NMIE is IER bit 1 (cdj_c674x_control_read and the MVC IER write mask
+     * below both treat them that way). */
+    x->reg_write = false;
+    if (x->enabled) {
+        if (x->controls[4])
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "B NRP parallel IER write conflict");
+        if (!queue_branch(x->out, x->cpu->cycles + 6, x->cpu->control[7]))
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "parallel taken branches or branch queue overflow");
+        x->out->control[4] |= 2u;
+        x->controls[4] = true;
+    }
+    return true;
+}
+
+static bool arm_bpos(CdjC674xArm *x)
+{
+    /* BPOS, printed pages 170-171: "If (dst >= 0), PFC = (PCE1 +
+     * (se(scst10) << 2))", five delay slots, dst read in E1 and never written.
+     * scst10 is the ten-bit src field, bits 22-13.  Printed page 170 also
+     * requires that only one BPOS issue per cycle and that BPOS not share an
+     * execute packet with ADDKPC. */
+    for (unsigned j = 0; j < x->packet->count; ++j) {
+        const CdjC674xInstruction *other = &x->packet->instructions[j];
+        if (other->compact || other == x->insn) continue;
+        if ((other->word & 0x1ffe) == 0x162)
+            return stop(x->cpu, x->pc, x->w, "BPOS parallel with ADDKPC");
+        if ((other->word & 0x1ffc) == 0x0020)
+            return stop(x->cpu, x->pc, x->w, "multiple BPOS instructions");
+    }
+    x->reg_write = false;
+    if (x->enabled && !(x->cpu->r[x->side][x->dst] & 0x80000000u)) {
+        if (!queue_branch(x->out, x->cpu->cycles + 6, (x->pc & ~31u) +
+                          (uint32_t)(sx((x->w >> 13) & 1023, 10) * 4)))
+            return stop(x->cpu, x->pc, x->w,
+                        "parallel taken branches or branch queue overflow");
+    }
+    return true;
+}
+
 
 static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x00000618, NULL,                  arm_sat_long },
@@ -2023,11 +3029,117 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x0f83effe, 0x00000362, NULL,                  arm_b_reg },
     { 0x00001ffe, 0x00000162, NULL,                  arm_addkpc },
     /* wave5-rows: dot-product and complex-multiply */
+    { 0x0000083c, 0x00000030, match_dotp,            arm_dotp },
     /* wave5-rows: packed 16-bit */
+    /* ABS2 fixes src1 (bits 17-13) at 00100b, so its row masks that field
+     * too rather than claiming the encodings the manual reserves. */
+    { 0x0003effc, 0x00008358, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000060, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x000000b8, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000930, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000460, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000098, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000970, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000c30, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000c98, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000c70, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000858, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000f70, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000838, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000f30, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000df0, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000620, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000e30, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000660, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000760, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000520, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x00000cb0, NULL,                  arm_packed16 },
+    { 0x00000ffc, 0x000004f0, NULL,                  arm_packed16_m },
+    { 0x00000ffc, 0x00000730, NULL,                  arm_packed16_m },
+    { 0x00000ffc, 0x000006b0, NULL,                  arm_packed16_m },
     /* wave5-rows: packed 8-bit */
+    /* Bits 11-2 of each entry's 32-bit Opcode figure; s (bit 1) and p (bit 0)
+     * stay free, as does the x bit.  CMPLTU4 (printed page 213) and MPYUS4
+     * (printed page 363) are pseudo-operations assembled as CMPGTU4 and
+     * MPYSU4 with exchanged operands, so they share those rows and add none. */
+    { 0x00000ffc, 0x00000cb8, NULL,                  arm_packed8 }, /* ADD4    */
+    { 0x00000ffc, 0x00000cd8, NULL,                  arm_packed8 }, /* SUB4    */
+    { 0x00000ffc, 0x00000b58, NULL,                  arm_packed8 }, /* SUBABS4 */
+    { 0x00000ffc, 0x00000cf0, NULL,                  arm_packed8 }, /* SADDU4  */
+    { 0x00000ffc, 0x00000878, NULL,                  arm_packed8 }, /* MAXU4   */
+    { 0x00000ffc, 0x00000918, NULL,                  arm_packed8 }, /* MINU4   */
+    { 0x00000ffc, 0x00000720, NULL,                  arm_packed8 }, /* CMPEQ4  */
+    { 0x00000ffc, 0x00000560, NULL,                  arm_packed8 }, /* CMPGTU4 */
+    { 0x00000ffc, 0x00000d30, NULL,                  arm_packed8 }, /* SPACKU4 */
+    { 0x00000ffc, 0x000004b0, NULL,                  arm_packed8 }, /* AVGU4   */
+    { 0x00000ffc, 0x00000130, NULL,                  arm_packed8 }, /* MPYU4   */
+    { 0x00000ffc, 0x00000170, NULL,                  arm_packed8 }, /* MPYSU4  */
     /* wave5-rows: pack, unpack, shuffle and bit manipulation */
+    /* Masks read off each entry's own Opcode figure: bits 17-13 and 11-2 for
+     * the .L/.S/.M src2-only forms, bits 11-2 alone where 17-13 carry src1, and
+     * bits 31-28 plus 11-2 for the three nonconditional .L forms. */
+    { 0x0003effc, 0x00006358, NULL,                  arm_packbits_unpack },
+    { 0x0003effc, 0x00006f20, NULL,                  arm_packbits_unpack },
+    { 0x0003effc, 0x00004358, NULL,                  arm_packbits_unpack },
+    { 0x0003effc, 0x00004f20, NULL,                  arm_packbits_unpack },
+    { 0x0003effc, 0x00002358, NULL,                  arm_packbits_unpack },
+    { 0x0003effc, 0x0003e0f0, NULL,                  arm_packbits_m },
+    { 0x0003effc, 0x0003c0f0, NULL,                  arm_packbits_m },
+    { 0x0003effc, 0x0003a0f0, NULL,                  arm_packbits_m },
+    { 0x0003effc, 0x000380f0, NULL,                  arm_packbits_m },
+    { 0x0003effc, 0x000320f0, NULL,                  arm_packbits_m },
+    { 0x0003effc, 0x000300f0, NULL,                  arm_packbits_m },
+    { 0x00000ffc, 0x00000770, NULL,                  arm_packbits_m },
+    { 0x00000ffc, 0x000007b0, NULL,                  arm_packbits_m },
+    { 0x00000ffc, 0x00000d78, NULL,                  arm_packbits_lmbd },
+    { 0x0003effc, 0x00000c78, NULL,                  arm_packbits_norm },
+    { 0x0003effc, 0x00000c18, NULL,                  arm_packbits_norm },
+    { 0x00000ffc, 0x00000c38, NULL,                  arm_packbits_mergebyte },
+    { 0x00000ffc, 0x00000e70, NULL,                  arm_packbits_mergebyte },
+    { 0x00000ffc, 0x00000c58, NULL,                  arm_packbits_mergebyte },
+    { 0x00000ffc, 0x00000eb0, NULL,                  arm_packbits_mergebyte },
+    { 0xf0800ffc, 0x10000698, NULL,                  arm_packbits_dual },
+    { 0xf0800ffc, 0x10000678, NULL,                  arm_packbits_dual },
+    { 0xf0000ffc, 0x100006d8, NULL,                  arm_packbits_dual },
     /* wave5-rows: double-precision floating point */
+    { 0x0003effc, 0x00000b20, NULL,                  arm_two_cycle_dp },
+    { 0x0003effc, 0x000000a0, NULL,                  arm_two_cycle_dp },
+    { 0x00000ffc, 0x00000a20, NULL,                  arm_cmpdp },
+    { 0x00000ffc, 0x00000a60, NULL,                  arm_cmpdp },
+    { 0x00000ffc, 0x00000aa0, NULL,                  arm_cmpdp },
+    { 0x00000ffc, 0x00000318, NULL,                  arm_addsubdp },
+    { 0x00000ffc, 0x00000e58, NULL,                  arm_addsubdp },
+    { 0x00000ffc, 0x00000338, NULL,                  arm_addsubdp },
+    { 0x00000ffc, 0x000003b8, NULL,                  arm_addsubdp },
+    { 0x00000ffc, 0x00000e78, NULL,                  arm_addsubdp },
+    { 0x00000ffc, 0x00000ef8, NULL,                  arm_addsubdp },
+    { 0x00000ffc, 0x00000700, NULL,                  arm_mpydp },
+    { 0x00000ffc, 0x000005b0, NULL,                  arm_mpydp },
+    { 0x00000ffc, 0x000005f0, NULL,                  arm_mpydp },
+    { 0x0003effc, 0x00000138, NULL,                  arm_dp_convert },
+    { 0x0003effc, 0x00000118, NULL,                  arm_dp_convert },
+    { 0x0003effc, 0x00000038, NULL,                  arm_dp_convert },
+    { 0x0003effc, 0x00000738, NULL,                  arm_intdp },
+    { 0x0003effc, 0x00000778, NULL,                  arm_intdp },
     /* wave5-rows: 32-bit multiply, Galois, dual-result and 40-bit long forms */
+    { 0x0000007c, 0x00000000, match_mpyi,            arm_mpyi },
+    { 0x0000083c, 0x00000030, match_mpy2_gmpy4,      arm_mpy2_gmpy4 },
+    { 0x00000ffc, 0x00000ef0, NULL,                  arm_dmv },
+    { 0x0003effc, 0x00000818, NULL,                  arm_sat40 },
+    { 0x00000ffc, 0x00000978, NULL,                  arm_subc },
+    { 0x0003effc, 0x00000358, NULL,                  arm_abs },
+    { 0x0003effc, 0x00000718, NULL,                  arm_abs },
+    { 0x00000fdc, 0x00000a18, NULL,                  arm_cmp_long },
+    { 0x00000fdc, 0x00000898, NULL,                  arm_cmp_long },
+    { 0x00000fdc, 0x00000998, NULL,                  arm_cmp_long },
+    { 0x00000fdc, 0x00000a98, NULL,                  arm_cmp_long },
+    { 0x00000fdc, 0x00000b98, NULL,                  arm_cmp_long },
+    { 0x00000fbc, 0x00000c20, NULL,                  arm_shift_long },
+    { 0x00000fbc, 0x000004a0, NULL,                  arm_shift_long },
+    { 0x00000fbc, 0x00000d20, NULL,                  arm_shift_long },
+    { 0x00000fbc, 0x00000920, NULL,                  arm_shift_long },
+    { 0x0ffffffe, 0x001c00e2, NULL,                  arm_b_nrp },
+    { 0x00001ffc, 0x00000020, NULL,                  arm_bpos },
 };
 
 unsigned cdj_c674x_arm_table_rows(void)
@@ -2621,7 +3733,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             return stop(cpu, pc, insn->word, "reserved predicate");
         if (uncond == CDJ_C674X_UNCOND_UNIMPLEMENTED)
             return stop(cpu, pc, insn->word, "instruction not implemented");
-        if (uncond != CDJ_C674X_UNCOND_NONE) {
+        if (uncond != CDJ_C674X_UNCOND_NONE &&
+            uncond != CDJ_C674X_UNCOND_ARM_TABLE) {
             /* ADDAB/ADDAH/ADDAW B14/B15, ucst15, dst: a single-cycle E1
              * register write with no memory access and no AMR involvement
              * (printed pages 115, 120, 123). Handled here because bits 3-2
@@ -2771,6 +3884,9 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
             out.loads[j].due == cpu->cycles + 1 &&
             controls[out.loads[j].sign_extend ? 20 : 18])
             return stop(cpu, cpu->pc, 0, "delayed FP-status write conflict");
+        if (out.loads[j].size == CDJ_C674X_DELAYED_FAUCR &&
+            out.loads[j].due == cpu->cycles + 1 && controls[19])
+            return stop(cpu, cpu->pc, 0, "delayed FP-status write conflict");
     }
     if (packet->single_cycle && timing.cycles > 1) {
         out.idle_cycles = timing.cycles - 1;
@@ -2809,6 +3925,14 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                  * (SPRUFE8B 2.8.3 and 2.9.13). Parallel units accumulate. */
                 out.control[1] |= 0x200u;
                 out.control[21] |= load->address & 0x3fu;
+                memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
+                continue;
+            }
+            if (load->size == CDJ_C674X_DELAYED_FAUCR) {
+                /* DP compare warning bits, due with dst on E2 (SPRUFE8B
+                 * 4.2.10, printed page 598).  Sticky, and parallel .S units
+                 * accumulate into their own halves. */
+                out.control[19] |= load->address;
                 memmove(load, load + 1, (--out.load_count - j) * sizeof(*load));
                 continue;
             }

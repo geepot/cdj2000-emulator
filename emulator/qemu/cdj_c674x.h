@@ -36,6 +36,11 @@ typedef struct {
 #define CDJ_C674X_DELAYED_IFR_CLEAR 33u
 /* No GPR write: address is the SSR unit mask, with CSR.SAT set in parallel. */
 #define CDJ_C674X_DELAYED_SAT 34u
+/* No GPR write: address is an FAUCR status OR mask, already shifted into the
+ * unit's half.  The DP compares write dst and FAUCR on the same later cycle
+ * (SPRUFE8B 4.2.10, printed page 598), and sign_extend selects only between
+ * FADCR and FMCR, so the FAUCR half of that pair needs its own entry. */
+#define CDJ_C674X_DELAYED_FAUCR 35u
 /* idle_cycles sentinel for the IDLE instruction's unbounded wait. */
 #define CDJ_C674X_IDLE_FOREVER (~0u)
 typedef struct {

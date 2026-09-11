@@ -53,7 +53,7 @@ def test_c6747_interrupt_controller(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
         '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
@@ -102,7 +102,7 @@ def test_c6747_pll_cycle_clock(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-pll-clock.c'),
         *[str(ROOT / 'emulator/qemu' / name) for name in
           ('cdj_c6747_pll.c', 'cdj_c6747_timer.c', 'cdj_c6747_mcasp.c',
-           'cdj_c674x.c', 'cdj_c674x_uncond.c', 'cdj_c674x_mpy.c',
+           'cdj_c674x.c', 'cdj_c674x_uncond.c', 'cdj_c674x_mpy.c', 'cdj_c674x_dotp.c', 'cdj_c674x_packed8.c', 'cdj_c674x_packed16.c', 'cdj_c674x_packbits.c', 'cdj_c674x_mpy32.c', 'cdj_c674x_dp.c',
            'cdj_c674x_sp.c', 'cdj_c674x_control.c', 'cdj_c674x_loop.c')],
         '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
@@ -160,7 +160,7 @@ def test_c674x_packets_and_branch_delays(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -175,7 +175,7 @@ def test_c674x_nonconditional_encodings(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -202,7 +202,7 @@ def test_c6747_syscfg_unlock_and_pipeline(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c6747_pll.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
@@ -238,7 +238,7 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
-        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
         '-o', str(binary)], check=True)
     out = subprocess.run([str(binary)], check=True, timeout=30,
@@ -256,4 +256,126 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
     # predicated row moves this number and must be changed here deliberately,
     # together with the `also` predicate that justifies the overlap.
     predicated = [line for line in lines if line.startswith('predicated-overlaps ')]
-    assert predicated == ['predicated-overlaps 91'], out
+    assert predicated == ['predicated-overlaps 251'], out
+
+
+def test_c674x_packed_dot_products(tmp_path):
+    """DOTP2/DOTPN2/DOTP(N)R(SU|US)2/DOTP(SU|US|U)4, SPRUFE8B pp235-253.
+
+    Expected values are transcribed from the manual's own worked examples,
+    including the "4 cycles after instruction" latency; the two rounded forms
+    halt where the manual prints "result undefined".
+    """
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'c674x-dotp-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-dotp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=30)
+
+
+def test_c674x_packed_8bit(tmp_path):
+    """Packed 8-bit (4x8) .L/.S/.M semantics, dispatch and pipeline latency.
+    Every expected register value in the cstub is transcribed from the worked
+    example of the instruction's own SPRUFE8B entry, with the printed page
+    quoted beside it; the cstub's header states the two exceptions.
+    """
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'c674x-packed8-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'),
+        str(ROOT / 'tests/cstub/c674x-packed8.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=10)
+
+
+def test_c674x_packed16_arithmetic(tmp_path):
+    """Packed 16-bit arithmetic, compares and shifts against SPRUFE8B examples.
+    Every expected value in the cstub is transcribed from a printed "N cycles
+    after instruction" block, and every instruction word from assembling the
+    manual's own example line with asm6x -mv6740.
+    """
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'c674x-packed16-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'),
+        str(ROOT / 'tests/cstub/c674x-packed16.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=10)
+
+
+def test_c674x_pack_unpack_shuffle_and_bit_manipulation(tmp_path):
+    """UNPKHU4/UNPKLU4/SWAP4/BITR/BITC4/DEAL/SHFL/SHFL3/XPND2/XPND4/ROTL/LMBD/
+    NORM/SHLMB/SHRMB/DPACK2/DPACKX2 against SPRUFE8B's own worked examples."""
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'c674x-packbits-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'),
+        str(ROOT / 'tests/cstub/c674x-packbits.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=10)
+
+
+def test_c674x_double_precision(tmp_path):
+    """Double-precision semantics, delay slots and FADCR/FAUCR/FMCR effects.
+
+    Expected values are transcribed from the SPRUFE8B per-instruction Example
+    blocks and special-case tables, or derived from the notes on those pages
+    where no example exists; the cstub says which, per case.  Nothing here
+    comes from running this emulator.  RCPDP/RCPSP/RSQRDP/RSQRSP are asserted
+    to stay unimplemented: the manual fixes only that their mantissa is
+    "accurate to the eighth binary position".
+    """
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'c674x-dp-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=30)
+
+
+def test_c674x_32bit_multiply_galois_and_long_forms(tmp_path):
+    """MPYI/MPYID/MPY2/GMPY4, DMV, SAT, SUBC, ABS, the 40-bit CMP*/SH* forms,
+    B NRP and BPOS, against SPRUFE8B's own per-instruction examples."""
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'c674x-mpy32-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-mpy32.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'), str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'), str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'), str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=10)
