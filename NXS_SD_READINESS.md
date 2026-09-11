@@ -85,6 +85,54 @@ source-key table had SD and DISC swapped, so `--sd` pressed DISC. That is the
 same reversal `panel_control.BUTTON_NAMES` warns about. It was necessary to fix
 and did not change any value above.
 
+
+### The readiness arm that is actually live, and the bit that decides it
+
+Three of the four globals are inert after boot. `0x04cf2180` is written exactly
+twice, both at t=0.9 s during init (`0x04388bea`, a block initialiser called
+from `0x0429fdcc`, and `0x0429fe76` writing zero), and never again - so the
+mode-state arm can never become true on its own.
+
+`0x04cf222c` is the opposite: it is written **793 times in a 110 s run**, from
+t=4.5 s onward at roughly 7 Hz. The watchpoint reports the return address
+`0x042f5ac2`; the store is inside the setter at `0x042a033c` (twelve bytes
+below the media-mode function `0x042a0348` this document already names), called
+from `0x042f5abe`. The caller computes the argument in the four instructions
+before the call:
+
+```
+0x042f5ab4:  mov    #76,r0
+0x042f5ab6:  mov.b  @(r0,r14),r0     ; flags byte at r14+76
+0x042f5ab8:  tst    #2,r0            ; T = 1 when bit 1 is CLEAR
+0x042f5aba:  subc   r4,r4            ; r4 = -T
+0x042f5abc:  mov.l  0x42f5bac,r1     ; r1 = 0x042a033c
+0x042f5abe:  jsr    @r1
+0x042f5ac0:  add    #1,r4            ; r4 = 1 if bit 1 SET, 0 if CLEAR
+```
+
+**So media mode is 1 for exactly one reason: bit 1 of the flags byte at
+`r14+76` is set.** Readiness needs that arm to be 0, so it needs that bit
+clear. The same byte has bit 0 set a few instructions earlier
+(`0x042f5aac: or #1,r0`), which confirms it is a flags byte rather than a
+counter.
+
+**The next step is therefore small and specific**: identify `r14` (loaded in
+the prologue above `0x042f5a30`, which is already past its load) and find what
+sets bit 1 of `r14+76`. That single bit is the whole mount gate. Do not clear
+it by hand to see what happens - that is the "injecting a media-ready value"
+shortcut this document warns about, and it would prove nothing about why the
+firmware leaves it set.
+
+### Hypotheses eliminated by measurement, so they need not be retried
+
+* **Card detect.** INFO1 bit 5 reads present throughout, active low.
+* **Source key.** `CDJ_PANEL_KEYS=22:19:04` changes no value in the table.
+* **Card contents.** A card carrying `PIONEER/rekordbox/export.pdb` and a WAV
+  under `Contents/` produces identical readiness to a bare `tracks/*.WAV`
+  card - readiness is decided before the filesystem is consulted.
+* **Board count.** A two-board `nxs_vm` run reaches the same "Wait" player
+  screen as MAIN alone; the library never appears in either.
+
 Reproduce disassembly using the available local binutils build:
 
 ```
