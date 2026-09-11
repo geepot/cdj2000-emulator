@@ -93,7 +93,8 @@ def test_c6747_pll_cycle_clock(tmp_path):
     subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-pll-clock.c'),
         *[str(ROOT / 'emulator/qemu' / name) for name in
-          ('cdj_c6747_pll.c', 'cdj_c674x.c', 'cdj_c674x_loop.c')],
+          ('cdj_c6747_pll.c', 'cdj_c674x.c', 'cdj_c674x_uncond.c',
+           'cdj_c674x_loop.c')],
         '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
@@ -149,8 +150,21 @@ def test_c674x_packets_and_branch_delays(tmp_path):
     subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
+
+
+def test_c674x_nonconditional_encodings(tmp_path):
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'c674x-uncond-test'
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c674x-uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=10)
 
 
 def test_c674x_loop_schedule(tmp_path):
@@ -172,5 +186,6 @@ def test_c6747_syscfg_unlock_and_pipeline(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c6747_syscfg.c'),
         str(ROOT / 'emulator/qemu/cdj_c6747_pll.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)

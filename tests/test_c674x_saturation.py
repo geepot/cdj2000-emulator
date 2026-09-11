@@ -18,6 +18,7 @@ def test_c674x_scalar_saturation(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'),
         str(ROOT / 'tests/cstub/c674x-saturation.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
         '-o', str(binary),
     ], check=True)

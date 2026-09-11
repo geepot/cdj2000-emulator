@@ -50,6 +50,7 @@ INVENTORY = ROOT / "analysis" / "dsp" / "isa_manual_inventory.json"
 PROBE_SOURCE = ROOT / "tests" / "cstub" / "c674x-isa-probe.c"
 CORE_SOURCES = (
     ROOT / "emulator" / "qemu" / "cdj_c674x.c",
+    ROOT / "emulator" / "qemu" / "cdj_c674x_uncond.c",
     ROOT / "emulator" / "qemu" / "cdj_c674x_loop.c",
 )
 

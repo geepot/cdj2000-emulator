@@ -40,6 +40,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "tests" / "cstub" / "c674x-isa-probe.c"
 CORE = (ROOT / "emulator" / "qemu" / "cdj_c674x.c",
+        ROOT / "emulator" / "qemu" / "cdj_c674x_uncond.c",
         ROOT / "emulator" / "qemu" / "cdj_c674x_loop.c")
 
 

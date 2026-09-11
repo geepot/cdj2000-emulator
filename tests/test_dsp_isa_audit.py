@@ -69,6 +69,7 @@ def test_probe_classifies_encodings_we_can_reason_about_independently(tmp_path):
         [compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
          "-I", str(ROOT / "emulator/qemu"), str(PROBE),
          str(ROOT / "emulator/qemu/cdj_c674x.c"),
+         str(ROOT / "emulator/qemu/cdj_c674x_uncond.c"),
          str(ROOT / "emulator/qemu/cdj_c674x_loop.c"), "-o", str(binary)],
         check=True)
     words = ["02988078", "0280022a", "ffffffff"]
@@ -191,6 +192,7 @@ def test_single_precision_rounding_against_an_independent_oracle(tmp_path):
         [compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
          "-I", str(ROOT / "emulator/qemu"), str(source),
          str(ROOT / "emulator/qemu/cdj_c674x.c"),
+         str(ROOT / "emulator/qemu/cdj_c674x_uncond.c"),
          str(ROOT / "emulator/qemu/cdj_c674x_loop.c"), "-o", str(binary)],
         check=True)
     result = subprocess.run([str(binary)], capture_output=True, text=True,

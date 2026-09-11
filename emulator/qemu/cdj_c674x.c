@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "cdj_c674x.h"
+#include "cdj_c674x_uncond.h"
 
 #define CDJ_C674X_TSR_SPLX (1u << 14)
 #define CDJ_C674X_LOOP_RETURNING (1u << 3)
@@ -1528,7 +1529,29 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         }
         unsigned creg = w >> 29, z = (w >> 28) & 1;
         bool enabled = true, reg_write = true, control_write = false;
-        if (creg == 7 || (!creg && z)) return stop(cpu, pc, insn->word, "reserved predicate");
+        /* Bits 31-28 = 0001 is an opcode field, not creg/z, for the C64x+
+         * nonconditional encodings; classify it before applying Table 3-9's
+         * reserved combination (printed page 77), which belongs only to the
+         * formats that really carry creg. CALLP and DINT/RINT continued
+         * above; the rest are reached here. */
+        CdjC674xUncondKind uncond = cdj_c674x_uncond_classify(w);
+        if (creg == 7 || (!creg && z && uncond == CDJ_C674X_UNCOND_NONE))
+            return stop(cpu, pc, insn->word, "reserved predicate");
+        if (uncond == CDJ_C674X_UNCOND_UNIMPLEMENTED)
+            return stop(cpu, pc, insn->word, "instruction not implemented");
+        if (uncond != CDJ_C674X_UNCOND_NONE) {
+            /* ADDAB/ADDAH/ADDAW B14/B15, ucst15, dst: a single-cycle E1
+             * register write with no memory access and no AMR involvement
+             * (printed pages 115, 120, 123). Handled here because bits 3-2
+             * would otherwise select Figure C-5's 15-bit-offset transfer. */
+            CdjC674xAddaLong adda =
+                cdj_c674x_adda_long(uncond, w, cpu->r[1][14], cpu->r[1][15]);
+            if (written[adda.side][adda.dst])
+                return stop(cpu, pc, insn->word, "parallel register write conflict");
+            out.r[adda.side][adda.dst] = adda.result;
+            written[adda.side][adda.dst] = true;
+            continue;
+        }
         if (creg) {
             static const unsigned bank[] = {0,1,1,1,0,0,0};
             static const unsigned index[] = {0,0,1,2,1,2,0};

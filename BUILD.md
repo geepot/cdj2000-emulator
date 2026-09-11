@@ -160,7 +160,7 @@ AMR/circular-addressing validation:
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_circular.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-circular.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-circular-family-san
 /tmp/cdj-circular-family-san
 sh scripts/build-qemu-sh4.sh build/qemu
@@ -200,7 +200,7 @@ Saturating arithmetic batch validation:
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_saturation.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-saturation.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-saturation-family-san
 /tmp/cdj-saturation-family-san
 sh scripts/build-qemu-sh4.sh build/qemu
@@ -1016,7 +1016,7 @@ SPKERNEL restriction remain incomplete.
 
 ```sh
 .venv/bin/pytest -q
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-prot-loop-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-prot-loop-san
 /tmp/cdj-prot-loop-san
 .venv/bin/python -m tools.cdj_dsp.replay runs/nxs-bnop-immediate-connected/dsp-l2.bin runs/dsp-protected-loop-1 --verify-repeat
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1139,7 +1139,7 @@ lockout. Privilege checking is not modeled.
 
 ```sh
 .venv/bin/pytest -q
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-syscfg.c emulator/qemu/cdj_c6747_syscfg.c emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-cfgchip-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-syscfg.c emulator/qemu/cdj_c6747_syscfg.c emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-cfgchip-san
 /tmp/cdj-cfgchip-san
 .venv/bin/python -m tools.cdj_dsp.replay runs/nxs-pll-enable-connected/dsp-l2.bin runs/dsp-cfgchip-1 --verify-repeat
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1291,7 +1291,7 @@ Reproduce focused and complete validation:
 
 ```sh
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_dsp_replay.py tests/test_dsp_inventory.py
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-fp-batch-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-fp-batch-san
 /tmp/cdj-fp-batch-san
 .venv/bin/python -m pytest -q
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1353,7 +1353,7 @@ Reproduce the focused and complete checks:
 
 ```sh
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-batch-san
 /tmp/cdj-c674x-batch-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1435,7 +1435,7 @@ Reproduce focused, complete and sanitizer validation:
   tests/test_dsp_inventory.py tests/test_dsp_coverage.py tests/test_dsp_replay.py
 .venv/bin/python -m pytest -q
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-coverage-san
 /tmp/cdj-c674x-coverage-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1446,7 +1446,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -o /tmp/cdj-checkpoint-coverage-san
 /tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c \
+  -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
   emulator/qemu/cdj_c674x_loop.c emulator/qemu/cdj_c6747_syscfg.c \
   emulator/qemu/cdj_c6747_psc.c emulator/qemu/cdj_c6747_mcasp.c \
   emulator/qemu/cdj_c6747_gpio.c emulator/qemu/cdj_c6747_i2c.c \
@@ -1711,7 +1711,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   emulator/qemu/cdj_c6747_cache.c -o /tmp/cdj-c6747-cache-san
 /tmp/cdj-c6747-cache-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-mpy-san
 /tmp/cdj-c674x-mpy-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1978,7 +1978,7 @@ sh scripts/build-qemu-sh4.sh build/qemu
 cc -std=c11 -Wall -Wextra -Werror \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   -Iemulator/qemu tests/cstub/c674x.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-c674x-san
 /tmp/cdj-c674x-san
 .venv/bin/python -m pytest -q
@@ -2053,3 +2053,28 @@ The helper downloads checksum-pinned GNU binutils 2.44 and builds a local
 `bfin-elf` assembler/linker under `build/bfin-binutils`; no system installation
 is needed. An existing archive can be supplied as the script's first argument.
 Tests also accept `BFIN_AS` and `BFIN_LD` overrides.
+
+### Blackfin wake-timing regression harness
+
+Run the prepared-source scheduler checks and firmware-free PLL/IDLE guest probes:
+
+```sh
+DEVELOPER_DIR=/Library/Developer/CommandLineTools .venv/bin/python -m pytest -q -rxX \
+  tests/test_bfin_wake_timing.py tests/test_bfin_wake_guest.py
+```
+
+The deterministic harness exercises code extracted from the local patched GNU
+simulator source, with controlled host clocks and event/link inputs. It is a
+regression gate for that implementation, not physical BF531 timing validation.
+Prepare current sources with the normal Blackfin build script before testing a
+changed patch. The assembled probes additionally exercise `bin/cdj-run`; set
+`BFIN_WAKE_SIM=/absolute/path/to/candidate` to check another simulator binary.
+They discover the existing local Blackfin assembler/linker automatically.
+
+The lock-during-IDLE guest probe records a known strict expected failure:
+wall-clock execution can resume the next guest instruction before delivering
+the pending PLL lock event. Only the specific PLL status assertion is marked;
+assembly/link errors, timeouts and unrelated emulator failures still fail.
+A future fix produces a strict XPASS until the expected-failure annotation is
+removed. The pending-before-IDLE control must pass with maskable interrupts
+disabled. Runtime scheduling is unchanged by these tests.
