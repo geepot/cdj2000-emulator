@@ -247,7 +247,7 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
     shadows = [line for line in lines if line.startswith('shadow ')]
     assert not shadows, 'shadowed dispatch rows:\n' + '\n'.join(shadows)
     assert 'hard-shadows 0' in lines, out
-    # 91 pairs overlap on mask/match alone and are separated only by an `also`
+    # 273 pairs overlap on mask/match alone and are separated only by an `also`
     # predicate.  That is consistent with the table comment's sweep, which
     # evaluated `also` and found no word claimed twice; this check deliberately
     # does not evaluate `also`, so it over-reports rather than under-reports.
@@ -256,7 +256,7 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
     # predicated row moves this number and must be changed here deliberately,
     # together with the `also` predicate that justifies the overlap.
     predicated = [line for line in lines if line.startswith('predicated-overlaps ')]
-    assert predicated == ['predicated-overlaps 251'], out
+    assert predicated == ['predicated-overlaps 273'], out
 
 
 def test_c674x_packed_dot_products(tmp_path):
@@ -431,4 +431,4 @@ def test_c674x_no_word_reaches_two_dispatch_rows(tmp_path):
     assert 'word-only-probes 4096' in lines, out
     # Pin the pair count so this stays tied to the mask/match check above: if
     # that one's 251 moves, this must be updated in the same change.
-    assert 'pairs-examined 251' in lines, out
+    assert 'pairs-examined 273' in lines, out

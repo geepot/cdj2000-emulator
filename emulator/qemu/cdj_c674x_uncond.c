@@ -6,8 +6,9 @@
  *
  * The manual's complete set of 32-bit encodings with the literal 0001 in bits
  * 31-28 is 28 instructions: the three ADDA long-immediate forms, CALLP,
- * DINT, RINT and the 22 classified here, of which DPACKX2, DPACK2 and SHFL3
- * are now implemented and routed to the caller's dispatch table. */
+ * DINT, RINT and the 22 classified here, of which DPACKX2, DPACK2, SHFL3 and
+ * the eight-strong CMPY/DDOTP group are now implemented and routed to the
+ * caller's dispatch table. */
 
 /* Figure D-3 (printed page 735), .L unit nonconditional: op is bits 11-5 and
  * bits 4-2 are 110, the same low bits as the predicable Figure D-1. */
@@ -41,23 +42,31 @@ static int l_unit_op(unsigned op)
 }
 
 /* Figure E-3 (printed page 743), .M unit nonconditional: bit 11 is 0, op is
- * bits 10-6 and bits 5-2 are 1100. */
+ * bits 10-6 and bits 5-2 are 1100.  Returns 0 for "not one of these", or which
+ * of the two dispositions the opfield has. */
+#define M_UNIMPLEMENTED 1
+#define M_ARM_TABLE     2
+
 static int m_unit_op(unsigned op)
 {
     switch (op) {
+    case 0x0f: /* MPY2IR,   printed page 367 */
+    case 0x19: /* SMPY32,   printed page 470 */
+    case 0x1b: /* XORMPY,   printed page 566 */
+    case 0x1f: /* GMPY,     printed page 270 */
+        return M_UNIMPLEMENTED;
+    /* These eight have semantics in cdj_c674x_dotp.c and a dispatch row of
+     * their own, so they are routed to the caller's arm table rather than
+     * refused. */
     case 0x0a: /* CMPY,     printed page 215 */
     case 0x0b: /* CMPYR,    printed page 217 */
     case 0x0c: /* CMPYR1,   printed page 219 */
-    case 0x0f: /* MPY2IR,   printed page 367 */
     case 0x14: /* DDOTPL2R, printed page 229 */
     case 0x15: /* DDOTPH2R, printed page 225 */
     case 0x16: /* DDOTPL2,  printed page 227 */
     case 0x17: /* DDOTPH2,  printed page 223 */
     case 0x18: /* DDOTP4,   printed page 221 */
-    case 0x19: /* SMPY32,   printed page 470 */
-    case 0x1b: /* XORMPY,   printed page 566 */
-    case 0x1f: /* GMPY,     printed page 270 */
-        return 1;
+        return M_ARM_TABLE;
     default:
         return 0;
     }
@@ -89,8 +98,11 @@ CdjC674xUncondKind cdj_c674x_uncond_classify(uint32_t word)
     }
     if ((word & 0x3cu) == 0x30u) {
         unsigned extent = (word >> 10) & 3u; /* bits 11-10 */
-        if (!(extent & 2u) && m_unit_op((word >> 6) & 0x1fu))
-            return CDJ_C674X_UNCOND_UNIMPLEMENTED;
+        if (!(extent & 2u)) {
+            int m = m_unit_op((word >> 6) & 0x1fu);
+            if (m == M_ARM_TABLE) return CDJ_C674X_UNCOND_ARM_TABLE;
+            if (m == M_UNIMPLEMENTED) return CDJ_C674X_UNCOND_UNIMPLEMENTED;
+        }
         /* Figure F-14 (printed page 749), .S unit nonconditional: bits 11-10
          * are 11, op is bits 9-6.  RPACK2 (printed page 416) is its only
          * member. */

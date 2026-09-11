@@ -99,7 +99,14 @@ static void adda(uint32_t word, unsigned side, unsigned dst,
  * from each instruction's own Opcode figure, words from asm6x.  DPACKX2
  * (op 0x33), DPACK2 (0x34) and SHFL3 (0x36) have left this list: they are
  * implemented and their semantics are covered by tests/cstub/c674x-packbits.c,
- * which also re-checks these three words for reachability. */
+ * which also re-checks these three words for reachability.
+ *
+ * The eight-strong Figure E-3 group - CMPY (0x0a), CMPYR (0x0b), CMPYR1
+ * (0x0c), DDOTPL2R (0x14), DDOTPH2R (0x15), DDOTPL2 (0x16), DDOTPH2 (0x17)
+ * and DDOTP4 (0x18) - has left it for the same reason: semantics in
+ * cdj_c674x_dotp.c, covered by tests/cstub/c674x-dotp.c, which re-checks
+ * these words through the whole core.  What remains here is what is still
+ * genuinely refused. */
 static void unimplemented_extensions(void)
 {
     static const struct { uint32_t word; const char *asm_line; } rows[] = {
@@ -109,15 +116,7 @@ static void unimplemented_extensions(void)
         {0x120821D8u, "SADDSUB  .L1 A1,A2,A5:A4  op 0x0e, printed page 427"},
         {0x120821F8u, "SADDSUB2 .L1 A1,A2,A5:A4  op 0x0f, printed page 429"},
         /* Figure E-3, .M unit: bit 11 = 0, op = bits 10-6, bits 5-2 = 1100. */
-        {0x120822B0u, "CMPY     .M1 A1,A2,A5:A4  op 0x0a, printed page 215"},
-        {0x118822F0u, "CMPYR    .M1 A1,A2,A3     op 0x0b, printed page 217"},
-        {0x11882330u, "CMPYR1   .M1 A1,A2,A3     op 0x0c, printed page 219"},
         {0x120823F0u, "MPY2IR   .M1 A1,A2,A5:A4  op 0x0f, printed page 367"},
-        {0x13044530u, "DDOTPL2R .M1 A3:A2,A1,A6  op 0x14, printed page 229"},
-        {0x13044570u, "DDOTPH2R .M1 A3:A2,A1,A6  op 0x15, printed page 225"},
-        {0x120445B0u, "DDOTPL2  .M1 A3:A2,A1,A5:A4 op 0x16, printed page 227"},
-        {0x120445F0u, "DDOTPH2  .M1 A3:A2,A1,A5:A4 op 0x17, printed page 223"},
-        {0x12082630u, "DDOTP4   .M1 A1,A2,A5:A4  op 0x18, printed page 221"},
         {0x11882670u, "SMPY32   .M1 A1,A2,A3     op 0x19, printed page 470"},
         {0x118826F0u, "XORMPY   .M1 A1,A2,A3     op 0x1b, printed page 566"},
         {0x118827F0u, "GMPY     .M1 A1,A2,A3     op 0x1f, printed page 270"},
@@ -127,7 +126,7 @@ static void unimplemented_extensions(void)
         {0x10000000u, "SWE                       op 0x0, printed page 557"},
         {0x10002000u, "SWENR                     op 0x1, printed page 558"},
     };
-    assert(sizeof(rows) / sizeof(rows[0]) == 19);
+    assert(sizeof(rows) / sizeof(rows[0]) == 11);
     for (unsigned i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
         /* p = 1 (parallel) must classify identically to p = 0. */
         rejects(rows[i].word, "instruction not implemented");

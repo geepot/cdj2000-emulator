@@ -126,3 +126,142 @@ CdjC674xDotpResult cdj_c674x_dotp(unsigned opfield, uint32_t src1,
     }
     return result;
 }
+
+/* ---- the nonconditional .M group, Figure E-3 (printed page 743) ---------- */
+
+/* sat() in these Execution blocks is the 32-bit signed clamp: the C674x
+ * saturating operations clamp to 7FFF FFFFh / 8000 0000h (SPRUFE8B 2.9.4,
+ * and every sat() in the .M unit's own entries is applied to a value that is
+ * being written as a signed 32-bit quantity). */
+static int32_t sat32(int64_t v, bool *saturated)
+{
+    if (v > INT64_C(0x7fffffff))  { *saturated = true; return (int32_t)0x7fffffff; }
+    if (v < -INT64_C(0x80000000)) { *saturated = true; return (int32_t)0x80000000; }
+    return (int32_t)v;
+}
+
+/* msb16(sat(x + 0000 8000h)): the rounding step CMPYR, DDOTPH2R and DDOTPL2R
+ * all share.  The addition is inside the saturate, so a sum that overflows on
+ * the rounding constant clamps before the halfword is taken. */
+static uint32_t round_msb16(int64_t value, bool *saturated)
+{
+    return ((uint32_t)sat32(value + 0x8000, saturated) >> 16) & 0xffffu;
+}
+
+/* msb16(sat((x + 0000 4000h) << 1)): CMPYR1's variant, which rounds at bit 14
+ * and then doubles, so it keeps one more significant bit than CMPYR.  The
+ * shift is inside the saturate as printed. */
+static uint32_t round_shift_msb16(int64_t value, bool *saturated)
+{
+    return ((uint32_t)sat32((value + 0x4000) * 2, saturated) >> 16) & 0xffffu;
+}
+
+CdjC674xCmpyResult cdj_c674x_cmpy(unsigned opfield, uint32_t src1,
+                                  uint32_t src1_hi, uint32_t src2)
+{
+    CdjC674xCmpyResult r = { .value = 0, .pair_dst = false, .pair_src1 = false,
+                             .saturated = false, .valid = true };
+    /* src1_e is the even (low) register of a src1 pair and src1_hi the odd
+     * one; the DDOTP*2 forms name them src1_e and src1_o. */
+    int64_t s1h = s16(src1, 1), s1l = s16(src1, 0);
+    int64_t s2h = s16(src2, 1), s2l = s16(src2, 0);
+    int64_t o1h = s16(src1_hi, 1), o1l = s16(src1_hi, 0);
+    int64_t e, o;
+
+    switch (opfield) {
+    case CDJ_C674X_CMPY:
+        /* Printed page 215:
+         *   sat((lsb16(src1) x msb16(src2)) + (msb16(src1) x lsb16(src2))) -> dst_e
+         *   (msb16(src1) x msb16(src2)) - (lsb16(src1) x lsb16(src2))      -> dst_o
+         * Only dst_e is saturated; dst_o is printed without sat().  Two
+         * 16x16 products cannot leave 32 bits anyway, so the asymmetry is
+         * observable only as a status effect, and it is reproduced rather than
+         * tidied up. */
+        r.pair_dst = true;
+        e = s1l * s2h + s1h * s2l;
+        o = s1h * s2h - s1l * s2l;
+        r.value = ((uint64_t)(uint32_t)(int32_t)o << 32) |
+                  (uint32_t)sat32(e, &r.saturated);
+        break;
+    case CDJ_C674X_CMPYR:
+        /* Printed page 217: both halves saturate, then each is rounded by
+         * msb16(sat(tmp + 0000 8000h)) into one 32-bit dst. */
+        e = sat32(s1l * s2h + s1h * s2l, &r.saturated);
+        o = sat32(s1h * s2h - s1l * s2l, &r.saturated);
+        r.value = (round_msb16(o, &r.saturated) << 16) |
+                  round_msb16(e, &r.saturated);
+        break;
+    case CDJ_C674X_CMPYR1:
+        /* Printed page 219.  THE MANUAL'S PSEUDOCODE HAS A TYPO HERE: it
+         * computes tmp_o and then prints
+         *     msb16(sat((tmp_e + 0000 4000h) << 1)) -> msb16(dst)
+         * using tmp_e for BOTH halves and leaving tmp_o unused.  Its own
+         * Example 1 settles it: CMPYR1 .M1 A0,A1,A2 with A0 = 0800 0400h and
+         * A1 = 0900 0200h gives A2 = 0080 0068h.  tmp_e = 1024x2304 +
+         * 2048x512 = 34 0000h rounds to 0068h, and tmp_o = 2048x2304 -
+         * 1024x512 = 40 0000h rounds to 0080h, which is what the upper half
+         * holds.  Taking the pseudocode literally would put 0068h in both
+         * halves and contradict the example, so tmp_o is used. */
+        e = sat32(s1l * s2h + s1h * s2l, &r.saturated);
+        o = sat32(s1h * s2h - s1l * s2l, &r.saturated);
+        r.value = (round_shift_msb16(o, &r.saturated) << 16) |
+                  round_shift_msb16(e, &r.saturated);
+        break;
+    case CDJ_C674X_DDOTP4:
+        /* Printed page 221: src2's halfwords each supply a packed BYTE pair.
+         *   (msb16(src1) x msb8(lsb16(src2))) + (lsb16(src1) x lsb8(lsb16(src2))) -> dst_e
+         *   (msb16(src1) x msb8(msb16(src2))) + (lsb16(src1) x lsb8(msb16(src2))) -> dst_o
+         * No sat() is printed on either line. */
+        r.pair_dst = true;
+        e = s1h * s8(src2, 1) + s1l * s8(src2, 0);
+        o = s1h * s8(src2, 3) + s1l * s8(src2, 2);
+        r.value = ((uint64_t)(uint32_t)(int32_t)o << 32) |
+                  (uint32_t)(int32_t)e;
+        break;
+    case CDJ_C674X_DDOTPH2:
+        /* Printed page 223:
+         *   sat((msb16(src1_o) x msb16(src2)) + (lsb16(src1_o) x lsb16(src2))) -> dst_o
+         *   sat((lsb16(src1_o) x msb16(src2)) + (msb16(src1_e) x lsb16(src2))) -> dst_e
+         * dst_e deliberately mixes the two src1 registers: that straddling
+         * pair is what makes this a "double" dot product. */
+        r.pair_dst = r.pair_src1 = true;
+        o = o1h * s2h + o1l * s2l;
+        e = o1l * s2h + s1h * s2l;
+        r.value = ((uint64_t)(uint32_t)sat32(o, &r.saturated) << 32) |
+                  (uint32_t)sat32(e, &r.saturated);
+        break;
+    case CDJ_C674X_DDOTPL2:
+        /* Printed page 227:
+         *   sat((msb16(src1_e) x msb16(src2)) + (lsb16(src1_e) x lsb16(src2))) -> dst_e
+         *   sat((lsb16(src1_o) x msb16(src2)) + (msb16(src1_e) x lsb16(src2))) -> dst_o */
+        r.pair_dst = r.pair_src1 = true;
+        e = s1h * s2h + s1l * s2l;
+        o = o1l * s2h + s1h * s2l;
+        r.value = ((uint64_t)(uint32_t)sat32(o, &r.saturated) << 32) |
+                  (uint32_t)sat32(e, &r.saturated);
+        break;
+    case CDJ_C674X_DDOTPH2R:
+        /* Printed page 225: the DDOTPH2 sums, each rounded by
+         * msb16(sat(sum + 0000 8000h)) into one 32-bit dst. */
+        r.pair_src1 = true;
+        o = o1h * s2h + o1l * s2l;
+        e = o1l * s2h + s1h * s2l;
+        r.value = (round_msb16(o, &r.saturated) << 16) |
+                  round_msb16(e, &r.saturated);
+        break;
+    case CDJ_C674X_DDOTPL2R:
+        /* Printed page 229.  Note the halves are crossed relative to
+         * DDOTPH2R: the src1_e sum goes to lsb16(dst) and the straddling sum
+         * to msb16(dst). */
+        r.pair_src1 = true;
+        e = s1h * s2h + s1l * s2l;
+        o = o1l * s2h + s1h * s2l;
+        r.value = (round_msb16(o, &r.saturated) << 16) |
+                  round_msb16(e, &r.saturated);
+        break;
+    default:
+        r.valid = false;
+        break;
+    }
+    return r;
+}

@@ -26,6 +26,7 @@
  * is what printed pages 242, 247 and 251 say they are.
  */
 #include <assert.h>
+#include <string.h>
 #include <stdio.h>
 #include "cdj_c674x.h"
 
@@ -39,6 +40,27 @@ static void issue(CdjC674x *c, uint32_t word)
         fprintf(stderr, "dotp test fault word=%08x: %s\n", word, c->fault);
         assert(false);
     }
+}
+
+/* Advance n further single-cycle packets, i.e. run out n delay slots.  A word
+ * of 0 is NOP 1 (SPRUFE8B printed page 388). */
+static void cycles(CdjC674x *c, unsigned n)
+{
+    for (unsigned i = 0; i < n; ++i) issue(c, 0);
+}
+
+/* Execute one word on a fresh CPU and report whether it was REJECTED, with the
+ * fault text, so refusals can be asserted by name. */
+static bool rejects(uint32_t word, const char **fault)
+{
+    CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+    CdjC674xPacket p = {
+        .instructions = {{.word = word, .pc = c.pc}},
+        .count = 1, .next_pc = c.pc + 4,
+    };
+    bool ok = cdj_c674x_execute(&c, &p, NULL, NULL, NULL);
+    if (fault) *fault = c.fault;
+    return !ok;
 }
 
 /* Figure E-1 compound .M word, predicated on [B0] so the disabled path is
@@ -254,11 +276,109 @@ static void assembler_words(void)
     }
 }
 
+/* ---- the nonconditional .M group, Figure E-3 (printed page 743) ----------
+ *
+ * CMPY, CMPYR1, DDOTP4, DDOTPH2 and DDOTPL2 through the whole core, so the
+ * Figure E-3 classification, the arm-table route, the register-pair shapes and
+ * the four-cycle latency are all under test - not just the arithmetic.
+ *
+ * Every expected value is TRANSCRIBED from the instruction's own Example
+ * block; each case names its printed page and the arithmetic the manual prints
+ * beside it. */
+static void nonconditional_m_group(void)
+{
+    /* Figure E-3 word: 0001 in bits 31-28, dst 27-23, src2 22-18, src1 17-13,
+     * x 12, 0 in bit 11, opfield 10-6, 1100 in bits 5-2, s 1, p 0. */
+    #define E3(dst, src2, src1, cross, op, side) \
+        (0x10000000u | (uint32_t)(dst) << 23 | (uint32_t)(src2) << 18 | \
+         (uint32_t)(src1) << 13 | (uint32_t)(cross) << 12 | \
+         (uint32_t)(op) << 6 | 0x30u | (uint32_t)(side) << 1)
+
+    /* CMPY .M1 A0,A1,A3:A2, printed page 216 Example 1.  A0 = 0008 0004h and
+     * A1 = 0009 0002h give A2 = 0000 0034h ((4 x 9) + (8 x 2) = 52) and
+     * A3 = 0000 0040h ((8 x 9) - (4 x 2) = 64) four cycles after. */
+    {
+        CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+        c.r[0][0] = 0x00080004u; c.r[0][1] = 0x00090002u;
+        c.r[0][2] = c.r[0][3] = 0xdeadbeefu;
+        issue(&c, E3(2, 1, 0, 0, 0x0a, 0));
+        cycles(&c, 2);
+        assert(c.r[0][2] == 0xdeadbeefu);       /* still in flight */
+        cycles(&c, 1);
+        assert(c.r[0][2] == 0x00000034u && c.r[0][3] == 0x00000040u);
+    }
+
+    /* CMPYR1 .M1 A0,A1,A2, printed page 219 Example 1.  A0 = 0800 0400h and
+     * A1 = 0900 0200h give A2 = 0080 0068h.  This case is also what settles
+     * the manual's tmp_e/tmp_o typo - see cdj_c674x_dotp.c. */
+    {
+        CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+        c.r[0][0] = 0x08000400u; c.r[0][1] = 0x09000200u;
+        issue(&c, E3(2, 1, 0, 0, 0x0c, 0));
+        cycles(&c, 3);
+        assert(c.r[0][2] == 0x00800068u);
+    }
+
+    /* DDOTP4 .M1 A4,A5,A9:A8, printed page 222 Example 1.  A4 = 0005 0003h
+     * and A5 = 0102 0304h give A8 = 0000 001Bh ((5 x 3) + (3 x 4) = 27) and
+     * A9 = 0000 000Bh ((5 x 1) + (3 x 2) = 11). */
+    {
+        CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+        c.r[0][4] = 0x00050003u; c.r[0][5] = 0x01020304u;
+        issue(&c, E3(8, 5, 4, 0, 0x18, 0));
+        cycles(&c, 3);
+        assert(c.r[0][8] == 0x0000001Bu && c.r[0][9] == 0x0000000Bu);
+    }
+
+    /* DDOTPH2 .M1 A5:A4,A6,A9:A8 and DDOTPL2 .M1 A5:A4,A6,A9:A8, printed
+     * pages 224 and 228 Example 1.  Both read src1_e = A4 = 0005 0003h,
+     * src1_o = A5 = 0002 0004h and src2 = A6 = 0007 0001h.  DDOTPH2 gives
+     * A8 = 0000 0021h, A9 = 0000 0012h; DDOTPL2 gives A8 = 0000 0026h,
+     * A9 = 0000 0021h.  (DDOTPL2's printed arithmetic annotations are
+     * DDOTPH2's, copied; its hex values are the authority and are what is
+     * transcribed here.) */
+    {
+        static const struct { unsigned op; uint32_t e, o; } cases[] = {
+            { 0x17, 0x00000021u, 0x00000012u },   /* DDOTPH2 */
+            { 0x16, 0x00000026u, 0x00000021u },   /* DDOTPL2 */
+        };
+        for (unsigned i = 0; i < 2; ++i) {
+            CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+            c.r[0][4] = 0x00050003u; c.r[0][5] = 0x00020004u;
+            c.r[0][6] = 0x00070001u;
+            issue(&c, E3(8, 6, 4, 0, cases[i].op, 0));
+            cycles(&c, 3);
+            assert(c.r[0][8] == cases[i].e && c.r[0][9] == cases[i].o);
+        }
+    }
+
+    /* A src1 pair must be even, and a dst pair must be even. */
+    {
+        const char *fault;
+        assert(rejects(E3(8, 6, 5, 0, 0x17, 0), &fault) && fault);  /* odd src1 */
+        assert(rejects(E3(9, 6, 4, 0, 0x17, 0), &fault) && fault);  /* odd dst  */
+    }
+
+    /* An opfield in this shape that is NOT implemented must still halt by
+     * name rather than be executed: MPY2IR (0x0f), SMPY32 (0x19), XORMPY
+     * (0x1b) and GMPY (0x1f) stay classified UNIMPLEMENTED. */
+    {
+        static const unsigned unimplemented[] = { 0x0f, 0x19, 0x1b, 0x1f };
+        for (unsigned i = 0; i < 4; ++i) {
+            const char *fault;
+            assert(rejects(E3(8, 6, 4, 0, unimplemented[i], 0), &fault));
+            assert(fault && !strcmp(fault, "instruction not implemented"));
+        }
+    }
+    #undef E3
+}
+
 int main(void)
 {
     scalar_examples();
     pair_examples();
     undefined_intermediate();
     assembler_words();
+    nonconditional_m_group();
     return 0;
 }

@@ -5,6 +5,7 @@
 #include "cdj_c674x_multicycle.h"
 #include "cdj_c674x_uncond.h"
 #include "cdj_c674x_mpy.h"
+#include "cdj_c674x_dotp.h"
 #include "cdj_c674x_packed8.h"
 #include "cdj_c674x_packbits.h"
 #include "cdj_c674x_mpy32.h"
@@ -1906,9 +1907,70 @@ static bool arm_addkpc(CdjC674xArm *x)
  * tests/test_c674x.py::test_c674x_dispatch_table_has_no_shadowed_rows - a row
  * that overlaps an existing one is otherwise silently unreachable. */
 /* wave5-arms: dot-product and complex-multiply */
+static bool arm_cmpy(CdjC674xArm *x)
+{
+    /* The nonconditional .M group of Figure E-3 (printed page 743): CMPY,
+     * CMPYR, CMPYR1, DDOTP4 and the four DDOTP*2 forms.  Reached through
+     * CDJ_C674X_UNCOND_ARM_TABLE, because bits 31-28 are the literal 0001
+     * opcode field rather than creg/z, so these are unconditional and the
+     * predicate path never applies to them.
+     *
+     * All are four-cycle with three delay slots (printed pages 215, 217, 219,
+     * 221, 223, 225, 227, 229), queued through the same delayed-result path
+     * arm_dotp uses.  Which registers are read and written depends on the
+     * opfield alone, so the shapes are taken from a probe rather than guessed:
+     * the DDOTP*2 forms read a src1 PAIR, and CMPY, DDOTP4, DDOTPH2 and
+     * DDOTPL2 write a dst pair while the rounding forms pack two rounded
+     * halves into a 32-bit dst. */
+    unsigned op = (x->w >> 6) & 31;
+    CdjC674xCmpyResult shape = cdj_c674x_cmpy(op, 0, 0, 0);
+    x->reg_write = false;
+    if (!shape.valid)
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "nonconditional .M opfield not implemented");
+    if (shape.pair_dst && (x->dst & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid multiply result register pair");
+    if (shape.pair_src1 && (x->a & 1))
+        return stop(x->cpu, x->pc, x->insn->word,
+                    "invalid multiply source register pair");
+    if (x->enabled) {
+        uint32_t src1 = x->cpu->r[x->side][x->a];
+        uint32_t src1_hi = shape.pair_src1 ? x->cpu->r[x->side][x->a + 1] : 0;
+        CdjC674xCmpyResult r =
+            cdj_c674x_cmpy(op, src1, src1_hi, x->cpu->r[x->cross][x->b]);
+        uint64_t due = x->cpu->cycles + 4;
+        if (x->out->load_count == 40)
+            return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
+        unsigned count = r.pair_dst ? 2 : 1;
+        for (unsigned j = 0; j < x->out->load_count; ++j) {
+            unsigned old_count = queued_result_registers(&x->out->loads[j]);
+            if (x->out->loads[j].due == due && x->out->loads[j].bank == x->side &&
+                x->out->loads[j].dst < x->dst + count &&
+                x->dst < x->out->loads[j].dst + old_count)
+                return stop(x->cpu, x->pc, x->insn->word,
+                            "parallel delayed-result write conflict");
+        }
+        x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+            .due = due,
+            .value = r.pair_dst ? r.value : (uint32_t)r.value,
+            .bank = x->side, .dst = x->dst, .size = r.pair_dst ? 16u : 0u
+        };
+    }
+    return true;
+}
+
+/* Figure E-3: bit 11 is 0, opfield bits 10-6, bits 5-2 are 1100, and bits
+ * 31-28 are the literal 0001.  The opfield set is the one cdj_c674x_cmpy
+ * implements; anything else in that shape is still classified UNIMPLEMENTED
+ * by cdj_c674x_uncond_classify and never reaches this row. */
+static bool match_cmpy(const CdjC674xArm *x)
+{
+    return cdj_c674x_cmpy((x->w >> 6) & 31, 0, 0, 0).valid;
+}
+
 /* Included here rather than in the file's header block so that this family's
  * whole edit to cdj_c674x.c stays inside its own anchor. */
-#include "cdj_c674x_dotp.h"
 
 /* The seven packed dot-product opfields of Figure E-1's compound .M format
  * (bit 11 zero, opfield bits 10-6, bits 5-2 = 1100).  Disjoint from the
@@ -3065,6 +3127,7 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x0f83effe, 0x00000362, NULL,                  arm_b_reg },
     { 0x00001ffe, 0x00000162, NULL,                  arm_addkpc },
     /* wave5-rows: dot-product and complex-multiply */
+    { 0xf000083c, 0x10000030, match_cmpy,           arm_cmpy },
     { 0x0000083c, 0x00000030, match_dotp,            arm_dotp },
     /* wave5-rows: packed 16-bit */
     /* ABS2 fixes src1 (bits 17-13) at 00100b, so its row masks that field
@@ -3219,6 +3282,11 @@ bool cdj_c674x_arm_table_row_claims(unsigned index, uint32_t word)
 {
     if (index >= cdj_c674x_arm_table_rows()) return false;
     const CdjC674xArmEntry *entry = &cdj_c674x_arms[index];
+    /* Mirror cdj_c674x_arm_lookup exactly, including its format rule: a word
+     * carrying the nonconditional 0001 opcode field in bits 31-28 is claimed
+     * only by a row that constrains those bits.  If this drifts from the
+     * lookup, the sweep stops measuring real selection. */
+    if ((word >> 28) == 1u && (entry->mask >> 28) != 0xfu) return false;
     if ((word & entry->mask) != entry->match) return false;
     if (!entry->also) return true;
     /* Every `also` predicate is a pure function of the instruction word: a
@@ -3249,6 +3317,20 @@ static const CdjC674xArmEntry *cdj_c674x_arm_lookup(const CdjC674xArm *x)
     for (unsigned i = 0; i < sizeof(cdj_c674x_arms) /
                              sizeof(cdj_c674x_arms[0]); ++i) {
         const CdjC674xArmEntry *entry = &cdj_c674x_arms[i];
+        /* A row whose mask leaves bits 31-28 free is a CONDITIONAL-format row:
+         * for it those bits are creg and z.  A word carrying the nonconditional
+         * 0001 opcode field there (Figure C-3/D-3/E-3/F-14/H-1) belongs to a
+         * different format that merely shares the low opcode bits, so only a
+         * row that constrains bits 31-28 explicitly may claim it.
+         *
+         * Without this the collision is silent and specific: DDOTP4's opfield
+         * is 11000, the same five bits MPY32U uses in Figure E-1, and the
+         * conditional MPY32 row comes first - so a DDOTP4 word executed as an
+         * unsigned 32x32 multiply.  Nothing caught it before because the
+         * nonconditional words never used to reach this table at all; they were
+         * stopped as unimplemented one step earlier.  Measured with
+         * tests/cstub/c674x-arm-claims.c: 5 row pairs over 1,835,008 words. */
+        if ((x->w >> 28) == 1u && (entry->mask >> 28) != 0xfu) continue;
         if ((x->w & entry->mask) == entry->match &&
             (!entry->also || entry->also(x)))
             return entry;
