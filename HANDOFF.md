@@ -6,6 +6,27 @@ Development repository: `git@github.com:geepot/cdj2000-emulator.git`, branch
 Keep the layout `CDJ/references/geepot-cdj2000-emulator` when practical.
 The parent prototype remains useful evidence; this fork is the active emulator.
 
+> **How to read this file.** It is 1,700+ lines of accumulated checkpoints,
+> **newest first**, and it is a running log rather than a description of the
+> current system. Three things follow from that:
+>
+> * Everything from **`## Historical checkpoints`** onward is superseded and is
+>   kept for provenance only. Do not act on it. The headings there say
+>   "Previous" and "Prior" for a reason.
+> * Sections naming a **checkpoint schema** date themselves: the current schema
+>   is **11** (`CDJ_DSP_CHECKPOINT_SCHEMA` in `emulator/qemu/cdj_dsp_checkpoint.h`),
+>   so a section headed "schema 8" or "schema 9" is history even where it says
+>   "Latest".
+> * For anything about **C674x or C6747 coverage** — what is implemented, what is
+>   tested, what the evidence actually establishes — this file is not the
+>   authority. `DSP_ARCHITECTURE_COVERAGE.md` is, and its section 0 lists what
+>   has landed since the audit. Several limitations described below have since
+>   been fixed.
+>
+> Marker added 2026-09-10 after an audit found this file's interleaving of
+> current and historical state to be the largest single source of confusion in
+> the repository.
+
 ## Current checkpoint
 
 Network work resumed at user request. The read-only network_inventory tool
@@ -726,7 +747,7 @@ encodings, and six probable addresses. Its coverage `validation_eligible` is
 false; exact-repeat success still describes reproducibility of the failure.
 Historical coverage hashes describe the old reports and are not rewritten.
 
-### Latest integrated DSP batch (schema 9)
+### Integrated DSP batch, schema 9 (HISTORICAL — current schema is 11)
 
 This section supersedes the schema-8 checkpoint below.  The C674x core now
 drains interruptible SPLOOP/SPLOOPW schedules, preserves the selected request,
@@ -802,7 +823,7 @@ host audio.  Functional SPI completion, returned-loop reconstruction,
 minimum interrupt pipe-down and packet-driven McASP slots remain explicitly
 ineligible for cycle-accuracy claims.
 
-### Latest integrated DSP batch (schema 8)
+### Integrated DSP batch, schema 8 (HISTORICAL — current schema is 11)
 
 This section supersedes the older chronological status below.  The current
 source combines the broad C674x ISA batches with CPU interrupt recognition,
@@ -1120,6 +1141,13 @@ same value to L1DCFG at `0x01840040`. The temporary edit was removed and the
 stable QEMU binary rebuilt. DSP memory-system/cache control is the next
 coherent family. This downstream inventory does not validate SPLOOPD timing,
 cache behavior, full boot, or audio.
+
+## Historical checkpoints
+
+> **Everything below here is superseded.** These are earlier checkpoints kept so
+> that the evidence trail stays intact, not statements about the current system.
+> A limitation described below may well have been fixed since; check
+> `DSP_ARCHITECTURE_COVERAGE.md` section 0 and the git log before believing one.
 
 ### Previous stable-wait checkpoint
 

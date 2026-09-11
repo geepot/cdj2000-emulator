@@ -558,6 +558,15 @@ of every SPRUH91D peripheral and must not be read as one.**
 5. `HANDOFF.md` and `BUILD.md` (~108K each) interleave current and historical
    state with no marker. Dated headings plus a "below here is historical" banner
    would retire a whole class of stale-limitation findings at once.
+   **`HANDOFF.md` done**: 1,650 of its 1,743 lines sat under a single heading
+   called "Current checkpoint", while eighteen subheadings inside it said
+   "Previous" or "Prior". It now carries a how-to-read banner, the explicitly
+   superseded run is behind a top-level `## Historical checkpoints` boundary with
+   its own warning, and the two sections headed "Latest integrated DSP batch
+   (schema 8/9)" are stamped historical, since the current schema is 11. The file
+   is still newest-first accumulation and the banner says so rather than
+   pretending otherwise. **`BUILD.md` still open**, and its SPLOOP-coverage
+   understatement with it.
 
 Documentation is, on the whole, **careful and well-qualified** — heavily hedged,
 explicit about what evidence does not establish. The corpus's failure mode is
