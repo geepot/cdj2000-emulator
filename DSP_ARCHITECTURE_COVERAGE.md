@@ -28,6 +28,7 @@ the section it supersedes.
 | Compact Figure F-29 `Sx2op` decoded | `e3314af` | §5.3 |
 | PROT dual-load, equal-count `NOP n`, and IDLE | `c48f886` | §5.4 (a), (b), (d) |
 | SMPY/SMPYH/SMPYHL/SMPYLH/SMPY2 and compact Figure E-5 `M3` | `44c2575` | §5.2, §5.3 |
+| The 104-word "genuine" compact gap re-measured: 72 of it was never a gap, and the remaining 32 are Figure H-6 SPLOOP reload. No core change — see §0.1 | *wave 3, `compact-gap`* | §0.1 |
 
 Measured after those five commits, by the same tools:
 
@@ -38,7 +39,7 @@ Measured after those five commits, by the same tools:
 | …rejected only as "reserved predicate" | 22 | **0** |
 | …rejected only as "reserved NOP count" (IDLE) | 1 | **0** |
 | Compact words refused "not implemented" (raw) | 11,440 | **6,944** |
-| …of which a **genuine** decode gap (see §0.1) | not measured | **104** |
+| …of which a **genuine** gap (see §0.1) | not measured | **32** |
 | Control registers reading back unmasked | 6, 7, 13, 14, 18, 19, 20 | **6, 7, 13, 14** (all correct: full 32-bit R/W) |
 | Packet-rollback failures | 0 | **0** |
 
@@ -138,6 +139,53 @@ The 104 are four small families: `addaw` 32, `subaw` 32, predicated `[a0]`/`[b0]
 — 11,440, then 10,928, then 6,944 — before anyone disassembled what it contained.
 It overstated the compact gap by about 98%. `tests/test_dsp_isa_audit.py` now
 asserts the four buckets, so the raw count cannot be mistaken for a gap again.
+
+**Correction, wave 3: the 104 repeated this section's own mistake one level
+down, and 72 of it was never a gap.** The table above is left as written; this
+paragraph supersedes its last row. Bucketing from a GNU *name* assumes GNU is an
+oracle for what the architecture defines, and for the `s` bit it is not.
+
+* `addaw` 32 + `subaw` 32 are the `s = 0` twins of Figure C-19 `Dx5p`
+  (printed page 730), which draws bit 0 as a literal `1` with `s=1` written
+  beneath — where Figure C-18 immediately above it draws an unconstrained `s` —
+  and notes `src2 = dst = B15`. The ADDAW description (printed page 123) gives
+  the reason: *"s = 1 indicates the unit is D2 and dst is in the B register
+  file"*, so a B15 destination forces `s = 1`, and `Dx5p` has no `x` bit to
+  cross with. `cl6x -mv6740` refuses `ADDAW .D1 B15,4,B15` (E0800) and
+  `SUBAW .D1 B15,4,B15` (E0800) and assembles both on `.D2`. GNU prints
+  `addaw .D1X b15,0,b15` — a cross-path **write** no C674x unit performs.
+* `mvc` 8 are the `s = 0` twins of Figure F-31 op 110 (printed page 756), whose
+  mnemonic table spells the restriction out: *"MVC (.unit) src, ILC (s = 1)"*.
+  `cl6x` refuses `MVC .S1 B0,ILC` with W0005 *"Operation requires .S2 unit"*.
+
+Both refusals were already in the core with a manual citation, and already
+pinned by `tests/cstub/c674x.c` — one of those comments even names `0xda6e` as
+the reason *"dis6x is not authoritative on s-bit legality"*. So these 72 words
+belong beside the 6,616: the architecture does not define them either.
+
+* predicated `[a0]`/`[b0]` 32 are Figure H-6 `Uspldr` (printed page 766),
+  `[A0]/[B0] SPLOOPD ii`, which GNU prints predicate-first so the classifier
+  read `[a0]` as the mnemonic. The SPLOOPD description (printed page 485) says
+  what the predicate means: *"When the SPLOOPD instruction is predicated, it
+  indicates that the loop is a nested loop using the SPLOOP reload
+  capability."* These **stay a genuine gap** — `cdj_c674x_step` names them and
+  refuses with `SPLOOPD reload not implemented`, and retained-buffer reload is
+  deliberately not claimed — but they are a chapter 7 feature, not a decode
+  family, so they are counted apart from the software-loop-family bucket, whose
+  definition is "implemented".
+
+| Bucket, re-measured | Words | A gap? |
+|---|---|---|
+| Encodings the architecture does not define | 6,616 | No |
+| Figure F-32 `Sx1b` `s = 0` | 128 | No — deliberately fail-closed, §0 |
+| Compact software-loop family | 96 | No — implemented, needs loop context |
+| `s = 0` twins of `s = 1`-only figures (C-19, F-31 op 110) | **72** | No — refusing them is correct |
+| **Genuine gap: Figure H-6 SPLOOP reload** | **32** | **Yes, and not a decode gap** |
+
+No emulator source changed for this correction: the core-source hashes in
+`analysis/dsp/audit_sweeps.json` are identical before and after. Implementing
+any of the 72 would have meant narrowing a guard to accept an encoding TI's own
+assembler rejects, which is the one thing this audit says not to do.
 
 **What this means for the plan.** Waves 3-6 as scoped — roughly 106 instruction
 rows of packed SIMD, double precision, dot products and bit manipulation — have
@@ -727,14 +775,19 @@ Acceptance: each of the 12 classified with its manual citation, and any that are
 our error fixed with a test. A fault that is genuinely the firmware's belongs in
 the report, not in the code.
 
-**3. The 104-word compact decode gap.** *(implementation; small and bounded)*
-Scope: `addaw` 32, `subaw` 32, predicated `[a0]`/`[b0]` 32, `mvc` 8 — the genuine
-remainder after §0.1 separated undefined encodings and the loop family out of the
-6,944.
-Acceptance: the `genuine-gap` bucket in `analysis/dsp/audit_sweeps.json` reaches 0
-with the other three buckets unchanged, and the per-mnemonic assertion in
-`test_dsp_isa_audit.py` updated to match. Note `addaw`/`subaw` compact forms pair
-naturally with the long-immediate work already done in `d7937e7`.
+**3. ~~The 104-word compact decode gap.~~ Done, by measurement, not by code.**
+*(closed in wave 3; see the correction in §0.1)*
+There was no 104-word decode gap. 72 of it (`addaw` 32, `subaw` 32, `mvc` 8) are
+`s = 0` twins of Figure C-19 `Dx5p` and Figure F-31 op 110, both of which hardwire
+`s = 1`; `cl6x` refuses all three assemblies and the core was right to refuse the
+encodings. The remaining 32 (predicated `[a0]`/`[b0]`) are Figure H-6 `Uspldr`,
+the **SPLOOP reload** capability, which stays fail-closed as
+`SPLOOPD reload not implemented`.
+What is left of this item, if anyone wants it: implement SPLOOP retained-buffer
+reload. That is a chapter 7 feature, not a compact-decode one, it has no
+confirmed-executed firmware evidence, and the one recorded fault near it is
+`nested SPLOOP would overwrite retained buffer` (one pc, four run artifacts),
+which belongs to the recorded-fault list rather than to an encoding sweep.
 
 **4. Audit `cdj_dsp_checkpoint.c` field-by-field, and gate eligibility on
 completeness.** *(validation + small implementation; ~1 day)*

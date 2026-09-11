@@ -9,7 +9,7 @@
   ],
   "compact_encoding_space": {
     "confirmed_executed_are_loop_family": true,
-    "confirmed_executed_caveat": "RESOLVED, and not in this measurement's favour. All of these words disassemble to the compact software-loop family - sploop, sploopd and spkernel - which this core IMPLEMENTS and validates in tests/cstub/c674x-spkernel-fields.c; 0xdc66 is the very word DSP_BOOT_MILESTONE_AUDIT.md analyses. The compact sweep refuses them only because a one-instruction probe packet has no active software loop around them, which is the same reason tools/cdj_dsp/isa_probe.py excludes that family from the 32-bit sweep. So these are NOT evidence of an executed unimplemented instruction, and the verdict below is an artifact of the sweep rather than a finding. See analysis/dsp/audit_sweeps.json compact.not_implemented_breakdown: of the 6,944 raw refusals, 6,616 are encodings the architecture does not define, 96 are this loop family, 128 are a deliberate fail-closed decision, and 104 are the genuine gap.",
+    "confirmed_executed_caveat": "RESOLVED, and not in this measurement's favour. All of these words disassemble to the compact software-loop family - sploop, sploopd and spkernel - which this core IMPLEMENTS and validates in tests/cstub/c674x-spkernel-fields.c; 0xdc66 is the very word DSP_BOOT_MILESTONE_AUDIT.md analyses. The compact sweep refuses them only because a one-instruction probe packet has no active software loop around them, which is the same reason tools/cdj_dsp/isa_probe.py excludes that family from the 32-bit sweep. So these are NOT evidence of an executed unimplemented instruction, and the verdict below is an artifact of the sweep rather than a finding. See analysis/dsp/audit_sweeps.json compact.not_implemented_breakdown: of the 6,944 raw refusals, 6,616 are encodings the architecture does not define, 96 are this loop family, 128 are a deliberate fail-closed decision, 72 are s = 0 twins of forms whose SPRUFE8B figure hardwires s = 1, and 32 are the genuine gap (Figure H-6 predicated SPLOOPD, the SPLOOP reload capability).",
     "confirmed_executed_word_count": 8,
     "confirmed_executed_words": [
       3174,
@@ -1390,7 +1390,7 @@
     }
   },
   "inputs": {
-    "analyzer_sha256": "bf040158ca517b1af418084999cc2ab9ba08126464cc81a0f6bc2a21a8d5cffc",
+    "analyzer_sha256": "f762c4b6aa2e2ae1122a98def1a21179f207d0105d7acb14078fe46b0965a1d3",
     "coverage_artifacts": 153,
     "coverage_inventory": "analysis/dsp/coverage_inventory.json",
     "disassembler_sha256": "2449e6a4ea0ed5c8cfeae3981b829c671a89f938865492e390b9878492ffdf89",

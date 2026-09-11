@@ -492,7 +492,9 @@ def build_report(args):
                     'analysis/dsp/audit_sweeps.json compact.not_implemented_breakdown: of '
                     'the 6,944 raw refusals, 6,616 are encodings the architecture does not '
                     'define, 96 are this loop family, 128 are a deliberate fail-closed '
-                    'decision, and 104 are the genuine gap.'),
+                    'decision, 72 are s = 0 twins of forms whose SPRUFE8B figure hardwires '
+                    's = 1, and 32 are the genuine gap (Figure H-6 predicated SPLOOPD, the '
+                    'SPLOOP reload capability).'),
                 confirmed_executed_are_loop_family=True,
                 distinct_compact_words_seen=len(compact_hits),
                 static_candidate_words=len(present),

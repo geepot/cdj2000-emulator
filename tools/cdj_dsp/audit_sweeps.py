@@ -78,15 +78,50 @@ LOOP_FAMILY = frozenset({"sploop", "sploopd", "sploopw", "spkernel", "spkernelr"
 # manual's self-contradiction is unresolved; see the Sx1b arm in cdj_c674x.c.
 DELIBERATE = frozenset({"bnop"})
 
+# Compact formats whose figure HARDWIRES the s bit, where GNU libopcodes does
+# not enforce it.  GNU happily names an instruction for the s = 0 twin of each
+# form below, and those names were read as a decode gap.  They are not: the
+# figure fixes bit 0, and TI's own assembler refuses the corresponding source.
+#
+#   Figure C-19 Dx5p (printed page 730) draws bit 0 as a literal "1" with "s=1"
+#   written underneath - contrast Figure C-18 Dx5 on the same page, whose bit 0
+#   is an unconstrained "s" - and notes "src2 = dst = B15".  The ADDAW
+#   description (printed page 123) says the s bit picks both unit and register
+#   file: "s = 1 indicates the unit is D2 and dst is in the B register file", so
+#   a B15 destination forces s = 1, and Dx5p has no x bit to cross with.
+#   cl6x -mv6740 refuses "ADDAW .D1 B15,4,B15" with E0800 "Functional unit
+#   specifier disagrees with operation" and "SUBAW .D1 B15,4,B15" with E0800
+#   "Functional unit side requested does not match side needed"; both assemble
+#   on .D2.  GNU prints "addaw .D1X b15,0,b15", a cross-path WRITE no C674x
+#   unit can perform.
+#
+#   Figure F-31 Sx1 op 110 (printed page 756) spells the restriction out in the
+#   mnemonic table itself: "MVC (.unit) src, ILC (s = 1)".  cl6x refuses
+#   "MVC .S1 B0,ILC" with W0005 "Operation requires .S2 unit".
+#
+# Refusing these is correct behaviour, so they belong with the undefined
+# encodings and not in a gap bucket.  The core's refusals are pinned by
+# tests/cstub/c674x.c; narrowing either guard to admit s = 0 would accept an
+# encoding hardware rejects.  Each entry is (label, mask, match).
+UNIT_RESTRICTED = (
+    ("addaw/subaw, Figure C-19 Dx5p s = 0", 0x1c7f, 0x0c76),
+    ("mvc ILC, Figure F-31 op 110 s = 0", 0xfc7f, 0xd86e),
+)
+
 
 def classify_rejected(words, disassembler, workdir):
     """Name each rejected 16-bit word with GNU's TI C6x disassembler.
 
-    Without this, "compact instruction not implemented" counts three very
+    Without this, "compact instruction not implemented" counts four very
     different things as one number: encodings the architecture does not define at
-    all (which the core is RIGHT to refuse), instructions that need a software
-    loop around them, and genuine gaps.  The raw count has been quoted as a
-    coverage figure and it overstates the gap by about an order of magnitude.
+    all (which the core is RIGHT to refuse), forms whose figure hardwires s = 1
+    so the s = 0 twin is equally undefined (ditto), instructions that need a
+    software loop around them, and genuine gaps.  The raw count has been quoted
+    as a coverage figure and it overstates the gap by two orders of magnitude.
+
+    GNU is the naming oracle here, not the legality oracle.  It names the s = 0
+    twins listed in UNIT_RESTRICTED and prints impossible cross-path writes for
+    them, so a bucket must not be assigned from a GNU name alone.
     """
     import struct
     names = {}
@@ -108,10 +143,19 @@ def classify_rejected(words, disassembler, workdir):
             input=addresses, text=True, capture_output=True, timeout=600)
         for line, word in zip(result.stdout.splitlines(), chunk):
             text = line.split("\t")[1] if "\t" in line else ""
-            first = text.split()[0] if text.split() else "<undefined>"
+            tokens = text.split()
+            first = tokens[0] if tokens else "<undefined>"
             # GNU emits "<undefined>" for an encoding it does not recognise; the
             # angle bracket is the reliable marker once the line is split.
-            names[word] = "<undefined>" if first.startswith("<") else first
+            if first.startswith("<"):
+                names[word] = "<undefined>"
+            elif first.startswith("["):
+                # A compact predicate precedes the mnemonic: keep both, so the
+                # report distinguishes Figure H-6 from Figure H-5, and let
+                # mnemonic() strip the predicate for bucketing.
+                names[word] = " ".join(tokens[:2])
+            else:
+                names[word] = first
     return names
 
 
@@ -145,10 +189,19 @@ def compact(text: str, disassembler=None, workdir=None) -> dict:
             name = names.get(word, "<undefined>")
             if name == "<undefined>":
                 buckets["undefined-encoding"] += 1
-            elif name in LOOP_FAMILY:
-                buckets["software-loop-family"] += 1
             elif name in DELIBERATE:
                 buckets["deliberately-fail-closed"] += 1
+            elif name in LOOP_FAMILY:
+                # Unpredicated Figure H-5/H-7/H-8 forms only.  The predicated
+                # Figure H-6 name keeps its "[a0]"/"[b0]" prefix and so falls
+                # through to genuine-gap below, which is where it belongs: it
+                # selects the SPLOOP RELOAD capability (SPLOOPD description,
+                # printed page 485, "it indicates that the loop is a nested loop
+                # using the SPLOOP reload capability"), and cdj_c674x_step
+                # refuses it by name with "SPLOOPD reload not implemented".
+                buckets["software-loop-family"] += 1
+            elif any(word & mask == match for _, mask, match in UNIT_RESTRICTED):
+                buckets["unit-restricted-encoding"] += 1
             else:
                 buckets["genuine-gap"] += 1
         by_mnemonic = collections.Counter(names.get(w, "<undefined>") for w in not_implemented)
@@ -163,16 +216,25 @@ def compact(text: str, disassembler=None, workdir=None) -> dict:
                                         "one-instruction probe packet cannot provide",
                 "deliberately-fail-closed": "refused on purpose while a manual "
                                             "self-contradiction is unresolved",
-                "genuine-gap": "an instruction the architecture defines, that we do not decode",
+                "unit-restricted-encoding": "the disassembler names an instruction, but the "
+                                            "SPRUFE8B figure hardwires the s bit for that form "
+                                            "and TI's assembler refuses the s = 0 source; "
+                                            "refusing it is correct, not a gap. See "
+                                            "UNIT_RESTRICTED in this module for the citations",
+                "genuine-gap": "an instruction the architecture defines, that we do not execute",
             },
+            "unit_restricted_forms": [label for label, _, _ in UNIT_RESTRICTED],
         }
         report["defensible_coverage_figure"] = {
-            "metric": "16-bit words that are a genuine compact decode gap",
+            "metric": "16-bit words that are a genuine compact gap",
             "value": buckets["genuine-gap"],
             "of": words,
-            "why": ("The raw not-implemented count conflates undefined encodings, which "
-                    "the core is right to refuse, with real gaps. Only the genuine-gap "
-                    "bucket is a coverage figure."),
+            "why": ("The raw not-implemented count conflates undefined encodings and "
+                    "s-bit-restricted forms, which the core is right to refuse, with real "
+                    "gaps. Only the genuine-gap bucket is a coverage figure, and it is no "
+                    "longer a DECODE gap: what remains is Figure H-6 Uspldr, the predicated "
+                    "SPLOOPD that selects the SPLOOP reload capability, which "
+                    "cdj_c674x_step recognises by name and refuses as not implemented."),
         }
     else:
         report["defensible_coverage_figure"] = {

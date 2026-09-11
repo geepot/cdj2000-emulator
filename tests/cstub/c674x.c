@@ -780,15 +780,30 @@ int main(void)
         assert(c.r[0][3] == 2 + minimum && c.control[13] == 0);
     }
     /* H-6 conditional SPLOOPD requests reload/nested-loop behavior, which
-     * remains fail-closed and leaves the setup packet atomic. */
-    const unsigned compact_sploopd_reload[] = {0x8c66, 0x8c67};
-    for (unsigned i = 0; i < 2; ++i) {
-        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
-        c.control[13] = 3; c.r[0][1] = 99;
-        memory[0] = compact_sploopd_reload[i]; memory[7] = 0xe0200000;
-        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
-        assert(c.cycles == 0 && !c.loop_active && c.r[0][1] == 99);
-        assert(!strcmp(c.fault, "SPLOOPD reload not implemented"));
+     * remains fail-closed and leaves the setup packet atomic.  SPRUFE8B's
+     * SPLOOPD description (printed page 485) is what makes this a reload
+     * rather than a plain predicate: "When the SPLOOPD instruction is
+     * predicated, it indicates that the loop is a nested loop using the
+     * SPLOOP reload capability."  Retained-buffer reload is not claimed.
+     *
+     * Sweep the whole format rather than two samples, because
+     * analysis/dsp/audit_sweeps.json now claims exactly 32 words here:
+     * Figure H-6 (printed page 766) fixes bit 15 = 1, bits 13-12 = 00,
+     * bits 11-10 = 11 and bits 6-1 = 110011, leaving ii3 (bit 14), ii2-0
+     * (bits 9-7) and op (bit 0) free - 2 * 8 * 2 = 32 encodings, every one of
+     * which must fault with the same text and change nothing.  ii is
+     * irrelevant to the refusal; the predicate is the whole reason for it. */
+    for (unsigned encoded = 0; encoded < 16; ++encoded) {
+        for (unsigned op = 0; op < 2; ++op) {
+            memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+            c.control[13] = 3; c.r[0][1] = 99;
+            memory[0] = 0x8c66 | (encoded & 8) << 11 | (encoded & 7) << 7 | op;
+            memory[7] = 0xe0200000;
+            assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+            assert(c.cycles == 0 && !c.loop_active && c.r[0][1] == 99 &&
+                   c.pc == 0x1000 && c.control[13] == 3);
+            assert(!strcmp(c.fault, "SPLOOPD reload not implemented"));
+        }
     }
     /* More than 14 source packets fit when they occupy no functional slots. */
     memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
@@ -1906,13 +1921,29 @@ int main(void)
                                       : 0x1000u + constant * 4));
         assert(c.cycles == 1);
     }
-    /* C-19 fixes s=1. The otherwise matching s=0 encoding is reserved. */
-    cdj_c674x_reset(&c, 0x1000);
-    CdjC674xPacket reserved_dx5p = {.count = 1, .next_pc = 0x1002,
-        .instructions = {{.compact = true, .pc = 0x1000,
-                          .word = 0x0c76}}};
-    assert(!cdj_c674x_execute(&c, &reserved_dx5p, read_word, NULL, NULL));
-    assert(c.cycles == 0 && c.r[1][15] == 0);
+    /* C-19 fixes s=1. The otherwise matching s=0 encoding is reserved, for
+     * both values of op: Figure C-19 (printed page 730) draws bit 0 as a
+     * literal "1" with "s=1" written beneath it, where Figure C-18 above it
+     * draws an unconstrained "s", and the note is "src2 = dst = B15".  The
+     * ADDAW description (printed page 123) gives the reason: "s = 1 indicates
+     * the unit is D2 and dst is in the B register file", so a B15 destination
+     * forces s = 1, and Dx5p carries no x bit to cross with.  cl6x -mv6740
+     * refuses "ADDAW .D1 B15,4,B15" (E0800, functional unit specifier
+     * disagrees with operation) and "SUBAW .D1 B15,4,B15" (E0800, unit side
+     * does not match side needed) while assembling both on .D2.  GNU
+     * libopcodes disassembles 0x0c76/0x0cf6 as "addaw/subaw .D1X b15,0,b15"
+     * all the same - a cross-path WRITE - which is why the compact sweep once
+     * counted these 64 words as a decode gap.  They are not one, and nothing
+     * here may be narrowed to admit them. */
+    for (unsigned j = 0; j < 2; ++j) {
+        cdj_c674x_reset(&c, 0x1000);
+        c.r[1][15] = 0x2000;
+        CdjC674xPacket reserved_dx5p = {.count = 1, .next_pc = 0x1002,
+            .instructions = {{.compact = true, .pc = 0x1000,
+                              .word = 0x0c76 | j << 7}}};
+        assert(!cdj_c674x_execute(&c, &reserved_dx5p, read_word, NULL, NULL));
+        assert(c.cycles == 0 && c.r[1][15] == 0x2000 && c.r[0][15] == 0);
+    }
 
     /* Figures C-8 through C-15 share the compact .D transfer layout.
      * Exercise every DSZ scalar interpretation plus aligned/nonaligned
@@ -3492,6 +3523,24 @@ int main(void)
     assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.fault && !strcmp(c.fault, "compact instruction not implemented") &&
            c.fault_word == 0xda6e);
+    c.fault = NULL;
+    /* The same holds across the whole src field, which is the other end of the
+     * eight words the sweep used to count as a gap: Figure F-31 leaves bits 9-7
+     * free and the s = 0 restriction is independent of them.  cl6x refuses
+     * "MVC .S1 B0,ILC" with W0005 "Operation requires .S2 unit"; GNU names
+     * 0xd86e "mvc .S1 b0,ilc" anyway, a B-file read on an A-side unit with no
+     * cross path in the format.  src = 0 reads B0, so ILC takes 0x0000002a. */
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][0] = 0x0000002a;
+    memory[0] = 0xd86f;
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.control[13] == 0x0000002a);
+    cdj_c674x_reset(&c, 0x1000);
+    c.r[1][0] = 0x0000002a;
+    memory[0] = 0xd86e;
+    assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(c.fault && !strcmp(c.fault, "compact instruction not implemented") &&
+           c.fault_word == 0xd86e && c.control[13] == 0 && c.cycles == 0);
     c.fault = NULL;
 
     /* CALLP writes the next execute-packet address and takes six cycles.
