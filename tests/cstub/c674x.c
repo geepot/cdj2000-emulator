@@ -2442,6 +2442,36 @@ int main(void)
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.r[1][5] == 0xc6df);
 
+    /* FADCR (18), FAUCR (19) and FMCR (20) reserve bits 31-27 and 15-11 in
+     * every one of SPRUFE8B Tables 2-25 (printed page 59), 2-26 (printed
+     * page 61) and 2-27 (printed page 63): "The reserved bit location is
+     * always read as 0. A value written to this field has no effect."  Every
+     * other bit is R/W by MVC in Figures 2-29/2-30/2-31, so writing all ones
+     * and reading back must give 0x07ff07ff on all three.  The MVC encodings
+     * are asm6x -mv6740 output: "MVC .S2 B4, FADCR" = 0x091003a2,
+     * "MVC .S2 B4, FAUCR" = 0x099003a2, "MVC .S2 B4, FMCR" = 0x0a1003a2,
+     * "MVC .S2 FADCR, B5" = 0x02c803e2, FAUCR = 0x02cc03e2,
+     * FMCR = 0x02d003e2. */
+    static const struct { uint32_t write, read; } fp_status[] = {
+        {0x091003a2u, 0x02c803e2u}, {0x099003a2u, 0x02cc03e2u},
+        {0x0a1003a2u, 0x02d003e2u},
+    };
+    for (unsigned i = 0; i < 3; ++i) {
+        memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+        c.r[1][4] = UINT32_MAX;
+        memory[0] = fp_status[i].write;
+        memory[1] = fp_status[i].read;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.control[18 + i] == 0x07ff07ffu);
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[1][5] == 0x07ff07ffu);
+        /* A reserved bit already set in stored state still reads back as 0. */
+        c.control[18 + i] = UINT32_MAX;
+        memory[2] = fp_status[i].read;
+        assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+        assert(c.r[1][5] == 0x07ff07ffu);
+    }
+
     /* Maskable CPU interrupts enter only at an execute-packet boundary.
      * Requests latch in IFR while globally/individually masked and are
      * recognized after all three architectural enables become true. */

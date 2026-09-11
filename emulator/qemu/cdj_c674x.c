@@ -202,7 +202,11 @@ static uint32_t control_read(const CdjC674x *cpu, unsigned id)
         return (cpu->control[id] & 0x0000c6deu) |
                ((cpu->control[1] >> 1) & 1u);
     case 18: case 19: case 20:      /* FADCR, FAUCR, FMCR */
-        return cpu->control[id];
+        /* All three reserve bits 31-27 and 15-11, "always read as 0":
+         * SPRUFE8B Tables 2-25 (printed page 59), 2-26 (printed page 61) and
+         * 2-27 (printed page 63), with Figures 2-29/2-30/2-31 marking those
+         * fields R-0.  Every other bit is R/W on each register. */
+        return cpu->control[id] & 0x07ff07ffu;
     case 26:                        /* TSR */
         return (cpu->control[id] & 0x0000c6deu) |
                (cpu->control[1] & 1u);
@@ -2433,6 +2437,13 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 /* CSR.PGIE and ITSR.GIE are also one physical bit. */
                 out.control[27] = (out.control[27] & ~1u) |
                                   ((value >> 1) & 1u);
+            } else if (dst == 18 || dst == 19 || dst == 20) {
+                /* FADCR/FAUCR/FMCR bits 31-27 and 15-11: "A value written to
+                 * this field has no effect" (SPRUFE8B Tables 2-25/2-26/2-27,
+                 * printed pages 59, 61 and 63), so MVC drops them rather than
+                 * storing bits a read must then hide.  The warning bits the FP
+                 * instructions OR in all live in the unreserved ranges. */
+                out.control[dst] = value & 0x07ff07ffu;
             } else if (dst == 21) {
                 out.control[21] = value & 0x3fu;
             } else if (dst == 4) {

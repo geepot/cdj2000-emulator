@@ -163,15 +163,13 @@ def test_control_register_reachability_and_reserved_bits(tmp_path):
     # is correct for these four.
     for ident in (6, 7, 13, 14):
         assert masks[str(ident)]["read_mask"] == "ffffffff"
-    # KNOWN DEFECT, recorded as row ISA-FP-STATUS-RESERVED in
-    # DSP_ARCHITECTURE_COVERAGE.md: FADCR, FAUCR and FMCR reserve bits 31-27 and
-    # 15-11, which SPRUFE8B Tables 2-25/2-26/2-27 (printed pages 59, 60, 62) say
-    # are "always read as 0".  The model stores all 32 bits.  When that is fixed
-    # these masks become 07ff07ff and this assertion must be updated to match.
+    # FADCR, FAUCR and FMCR each reserve bits 31-27 and 15-11, which SPRUFE8B
+    # Tables 2-25 (printed page 59), 2-26 (printed page 61) and 2-27 (printed
+    # page 63) say are "always read as 0" and unaffected by writes; every other
+    # bit is R/W by MVC in Figures 2-29/2-30/2-31.  ~0x07ff07ff is exactly the
+    # two reserved ranges, so this is the manual's mask, not a measurement.
     for ident in (18, 19, 20):
-        assert masks[str(ident)]["read_mask"] == "ffffffff", (
-            "FADCR/FAUCR/FMCR reserved-bit masking appears to have been fixed; "
-            "update this test and the coverage row to 07ff07ff")
+        assert masks[str(ident)]["read_mask"] == "07ff07ff"
 
 
 def test_single_precision_rounding_against_an_independent_oracle(tmp_path):
