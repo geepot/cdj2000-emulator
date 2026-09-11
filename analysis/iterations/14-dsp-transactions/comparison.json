@@ -1,0 +1,103 @@
+{
+  "speedup_vs_baseline": {
+    "baseline": 1.0,
+    "clear": 1.2024251977242064,
+    "copy": 1.1099466809974117,
+    "combined": 1.3637488324587264
+  },
+  "boot_elapsed_reduction_seconds": 1.3283471250015282,
+  "ranges": {
+    "baseline": {
+      "normal_player_observed_gui_seconds": [
+        9.041996584001026,
+        9.047263000000385
+      ],
+      "utility_response_seconds": [
+        1.3106627464294434,
+        1.570885181427002
+      ],
+      "encoder_response_seconds": [
+        0.3111379146575928,
+        0.33768391609191895
+      ],
+      "dsp_packets_per_gui_budget_second": [
+        5718817.647058823,
+        5730582.352941177
+      ]
+    },
+    "clear": {
+      "normal_player_observed_gui_seconds": [
+        8.24715733300036,
+        8.285827083000186
+      ],
+      "utility_response_seconds": [
+        1.3009731769561768,
+        1.4038364887237549
+      ],
+      "encoder_response_seconds": [
+        0.30023741722106934,
+        0.35219311714172363
+      ],
+      "dsp_packets_per_gui_budget_second": [
+        6859994.117647059,
+        6907052.94117647
+      ]
+    },
+    "copy": {
+      "normal_player_observed_gui_seconds": [
+        8.459870209000655,
+        8.650035582999408
+      ],
+      "utility_response_seconds": [
+        1.3660266399383545,
+        1.370359182357788
+      ],
+      "encoder_response_seconds": [
+        0.27017641067504883,
+        0.31707048416137695
+      ],
+      "dsp_packets_per_gui_budget_second": [
+        6330582.352941177,
+        6377641.176470588
+      ]
+    },
+    "combined": {
+      "normal_player_observed_gui_seconds": [
+        7.606037834000745,
+        7.82652749999761
+      ],
+      "utility_response_seconds": [
+        1.3330764770507812,
+        1.3335659503936768
+      ],
+      "encoder_response_seconds": [
+        0.3329188823699951,
+        0.33749866485595703
+      ],
+      "dsp_packets_per_gui_budget_second": [
+        7777641.176470588,
+        7836464.705882353
+      ]
+    }
+  },
+  "frames_scanned": [
+    "5099",
+    "5099",
+    "5099",
+    "5099",
+    "5099",
+    "5099",
+    "5099",
+    "5099"
+  ],
+  "dropped_ms": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+  ]
+}

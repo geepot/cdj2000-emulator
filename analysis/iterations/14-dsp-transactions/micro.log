@@ -1,0 +1,15 @@
+{
+  "scope": "Synthetic 9-million-MVK execute calls; exact production core object. Not firmware/replay/whole-player speed. Loop-issue timing is a separate unchanged synthetic path.",
+  "medians": {
+    "baseline": 0.884957,
+    "clear": 0.647961,
+    "copy": 0.722,
+    "combined": 0.505518
+  },
+  "speedup_vs_baseline": {
+    "baseline": 1.0,
+    "clear": 1.3657565810287964,
+    "copy": 1.225702216066482,
+    "combined": 1.750594439762778
+  }
+}

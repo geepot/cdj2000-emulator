@@ -8,6 +8,19 @@
 #include "cdj_c674x_sp.h"
 #include "cdj_c674x_control.h"
 
+/* This scratch CPU is initialized by the prefix copy below.  Its loop tail
+ * must never be accessed by packet execution.  Avoid compiler-injected tail
+ * clearing while retaining automatic initialization everywhere else. */
+#if defined(__has_attribute)
+# if __has_attribute(uninitialized)
+#  define CDJ_C674X_UNINITIALIZED __attribute__((uninitialized))
+# endif
+#endif
+#ifndef CDJ_C674X_UNINITIALIZED
+# define CDJ_C674X_UNINITIALIZED
+#endif
+
+
 #define CDJ_C674X_TSR_SPLX (1u << 14)
 #define CDJ_C674X_LOOP_RETURNING (1u << 3)
 #define CDJ_C674X_LOOP_CONTEXT 31u
@@ -2020,7 +2033,7 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
      * remain untouched here, including on branches that idle the loop.
      * Keep a transactional copy, but do not copy that large immutable tail.
      * No helper called with &out may inspect loop or loop_instructions. */
-    CdjC674x out;
+    CdjC674x out CDJ_C674X_UNINITIALIZED;
     memcpy(&out, cpu, offsetof(CdjC674x, loop));
     bool written[2][32] = {{false}}, controls[32] = {false};
     if (cpu->fault) return false;

@@ -1,0 +1,1 @@
+The first copy-only trial (`runs/optimization-14-dsp-transactions-copy-0`) was terminated by SIGTERM during the run, before any scheduled panel command. The launcher exited -15; QEMU logged SIGTERM from PID41701, whose identity was no longer available. No cause is inferred. Its partial summary is retained here and excluded from all aggregate results. Replacement:copy trial2.

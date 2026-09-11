@@ -843,3 +843,96 @@ must not be compared directly with older binaries as a performance regression.
 **Cumulative measured gains are unchanged.** This result establishes that a
 bounded implementation experiment is worthwhile, not that an optimization has
 already been validated.
+
+## Iteration 14 — DSP scratch initialization and bounded queue commits
+
+Two independent candidates are evaluated against the same frozen installed
+QEMU object set, compiler flags, firmware and Blackfin binary. Only the DSP
+core object is recompiled/relinked. This deliberately excludes the newest
+uninstalled PLL source changes from the connected comparison. The shared QEMU
+build and Blackfin executable are not overwritten during measurements.
+Inputs, isolated build recipe, binary identities and measurements are under
+`analysis/iterations/14-dsp-transactions/`.
+
+The first candidate uses the compiler's feature-tested `uninitialized`
+attribute on the one scratch CPU whose prefix is immediately copied. It keeps
+automatic initialization elsewhere. Disassembly confirms that the unused-tail
+`bzero` disappears with this candidate and remains in the baseline/copy-only
+variants. The second retains the full prefix copy-in, preserving operand reads
+and new-slot padding, but commits scalar ranges plus the pre-retirement queue
+extents. Slots that retirement makes inactive are still committed. All other
+inactive bytes remain unchanged in the original CPU. Neither candidate changes
+interrupt/link timing, device callbacks, guest cycles or transaction failures.
+
+### Fixed-work diagnostic
+
+Five alternating forward/reverse rounds used the exact QEMU core objects in
+a synthetic nine-million-MVK benchmark. Median execution CPU time was
+0.884957 s baseline, 0.647961 s clear-only, 0.722000 s copy-only and 0.505518 s
+combined: respectively **1.366×, 1.226× and 1.751×** baseline throughput.
+This is a synthetic instruction workload, not firmware replay or whole-player
+performance; the connected outcomes below determine the end-to-end return.
+The separate unchanged loop-issue timing printed by that harness is not part
+of these ratios.
+
+Final focused regression, with the installed TI assembler enabled, passes
+33 tests on baseline and 35 each on clear-only and combined, with no skips. A separate byte-exact differential gate drives
+192 poisoned-state cases (plus load/store continuation packets), comparing
+CPU bytes, fault strings, return values and callback observations against a
+full-prefix-copy reference. It covers queue insertion/retirement, multicycle
+NOP, IDLE/loop flags, taken branches, malformed packets, partial-packet rollback,
+queue overflow and a broken store callback guarantee. Both ordinary and
+ASan/UBSan builds pass. Inactive queue bytes and forbidden loop-tail bytes are
+poisoned while all live bool/count fields retain valid values.
+
+### Connected outcomes
+
+Eight completed strict connected runs (two per variant, forward/reverse order)
+use the same 85-second GUI budget and fixed MENU/encoder sequence. All have
+unchanged input hashes, GUI exit 0, 5,099 scanned frames, zero reported dropped
+milliseconds, identical normal-player/UTILITY/encoder-selection frames,
+acknowledged panel commands and no unexpected DSP stops. One SIGTERM-interrupted
+copy-only trial is excluded; its replacement is trial 2. The signal's cause is
+unknown, and no partial result contributes to these medians.
+
+| Variant | DSP M packets/s | Gain vs baseline | Normal player (s) | MENU response (s) | Encoder response (s) | Combined CPU |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 5.725 | 0.0% | 9.045 | 1.441 | 0.324 | 170.77% |
+| clear | 6.884 | 20.2% | 8.266 | 1.352 | 0.326 | 170.32% |
+| copy | 6.354 | 11.0% | 8.555 | 1.368 | 0.294 | 170.00% |
+| combined | 7.807 | 36.4% | 7.716 | 1.333 | 0.335 | 169.10% |
+
+CPU 100% denotes one host core. MAIN remains approximately 100% in all variants;
+combined utilization stays around 1.7 cores. The throughput gain comes from more
+executed packets in the same wall-clock workload, not lower CPU utilization.
+Packet-rate ranges do not overlap: baseline 5.719–5.731, clear 6.860–6.907,
+copy 6.331–6.378 and combined 7.778–7.836 M/s. The second optimization improves
+throughput a further 13.4% over clear-only; do not sum the independent percentages.
+
+The combined normal-player milestone appears 1.328 seconds earlier by median
+(9.045→7.716s), about 14.7% less elapsed time. Frames are sampled every 0.2 s;
+the two combined observations span 7.606–7.827s and both baseline observations
+are around 9.04s. This establishes a bounded boot-workload gain, not universal
+firmware acceleration. Baseline MENU latency spans 1.311–1.571s and overlaps
+the candidate results; encoder ranges overlap too. No reliable panel-response
+or CPU-saving claim is retained from two trials.
+
+**Cumulative for these two DSP changes: 1.364× connected DSP throughput
+(+36.4%), with the normal-player milestone 1.33 seconds earlier.** The synthetic
+MVK result is 1.751× and is reported separately. Prior Blackfin fixed-tick and
+SPORT capture-I/O gains are not multiplied into this connected result.
+
+### Final semantic validation
+
+All twelve fixed firmware continuations (three captured checkpoints times four
+variants, one million steps each) produce byte-identical compact traces and
+final checkpoints across variants. They reach the requested step limit with
+empty fault strings. The replay adapter/peripherals are identical in each
+comparison; this is an equivalence gate, not a connected-event or hardware
+clock oracle. The complete C674x ISA fixture also passes ASan/UBSan.
+
+The unused-tail initialization change is retained independently for its 20.2%
+connected throughput gain. The compiler guard leaves unsupported compilers on
+their normal initialization policy. Deeper removal of the full entry copy
+remains outside this change; pre-packet operand reads and failure rollback
+still depend on it.

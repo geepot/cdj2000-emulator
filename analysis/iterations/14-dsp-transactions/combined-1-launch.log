@@ -1,0 +1,9 @@
+launch combined trial 1
+verified combined trial 1
+[
+  {
+    "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-14-dsp-transactions-combined-1",
+    "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/14-dsp-transactions/optimization-14-dsp-transactions-combined-1.json",
+    "exit_code": 0
+  }
+]

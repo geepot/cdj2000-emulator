@@ -1,0 +1,2 @@
+C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed
+Complete C674x ISA fixture passed ASan/UBSan.

@@ -1,0 +1,137 @@
+{
+  "scope": "Fixed firmware continuation equivalence across production core objects.\n\nUses the same snapshot replay adapter/peripherals for every variant; this is\ncross-variant determinism, not a connected transcript or timing-oracle gate.\nRun after connected measurements, never concurrently with them.\n",
+  "runs": [
+    {
+      "checkpoint": 1,
+      "input_sha256": "2b7d37c8ba0395272faa2b720736ddbb06bbe11b585cdc0d16073c7c529a9596",
+      "label": "baseline",
+      "elapsed_seconds": 0.32647629200073425,
+      "hashes": {
+        "trace.jsonl": "a6c0d5c61b804dbd993b7d93431f5c361242c7ce4ecce1c4e2c183c99a7bd95a",
+        "final.cdjdsp": "d90976eef852e5c8af598e8eda23913b091e5647f522effebce42deb211c4603"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611716,\"fault_pc\":0,\"fault_word\":0,\"packets\":1000000,\"cycles\":2598343,\"registers\":[[0,0,0,0,0,277948936,29430016,1,0,0,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,293611720,36,2952790028,98304,29442432,0,0,0,0,0,0,293628160,293624536,1007191870,3190467236,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331541152},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":114339,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 1,
+      "input_sha256": "2b7d37c8ba0395272faa2b720736ddbb06bbe11b585cdc0d16073c7c529a9596",
+      "label": "clear",
+      "elapsed_seconds": 0.28418833300020196,
+      "hashes": {
+        "trace.jsonl": "a6c0d5c61b804dbd993b7d93431f5c361242c7ce4ecce1c4e2c183c99a7bd95a",
+        "final.cdjdsp": "d90976eef852e5c8af598e8eda23913b091e5647f522effebce42deb211c4603"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611716,\"fault_pc\":0,\"fault_word\":0,\"packets\":1000000,\"cycles\":2598343,\"registers\":[[0,0,0,0,0,277948936,29430016,1,0,0,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,293611720,36,2952790028,98304,29442432,0,0,0,0,0,0,293628160,293624536,1007191870,3190467236,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331541152},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":114339,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 1,
+      "input_sha256": "2b7d37c8ba0395272faa2b720736ddbb06bbe11b585cdc0d16073c7c529a9596",
+      "label": "copy",
+      "elapsed_seconds": 0.3182859999978973,
+      "hashes": {
+        "trace.jsonl": "a6c0d5c61b804dbd993b7d93431f5c361242c7ce4ecce1c4e2c183c99a7bd95a",
+        "final.cdjdsp": "d90976eef852e5c8af598e8eda23913b091e5647f522effebce42deb211c4603"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611716,\"fault_pc\":0,\"fault_word\":0,\"packets\":1000000,\"cycles\":2598343,\"registers\":[[0,0,0,0,0,277948936,29430016,1,0,0,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,293611720,36,2952790028,98304,29442432,0,0,0,0,0,0,293628160,293624536,1007191870,3190467236,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331541152},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":114339,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 1,
+      "input_sha256": "2b7d37c8ba0395272faa2b720736ddbb06bbe11b585cdc0d16073c7c529a9596",
+      "label": "combined",
+      "elapsed_seconds": 0.27195558300081757,
+      "hashes": {
+        "trace.jsonl": "a6c0d5c61b804dbd993b7d93431f5c361242c7ce4ecce1c4e2c183c99a7bd95a",
+        "final.cdjdsp": "d90976eef852e5c8af598e8eda23913b091e5647f522effebce42deb211c4603"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611716,\"fault_pc\":0,\"fault_word\":0,\"packets\":1000000,\"cycles\":2598343,\"registers\":[[0,0,0,0,0,277948936,29430016,1,0,0,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,293611720,36,2952790028,98304,29442432,0,0,0,0,0,0,293628160,293624536,1007191870,3190467236,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331541152},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":114339,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 25,
+      "input_sha256": "45af24f01986b8498ae21b09950481ed7bc1d91280fb5d41d6c3d6ea01c74e18",
+      "label": "baseline",
+      "elapsed_seconds": 0.22643620800226927,
+      "hashes": {
+        "trace.jsonl": "cbce30ef1d52c1539447d9b746f5b7e4406916b7e206e1bd0dabef68a72363d2",
+        "final.cdjdsp": "2c29895fa2ec4d921f57872db27b0533c3ab9e234973846b353a839e5c5153e7"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611512,\"fault_pc\":0,\"fault_word\":0,\"packets\":11033227,\"cycles\":26295266,\"registers\":[[2,0,0,31613040,2,3221356544,67113002,58732714,4096,293828608,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[4,0,1,293611828,32,32768,98304,29442432,0,0,0,0,0,0,293628160,293624536,726145264,35163747,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331547704},\"pending_stores\":0,\"pending_loads\":1,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":1144640,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 25,
+      "input_sha256": "45af24f01986b8498ae21b09950481ed7bc1d91280fb5d41d6c3d6ea01c74e18",
+      "label": "clear",
+      "elapsed_seconds": 0.19463933299994096,
+      "hashes": {
+        "trace.jsonl": "cbce30ef1d52c1539447d9b746f5b7e4406916b7e206e1bd0dabef68a72363d2",
+        "final.cdjdsp": "2c29895fa2ec4d921f57872db27b0533c3ab9e234973846b353a839e5c5153e7"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611512,\"fault_pc\":0,\"fault_word\":0,\"packets\":11033227,\"cycles\":26295266,\"registers\":[[2,0,0,31613040,2,3221356544,67113002,58732714,4096,293828608,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[4,0,1,293611828,32,32768,98304,29442432,0,0,0,0,0,0,293628160,293624536,726145264,35163747,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331547704},\"pending_stores\":0,\"pending_loads\":1,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":1144640,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 25,
+      "input_sha256": "45af24f01986b8498ae21b09950481ed7bc1d91280fb5d41d6c3d6ea01c74e18",
+      "label": "copy",
+      "elapsed_seconds": 0.21208229100011522,
+      "hashes": {
+        "trace.jsonl": "cbce30ef1d52c1539447d9b746f5b7e4406916b7e206e1bd0dabef68a72363d2",
+        "final.cdjdsp": "2c29895fa2ec4d921f57872db27b0533c3ab9e234973846b353a839e5c5153e7"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611512,\"fault_pc\":0,\"fault_word\":0,\"packets\":11033227,\"cycles\":26295266,\"registers\":[[2,0,0,31613040,2,3221356544,67113002,58732714,4096,293828608,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[4,0,1,293611828,32,32768,98304,29442432,0,0,0,0,0,0,293628160,293624536,726145264,35163747,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331547704},\"pending_stores\":0,\"pending_loads\":1,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":1144640,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 25,
+      "input_sha256": "45af24f01986b8498ae21b09950481ed7bc1d91280fb5d41d6c3d6ea01c74e18",
+      "label": "combined",
+      "elapsed_seconds": 0.17712883399872226,
+      "hashes": {
+        "trace.jsonl": "cbce30ef1d52c1539447d9b746f5b7e4406916b7e206e1bd0dabef68a72363d2",
+        "final.cdjdsp": "2c29895fa2ec4d921f57872db27b0533c3ab9e234973846b353a839e5c5153e7"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":293611512,\"fault_pc\":0,\"fault_word\":0,\"packets\":11033227,\"cycles\":26295266,\"registers\":[[2,0,0,31613040,2,3221356544,67113002,58732714,4096,293828608,31522816,0,0,0,0,0,293619936,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[4,0,1,293611828,32,32768,98304,29442432,0,0,0,0,0,0,293628160,293624536,726145264,35163747,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],\"control\":{\"csr\":335544576,\"ifr\":0,\"ier\":1,\"irp\":0,\"ilc\":0,\"rilc\":0,\"tsr\":0,\"itsr\":0,\"loop_context\":72057594331547704},\"pending_stores\":0,\"pending_loads\":1,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":1144640,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":0,\"last_word\":0,\"program\":[255,255,0,0,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 250,
+      "input_sha256": "8fa985666dacdfc99506dd660defa5d772d516237a2c32b3f72a55ebe1b34eb9",
+      "label": "baseline",
+      "elapsed_seconds": 0.2493739999990794,
+      "hashes": {
+        "trace.jsonl": "3989ffafbfc5e51ae524db80bd917c165e69b4e8ccdf48ae34b65ed7a1b5bb2f",
+        "final.cdjdsp": "f1475ee0760912d2b5ee00c0e59f1fd979fedde0dbf9d1d79438b81543035dc2"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":3221530204,\"fault_pc\":0,\"fault_word\":0,\"packets\":211099500,\"cycles\":395693348,\"registers\":[[0,1,0,0,293829536,4096,30441632,30425248,30441632,30441632,293789332,0,0,0,0,0,293735192,0,1318,3212814051,1029015519,0,0,0,0,0,0,0,0,0,0,1065353216],[0,1,0,3221530080,0,0,1000,2147549183,31531008,0,0,0,0,0,293628160,293624520,293790906,293790748,293790746,293790744,12,0,0,0,0,0,0,0,0,0,0,1266679808]],\"control\":{\"csr\":335544579,\"ifr\":0,\"ier\":33043,\"irp\":293621004,\"ilc\":0,\"rilc\":0,\"tsr\":1,\"itsr\":1,\"loop_context\":216172785335314356},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":17205426,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":8,\"last_word\":1561,\"program\":[511,511,8,25,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 250,
+      "input_sha256": "8fa985666dacdfc99506dd660defa5d772d516237a2c32b3f72a55ebe1b34eb9",
+      "label": "clear",
+      "elapsed_seconds": 0.2131039170017175,
+      "hashes": {
+        "trace.jsonl": "3989ffafbfc5e51ae524db80bd917c165e69b4e8ccdf48ae34b65ed7a1b5bb2f",
+        "final.cdjdsp": "f1475ee0760912d2b5ee00c0e59f1fd979fedde0dbf9d1d79438b81543035dc2"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":3221530204,\"fault_pc\":0,\"fault_word\":0,\"packets\":211099500,\"cycles\":395693348,\"registers\":[[0,1,0,0,293829536,4096,30441632,30425248,30441632,30441632,293789332,0,0,0,0,0,293735192,0,1318,3212814051,1029015519,0,0,0,0,0,0,0,0,0,0,1065353216],[0,1,0,3221530080,0,0,1000,2147549183,31531008,0,0,0,0,0,293628160,293624520,293790906,293790748,293790746,293790744,12,0,0,0,0,0,0,0,0,0,0,1266679808]],\"control\":{\"csr\":335544579,\"ifr\":0,\"ier\":33043,\"irp\":293621004,\"ilc\":0,\"rilc\":0,\"tsr\":1,\"itsr\":1,\"loop_context\":216172785335314356},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":17205426,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":8,\"last_word\":1561,\"program\":[511,511,8,25,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 250,
+      "input_sha256": "8fa985666dacdfc99506dd660defa5d772d516237a2c32b3f72a55ebe1b34eb9",
+      "label": "copy",
+      "elapsed_seconds": 0.231966833001934,
+      "hashes": {
+        "trace.jsonl": "3989ffafbfc5e51ae524db80bd917c165e69b4e8ccdf48ae34b65ed7a1b5bb2f",
+        "final.cdjdsp": "f1475ee0760912d2b5ee00c0e59f1fd979fedde0dbf9d1d79438b81543035dc2"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":3221530204,\"fault_pc\":0,\"fault_word\":0,\"packets\":211099500,\"cycles\":395693348,\"registers\":[[0,1,0,0,293829536,4096,30441632,30425248,30441632,30441632,293789332,0,0,0,0,0,293735192,0,1318,3212814051,1029015519,0,0,0,0,0,0,0,0,0,0,1065353216],[0,1,0,3221530080,0,0,1000,2147549183,31531008,0,0,0,0,0,293628160,293624520,293790906,293790748,293790746,293790744,12,0,0,0,0,0,0,0,0,0,0,1266679808]],\"control\":{\"csr\":335544579,\"ifr\":0,\"ier\":33043,\"irp\":293621004,\"ilc\":0,\"rilc\":0,\"tsr\":1,\"itsr\":1,\"loop_context\":216172785335314356},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":17205426,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":8,\"last_word\":1561,\"program\":[511,511,8,25,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    },
+    {
+      "checkpoint": 250,
+      "input_sha256": "8fa985666dacdfc99506dd660defa5d772d516237a2c32b3f72a55ebe1b34eb9",
+      "label": "combined",
+      "elapsed_seconds": 0.20362104199739406,
+      "hashes": {
+        "trace.jsonl": "3989ffafbfc5e51ae524db80bd917c165e69b4e8ccdf48ae34b65ed7a1b5bb2f",
+        "final.cdjdsp": "f1475ee0760912d2b5ee00c0e59f1fd979fedde0dbf9d1d79438b81543035dc2"
+      },
+      "trace_tail": "{\"event\":\"stop\",\"reason\":\"step_limit\",\"fault\":\"\",\"pc\":3221530204,\"fault_pc\":0,\"fault_word\":0,\"packets\":211099500,\"cycles\":395693348,\"registers\":[[0,1,0,0,293829536,4096,30441632,30425248,30441632,30441632,293789332,0,0,0,0,0,293735192,0,1318,3212814051,1029015519,0,0,0,0,0,0,0,0,0,0,1065353216],[0,1,0,3221530080,0,0,1000,2147549183,31531008,0,0,0,0,0,293628160,293624520,293790906,293790748,293790746,293790744,12,0,0,0,0,0,0,0,0,0,0,1266679808]],\"control\":{\"csr\":335544579,\"ifr\":0,\"ier\":33043,\"irp\":293621004,\"ilc\":0,\"rilc\":0,\"tsr\":1,\"itsr\":1,\"loop_context\":216172785335314356},\"pending_stores\":0,\"pending_loads\":0,\"syscfg_unlocked\":false,\"pll_legacy_bit4_used\":true,\"pll_oscin_cycles\":17205426,\"pll_reset_age\":17,\"pll_lock_wait_remaining\":0,\"pll_early_enable\":true,\"cfgchip\":[0,98304,61184,65280],\"amute_clear_pulses\":0,\"hpi\":{\"reset\":false,\"hwob\":true,\"dspint\":false,\"hint\":false},\"emifb\":{\"sdcfg\":83489,\"sdrfc\":1014,\"sdtim1\":277948936,\"sdtim2\":1611268103,\"init_sequences\":3},\"wm8740\":{\"transfers\":8,\"last_word\":1561,\"program\":[511,511,8,25,0],\"active_attenuation\":[255,255],\"register4_unlocked\":false}}"
+    }
+  ]
+}

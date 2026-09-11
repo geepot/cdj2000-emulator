@@ -1,0 +1,845 @@
+{
+  "schema": 1,
+  "suite": "14-dsp-transactions",
+  "runs": [
+    {
+      "name": "optimization-14-dsp-transactions-baseline-0",
+      "label": "baseline",
+      "trial": 0,
+      "input_hashes": {
+        "qemu": "424a4a97dabcb149c27ca43060955f1f066be059c03eed11f247b566a7f4e01a",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 9.041996584001026,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.570885181427002,
+        "encoder": 0.33768391609191895
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.15193629100031103,
+        "up 20:08": 0.14378354200016474,
+        "rotary 7 1": 0.06188654099969426
+      },
+      "cpu_percent": {
+        "main": 99.71549520964228,
+        "gui": 71.31959696211004,
+        "combined": 171.03509217175232
+      },
+      "cpu_window_seconds": 69.72838058299749,
+      "cpu_seconds_last_shared": {
+        "main": 85.62,
+        "gui": 59.27
+      },
+      "dsp_packets": 487099500,
+      "dsp_cycles": 889747871,
+      "dsp_packets_per_gui_budget_second": 5730582.352941177,
+      "callbacks": {
+        "count": 500,
+        "execution_seconds": 82.41676700000001,
+        "p50_ms": 168.414,
+        "p95_ms": 171.12085,
+        "max_ms": 348.043
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd0c3d6",
+        "insns": "2680160256",
+        "mips": "32.12",
+        "ticks": "34000747601",
+        "tick_rate": "400.000M/s",
+        "events": "3132860",
+        "dma": "1542579",
+        "frames": "5099",
+        "published": "12",
+        "link_rx": "34048",
+        "mem_fill": "1564",
+        "guest_s": "85.00",
+        "parked_s": "25.42",
+        "dropped_ms": "0.0",
+        "waits": "205114",
+        "spins": "178407817"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    },
+    {
+      "name": "optimization-14-dsp-transactions-baseline-1",
+      "label": "baseline",
+      "trial": 1,
+      "input_hashes": {
+        "qemu": "424a4a97dabcb149c27ca43060955f1f066be059c03eed11f247b566a7f4e01a",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 9.047263000000385,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.3106627464294434,
+        "encoder": 0.3111379146575928
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.007659040998987621,
+        "up 20:08": 0.05078816699824529,
+        "rotary 7 1": 0.04112679199897684
+      },
+      "cpu_percent": {
+        "main": 100.08884931669924,
+        "gui": 70.40683331417165,
+        "combined": 170.49568263087087
+      },
+      "cpu_window_seconds": 69.63812699999835,
+      "cpu_seconds_last_shared": {
+        "main": 86.03,
+        "gui": 58.69
+      },
+      "dsp_packets": 486099500,
+      "dsp_cycles": 887957815,
+      "dsp_packets_per_gui_budget_second": 5718817.647058823,
+      "callbacks": {
+        "count": 499,
+        "execution_seconds": 82.556047,
+        "p50_ms": 169.759,
+        "p95_ms": 171.295,
+        "max_ms": 201.638
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd0cf50",
+        "insns": "2689335296",
+        "mips": "32.18",
+        "ticks": "34000011601",
+        "tick_rate": "400.000M/s",
+        "events": "3136069",
+        "dma": "1543265",
+        "frames": "5099",
+        "published": "12",
+        "link_rx": "34512",
+        "mem_fill": "1564",
+        "guest_s": "85.00",
+        "parked_s": "26.43",
+        "dropped_ms": "0.0",
+        "waits": "234414",
+        "spins": "180332326"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    },
+    {
+      "name": "optimization-14-dsp-transactions-clear-0",
+      "label": "clear",
+      "trial": 0,
+      "input_hashes": {
+        "qemu": "97aea863ea4e7840d3c4a550158b9cf66bf2dbf39c797dc11bc31d5a29bb657e",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 8.285827083000186,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.4038364887237549,
+        "encoder": 0.35219311714172363
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.0995045410018065,
+        "up 20:08": 0.01085787500051083,
+        "rotary 7 1": 0.092815291001898
+      },
+      "cpu_percent": {
+        "main": 100.01059357937208,
+        "gui": 70.80790265347984,
+        "combined": 170.81849623285194
+      },
+      "cpu_window_seconds": 69.58262870899853,
+      "cpu_seconds_last_shared": {
+        "main": 85.93,
+        "gui": 59.45
+      },
+      "dsp_packets": 583099500,
+      "dsp_cycles": 1061592913,
+      "dsp_packets_per_gui_budget_second": 6859994.117647059,
+      "callbacks": {
+        "count": 596,
+        "execution_seconds": 81.979154,
+        "p50_ms": 140.40449999999998,
+        "p95_ms": 142.0795,
+        "max_ms": 166.306
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd0cf5a",
+        "insns": "2703753216",
+        "mips": "32.18",
+        "ticks": "34000202401",
+        "tick_rate": "400.000M/s",
+        "events": "3145084",
+        "dma": "1544330",
+        "frames": "5099",
+        "published": "12",
+        "link_rx": "40632",
+        "mem_fill": "1564",
+        "guest_s": "85.00",
+        "parked_s": "25.47",
+        "dropped_ms": "0.0",
+        "waits": "237564",
+        "spins": "178553350"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    },
+    {
+      "name": "optimization-14-dsp-transactions-clear-1",
+      "label": "clear",
+      "trial": 1,
+      "input_hashes": {
+        "qemu": "97aea863ea4e7840d3c4a550158b9cf66bf2dbf39c797dc11bc31d5a29bb657e",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 8.24715733300036,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.3009731769561768,
+        "encoder": 0.30023741722106934
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.05165195900190156,
+        "up 20:08": 0.03368883299845038,
+        "rotary 7 1": 0.046793624998827
+      },
+      "cpu_percent": {
+        "main": 100.05568999778795,
+        "gui": 69.76228507368336,
+        "combined": 169.81797507147132
+      },
+      "cpu_window_seconds": 69.75115558299876,
+      "cpu_seconds_last_shared": {
+        "main": 85.93,
+        "gui": 58.53
+      },
+      "dsp_packets": 587099500,
+      "dsp_cycles": 1068753158,
+      "dsp_packets_per_gui_budget_second": 6907052.94117647,
+      "callbacks": {
+        "count": 600,
+        "execution_seconds": 82.073406,
+        "p50_ms": 139.676,
+        "p95_ms": 141.47605,
+        "max_ms": 159.195
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd104ba",
+        "insns": "2710896640",
+        "mips": "32.19",
+        "ticks": "34000510401",
+        "tick_rate": "400.000M/s",
+        "events": "3144901",
+        "dma": "1544975",
+        "frames": "5099",
+        "published": "12",
+        "link_rx": "40960",
+        "mem_fill": "1564",
+        "guest_s": "85.00",
+        "parked_s": "26.50",
+        "dropped_ms": "0.0",
+        "waits": "281531",
+        "spins": "179516959"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    },
+    {
+      "name": "optimization-14-dsp-transactions-combined-0",
+      "label": "combined",
+      "trial": 0,
+      "input_hashes": {
+        "qemu": "69fba572fdf79023bd18c0775e7b61a0143cfdaf5624ae9e3bba8d21eb071a93",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 7.82652749999761,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.3330764770507812,
+        "encoder": 0.33749866485595703
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.09845412499998929,
+        "up 20:08": 0.12619391699990956,
+        "rotary 7 1": 0.12384654199922807
+      },
+      "cpu_percent": {
+        "main": 100.029536352852,
+        "gui": 69.75838278110484,
+        "combined": 169.78791913395685
+      },
+      "cpu_window_seconds": 69.76939266599948,
+      "cpu_seconds_last_shared": {
+        "main": 85.87,
+        "gui": 58.75
+      },
+      "dsp_packets": 666099500,
+      "dsp_cycles": 1210167321,
+      "dsp_packets_per_gui_budget_second": 7836464.705882353,
+      "callbacks": {
+        "count": 679,
+        "execution_seconds": 81.696369,
+        "p50_ms": 122.575,
+        "p95_ms": 124.72930000000001,
+        "max_ms": 145.149
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd0cf70",
+        "insns": "2725117952",
+        "mips": "32.15",
+        "ticks": "34000300800",
+        "tick_rate": "400.000M/s",
+        "events": "3155099",
+        "dma": "1545739",
+        "frames": "5099",
+        "published": "12",
+        "link_rx": "46936",
+        "mem_fill": "1564",
+        "guest_s": "85.00",
+        "parked_s": "26.24",
+        "dropped_ms": "0.0",
+        "waits": "339057",
+        "spins": "182159661"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    },
+    {
+      "name": "optimization-14-dsp-transactions-combined-1",
+      "label": "combined",
+      "trial": 1,
+      "input_hashes": {
+        "qemu": "69fba572fdf79023bd18c0775e7b61a0143cfdaf5624ae9e3bba8d21eb071a93",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 7.606037834000745,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.3335659503936768,
+        "encoder": 0.3329188823699951
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.09787995800070348,
+        "up 20:08": 0.09663600000203587,
+        "rotary 7 1": 0.11820637500204612
+      },
+      "cpu_percent": {
+        "main": 100.04501008056563,
+        "gui": 68.3626540315091,
+        "combined": 168.4076641120747
+      },
+      "cpu_window_seconds": 69.62866008399942,
+      "cpu_seconds_last_shared": {
+        "main": 85.98,
+        "gui": 56.26
+      },
+      "dsp_packets": 661099500,
+      "dsp_cycles": 1201217061,
+      "dsp_packets_per_gui_budget_second": 7777641.176470588,
+      "callbacks": {
+        "count": 674,
+        "execution_seconds": 81.728883,
+        "p50_ms": 123.46600000000001,
+        "p95_ms": 125.3934,
+        "max_ms": 148.223
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd0cf48",
+        "insns": "2598043648",
+        "mips": "32.19",
+        "ticks": "34000060801",
+        "tick_rate": "400.000M/s",
+        "events": "3097972",
+        "dma": "1535632",
+        "frames": "5099",
+        "published": "13",
+        "link_rx": "46216",
+        "mem_fill": "4339",
+        "guest_s": "85.00",
+        "parked_s": "28.84",
+        "dropped_ms": "0.0",
+        "waits": "360157",
+        "spins": "172489385"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    },
+    {
+      "name": "optimization-14-dsp-transactions-copy-1",
+      "label": "copy",
+      "trial": 1,
+      "input_hashes": {
+        "qemu": "6717bb7a502cba9b37f40010005139b1e1c8a9f721bf685d3220aef93545188c",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 8.650035582999408,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.370359182357788,
+        "encoder": 0.27017641067504883
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.08537366699965787,
+        "up 20:08": 0.11333016600110568,
+        "rotary 7 1": 0.010080832998937694
+      },
+      "cpu_percent": {
+        "main": 100.0364429786287,
+        "gui": 70.35309975245187,
+        "combined": 170.38954273108055
+      },
+      "cpu_window_seconds": 69.90452470899982,
+      "cpu_seconds_last_shared": {
+        "main": 86.11,
+        "gui": 0.0
+      },
+      "dsp_packets": 538099500,
+      "dsp_cycles": 981040573,
+      "dsp_packets_per_gui_budget_second": 6330582.352941177,
+      "callbacks": {
+        "count": 551,
+        "execution_seconds": 82.37811900000001,
+        "p50_ms": 152.892,
+        "p95_ms": 154.55599999999998,
+        "max_ms": 176.52
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd0cfa8",
+        "insns": "2697068544",
+        "mips": "32.18",
+        "ticks": "34000253600",
+        "tick_rate": "400.000M/s",
+        "events": "3143129",
+        "dma": "1543872",
+        "frames": "5099",
+        "published": "12",
+        "link_rx": "37608",
+        "mem_fill": "1564",
+        "guest_s": "85.00",
+        "parked_s": "26.19",
+        "dropped_ms": "0.0",
+        "waits": "238589",
+        "spins": "178778605"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    },
+    {
+      "name": "optimization-14-dsp-transactions-copy-2",
+      "label": "copy",
+      "trial": 2,
+      "input_hashes": {
+        "qemu": "6717bb7a502cba9b37f40010005139b1e1c8a9f721bf685d3220aef93545188c",
+        "simulator": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+        "main_firmware": "02c470e35c944b6107d68a7653b0caabefd6e39650ad5d729e81d59921cb9d85",
+        "gui_boot": "f873acf392c51475ec812e4a2cf809e674d8723f04dbe25eb2ba354a962945cb",
+        "gui_flash": "75b4bb0d000429604e5c1dc63f24ab52b43a1a578bdf90232eb95489d38c9e30"
+      },
+      "normal_player_observed_gui_seconds": 8.459870209000655,
+      "milestone_hashes": {
+        "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+        "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+        "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+      },
+      "response_seconds": {
+        "utility": 1.3660266399383545,
+        "encoder": 0.31707048416137695
+      },
+      "ack_latency_seconds": {
+        "down 20:08": 0.07901362499978859,
+        "up 20:08": 0.12157599999773083,
+        "rotary 7 1": 0.07002795800144668
+      },
+      "cpu_percent": {
+        "main": 100.08611238500467,
+        "gui": 69.51977638660473,
+        "combined": 169.6058887716094
+      },
+      "cpu_window_seconds": 69.74993666599767,
+      "cpu_seconds_last_shared": {
+        "main": 85.92,
+        "gui": 58.12
+      },
+      "dsp_packets": 542099500,
+      "dsp_cycles": 988200782,
+      "dsp_packets_per_gui_budget_second": 6377641.176470588,
+      "callbacks": {
+        "count": 555,
+        "execution_seconds": 82.302198,
+        "p50_ms": 151.62,
+        "p95_ms": 153.2247,
+        "max_ms": 203.906
+      },
+      "final_stats": {
+        "wall": "85.0",
+        "pc": "0xd0cf5a",
+        "insns": "2699493376",
+        "mips": "32.04",
+        "ticks": "34000186800",
+        "tick_rate": "400.000M/s",
+        "events": "3142242",
+        "dma": "1544101",
+        "frames": "5099",
+        "published": "12",
+        "link_rx": "37864",
+        "mem_fill": "1564",
+        "guest_s": "85.00",
+        "parked_s": "26.93",
+        "dropped_ms": "0.0",
+        "waits": "256930",
+        "spins": "179504973"
+      },
+      "stop_reasons": [
+        "HINT host-event yield",
+        "phase budget exhausted"
+      ],
+      "unexpected_stop_reasons": []
+    }
+  ],
+  "aggregate": {
+    "baseline": {
+      "normal_player_observed_gui_seconds": {
+        "median": 9.044629792000705,
+        "min": 9.041996584001026,
+        "max": 9.047263000000385,
+        "values": [
+          9.041996584001026,
+          9.047263000000385
+        ]
+      },
+      "utility_response_seconds": {
+        "median": 1.4407739639282227,
+        "min": 1.3106627464294434,
+        "max": 1.570885181427002,
+        "values": [
+          1.570885181427002,
+          1.3106627464294434
+        ]
+      },
+      "encoder_response_seconds": {
+        "median": 0.32441091537475586,
+        "min": 0.3111379146575928,
+        "max": 0.33768391609191895,
+        "values": [
+          0.33768391609191895,
+          0.3111379146575928
+        ]
+      },
+      "dsp_packets_per_gui_budget_second": {
+        "median": 5724700.0,
+        "min": 5718817.647058823,
+        "max": 5730582.352941177,
+        "values": [
+          5730582.352941177,
+          5718817.647058823
+        ]
+      },
+      "main_cpu_percent": {
+        "median": 99.90217226317077,
+        "min": 99.71549520964228,
+        "max": 100.08884931669924,
+        "values": [
+          99.71549520964228,
+          100.08884931669924
+        ]
+      },
+      "gui_cpu_percent": {
+        "median": 70.86321513814084,
+        "min": 70.40683331417165,
+        "max": 71.31959696211004,
+        "values": [
+          71.31959696211004,
+          70.40683331417165
+        ]
+      },
+      "combined_cpu_percent": {
+        "median": 170.7653874013116,
+        "min": 170.49568263087087,
+        "max": 171.03509217175232,
+        "values": [
+          171.03509217175232,
+          170.49568263087087
+        ]
+      }
+    },
+    "clear": {
+      "normal_player_observed_gui_seconds": {
+        "median": 8.266492208000273,
+        "min": 8.24715733300036,
+        "max": 8.285827083000186,
+        "values": [
+          8.285827083000186,
+          8.24715733300036
+        ]
+      },
+      "utility_response_seconds": {
+        "median": 1.3524048328399658,
+        "min": 1.3009731769561768,
+        "max": 1.4038364887237549,
+        "values": [
+          1.4038364887237549,
+          1.3009731769561768
+        ]
+      },
+      "encoder_response_seconds": {
+        "median": 0.3262152671813965,
+        "min": 0.30023741722106934,
+        "max": 0.35219311714172363,
+        "values": [
+          0.35219311714172363,
+          0.30023741722106934
+        ]
+      },
+      "dsp_packets_per_gui_budget_second": {
+        "median": 6883523.529411765,
+        "min": 6859994.117647059,
+        "max": 6907052.94117647,
+        "values": [
+          6859994.117647059,
+          6907052.94117647
+        ]
+      },
+      "main_cpu_percent": {
+        "median": 100.03314178858002,
+        "min": 100.01059357937208,
+        "max": 100.05568999778795,
+        "values": [
+          100.01059357937208,
+          100.05568999778795
+        ]
+      },
+      "gui_cpu_percent": {
+        "median": 70.28509386358161,
+        "min": 69.76228507368336,
+        "max": 70.80790265347984,
+        "values": [
+          70.80790265347984,
+          69.76228507368336
+        ]
+      },
+      "combined_cpu_percent": {
+        "median": 170.31823565216163,
+        "min": 169.81797507147132,
+        "max": 170.81849623285194,
+        "values": [
+          170.81849623285194,
+          169.81797507147132
+        ]
+      }
+    },
+    "copy": {
+      "normal_player_observed_gui_seconds": {
+        "median": 8.554952896000032,
+        "min": 8.459870209000655,
+        "max": 8.650035582999408,
+        "values": [
+          8.650035582999408,
+          8.459870209000655
+        ]
+      },
+      "utility_response_seconds": {
+        "median": 1.3681929111480713,
+        "min": 1.3660266399383545,
+        "max": 1.370359182357788,
+        "values": [
+          1.370359182357788,
+          1.3660266399383545
+        ]
+      },
+      "encoder_response_seconds": {
+        "median": 0.2936234474182129,
+        "min": 0.27017641067504883,
+        "max": 0.31707048416137695,
+        "values": [
+          0.27017641067504883,
+          0.31707048416137695
+        ]
+      },
+      "dsp_packets_per_gui_budget_second": {
+        "median": 6354111.764705882,
+        "min": 6330582.352941177,
+        "max": 6377641.176470588,
+        "values": [
+          6330582.352941177,
+          6377641.176470588
+        ]
+      },
+      "main_cpu_percent": {
+        "median": 100.06127768181668,
+        "min": 100.0364429786287,
+        "max": 100.08611238500467,
+        "values": [
+          100.0364429786287,
+          100.08611238500467
+        ]
+      },
+      "gui_cpu_percent": {
+        "median": 69.9364380695283,
+        "min": 69.51977638660473,
+        "max": 70.35309975245187,
+        "values": [
+          70.35309975245187,
+          69.51977638660473
+        ]
+      },
+      "combined_cpu_percent": {
+        "median": 169.99771575134497,
+        "min": 169.6058887716094,
+        "max": 170.38954273108055,
+        "values": [
+          170.38954273108055,
+          169.6058887716094
+        ]
+      }
+    },
+    "combined": {
+      "normal_player_observed_gui_seconds": {
+        "median": 7.716282666999177,
+        "min": 7.606037834000745,
+        "max": 7.82652749999761,
+        "values": [
+          7.82652749999761,
+          7.606037834000745
+        ]
+      },
+      "utility_response_seconds": {
+        "median": 1.333321213722229,
+        "min": 1.3330764770507812,
+        "max": 1.3335659503936768,
+        "values": [
+          1.3330764770507812,
+          1.3335659503936768
+        ]
+      },
+      "encoder_response_seconds": {
+        "median": 0.3352087736129761,
+        "min": 0.3329188823699951,
+        "max": 0.33749866485595703,
+        "values": [
+          0.33749866485595703,
+          0.3329188823699951
+        ]
+      },
+      "dsp_packets_per_gui_budget_second": {
+        "median": 7807052.94117647,
+        "min": 7777641.176470588,
+        "max": 7836464.705882353,
+        "values": [
+          7836464.705882353,
+          7777641.176470588
+        ]
+      },
+      "main_cpu_percent": {
+        "median": 100.03727321670883,
+        "min": 100.029536352852,
+        "max": 100.04501008056563,
+        "values": [
+          100.029536352852,
+          100.04501008056563
+        ]
+      },
+      "gui_cpu_percent": {
+        "median": 69.06051840630697,
+        "min": 68.3626540315091,
+        "max": 69.75838278110484,
+        "values": [
+          69.75838278110484,
+          68.3626540315091
+        ]
+      },
+      "combined_cpu_percent": {
+        "median": 169.09779162301578,
+        "min": 168.4076641120747,
+        "max": 169.78791913395685,
+        "values": [
+          169.78791913395685,
+          168.4076641120747
+        ]
+      }
+    }
+  },
+  "milestone_hashes": {
+    "normal": "1eab3e54d27d28add9fe945334acb638bd520168c6d9e096c6d9d07dfa7384ce",
+    "utility": "cf4226e6abcd0c51462a472cec404485cfe64c7317bbf7aab2291c080fcf2e68",
+    "encoder": "59644051a33599fbf99fd0f2206c6f49c28b4590d575cc24ca2fc0a11a06bc2c"
+  },
+  "notes": [
+    "Response seconds use source_mtime_ns minus panel send epoch, as in iteration 11.",
+    "CPU uses shared process samples from 10..80 seconds; 100% is one core."
+  ]
+}

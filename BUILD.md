@@ -2191,3 +2191,23 @@ controls. The combined Blackfin suite reports 37 passed and one expected
 failure locally; the Windows waiter and full SIC/CEC/SPORT integration remain
 outside this harness. Run the broader gate with
 `.venv/bin/python -m pytest -q -rxX tests/test_bfin_*.py tests/test_blackfin_parallel.py`.
+
+### DSP packet transaction regression
+
+Run the byte-exact transaction gate without proprietary firmware:
+
+```sh
+DEVELOPER_DIR=/Library/Developer/CommandLineTools .venv/bin/python -m pytest -q \
+  tests/test_c674x_transaction.py
+```
+
+It compares CPU bytes, failure results and callback observations against a
+full-prefix transaction across poisoned queue/tail states, queue insertion and
+retirement, multicycle packets, IDLE/branch flags and rollback. The sanitizer
+parameter skips when the compiler/runtime lacks ASan/UBSan support. Compiler
+automatic initialization is enabled when supported. Both parameters pass on
+macOS. Run `tests/test_c674x.py`, `tests/test_c674x_spkernel_fields.py` and
+`tests/test_dsp_checkpoint_replay.py` alongside it for the focused architecture
+and replay gate; set `C6X_TI_BIN` as above to include the independent TI oracle.
+Connected throughput and panel measurements are in iteration 14 of
+`ITERATION_ANALYSIS.md`; fixed-work synthetic gains are reported separately.

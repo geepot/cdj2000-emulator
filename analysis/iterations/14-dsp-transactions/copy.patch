@@ -1,0 +1,38 @@
+--- a/emulator/qemu/cdj_c674x.c
++++ b/emulator/qemu/cdj_c674x.c
+@@ -2689,6 +2689,10 @@
+             if (dst == 13 || dst == 14) out.control_ready[dst] = cpu->cycles + 4;
+         }
+     }
++    /* Issue only appends queue entries; retirement below can modify and
++     * remove them.  Commit the pre-retirement extent, including slots that
++     * become inactive, to preserve checkpoint bytes and struct padding. */
++    unsigned store_peak = out.store_count, load_peak = out.load_count;
+     if (nonaligned_memory && memory_count > 1)
+         return stop(cpu, cpu->pc, 0, "parallel access with nonaligned memory instruction");
+     /* Same-cycle overlapping RAM reads/writes need bus arbitration that
+@@ -2850,7 +2854,23 @@
+         }
+     }
+     ++out.packets;
+-    memcpy(cpu, &out, offsetof(CdjC674x, loop));
++    if (store_peak > 24 || load_peak > 40) {
++        /* Keep the original copy boundary for an invalid incoming state. */
++        memcpy(cpu, &out, offsetof(CdjC674x, loop));
++    } else {
++        /* Copy scalar ranges including padding; untouched queue capacity
++         * already has its original bytes in cpu.  The full copy-in above
++         * preserves old operand reads and padding in newly appended slots. */
++        memcpy(cpu, &out, offsetof(CdjC674x, stores));
++        memcpy(cpu->stores, out.stores, store_peak * sizeof(out.stores[0]));
++        memcpy((char *)cpu + offsetof(CdjC674x, store_count),
++               (const char *)&out + offsetof(CdjC674x, store_count),
++               offsetof(CdjC674x, loads) - offsetof(CdjC674x, store_count));
++        memcpy(cpu->loads, out.loads, load_peak * sizeof(out.loads[0]));
++        memcpy((char *)cpu + offsetof(CdjC674x, load_count),
++               (const char *)&out + offsetof(CdjC674x, load_count),
++               offsetof(CdjC674x, loop) - offsetof(CdjC674x, load_count));
++    }
+     return true;
+ }
+ 

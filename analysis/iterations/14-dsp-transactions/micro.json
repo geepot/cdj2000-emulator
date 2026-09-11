@@ -1,0 +1,137 @@
+{
+  "scope": "Synthetic 9-million-MVK execute calls; exact production core object. Not firmware/replay/whole-player speed. Loop-issue timing is a separate unchanged synthetic path.",
+  "trials": [
+    {
+      "label": "baseline",
+      "trial": 0,
+      "execute_cpu_seconds": 0.890017,
+      "stdout": "execute 0.890017 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.109367 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "clear",
+      "trial": 0,
+      "execute_cpu_seconds": 0.653891,
+      "stdout": "execute 0.653891 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.110859 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "copy",
+      "trial": 0,
+      "execute_cpu_seconds": 0.730359,
+      "stdout": "execute 0.730359 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.107517 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "combined",
+      "trial": 0,
+      "execute_cpu_seconds": 0.505518,
+      "stdout": "execute 0.505518 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.119068 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "combined",
+      "trial": 1,
+      "execute_cpu_seconds": 0.530535,
+      "stdout": "execute 0.530535 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.109680 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "copy",
+      "trial": 1,
+      "execute_cpu_seconds": 0.722,
+      "stdout": "execute 0.722000 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.108059 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "clear",
+      "trial": 1,
+      "execute_cpu_seconds": 0.643768,
+      "stdout": "execute 0.643768 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.106704 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "baseline",
+      "trial": 1,
+      "execute_cpu_seconds": 0.883768,
+      "stdout": "execute 0.883768 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.109087 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "baseline",
+      "trial": 2,
+      "execute_cpu_seconds": 0.886505,
+      "stdout": "execute 0.886505 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.109368 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "clear",
+      "trial": 2,
+      "execute_cpu_seconds": 0.643379,
+      "stdout": "execute 0.643379 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.108193 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "copy",
+      "trial": 2,
+      "execute_cpu_seconds": 0.721203,
+      "stdout": "execute 0.721203 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.108630 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "combined",
+      "trial": 2,
+      "execute_cpu_seconds": 0.501264,
+      "stdout": "execute 0.501264 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.110443 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "combined",
+      "trial": 3,
+      "execute_cpu_seconds": 0.509523,
+      "stdout": "execute 0.509523 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.104838 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "copy",
+      "trial": 3,
+      "execute_cpu_seconds": 0.724073,
+      "stdout": "execute 0.724073 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.105672 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "clear",
+      "trial": 3,
+      "execute_cpu_seconds": 0.649263,
+      "stdout": "execute 0.649263 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.106783 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "baseline",
+      "trial": 3,
+      "execute_cpu_seconds": 0.884957,
+      "stdout": "execute 0.884957 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.107144 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "baseline",
+      "trial": 4,
+      "execute_cpu_seconds": 0.884932,
+      "stdout": "execute 0.884932 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.109949 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "clear",
+      "trial": 4,
+      "execute_cpu_seconds": 0.647961,
+      "stdout": "execute 0.647961 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.107074 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "copy",
+      "trial": 4,
+      "execute_cpu_seconds": 0.721633,
+      "stdout": "execute 0.721633 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.108522 s; cycles=9000000 count=6\n"
+    },
+    {
+      "label": "combined",
+      "trial": 4,
+      "execute_cpu_seconds": 0.501543,
+      "stdout": "execute 0.501543 s; packets=9000000 reg=123 state=6592 prefix=3024\nloop 0.104885 s; cycles=9000000 count=6\n"
+    }
+  ],
+  "medians": {
+    "baseline": 0.884957,
+    "clear": 0.647961,
+    "copy": 0.722,
+    "combined": 0.505518
+  },
+  "speedup_vs_baseline": {
+    "baseline": 1.0,
+    "clear": 1.3657565810287964,
+    "copy": 1.225702216066482,
+    "combined": 1.750594439762778
+  }
+}

@@ -1,0 +1,9 @@
+launch copy trial 1
+verified copy trial 1
+[
+  {
+    "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-14-dsp-transactions-copy-1",
+    "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/14-dsp-transactions/optimization-14-dsp-transactions-copy-1.json",
+    "exit_code": 0
+  }
+]

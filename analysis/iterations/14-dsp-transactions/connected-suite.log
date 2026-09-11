@@ -1,0 +1,12 @@
+launch baseline trial 0
+verified baseline trial 0
+launch clear trial 0
+verified clear trial 0
+launch copy trial 0
+Traceback (most recent call last):
+  File "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/14-dsp-transactions/benchmark.py", line 147, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/14-dsp-transactions/benchmark.py", line 137, in main
+    raise RuntimeError(result)
+RuntimeError: {'run': '/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-14-dsp-transactions-copy-0', 'summary': '/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/14-dsp-transactions/optimization-14-dsp-transactions-copy-0.json', 'exit_code': -15}

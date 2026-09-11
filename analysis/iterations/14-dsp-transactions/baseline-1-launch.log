@@ -1,0 +1,9 @@
+launch baseline trial 1
+verified baseline trial 1
+[
+  {
+    "run": "/Users/gpotvin/Git/cdj2000-emulator/runs/optimization-14-dsp-transactions-baseline-1",
+    "summary": "/Users/gpotvin/Git/cdj2000-emulator/analysis/iterations/14-dsp-transactions/optimization-14-dsp-transactions-baseline-1.json",
+    "exit_code": 0
+  }
+]
