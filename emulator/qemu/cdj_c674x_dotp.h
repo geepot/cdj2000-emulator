@@ -94,4 +94,13 @@ typedef struct {
  * write before committing. */
 CdjC674xCmpyResult cdj_c674x_cmpy(unsigned opfield, uint32_t src1,
                                   uint32_t src1_hi, uint32_t src2);
+
+/* SMPY32 (opfield 11001, printed page 470) and MPY2IR (01111, printed page
+ * 367): two more members of the same Figure E-3 nonconditional .M group, both
+ * four-cycle with three delay slots.  SMPY32 writes a 32-bit dst, MPY2IR a
+ * dst_o:dst_e pair, so they use the same CdjC674xCmpyResult shape fields. */
+#define CDJ_C674X_SMPY32 0x19u
+#define CDJ_C674X_MPY2IR 0x0fu
+CdjC674xCmpyResult cdj_c674x_mpy32_nonconditional(unsigned opfield,
+                                                  uint32_t src1, uint32_t src2);
 #endif

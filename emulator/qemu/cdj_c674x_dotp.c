@@ -265,3 +265,54 @@ CdjC674xCmpyResult cdj_c674x_cmpy(unsigned opfield, uint32_t src1,
     }
     return r;
 }
+
+CdjC674xCmpyResult cdj_c674x_mpy32_nonconditional(unsigned opfield,
+                                                  uint32_t src1, uint32_t src2)
+{
+    CdjC674xCmpyResult r = { .value = 0, .pair_dst = false, .pair_src1 = false,
+                             .saturated = false, .valid = true };
+    switch (opfield) {
+    case CDJ_C674X_SMPY32: {
+        /* Printed page 470: msb32(sat((src2 x src1) << 1)) -> dst.  Both
+         * sources are signed 32-bit, so the product needs 63 bits and the
+         * left shift needs 64.  Only -2^31 x -2^31 = 2^62 overflows a signed
+         * 64-bit value once doubled, which is the single case sat() exists
+         * for; it clamps to 7FFF FFFF FFFF FFFFh and dst becomes 7FFF FFFFh. */
+        int64_t product = (int64_t)(int32_t)src1 * (int64_t)(int32_t)src2;
+        int64_t shifted;
+        if (product >= (INT64_C(1) << 62)) {
+            shifted = INT64_MAX;
+            r.saturated = true;
+        } else {
+            shifted = product << 1;
+        }
+        r.value = (uint32_t)((uint64_t)shifted >> 32);
+        break;
+    }
+    case CDJ_C674X_MPY2IR:
+        /* Printed page 367.  Each signed halfword of src1 multiplies the whole
+         * signed src2, the product is rounded by adding 4000h and shifted right
+         * by 15, and the low 32 bits are written - msb16(src1) to dst_o and
+         * lsb16(src1) to dst_e.  The manual gives the saturating case its own
+         * explicit branch rather than a sat(): "if (msb16(src1) = 8000h &&
+         * src2 = 8000 0000h), 7FFF FFFFh -> dst_o", which is the only input
+         * pair whose rounded product leaves 32 bits. */
+        r.pair_dst = true;
+        {
+            int32_t hi = (int16_t)(src1 >> 16), lo = (int16_t)(src1 & 0xffffu);
+            bool sat_o = hi == INT16_MIN && src2 == 0x80000000u;
+            bool sat_e = lo == INT16_MIN && src2 == 0x80000000u;
+            uint32_t o = sat_o ? 0x7fffffffu : (uint32_t)
+                (((int64_t)hi * (int64_t)(int32_t)src2 + 0x4000) >> 15);
+            uint32_t e = sat_e ? 0x7fffffffu : (uint32_t)
+                (((int64_t)lo * (int64_t)(int32_t)src2 + 0x4000) >> 15);
+            r.saturated = sat_o || sat_e;
+            r.value = ((uint64_t)o << 32) | e;
+        }
+        break;
+    default:
+        r.valid = false;
+        break;
+    }
+    return r;
+}

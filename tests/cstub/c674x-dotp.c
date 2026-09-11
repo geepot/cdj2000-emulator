@@ -359,12 +359,35 @@ static void nonconditional_m_group(void)
         assert(rejects(E3(9, 6, 4, 0, 0x17, 0), &fault) && fault);  /* odd dst  */
     }
 
-    /* An opfield in this shape that is NOT implemented must still halt by
-     * name rather than be executed: MPY2IR (0x0f), SMPY32 (0x19), XORMPY
-     * (0x1b) and GMPY (0x1f) stay classified UNIMPLEMENTED. */
+    /* SMPY32 .M1 A0,A1,A2, printed page 470 Example 1: A0 = 8765 4321h and
+     * A1 = 1234 5678h give A2 = EED8 ED1Ah four cycles after. */
     {
-        static const unsigned unimplemented[] = { 0x0f, 0x19, 0x1b, 0x1f };
-        for (unsigned i = 0; i < 4; ++i) {
+        CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+        c.r[0][0] = 0x87654321u; c.r[0][1] = 0x12345678u;
+        issue(&c, E3(2, 1, 0, 0, 0x19, 0));
+        cycles(&c, 3);
+        assert(c.r[0][2] == 0xeed8ed1au);
+    }
+
+    /* MPY2IR .M2 B2,B5,B9:B8, printed page 367 Example 1: B2 = 8000 8001h and
+     * B5 = 8000 0000h give B8 = 7FFF 0000h and B9 = 7FFF FFFFh.  B9 is the
+     * manual's own explicit saturating branch, msb16(src1) = 8000h with
+     * src2 = 8000 0000h, and B8 is the ordinary rounded path - so one example
+     * covers both sides of that branch. */
+    {
+        CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+        c.r[1][2] = 0x80008001u; c.r[1][5] = 0x80000000u;
+        issue(&c, E3(8, 5, 2, 0, 0x0f, 1));
+        cycles(&c, 3);
+        assert(c.r[1][8] == 0x7fff0000u && c.r[1][9] == 0x7fffffffu);
+    }
+
+    /* An opfield in this shape that is NOT implemented must still halt by
+     * name rather than be executed: XORMPY (0x1b) and GMPY (0x1f) stay
+     * classified UNIMPLEMENTED. */
+    {
+        static const unsigned unimplemented[] = { 0x1b, 0x1f };
+        for (unsigned i = 0; i < 2; ++i) {
             const char *fault;
             assert(rejects(E3(8, 6, 4, 0, unimplemented[i], 0), &fault));
             assert(fault && !strcmp(fault, "instruction not implemented"));

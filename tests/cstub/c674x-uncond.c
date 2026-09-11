@@ -105,8 +105,9 @@ static void adda(uint32_t word, unsigned side, unsigned dst,
  * (0x0c), DDOTPL2R (0x14), DDOTPH2R (0x15), DDOTPL2 (0x16), DDOTPH2 (0x17)
  * and DDOTP4 (0x18) - has left it for the same reason: semantics in
  * cdj_c674x_dotp.c, covered by tests/cstub/c674x-dotp.c, which re-checks
- * these words through the whole core.  What remains here is what is still
- * genuinely refused. */
+ * these words through the whole core.  SMPY32 (0x19) and MPY2IR (0x0f) have
+ * since left it the same way.  What remains here is what is still genuinely
+ * refused. */
 static void unimplemented_extensions(void)
 {
     static const struct { uint32_t word; const char *asm_line; } rows[] = {
@@ -116,8 +117,6 @@ static void unimplemented_extensions(void)
         {0x120821D8u, "SADDSUB  .L1 A1,A2,A5:A4  op 0x0e, printed page 427"},
         {0x120821F8u, "SADDSUB2 .L1 A1,A2,A5:A4  op 0x0f, printed page 429"},
         /* Figure E-3, .M unit: bit 11 = 0, op = bits 10-6, bits 5-2 = 1100. */
-        {0x120823F0u, "MPY2IR   .M1 A1,A2,A5:A4  op 0x0f, printed page 367"},
-        {0x11882670u, "SMPY32   .M1 A1,A2,A3     op 0x19, printed page 470"},
         {0x118826F0u, "XORMPY   .M1 A1,A2,A3     op 0x1b, printed page 566"},
         {0x118827F0u, "GMPY     .M1 A1,A2,A3     op 0x1f, printed page 270"},
         /* Figure F-14, .S unit: bits 11-10 = 11, op = bits 9-6. */
@@ -126,7 +125,7 @@ static void unimplemented_extensions(void)
         {0x10000000u, "SWE                       op 0x0, printed page 557"},
         {0x10002000u, "SWENR                     op 0x1, printed page 558"},
     };
-    assert(sizeof(rows) / sizeof(rows[0]) == 11);
+    assert(sizeof(rows) / sizeof(rows[0]) == 9);
     for (unsigned i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
         /* p = 1 (parallel) must classify identically to p = 0. */
         rejects(rows[i].word, "instruction not implemented");

@@ -50,8 +50,6 @@ static int l_unit_op(unsigned op)
 static int m_unit_op(unsigned op)
 {
     switch (op) {
-    case 0x0f: /* MPY2IR,   printed page 367 */
-    case 0x19: /* SMPY32,   printed page 470 */
     case 0x1b: /* XORMPY,   printed page 566 */
     case 0x1f: /* GMPY,     printed page 270 */
         return M_UNIMPLEMENTED;
@@ -66,6 +64,8 @@ static int m_unit_op(unsigned op)
     case 0x16: /* DDOTPL2,  printed page 227 */
     case 0x17: /* DDOTPH2,  printed page 223 */
     case 0x18: /* DDOTP4,   printed page 221 */
+    case 0x0f: /* MPY2IR,   printed page 367 */
+    case 0x19: /* SMPY32,   printed page 470 */
         return M_ARM_TABLE;
     default:
         return 0;

@@ -1923,7 +1923,10 @@ static bool arm_cmpy(CdjC674xArm *x)
      * DDOTPL2 write a dst pair while the rounding forms pack two rounded
      * halves into a 32-bit dst. */
     unsigned op = (x->w >> 6) & 31;
-    CdjC674xCmpyResult shape = cdj_c674x_cmpy(op, 0, 0, 0);
+    bool mpy32 = op == CDJ_C674X_SMPY32 || op == CDJ_C674X_MPY2IR;
+    CdjC674xCmpyResult shape = mpy32
+        ? cdj_c674x_mpy32_nonconditional(op, 0, 0)
+        : cdj_c674x_cmpy(op, 0, 0, 0);
     x->reg_write = false;
     if (!shape.valid)
         return stop(x->cpu, x->pc, x->insn->word,
@@ -1937,8 +1940,9 @@ static bool arm_cmpy(CdjC674xArm *x)
     if (x->enabled) {
         uint32_t src1 = x->cpu->r[x->side][x->a];
         uint32_t src1_hi = shape.pair_src1 ? x->cpu->r[x->side][x->a + 1] : 0;
-        CdjC674xCmpyResult r =
-            cdj_c674x_cmpy(op, src1, src1_hi, x->cpu->r[x->cross][x->b]);
+        CdjC674xCmpyResult r = mpy32
+            ? cdj_c674x_mpy32_nonconditional(op, src1, x->cpu->r[x->cross][x->b])
+            : cdj_c674x_cmpy(op, src1, src1_hi, x->cpu->r[x->cross][x->b]);
         uint64_t due = x->cpu->cycles + 4;
         if (x->out->load_count == 40)
             return stop(x->cpu, x->pc, x->insn->word, "delayed-result queue full");
@@ -1966,7 +1970,9 @@ static bool arm_cmpy(CdjC674xArm *x)
  * by cdj_c674x_uncond_classify and never reaches this row. */
 static bool match_cmpy(const CdjC674xArm *x)
 {
-    return cdj_c674x_cmpy((x->w >> 6) & 31, 0, 0, 0).valid;
+    unsigned op = (x->w >> 6) & 31;
+    return cdj_c674x_cmpy(op, 0, 0, 0).valid ||
+           cdj_c674x_mpy32_nonconditional(op, 0, 0).valid;
 }
 
 /* Included here rather than in the file's header block so that this family's
