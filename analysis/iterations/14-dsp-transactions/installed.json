@@ -1,0 +1,10 @@
+{
+  "path": "/Users/gpotvin/Git/cdj2000-emulator/build/qemu/build/qemu-system-sh4",
+  "before_sha256": "fb5f9523e4437750ef4a89b913f7a7af37e4b13611f121272cbcf9cf57b780ab",
+  "after_sha256": "69fba572fdf79023bd18c0775e7b61a0143cfdaf5624ae9e3bba8d21eb071a93",
+  "atomic_replace": true,
+  "source": "/Users/gpotvin/Git/cdj2000-emulator/build/performance/14/combined/qemu-system-sh4",
+  "version": "QEMU emulator version 11.1.50 (v11.1.0-1251-g5534799068-dirty)\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers\n",
+  "blackfin_sha256": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+  "note": "Installed tested frozen-object binary; no unbuilt unrelated peripheral source changes were folded into this experiment."
+}

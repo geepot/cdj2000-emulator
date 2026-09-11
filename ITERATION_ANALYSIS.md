@@ -862,7 +862,7 @@ variants. The second retains the full prefix copy-in, preserving operand reads
 and new-slot padding, but commits scalar ranges plus the pre-retirement queue
 extents. Slots that retirement makes inactive are still committed. All other
 inactive bytes remain unchanged in the original CPU. Neither candidate changes
-interrupt/link timing, device callbacks, guest cycles or transaction failures.
+scheduler policy, callback ordering, guest cycle accounting or failure rules.
 
 ### Fixed-work diagnostic
 
@@ -936,3 +936,20 @@ connected throughput gain. The compiler guard leaves unsupported compilers on
 their normal initialization policy. Deeper removal of the full entry copy
 remains outside this change; pre-packet operand reads and failure rollback
 still depend on it.
+
+The bounded-commit optimization is retained as a separate change: 11.0% higher
+connected throughput alone, and 13.4% additional throughput over clear-only.
+It preserves the full entry transaction, all scalar/padding bytes and every
+queue slot touched before retirement, including entries that become inactive.
+Both retained changes together deliver the measured 36.4% cumulative gain.
+The live differential gate passes again with the final combined source.
+
+The tested combined QEMU (`69fba572…071a93`) is installed at
+`build/qemu/build/qemu-system-sh4` using same-directory atomic replacement.
+Its previous hash was checked before replacement; signature verification and
+launch/version checks pass afterward. Blackfin remains `f2456de5…96535`.
+The installation retains the frozen installed peripheral objects; unrelated
+unbuilt PLL source work was not silently incorporated into measured binaries.
+A future normal build will include those source updates and needs its own
+connected validation. The full prefix copy-in, synchronous DSP callbacks,
+complete hardware timing, storage and audio validation remain limitations.
