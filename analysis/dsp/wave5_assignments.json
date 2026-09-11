@@ -1,0 +1,3699 @@
+{
+  "dotp-cmpy": [
+    {
+      "mnemonic": "DOTP2",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product, Signed, Packed 16-Bit",
+      "manual_pages": [
+        235,
+        237
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair",
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTP2 .M1 A4, A6, A5",
+          "word": "02988330",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTP2 .M1 A4, A6, A9:A8",
+          "word": "041882F0",
+          "unit": ".M1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "DOTP2 .M2 B4, B6, B5",
+          "word": "02988332",
+          "unit": ".M2",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTP2 .M2 B4, B6, B9:B8",
+          "word": "041882F2",
+          "unit": ".M2",
+          "binding": "dst-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPN2",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product With Negate, Signed, Packed 16-Bit",
+      "manual_pages": [
+        238,
+        239
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPN2 .M1 A4, A6, A5",
+          "word": "02988270",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPN2 .M2 B4, B6, B5",
+          "word": "02988272",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPNRSU2",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product With Negate, Shift and Round, Signed by Unsigned, Packed 16-Bit",
+      "manual_pages": [
+        240,
+        241
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPNRSU2 .M1 A4, A6, A5",
+          "word": "029881F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPNRSU2 .M2 B4, B6, B5",
+          "word": "029881F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPNRUS2",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product With Negate, Shift and Round, Unsigned by Signed, Packed 16-Bit",
+      "manual_pages": [
+        242,
+        243
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPNRUS2 .M1 A6, A4, A5",
+          "word": "029881F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPNRUS2 .M2 B6, B4, B5",
+          "word": "029881F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPRSU2",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product With Shift and Round, Signed by Unsigned, Packed 16-Bit",
+      "manual_pages": [
+        244,
+        246
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPRSU2 .M1 A4, A6, A5",
+          "word": "02988370",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPRSU2 .M2 B4, B6, B5",
+          "word": "02988372",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPRUS2",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product With Shift and Round, Unsigned by Signed, Packed 16-Bit",
+      "manual_pages": [
+        247,
+        248
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPRUS2 .M1 A6, A4, A5",
+          "word": "02988370",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPRUS2 .M2 B6, B4, B5",
+          "word": "02988372",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPSU4",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product, Signed by Unsigned, Packed 8-Bit",
+      "manual_pages": [
+        249,
+        250
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPSU4 .M1 A4, A6, A5",
+          "word": "029880B0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPSU4 .M2 B4, B6, B5",
+          "word": "029880B2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPU4",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product, Unsigned, Packed 8-Bit",
+      "manual_pages": [
+        252,
+        253
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPU4 .M1 A4, A6, A5",
+          "word": "029881B0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPU4 .M2 B4, B6, B5",
+          "word": "029881B2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DOTPUS4",
+      "units": [
+        ".M"
+      ],
+      "title": "Dot Product, Unsigned by Signed, Packed 8-Bit",
+      "manual_pages": [
+        251,
+        251
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DOTPUS4 .M1 A6, A4, A5",
+          "word": "029880B0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DOTPUS4 .M2 B6, B4, B5",
+          "word": "029880B2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DDOTP4",
+      "units": [
+        ".M"
+      ],
+      "title": "Double Dot Product, Signed, Packed 16-Bit and Signed, Packed 8-Bit",
+      "manual_pages": [
+        221,
+        222
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DDOTP4 .M1 A4, A6, A9:A8",
+          "word": "14188630",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DDOTP4 .M2 B4, B6, B9:B8",
+          "word": "14188632",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DDOTPH2",
+      "units": [
+        ".M"
+      ],
+      "title": "Double Dot Product, Two Pairs, Signed, Packed 16-Bit",
+      "manual_pages": [
+        223,
+        224
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DDOTPH2 .M1 A5:A4, A6, A9:A8",
+          "word": "141885F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DDOTPH2 .M2 B5:B4, B6, B9:B8",
+          "word": "141885F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DDOTPH2R",
+      "units": [
+        ".M"
+      ],
+      "title": "Double Dot Product With Rounding, Two Pairs, Signed, Packed 16-Bit",
+      "manual_pages": [
+        225,
+        226
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DDOTPH2R .M1 A5:A4, A6, A5",
+          "word": "12988570",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DDOTPH2R .M2 B5:B4, B6, B5",
+          "word": "12988572",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DDOTPL2",
+      "units": [
+        ".M"
+      ],
+      "title": "Double Dot Product, Two Pairs, Signed, Packed 16-Bit",
+      "manual_pages": [
+        227,
+        228
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DDOTPL2 .M1 A5:A4, A6, A9:A8",
+          "word": "141885B0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DDOTPL2 .M2 B5:B4, B6, B9:B8",
+          "word": "141885B2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DDOTPL2R",
+      "units": [
+        ".M"
+      ],
+      "title": "Double Dot Product With Rounding, Two Pairs, Signed Packed 16-Bit",
+      "manual_pages": [
+        229,
+        230
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DDOTPL2R .M1 A5:A4, A6, A5",
+          "word": "12988530",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DDOTPL2R .M2 B5:B4, B6, B5",
+          "word": "12988532",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPY",
+      "units": [
+        ".M"
+      ],
+      "title": "Complex Multiply Two Pairs, Signed, Packed 16-Bit",
+      "manual_pages": [
+        215,
+        216
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPY .M1 A4, A6, A9:A8",
+          "word": "141882B0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPY .M2 B4, B6, B9:B8",
+          "word": "141882B2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPYR",
+      "units": [
+        ".M"
+      ],
+      "title": "Complex Multiply Two Pairs, Signed, Packed 16-Bit With Rounding",
+      "manual_pages": [
+        217,
+        218
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPYR .M1 A4, A6, A5",
+          "word": "129882F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPYR .M2 B4, B6, B5",
+          "word": "129882F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPYR1",
+      "units": [
+        ".M"
+      ],
+      "title": "Complex Multiply Two Pairs, Signed, Packed 16-Bit With Rounding",
+      "manual_pages": [
+        219,
+        220
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPYR1 .M1 A4, A6, A5",
+          "word": "12988330",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPYR1 .M2 B4, B6, B5",
+          "word": "12988332",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    }
+  ],
+  "packed16": [
+    {
+      "mnemonic": "ABS2",
+      "units": [
+        ".L"
+      ],
+      "title": "Absolute Value With Saturation, Signed, Packed 16-Bit",
+      "manual_pages": [
+        103,
+        104
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ABS2 .L1 A6, A5",
+          "word": "02988358",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ABS2 .L2 B6, B5",
+          "word": "0298835A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "ADD2",
+      "units": [
+        ".L",
+        ".S",
+        ".D"
+      ],
+      "title": "Add Two 16-Bit Integers on Upper and Lower Register Halves",
+      "manual_pages": [
+        137,
+        139
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ADD2 .D1 A4, A6, A5",
+          "word": "02988930",
+          "unit": ".D1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ADD2 .D2 B4, B6, B5",
+          "word": "02988932",
+          "unit": ".D2",
+          "binding": "scalar"
+        },
+        {
+          "source": "ADD2 .L1 A4, A6, A5",
+          "word": "029880B8",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ADD2 .L2 B4, B6, B5",
+          "word": "029880BA",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SUB2",
+      "units": [
+        ".L",
+        ".S",
+        ".D"
+      ],
+      "title": "Subtract Two 16-Bit Integers on Upper and Lower Register Halves",
+      "manual_pages": [
+        548,
+        550
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SUB2 .D1 A4, A6, A5",
+          "word": "02988970",
+          "unit": ".D1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SUB2 .D2 B4, B6, B5",
+          "word": "02988972",
+          "unit": ".D2",
+          "binding": "scalar"
+        },
+        {
+          "source": "SUB2 .L1 A4, A6, A5",
+          "word": "02988098",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SUB2 .L2 B4, B6, B5",
+          "word": "0298809A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SADD2",
+      "units": [
+        ".S"
+      ],
+      "title": "Add Two Signed 16-Bit Integers on Upper and Lower Register Halves With Saturation",
+      "manual_pages": [
+        425,
+        426
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SADD2 .S1 A4, A6, A5",
+          "word": "02988C30",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SADD2 .S2 B4, B6, B5",
+          "word": "02988C32",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SSUB2",
+      "units": [
+        ".L"
+      ],
+      "title": "Subtract Two Signed 16-Bit Integers on Upper and Lower Register Halves With Saturation",
+      "manual_pages": [
+        502,
+        503
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SSUB2 .L1 A4, A6, A5",
+          "word": "02988C98",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SSUB2 .L2 B4, B6, B5",
+          "word": "02988C9A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SADDSU2",
+      "units": [
+        ".S"
+      ],
+      "title": "Add Two Signed and Unsigned 16-Bit Integers on Register Halves With Saturation",
+      "manual_pages": [
+        431,
+        432
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SADDSU2 .S1 A6, A4, A5",
+          "word": "02988C70",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SADDSU2 .S2 B6, B4, B5",
+          "word": "02988C72",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SADDUS2",
+      "units": [
+        ".S"
+      ],
+      "title": "Add Two Unsigned and Signed 16-Bit Integers on Register Halves With Saturation",
+      "manual_pages": [
+        433,
+        434
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SADDUS2 .S1 A4, A6, A5",
+          "word": "02988C70",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SADDUS2 .S2 B4, B6, B5",
+          "word": "02988C72",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MAX2",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Maximum, Signed, Packed 16-Bit",
+      "manual_pages": [
+        306,
+        308
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MAX2 .L1 A4, A6, A5",
+          "word": "02988858",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MAX2 .L2 B4, B6, B5",
+          "word": "0298885A",
+          "unit": ".L2",
+          "binding": "scalar"
+        },
+        {
+          "source": "MAX2 .S1 A4, A6, A5",
+          "word": "02988F70",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MAX2 .S2 B4, B6, B5",
+          "word": "02988F72",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MIN2",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Minimum, Signed, Packed 16-Bit",
+      "manual_pages": [
+        311,
+        313
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MIN2 .L1 A4, A6, A5",
+          "word": "02988838",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MIN2 .L2 B4, B6, B5",
+          "word": "0298883A",
+          "unit": ".L2",
+          "binding": "scalar"
+        },
+        {
+          "source": "MIN2 .S1 A4, A6, A5",
+          "word": "02988F30",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MIN2 .S2 B4, B6, B5",
+          "word": "02988F32",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "AVG2",
+      "units": [
+        ".M"
+      ],
+      "title": "Average, Signed, Packed 16-Bit",
+      "manual_pages": [
+        147,
+        148
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "AVG2 .M1 A4, A6, A5",
+          "word": "029884F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "AVG2 .M2 B4, B6, B5",
+          "word": "029884F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHR2",
+      "units": [
+        ".S"
+      ],
+      "title": "Arithmetic Shift Right, Signed, Packed 16-Bit",
+      "manual_pages": [
+        453,
+        454
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SHR2 .S1 A6, A4, A5",
+          "word": "02988DF0",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHR2 .S2 B6, B4, B5",
+          "word": "02988DF2",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHRU2",
+      "units": [
+        ".S"
+      ],
+      "title": "Arithmetic Shift Right, Unsigned, Packed 16-Bit",
+      "manual_pages": [
+        459,
+        460
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SHRU2 .S1 A6, A4, A5",
+          "word": "02988E30",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHRU2 .S2 B6, B4, B5",
+          "word": "02988E32",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPEQ2",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Equality, Packed 16-Bit",
+      "manual_pages": [
+        179,
+        180
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPEQ2 .S1 A4, A6, A5",
+          "word": "02988760",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPEQ2 .S2 B4, B6, B5",
+          "word": "02988762",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPGT2",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Greater Than, Packed 16-Bit",
+      "manual_pages": [
+        191,
+        192
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPGT2 .S1 A4, A6, A5",
+          "word": "02988520",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPGT2 .S2 B4, B6, B5",
+          "word": "02988522",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPLT2",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Less Than, Packed 16-Bit",
+      "manual_pages": [
+        205,
+        206
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPLT2 .S1 A6, A4, A5",
+          "word": "02988520",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPLT2 .S2 B6, B4, B5",
+          "word": "02988522",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SPACK2",
+      "units": [
+        ".S"
+      ],
+      "title": "Saturate and Pack Two 16 LSBs Into Upper and Lower Register Halves",
+      "manual_pages": [
+        472,
+        473
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SPACK2 .S1 A4, A6, A5",
+          "word": "02988CB0",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SPACK2 .S2 B4, B6, B5",
+          "word": "02988CB2",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "RPACK2",
+      "units": [
+        ".S"
+      ],
+      "title": "Shift With Saturation and Pack Two 16 MSBs Into Upper and Lower Register Halves",
+      "manual_pages": [
+        416,
+        417
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "RPACK2 .S1 A4, A6, A5",
+          "word": "12988EF0",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "RPACK2 .S2 B4, B6, B5",
+          "word": "12988EF2",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SSHVL",
+      "units": [
+        ".M"
+      ],
+      "title": "Variable Shift Left",
+      "manual_pages": [
+        495,
+        496
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SSHVL .M1 A6, A4, A5",
+          "word": "02988730",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SSHVL .M2 B6, B4, B5",
+          "word": "02988732",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SSHVR",
+      "units": [
+        ".M"
+      ],
+      "title": "Variable Shift Right",
+      "manual_pages": [
+        497,
+        498
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SSHVR .M1 A6, A4, A5",
+          "word": "029886B0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SSHVR .M2 B6, B4, B5",
+          "word": "029886B2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    }
+  ],
+  "packed8": [
+    {
+      "mnemonic": "ADD4",
+      "units": [
+        ".L"
+      ],
+      "title": "Add Without Saturation, Four 8-Bit Pairs for Four 8-Bit Results",
+      "manual_pages": [
+        140,
+        141
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ADD4 .L1 A4, A6, A5",
+          "word": "02988CB8",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ADD4 .L2 B4, B6, B5",
+          "word": "02988CBA",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SUB4",
+      "units": [
+        ".L"
+      ],
+      "title": "Subtract Without Saturation, Four 8-Bit Pairs for Four 8-Bit Results",
+      "manual_pages": [
+        551,
+        552
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SUB4 .L1 A4, A6, A5",
+          "word": "02988CD8",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SUB4 .L2 B4, B6, B5",
+          "word": "02988CDA",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SUBABS4",
+      "units": [
+        ".L"
+      ],
+      "title": "Subtract With Absolute Value, Four 8-Bit Pairs for Four 8-Bit Results",
+      "manual_pages": [
+        534,
+        535
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SUBABS4 .L1 A4, A6, A5",
+          "word": "02988B58",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SUBABS4 .L2 B4, B6, B5",
+          "word": "02988B5A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SADDU4",
+      "units": [
+        ".S"
+      ],
+      "title": "Add With Saturation, Four Unsigned 8-Bit Pairs for Four 8-Bit Results",
+      "manual_pages": [
+        435,
+        436
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SADDU4 .S1 A4, A6, A5",
+          "word": "02988CF0",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SADDU4 .S2 B4, B6, B5",
+          "word": "02988CF2",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "AVGU4",
+      "units": [
+        ".M"
+      ],
+      "title": "Average, Unsigned, Packed 8-Bit",
+      "manual_pages": [
+        149,
+        150
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "AVGU4 .M1 A4, A6, A5",
+          "word": "029884B0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "AVGU4 .M2 B4, B6, B5",
+          "word": "029884B2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MAXU4",
+      "units": [
+        ".L"
+      ],
+      "title": "Maximum, Unsigned, Packed 8-Bit",
+      "manual_pages": [
+        309,
+        310
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MAXU4 .L1 A4, A6, A5",
+          "word": "02988878",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MAXU4 .L2 B4, B6, B5",
+          "word": "0298887A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MINU4",
+      "units": [
+        ".L"
+      ],
+      "title": "Minimum, Unsigned, Packed 8-Bit",
+      "manual_pages": [
+        314,
+        315
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MINU4 .L1 A4, A6, A5",
+          "word": "02988918",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MINU4 .L2 B4, B6, B5",
+          "word": "0298891A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPEQ4",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Equality, Packed 8-Bit",
+      "manual_pages": [
+        181,
+        183
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPEQ4 .S1 A4, A6, A5",
+          "word": "02988720",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPEQ4 .S2 B4, B6, B5",
+          "word": "02988722",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPGTU4",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Greater Than, Unsigned, Packed 8-Bit",
+      "manual_pages": [
+        199,
+        201
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPGTU4 .S1 A4, A6, A5",
+          "word": "02988560",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPGTU4 .S2 B4, B6, B5",
+          "word": "02988562",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPLTU4",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Less Than, Unsigned, Packed 8-Bit",
+      "manual_pages": [
+        213,
+        214
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPLTU4 .S1 A6, A4, A5",
+          "word": "02988560",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "CMPLTU4 .S2 B6, B4, B5",
+          "word": "02988562",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPYU4",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Unsigned \u00d7 Unsigned, Four 8-Bit Pairs for Four 8-Bit Results",
+      "manual_pages": [
+        360,
+        361
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYU4 .M1 A4, A6, A9:A8",
+          "word": "04188130",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MPYU4 .M2 B4, B6, B9:B8",
+          "word": "04188132",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPYSU4",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Signed \u00d7 Unsigned, Four 8-Bit Pairs for Four 8-Bit Results",
+      "manual_pages": [
+        357,
+        358
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYSU4 .M1 A4, A6, A9:A8",
+          "word": "04188170",
+          "unit": ".M1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "MPYSU4 .M2 B4, B6, B9:B8",
+          "word": "04188172",
+          "unit": ".M2",
+          "binding": "dst-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPYUS4",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Unsigned \u00d7 Signed, Four 8-Bit Pairs for Four 8-Bit Results",
+      "manual_pages": [
+        363,
+        364
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYUS4 .M1 A6, A4, A9:A8",
+          "word": "04188170",
+          "unit": ".M1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "MPYUS4 .M2 B6, B4, B9:B8",
+          "word": "04188172",
+          "unit": ".M2",
+          "binding": "dst-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SPACKU4",
+      "units": [
+        ".S"
+      ],
+      "title": "Saturate and Pack Four Signed 16-Bit Integers Into Four Unsigned 8-Bit Halfwords",
+      "manual_pages": [
+        474,
+        476
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SPACKU4 .S1 A4, A6, A5",
+          "word": "02988D30",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SPACKU4 .S2 B4, B6, B5",
+          "word": "02988D32",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    }
+  ],
+  "pack-bits": [
+    {
+      "mnemonic": "UNPKHU4",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Unpack 16 MSB Into Two Lower 8-Bit Halfwords of Upper and Lower Register Halves",
+      "manual_pages": [
+        559,
+        560
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "UNPKHU4 .L1 A6, A5",
+          "word": "02986358",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "UNPKHU4 .L2 B6, B5",
+          "word": "0298635A",
+          "unit": ".L2",
+          "binding": "scalar"
+        },
+        {
+          "source": "UNPKHU4 .S1 A6, A5",
+          "word": "02986F20",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "UNPKHU4 .S2 B6, B5",
+          "word": "02986F22",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "UNPKLU4",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Unpack 16 LSB Into Two Lower 8-Bit Halfwords of Upper and Lower Register Halves",
+      "manual_pages": [
+        561,
+        562
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "UNPKLU4 .L1 A6, A5",
+          "word": "02984358",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "UNPKLU4 .L2 B6, B5",
+          "word": "0298435A",
+          "unit": ".L2",
+          "binding": "scalar"
+        },
+        {
+          "source": "UNPKLU4 .S1 A6, A5",
+          "word": "02984F20",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "UNPKLU4 .S2 B6, B5",
+          "word": "02984F22",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SWAP4",
+      "units": [
+        ".L"
+      ],
+      "title": "Swap Byte Pairs in Upper and Lower Register Halves",
+      "manual_pages": [
+        555,
+        556
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SWAP4 .L1 A6, A5",
+          "word": "02982358",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SWAP4 .L2 B6, B5",
+          "word": "0298235A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "BITR",
+      "units": [
+        ".M"
+      ],
+      "title": "Bit Reverse",
+      "manual_pages": [
+        163,
+        164
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "BITR .M1 A6, A5",
+          "word": "029BE0F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "BITR .M2 B6, B5",
+          "word": "029BE0F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "BITC4",
+      "units": [
+        ".M"
+      ],
+      "title": "Bit Count, Packed 8-Bit",
+      "manual_pages": [
+        161,
+        162
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "BITC4 .M1 A6, A5",
+          "word": "029BC0F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "BITC4 .M2 B6, B5",
+          "word": "029BC0F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DEAL",
+      "units": [
+        ".M"
+      ],
+      "title": "Deinterleave and Pack",
+      "manual_pages": [
+        231,
+        232
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DEAL .M1 A6, A5",
+          "word": "029BA0F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DEAL .M2 B6, B5",
+          "word": "029BA0F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHFL",
+      "units": [
+        ".M"
+      ],
+      "title": "Shuffle",
+      "manual_pages": [
+        443,
+        444
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SHFL .M1 A6, A5",
+          "word": "029B80F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHFL .M2 B6, B5",
+          "word": "029B80F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHFL3",
+      "units": [
+        ".L"
+      ],
+      "title": "3-Way Bit Interleave On Three 16-Bit Values Into a 48-Bit Result",
+      "manual_pages": [
+        445,
+        446
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SHFL3 .L1 A4, A6, A9:A8",
+          "word": "141886D8",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHFL3 .L2 B4, B6, B9:B8",
+          "word": "141886DA",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "XPND2",
+      "units": [
+        ".M"
+      ],
+      "title": "Expand Bits to Packed 16-Bit Masks",
+      "manual_pages": [
+        568,
+        569
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "XPND2 .M1 A6, A5",
+          "word": "029B20F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "XPND2 .M2 B6, B5",
+          "word": "029B20F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "XPND4",
+      "units": [
+        ".M"
+      ],
+      "title": "Expand Bits to Packed 8-Bit Masks",
+      "manual_pages": [
+        570,
+        571
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "XPND4 .M1 A6, A5",
+          "word": "029B00F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "XPND4 .M2 B6, B5",
+          "word": "029B00F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "ROTL",
+      "units": [
+        ".M"
+      ],
+      "title": "Rotate Left",
+      "manual_pages": [
+        414,
+        415
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ROTL .M1 A6, A4, A5",
+          "word": "02988770",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ROTL .M2 B6, B4, B5",
+          "word": "02988772",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "LMBD",
+      "units": [
+        ".L"
+      ],
+      "title": "Leftmost Bit Detection",
+      "manual_pages": [
+        304,
+        305
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "LMBD .L1 A4, A6, A5",
+          "word": "02988D78",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "LMBD .L2 B4, B6, B5",
+          "word": "02988D7A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "NORM",
+      "units": [
+        ".L"
+      ],
+      "title": "Normalize Integer",
+      "manual_pages": [
+        390,
+        391
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar",
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "NORM .L1 A6, A5",
+          "word": "02980C78",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "NORM .L1 A7:A6, A5",
+          "word": "02980C18",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "NORM .L2 B6, B5",
+          "word": "02980C7A",
+          "unit": ".L2",
+          "binding": "scalar"
+        },
+        {
+          "source": "NORM .L2 B7:B6, B5",
+          "word": "02980C1A",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHLMB",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Shift Left and Merge Byte",
+      "manual_pages": [
+        449,
+        450
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SHLMB .L1 A4, A6, A5",
+          "word": "02988C38",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHLMB .L2 B4, B6, B5",
+          "word": "02988C3A",
+          "unit": ".L2",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHLMB .S1 A4, A6, A5",
+          "word": "02988E70",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHLMB .S2 B4, B6, B5",
+          "word": "02988E72",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHRMB",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Shift Right and Merge Byte",
+      "manual_pages": [
+        455,
+        456
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SHRMB .L1 A4, A6, A5",
+          "word": "02988C58",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHRMB .L2 B4, B6, B5",
+          "word": "02988C5A",
+          "unit": ".L2",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHRMB .S1 A4, A6, A5",
+          "word": "02988EB0",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SHRMB .S2 B4, B6, B5",
+          "word": "02988EB2",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DPACK2",
+      "units": [
+        ".L"
+      ],
+      "title": "Parallel PACK2 and PACKH2 Operations",
+      "manual_pages": [
+        254,
+        255
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DPACK2 .L1 A4, A6, A9:A8",
+          "word": "14188698",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DPACK2 .L2 B4, B6, B9:B8",
+          "word": "1418869A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DPACKX2",
+      "units": [
+        ".L"
+      ],
+      "title": "Parallel PACKLH2 Operations",
+      "manual_pages": [
+        256,
+        257
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DPACKX2 .L1 A4, A6, A9:A8",
+          "word": "14188678",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DPACKX2 .L2 B4, B6, B9:B8",
+          "word": "1418867A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    }
+  ],
+  "double-fp": [
+    {
+      "mnemonic": "ABSDP",
+      "units": [
+        ".S"
+      ],
+      "title": "Absolute Value, Double-Precision Floating-Point",
+      "manual_pages": [
+        105,
+        106
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ABSDP .S1 A7:A6, A9:A8",
+          "word": "041C0B20",
+          "unit": ".S1",
+          "binding": "pairs"
+        },
+        {
+          "source": "ABSDP .S2 B7:B6, B9:B8",
+          "word": "041C0B22",
+          "unit": ".S2",
+          "binding": "pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "ADDDP",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Add Two Double-Precision Floating-Point Values",
+      "manual_pages": [
+        125,
+        126
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ADDDP .L1 A5:A4, A7:A6, A9:A8",
+          "word": "04188318",
+          "unit": ".L1",
+          "binding": "pairs"
+        },
+        {
+          "source": "ADDDP .L2 B5:B4, B7:B6, B9:B8",
+          "word": "0418831A",
+          "unit": ".L2",
+          "binding": "pairs"
+        },
+        {
+          "source": "ADDDP .S1 A5:A4, A7:A6, A9:A8",
+          "word": "04188E58",
+          "unit": ".S1",
+          "binding": "pairs"
+        },
+        {
+          "source": "ADDDP .S2 B5:B4, B7:B6, B9:B8",
+          "word": "04188E5A",
+          "unit": ".S2",
+          "binding": "pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SUBDP",
+      "units": [
+        ".L",
+        ".S"
+      ],
+      "title": "Subtract Two Double-Precision Floating-Point Values",
+      "manual_pages": [
+        541,
+        543
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SUBDP .L1 A5:A4, A7:A6, A9:A8",
+          "word": "04188338",
+          "unit": ".L1",
+          "binding": "pairs"
+        },
+        {
+          "source": "SUBDP .L2 B5:B4, B7:B6, B9:B8",
+          "word": "0418833A",
+          "unit": ".L2",
+          "binding": "pairs"
+        },
+        {
+          "source": "SUBDP .S1 A5:A4, A7:A6, A9:A8",
+          "word": "04188E78",
+          "unit": ".S1",
+          "binding": "pairs"
+        },
+        {
+          "source": "SUBDP .S2 B5:B4, B7:B6, B9:B8",
+          "word": "04188E7A",
+          "unit": ".S2",
+          "binding": "pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPYDP",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Two Double-Precision Floating-Point Values",
+      "manual_pages": [
+        318,
+        319
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYDP .M1 A5:A4, A7:A6, A9:A8",
+          "word": "04188700",
+          "unit": ".M1",
+          "binding": "pairs"
+        },
+        {
+          "source": "MPYDP .M2 B5:B4, B7:B6, B9:B8",
+          "word": "04188702",
+          "unit": ".M2",
+          "binding": "pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPYSPDP",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Single-Precision Floating-Point Value \u00d7 Double-Precision Floating-Point Value",
+      "manual_pages": [
+        352,
+        353
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "src2-dst-pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYSPDP .M1 A4, A7:A6, A9:A8",
+          "word": "041885B0",
+          "unit": ".M1",
+          "binding": "src2-dst-pairs"
+        },
+        {
+          "source": "MPYSPDP .M2 B4, B7:B6, B9:B8",
+          "word": "041885B2",
+          "unit": ".M2",
+          "binding": "src2-dst-pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPYSP2DP",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Two Single-Precision Floating-Point Values for Double-Precision Result",
+      "manual_pages": [
+        354,
+        355
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYSP2DP .M1 A4, A6, A9:A8",
+          "word": "041885F0",
+          "unit": ".M1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "MPYSP2DP .M2 B4, B6, B9:B8",
+          "word": "041885F2",
+          "unit": ".M2",
+          "binding": "dst-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPEQDP",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Equality, Double-Precision Floating-Point Values",
+      "manual_pages": [
+        184,
+        185
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "src12-pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPEQDP .S1 A5:A4, A7:A6, A5",
+          "word": "02988A20",
+          "unit": ".S1",
+          "binding": "src12-pairs"
+        },
+        {
+          "source": "CMPEQDP .S2 B5:B4, B7:B6, B5",
+          "word": "02988A22",
+          "unit": ".S2",
+          "binding": "src12-pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPGTDP",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Greater Than, Double-Precision Floating-Point Values",
+      "manual_pages": [
+        193,
+        194
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "src12-pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPGTDP .S1 A5:A4, A7:A6, A5",
+          "word": "02988A60",
+          "unit": ".S1",
+          "binding": "src12-pairs"
+        },
+        {
+          "source": "CMPGTDP .S2 B5:B4, B7:B6, B5",
+          "word": "02988A62",
+          "unit": ".S2",
+          "binding": "src12-pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPLTDP",
+      "units": [
+        ".S"
+      ],
+      "title": "Compare for Less Than, Double-Precision Floating-Point Values",
+      "manual_pages": [
+        207,
+        208
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "src12-pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPLTDP .S1 A5:A4, A7:A6, A5",
+          "word": "02988AA0",
+          "unit": ".S1",
+          "binding": "src12-pairs"
+        },
+        {
+          "source": "CMPLTDP .S2 B5:B4, B7:B6, B5",
+          "word": "02988AA2",
+          "unit": ".S2",
+          "binding": "src12-pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "RCPDP",
+      "units": [
+        ".S"
+      ],
+      "title": "Double-Precision Floating-Point Reciprocal Approximation",
+      "manual_pages": [
+        409,
+        410
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "RCPDP .S1 A7:A6, A9:A8",
+          "word": "041C0B60",
+          "unit": ".S1",
+          "binding": "pairs"
+        },
+        {
+          "source": "RCPDP .S2 B7:B6, B9:B8",
+          "word": "041C0B62",
+          "unit": ".S2",
+          "binding": "pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "RCPSP",
+      "units": [
+        ".S"
+      ],
+      "title": "Single-Precision Floating-Point Reciprocal Approximation",
+      "manual_pages": [
+        411,
+        412
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "RCPSP .S1 A6, A5",
+          "word": "02980F60",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "RCPSP .S2 B6, B5",
+          "word": "02980F62",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "RSQRDP",
+      "units": [
+        ".S"
+      ],
+      "title": "Double-Precision Floating-Point Square-Root Reciprocal Approximation",
+      "manual_pages": [
+        418,
+        419
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "pairs"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "RSQRDP .S1 A7:A6, A9:A8",
+          "word": "041C0BA0",
+          "unit": ".S1",
+          "binding": "pairs"
+        },
+        {
+          "source": "RSQRDP .S2 B7:B6, B9:B8",
+          "word": "041C0BA2",
+          "unit": ".S2",
+          "binding": "pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "RSQRSP",
+      "units": [
+        ".S"
+      ],
+      "title": "Single-Precision Floating-Point Square-Root Reciprocal Approximation",
+      "manual_pages": [
+        420,
+        421
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "RSQRSP .S1 A6, A5",
+          "word": "02980FA0",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "RSQRSP .S2 B6, B5",
+          "word": "02980FA2",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SPDP",
+      "units": [
+        ".S"
+      ],
+      "title": "Convert Single-Precision Floating-Point Value to Double-Precision Floating-Point Value",
+      "manual_pages": [
+        477,
+        478
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SPDP .S1 A6, A9:A8",
+          "word": "041800A0",
+          "unit": ".S1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "SPDP .S2 B6, B9:B8",
+          "word": "041800A2",
+          "unit": ".S2",
+          "binding": "dst-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DPSP",
+      "units": [
+        ".L"
+      ],
+      "title": "Convert Double-Precision Floating-Point Value to Single-Precision Floating-Point Value",
+      "manual_pages": [
+        260,
+        261
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DPSP .L1 A7:A6, A5",
+          "word": "029C0138",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "DPSP .L2 B7:B6, B5",
+          "word": "029C013A",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DPINT",
+      "units": [
+        ".L"
+      ],
+      "title": "Convert Double-Precision Floating-Point Value to Integer",
+      "manual_pages": [
+        258,
+        259
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DPINT .L1 A7:A6, A5",
+          "word": "029C0118",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "DPINT .L2 B7:B6, B5",
+          "word": "029C011A",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DPTRUNC",
+      "units": [
+        ".L"
+      ],
+      "title": "Convert Double-Precision Floating-Point Value to Integer With Truncation",
+      "manual_pages": [
+        262,
+        263
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DPTRUNC .L1 A7:A6, A5",
+          "word": "029C0038",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "DPTRUNC .L2 B7:B6, B5",
+          "word": "029C003A",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "INTDP",
+      "units": [
+        ".L"
+      ],
+      "title": "Convert Signed Integer to Double-Precision Floating-Point Value",
+      "manual_pages": [
+        275,
+        275
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "INTDP .L1 A6, A9:A8",
+          "word": "04180738",
+          "unit": ".L1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "INTDP .L2 B6, B9:B8",
+          "word": "0418073A",
+          "unit": ".L2",
+          "binding": "dst-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "INTDPU",
+      "units": [
+        ".L"
+      ],
+      "title": "Convert Unsigned Integer to Double-Precision Floating-Point Value",
+      "manual_pages": [
+        276,
+        276
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "INTDPU .L1 A6, A9:A8",
+          "word": "04180778",
+          "unit": ".L1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "INTDPU .L2 B6, B9:B8",
+          "word": "0418077A",
+          "unit": ".L2",
+          "binding": "dst-pair"
+        }
+      ]
+    }
+  ],
+  "mpy32-misc": [
+    {
+      "mnemonic": "MPYI",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply 32-Bit \u00d7 32-Bit Into 32-Bit Result",
+      "manual_pages": [
+        334,
+        334
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYI .M1 A4, A6, A5",
+          "word": "02988200",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MPYI .M2 B4, B6, B5",
+          "word": "02988202",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPYID",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply 32-Bit \u00d7 32-Bit Into 64-Bit Result",
+      "manual_pages": [
+        335,
+        336
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "dst-pair"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPYID .M1 A4, A6, A9:A8",
+          "word": "04188400",
+          "unit": ".M1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "MPYID .M2 B4, B6, B9:B8",
+          "word": "04188402",
+          "unit": ".M2",
+          "binding": "dst-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPY2",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Signed by Signed, 16 LSB \u00d7 16 LSB and 16 MSB \u00d7 16 MSB",
+      "manual_pages": [
+        365,
+        366
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPY2 .M1 A4, A6, A9:A8",
+          "word": "04188030",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MPY2 .M2 B4, B6, B9:B8",
+          "word": "04188032",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "MPY2IR",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Two 16-Bit \u00d7 32-Bit, Shifted by 15 to Produce a Rounded 32-Bit Result",
+      "manual_pages": [
+        367,
+        368
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "MPY2IR .M1 A4, A6, A9:A8",
+          "word": "141883F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "MPY2IR .M2 B4, B6, B9:B8",
+          "word": "141883F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SMPY32",
+      "units": [
+        ".M"
+      ],
+      "title": "Multiply Signed 32-Bit \u00d7 Signed 32-Bit Into 64-Bit Result With Left Shift and Saturation",
+      "manual_pages": [
+        470,
+        471
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SMPY32 .M1 A4, A6, A5",
+          "word": "12988670",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SMPY32 .M2 B4, B6, B5",
+          "word": "12988672",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "GMPY",
+      "units": [
+        ".M"
+      ],
+      "title": "Galois Field Multiply",
+      "manual_pages": [
+        270,
+        271
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "GMPY .M1 A4, A6, A5",
+          "word": "129887F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "GMPY .M2 B4, B6, B5",
+          "word": "129887F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "GMPY4",
+      "units": [
+        ".M"
+      ],
+      "title": "Galois Field Multiply, Packed 8-Bit",
+      "manual_pages": [
+        272,
+        273
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "GMPY4 .M1 A4, A6, A5",
+          "word": "02988470",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "GMPY4 .M2 B4, B6, B5",
+          "word": "02988472",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "XORMPY",
+      "units": [
+        ".M"
+      ],
+      "title": "Galois Field Multiply With Zero Polynomial",
+      "manual_pages": [
+        566,
+        567
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "XORMPY .M1 A4, A6, A5",
+          "word": "129886F0",
+          "unit": ".M1",
+          "binding": "scalar"
+        },
+        {
+          "source": "XORMPY .M2 B4, B6, B5",
+          "word": "129886F2",
+          "unit": ".M2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "ADDSUB",
+      "units": [
+        ".L"
+      ],
+      "title": "Parallel ADD and SUB Operations On Common Inputs",
+      "manual_pages": [
+        132,
+        132
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ADDSUB .L1 A4, A6, A9:A8",
+          "word": "14188198",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ADDSUB .L2 B4, B6, B9:B8",
+          "word": "1418819A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "ADDSUB2",
+      "units": [
+        ".L"
+      ],
+      "title": "Parallel ADD2 and SUB2 Operations On Common Inputs",
+      "manual_pages": [
+        133,
+        134
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ADDSUB2 .L1 A4, A6, A9:A8",
+          "word": "141881B8",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ADDSUB2 .L2 B4, B6, B9:B8",
+          "word": "141881BA",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SADDSUB",
+      "units": [
+        ".L"
+      ],
+      "title": "Parallel SADD and SSUB Operations On Common Inputs",
+      "manual_pages": [
+        427,
+        428
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SADDSUB .L1 A4, A6, A9:A8",
+          "word": "141881D8",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SADDSUB .L2 B4, B6, B9:B8",
+          "word": "141881DA",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SADDSUB2",
+      "units": [
+        ".L"
+      ],
+      "title": "Parallel SADD2 and SSUB2 Operations On Common Inputs",
+      "manual_pages": [
+        429,
+        430
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SADDSUB2 .L1 A4, A6, A9:A8",
+          "word": "141881F8",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SADDSUB2 .L2 B4, B6, B9:B8",
+          "word": "141881FA",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "DMV",
+      "units": [
+        ".S"
+      ],
+      "title": "Move Two Independent Registers to Register Pair",
+      "manual_pages": [
+        234,
+        234
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "DMV .S1 A4, A6, A9:A8",
+          "word": "04188EF0",
+          "unit": ".S1",
+          "binding": "scalar"
+        },
+        {
+          "source": "DMV .S2 B4, B6, B9:B8",
+          "word": "04188EF2",
+          "unit": ".S2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SAT",
+      "units": [
+        ".L"
+      ],
+      "title": "Saturate a 40-Bit Integer to a 32-Bit Integer",
+      "manual_pages": [
+        437,
+        439
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SAT .L1 A7:A6, A5",
+          "word": "02980818",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SAT .L2 B7:B6, B5",
+          "word": "0298081A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SUBC",
+      "units": [
+        ".L"
+      ],
+      "title": "Subtract Conditionally and Shift\u2014Used for Division",
+      "manual_pages": [
+        539,
+        540
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SUBC .L1 A4, A6, A5",
+          "word": "02988978",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "SUBC .L2 B4, B6, B5",
+          "word": "0298897A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "ABS",
+      "units": [
+        ".L"
+      ],
+      "title": "Absolute Value With Saturation",
+      "manual_pages": [
+        101,
+        102
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "pairs",
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "ABS .L1 A6, A5",
+          "word": "02980358",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ABS .L1 A7:A6, A9:A8",
+          "word": "04180718",
+          "unit": ".L1",
+          "binding": "pairs"
+        },
+        {
+          "source": "ABS .L1 A7:A6,A9:A8",
+          "word": "04180718",
+          "unit": ".L1",
+          "binding": "scalar"
+        },
+        {
+          "source": "ABS .L2 B6, B5",
+          "word": "0298035A",
+          "unit": ".L2",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "B NRP",
+      "units": [
+        ".S"
+      ],
+      "title": "Branch Using NMI Return Pointer",
+      "manual_pages": [
+        157,
+        158
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "?"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "B .S2 NRP",
+          "word": "001C00E2",
+          "unit": ".S2",
+          "binding": "?"
+        }
+      ]
+    },
+    {
+      "mnemonic": "BPOS",
+      "units": [
+        ".S"
+      ],
+      "title": "Branch Positive",
+      "manual_pages": [
+        170,
+        171
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "?"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "BPOS .S1 $, A5",
+          "word": "02804020",
+          "unit": ".S1",
+          "binding": "?"
+        },
+        {
+          "source": "BPOS .S2 $, B5",
+          "word": "02806022",
+          "unit": ".S2",
+          "binding": "?"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SWE",
+      "units": [],
+      "title": "Software Exception",
+      "manual_pages": [
+        557,
+        557
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SWE",
+          "word": "10000000",
+          "unit": "none",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SWENR",
+      "units": [],
+      "title": "Software Exception\u2014No Return",
+      "manual_pages": [
+        558,
+        558
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "scalar"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SWENR",
+          "word": "10002000",
+          "unit": "none",
+          "binding": "scalar"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SPMASKR",
+      "units": [],
+      "title": "Software Pipelined Loop (SPLOOP) Buffer Operation Load/Execution Control",
+      "manual_pages": [
+        489,
+        490
+      ],
+      "partial_row": false,
+      "missing_bindings": [
+        "?"
+      ],
+      "already_accepted_bindings": [],
+      "example_rejected_encodings": [
+        {
+          "source": "SPMASKR L1",
+          "word": "00072000",
+          "unit": "none",
+          "binding": "?"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPEQ",
+      "units": [
+        ".L"
+      ],
+      "title": "Compare for Equality, Signed Integer",
+      "manual_pages": [
+        177,
+        178
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "src1-pair",
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPEQ .L1 A4, A7:A6, A5",
+          "word": "02988A38",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPEQ .L1 A5:A4, A6, A5",
+          "word": "0290CA38",
+          "unit": ".L1",
+          "binding": "src1-pair"
+        },
+        {
+          "source": "CMPEQ .L2 B4, B7:B6, B5",
+          "word": "02988A3A",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPEQ .L2 B5:B4, B6, B5",
+          "word": "0290CA3A",
+          "unit": ".L2",
+          "binding": "src1-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPGT",
+      "units": [
+        ".L"
+      ],
+      "title": "Compare for Greater Than, Signed Integers",
+      "manual_pages": [
+        188,
+        190
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "src1-pair",
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPGT .L1 A4, A7:A6, A5",
+          "word": "029888B8",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPGT .L1 A5:A4, A6, A5",
+          "word": "0290CAB8",
+          "unit": ".L1",
+          "binding": "src1-pair"
+        },
+        {
+          "source": "CMPGT .L2 B4, B7:B6, B5",
+          "word": "029888BA",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPGT .L2 B5:B4, B6, B5",
+          "word": "0290CABA",
+          "unit": ".L2",
+          "binding": "src1-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPGTU",
+      "units": [
+        ".L"
+      ],
+      "title": "Compare for Greater Than, Unsigned Integers",
+      "manual_pages": [
+        197,
+        198
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "src1-pair",
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPGTU .L1 A4, A7:A6, A5",
+          "word": "029889B8",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPGTU .L1 A5:A4, A6, A5",
+          "word": "0290CBB8",
+          "unit": ".L1",
+          "binding": "src1-pair"
+        },
+        {
+          "source": "CMPGTU .L2 B4, B7:B6, B5",
+          "word": "029889BA",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPGTU .L2 B5:B4, B6, B5",
+          "word": "0290CBBA",
+          "unit": ".L2",
+          "binding": "src1-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPLT",
+      "units": [
+        ".L"
+      ],
+      "title": "Compare for Less Than, Signed Integers",
+      "manual_pages": [
+        202,
+        204
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "src1-pair",
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPLT .L1 A4, A7:A6, A5",
+          "word": "02988AB8",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPLT .L1 A5:A4, A6, A5",
+          "word": "0290C8B8",
+          "unit": ".L1",
+          "binding": "src1-pair"
+        },
+        {
+          "source": "CMPLT .L2 B4, B7:B6, B5",
+          "word": "02988ABA",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPLT .L2 B5:B4, B6, B5",
+          "word": "0290C8BA",
+          "unit": ".L2",
+          "binding": "src1-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "CMPLTU",
+      "units": [
+        ".L"
+      ],
+      "title": "Compare for Less Than, Unsigned Integers",
+      "manual_pages": [
+        211,
+        212
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "src1-pair",
+        "src2-pair"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "CMPLTU .L1 A4, A7:A6, A5",
+          "word": "02988BB8",
+          "unit": ".L1",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPLTU .L1 A5:A4, A6, A5",
+          "word": "0290C9B8",
+          "unit": ".L1",
+          "binding": "src1-pair"
+        },
+        {
+          "source": "CMPLTU .L2 B4, B7:B6, B5",
+          "word": "02988BBA",
+          "unit": ".L2",
+          "binding": "src2-pair"
+        },
+        {
+          "source": "CMPLTU .L2 B5:B4, B6, B5",
+          "word": "0290C9BA",
+          "unit": ".L2",
+          "binding": "src1-pair"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHL",
+      "units": [
+        ".S"
+      ],
+      "title": "Arithmetic Shift Left",
+      "manual_pages": [
+        447,
+        448
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "dst-pair",
+        "src2-dst-pairs"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "SHL .S1 A6, A4, A9:A8",
+          "word": "041884E0",
+          "unit": ".S1",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "SHL .S1 A7:A6, A4, A9:A8",
+          "word": "04188C60",
+          "unit": ".S1",
+          "binding": "src2-dst-pairs"
+        },
+        {
+          "source": "SHL .S2 B6, B4, B9:B8",
+          "word": "041884E2",
+          "unit": ".S2",
+          "binding": "dst-pair"
+        },
+        {
+          "source": "SHL .S2 B7:B6, B4, B9:B8",
+          "word": "04188C62",
+          "unit": ".S2",
+          "binding": "src2-dst-pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHR",
+      "units": [
+        ".S"
+      ],
+      "title": "Arithmetic Shift Right",
+      "manual_pages": [
+        451,
+        452
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "src2-dst-pairs"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "SHR .S1 A7:A6, A4, A9:A8",
+          "word": "04188D60",
+          "unit": ".S1",
+          "binding": "src2-dst-pairs"
+        },
+        {
+          "source": "SHR .S2 B7:B6, B4, B9:B8",
+          "word": "04188D62",
+          "unit": ".S2",
+          "binding": "src2-dst-pairs"
+        }
+      ]
+    },
+    {
+      "mnemonic": "SHRU",
+      "units": [
+        ".S"
+      ],
+      "title": "Logical Shift Right",
+      "manual_pages": [
+        457,
+        458
+      ],
+      "partial_row": true,
+      "missing_bindings": [
+        "src2-dst-pairs"
+      ],
+      "already_accepted_bindings": [
+        "scalar"
+      ],
+      "example_rejected_encodings": [
+        {
+          "source": "SHRU .S1 A7:A6, A4, A9:A8",
+          "word": "04188960",
+          "unit": ".S1",
+          "binding": "src2-dst-pairs"
+        },
+        {
+          "source": "SHRU .S2 B7:B6, B4, B9:B8",
+          "word": "04188962",
+          "unit": ".S2",
+          "binding": "src2-dst-pairs"
+        }
+      ]
+    }
+  ]
+}
