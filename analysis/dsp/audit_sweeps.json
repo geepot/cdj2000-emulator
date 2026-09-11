@@ -1,22 +1,22 @@
 {
   "compact": {
-    "accepted": 53856,
+    "accepted": 58464,
     "accepting_configurations": {
       "plain/all-pointers": 9216,
-      "plain/pointer": 43168,
+      "plain/pointer": 47776,
       "rs/all-pointers": 1344,
       "rs/pointer": 128
     },
     "defensible_coverage_figure": {
       "metric": "16-bit words rejected as \"compact instruction not implemented\"",
       "of": 65536,
-      "value": 11440,
+      "value": 6944,
       "why": "Independent of the probe's memory window and register values, unlike the accepted total."
     },
-    "rejected": 11680,
+    "rejected": 7072,
     "rejection_reasons": {
-      "compact instruction not implemented": 11440,
-      "reserved compact LSDx1 instruction": 176,
+      "compact instruction not implemented": 6944,
+      "reserved compact LSDx1 instruction": 64,
       "unaligned stack access or invalid register pair": 64
     },
     "words_swept": 65536
@@ -46,10 +46,7 @@
       6,
       7,
       13,
-      14,
-      18,
-      19,
-      20
+      14
     ],
     "readable_ids": [
       0,
@@ -121,12 +118,12 @@
       },
       "18": {
         "read": "accept",
-        "read_mask": "ffffffff",
+        "read_mask": "07ff07ff",
         "write": "accept"
       },
       "19": {
         "read": "accept",
-        "read_mask": "ffffffff",
+        "read_mask": "07ff07ff",
         "write": "accept"
       },
       "2": {
@@ -136,7 +133,7 @@
       },
       "20": {
         "read": "accept",
-        "read_mask": "ffffffff",
+        "read_mask": "07ff07ff",
         "write": "accept"
       },
       "21": {
@@ -280,10 +277,12 @@
   },
   "provenance": {
     "core_sources": {
-      "emulator/qemu/cdj_c674x.c": "34e6a1c141016a2db672e11994721df1cc9b591ef39310b5ff6bd65d1442232f",
-      "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00"
+      "emulator/qemu/cdj_c674x.c": "797bc1695883c9dbb4cfd0afaf8515aff0823b852eec2b433ad47e5258295d11",
+      "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
+      "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+      "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
     },
-    "generator_sha256": "b174d15deb466e988fc8412fd3e1505f9a4bdd995deebaae824fe42f0b0b0354",
+    "generator_sha256": "1a9f972db39e364af7cd15754c74f7b1a54dd780e8478b93554db89fd44d7c82",
     "probe_source": "tests/cstub/c674x-isa-probe.c",
     "probe_source_sha256": "565f14cc09c631c461898a06f2ff72cd5a9dc6c19c5fa65f78b375399c109aa2"
   },

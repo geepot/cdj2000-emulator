@@ -14,6 +14,64 @@ commits. Two tracks read the tree at `3da5ff2` and four at `2eb2476`; the
 difference is documentation, and documentation findings are dated accordingly.
 `ITERATION_ANALYSIS.md` and `RUNNING.md` changed inside that window.
 
+## 0. Status since this audit
+
+The findings below are dated 2026-09-10 and describe commit `3da5ff2`. They are
+**left as written**, because an audit report whose baseline is edited away stops
+being evidence. This section records what has since been fixed; each entry names
+the section it supersedes.
+
+| Landed | Commit | Supersedes |
+|---|---|---|
+| The blanket reserved-predicate gate is narrowed, so the 25 nonconditional rows are reachable and report "instruction not implemented"; ADDAB/ADDAH/ADDAW long-immediate implemented | `d7937e7` | §5.1 |
+| FADCR/FAUCR/FMCR reserved bits masked on read and write | `323f7e0` | §5.6 |
+| Compact Figure F-29 `Sx2op` decoded | `e3314af` | §5.3 |
+| PROT dual-load, equal-count `NOP n`, and IDLE | `c48f886` | §5.4 (a), (b), (d) |
+| SMPY/SMPYH/SMPYHL/SMPYLH/SMPY2 and compact Figure E-5 `M3` | `44c2575` | §5.2, §5.3 |
+
+Measured after those five commits, by the same tools:
+
+| Measure | At audit | Now |
+|---|---|---|
+| Rows with at least one probed encoding accepted (excl. pseudo-ops) | 117 | **123** |
+| Rows where every probed encoding is rejected | 113 | **107** |
+| …rejected only as "reserved predicate" | 22 | **0** |
+| …rejected only as "reserved NOP count" (IDLE) | 1 | **0** |
+| Compact words rejected "not implemented" | 11,440 | **6,944** |
+| Control registers reading back unmasked | 6, 7, 13, 14, 18, 19, 20 | **6, 7, 13, 14** (all correct: full 32-bit R/W) |
+| Packet-rollback failures | 0 | **0** |
+
+Still deliberately **not** done, and why:
+
+- **The 22 nonconditional instructions are reachable but unimplemented.** That was
+  the point of `d7937e7`: an honest diagnostic first, semantics later.
+- **Compact Figure F-32 `Sx1b` with `s = 0` stays fail-closed.** The manual
+  contradicts itself (Figure F-32 leaves `s` free and Table B-1 does not footnote
+  "BNOP register" as S2-only; but printed page 168 heads the entry `unit = .S2`
+  and `cl6x` refuses it). The audit's own rule is that an unresolved question
+  stays unknown, and accepting an encoding hardware may reject is the worse error.
+  Opening it later is one bit in two places.
+- **Overlapping parallel load/store to one address stays fail-closed.** SPRUFE8B
+  does not define the ordering; inventing one would be worse than a halt.
+- **Figure D-6 `Ltbd` remains unexplained** and referenced by no instruction.
+
+Two ambiguities were found while implementing and are now open questions:
+
+- **Does a PROT packet with N parallel loads expand once or once per load?**
+  Printed page 93's text is per-LD and does not address two LDs in one execute
+  packet. Charging once per packet is an inference from parallel loads sharing a
+  single issue cycle; a literal reading gives 4 + 4. Rejecting the packet, the old
+  behaviour, was wrong either way.
+- **Figure E-5 `M3` and Figure G-4 `LSDx1` overlap** on 112 words and the manual
+  does not say which wins. TI's disassembler decodes them as `M3`, which is what
+  the implementation follows, and the now-unreachable `LSDx1` guard is kept rather
+  than deleted so that reordering cannot silently open the space.
+
+One test is labelled **metamorphic** rather than reference-backed: the protected-
+loop equivalence test pins page 93's equivalence between a protected load and an
+explicit `LD; NOP 4`, but the absolute values it compares are our own trace of the
+second program, so a shared error in `NOP 4` handling would not be caught.
+
 ## 1. References
 
 Both manuals are proprietary TI documents. They are downloaded into git-ignored

@@ -2,35 +2,35 @@
   "coordinator_adjusted_rows": [
     "EP-ART-DOCCITED",
     "EP-CHAIN-EXTERNAL",
-    "IC-CR-AMR",
-    "IC-CR-FPCFG",
-    "IC-CR-INVENTORY",
-    "IC-CR-MISC-ABSENT",
-    "IC-CR-NTSR",
-    "IC-CR-PCE1",
-    "IC-CR-TSC",
-    "IC-EXC-MODEL",
-    "ISA-BRANCH",
-    "ISA-ENC-CROSSPATH",
-    "ISA-ENC-PREDICATE",
+    "ISA-PACK",
     "ISA-MPY16",
     "ISA-MPY32",
-    "ISA-PACK",
-    "LOOP-BUF",
-    "MEM-AMR-BLOCK-VS-SIZE",
+    "ISA-BRANCH",
+    "ISA-ENC-PREDICATE",
+    "ISA-ENC-CROSSPATH",
+    "IC-CR-INVENTORY",
+    "IC-CR-AMR",
+    "IC-CR-NTSR",
+    "IC-CR-TSC",
+    "IC-CR-PCE1",
+    "IC-CR-MISC-ABSENT",
+    "IC-CR-FPCFG",
+    "IC-EXC-MODEL",
     "MEM-AMR-CIRC-LDST",
+    "MEM-AMR-BLOCK-VS-SIZE",
     "MEM-ORDER-VISIBILITY",
     "MEM-READ-CONTRACT",
-    "PKT-DELAY",
-    "PKT-MCNOP",
     "PKT-PBIT",
-    "PKT-PROT"
+    "PKT-MCNOP",
+    "PKT-PROT",
+    "PKT-DELAY",
+    "LOOP-BUF"
   ],
   "counts": {
     "by_fidelity": {
       "approximation": 94,
-      "strict": 35,
-      "unknown": 63
+      "strict": 34,
+      "unknown": 64
     },
     "by_implementation": {
       "partial": 81,
@@ -59,17 +59,19 @@
       "upheld": 58
     },
     "rows": 192,
-    "rows_adjusted_by_coordinator": 8,
+    "rows_adjusted_by_coordinator": 25,
     "rows_corrected_by_verifier": 64
   },
   "dsp_source_unchanged_since": "3da5ff2",
   "generated_from": {
     "audit_sweeps_provenance": {
       "core_sources": {
-        "emulator/qemu/cdj_c674x.c": "34e6a1c141016a2db672e11994721df1cc9b591ef39310b5ff6bd65d1442232f",
-        "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00"
+        "emulator/qemu/cdj_c674x.c": "797bc1695883c9dbb4cfd0afaf8515aff0823b852eec2b433ad47e5258295d11",
+        "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
+        "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+        "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
       },
-      "generator_sha256": "b174d15deb466e988fc8412fd3e1505f9a4bdd995deebaae824fe42f0b0b0354",
+      "generator_sha256": "1a9f972db39e364af7cd15754c74f7b1a54dd780e8478b93554db89fd44d7c82",
       "probe_source": "tests/cstub/c674x-isa-probe.c",
       "probe_source_sha256": "565f14cc09c631c461898a06f2ff72cd5a9dc6c19c5fa65f78b375399c109aa2"
     },
@@ -95,16 +97,18 @@
     },
     "isa_probe_provenance": {
       "assembler": "TI asm6x -mv6740",
-      "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 16:06:40 2026",
+      "assembler_version": "TMS320C6x Assembler Unix v8.5.0 Thu Sep 10 17:50:10 2026",
       "core_sources": {
-        "emulator/qemu/cdj_c674x.c": "34e6a1c141016a2db672e11994721df1cc9b591ef39310b5ff6bd65d1442232f",
-        "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00"
+        "emulator/qemu/cdj_c674x.c": "797bc1695883c9dbb4cfd0afaf8515aff0823b852eec2b433ad47e5258295d11",
+        "emulator/qemu/cdj_c674x_loop.c": "3e96810dd8c104f7b41d81a1faed7e191ad0dd2c8e56ae9567c74c3363634c00",
+        "emulator/qemu/cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+        "emulator/qemu/cdj_c674x_uncond.c": "45e04b752e529a987964d251638e5d96daf7a227d223019883406bf3df80ac72"
       },
-      "generator_sha256": "0ca5354c6678a049469e60634dc4167dcb62c9941965d4836f2bb17ea6edcb0c",
+      "generator_sha256": "9153754df4c60f3cfd28dfc8ebadf6997f1e697a0e6670e58b48ac29035a2b2a",
       "manual_inventory": "analysis/dsp/isa_manual_inventory.json",
       "manual_inventory_sha256": "001a9980353a3e1e8e52e2e774abe20f34b22c45045c0735c0da60f5f0f3160c",
       "probe_source": "tests/cstub/c674x-isa-probe.c",
-      "probe_source_sha256": "e3d8888d2ecea037b9e9855b4f6794edd66d8aee09bb853a0d85c9a44c47bcbc"
+      "probe_source_sha256": "565f14cc09c631c461898a06f2ff72cd5a9dc6c19c5fa65f78b375399c109aa2"
     },
     "track_reports": [
       "analysis/dsp/tracks/doc-claims.md",
@@ -115,7 +119,7 @@
       "analysis/dsp/tracks/packet-pipeline.md"
     ]
   },
-  "head": "d96c9b1f8f1cf50621c93f1cb5810e6904c1a77c",
+  "head": "44c25755e5abf950dd3ff2b04dae6be49c1650bb",
   "how_to_read_a_row": {
     "fidelity": "strict | approximation | unknown",
     "implementation": "supported | partial | unsupported | unknown",
@@ -137,17 +141,17 @@
       "The compact accepted total is not quoted as coverage: it moves with the probe register profiles. The not-implemented count does not.",
       "No percentage of \"the ISA\" is defensible from these numbers and none is given."
     ],
-    "compact_words_rejected_as_not_implemented": 11440,
+    "compact_words_rejected_as_not_implemented": 6944,
     "compact_words_swept": 65536,
     "distinct_base_mnemonics": 227,
     "documented_32bit_format_figures_appendices_c_to_h": 29,
     "documented_compact_format_figures_appendices_c_to_h": 48,
-    "probe_rows_all_probed_encodings_rejected": 113,
+    "probe_rows_all_probed_encodings_rejected": 107,
     "probe_rows_out_of_probe_scope": 5,
     "probe_rows_rejected_only_as_instruction_not_implemented": 90,
     "probe_rows_rejected_only_as_reserved_predicate": 22,
-    "probe_rows_with_at_least_one_accepted_encoding": 122,
-    "probe_rows_with_at_least_one_accepted_encoding_excluding_pseudo_ops": 117,
+    "probe_rows_with_at_least_one_accepted_encoding": 128,
+    "probe_rows_with_at_least_one_accepted_encoding_excluding_pseudo_ops": 123,
     "table_a1_c674x_rows": 240
   },
   "rows": [
@@ -1549,7 +1553,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: replaced an assertion-free scratchpad probe with the committed sweep in tools/cdj_dsp/audit_sweeps.py and its assertions in tests/test_dsp_isa_audit.py, recorded in analysis/dsp/audit_sweeps.json."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "17/30 acronyms reachable (15 readable, 16 writable); 13/30 absent in both directions (DIER, DNUM, ECR, EFR, GFPGFR, GPLYA, GPLYB, IERR, NTSR, PCE1, REP, TSCH, TSCL). Of the 17 reachable: 7 modelled (IFR, ISR, ICR, IER, ISTP, SSR, ITSR), 4 partial (CSR, TSR, IRP, NRP), 6 with field fidelity owned by other tracks (AMR, ILC, RILC, FADCR, FAUCR, FMCR). No reachable register reads as a hard-wired constant; absent IDs fail closed with 'control register read/write not implemented' without advancing time. control_read()'s default return 0 is unreachable.",
       "fidelity": "approximation",
@@ -1570,7 +1574,7 @@
           "name": "test_c674x_interrupt_and_control_registers (cstub c674x.c control block)"
         },
         {
-          "establishes": "Drives a real MVC in both directions for all 32 control register ids with encodings taken from TI asm6x, and asserts the readable set, the writable set (ISR write-only) and the read-back masks, including that FADCR/FAUCR/FMCR currently return reserved bits the manual says read as 0.",
+          "establishes": "Drives a real MVC in both directions for all 32 control register ids with encodings taken from TI asm6x, asserting the readable set, the writable set (ISR write-only) and the read-back masks.",
           "expected_values": "independent-of-emulator",
           "file": "tests/test_dsp_isa_audit.py",
           "name": "test_control_register_reachability_and_reserved_bits"
@@ -1589,7 +1593,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Read and write masks match Table 2-7 (bits 31-26 reserved). Circular-addressing semantics of BK0/BK1 and the per-register MODE fields are the addressing track's; this track assessed only MVC reachability and masking.",
       "fidelity": "unknown",
@@ -1910,7 +1914,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Both MVC directions fail closed with 'control register read/write not implemented'. control[28] exists as a zeroed slot but is never read or written. Needed by any NMI or exception return, and by NTSR.HWE / NTSR.SPLX inspection after an NMI terminated a SPLOOP (which 5.1.1.2 says makes return to the interrupted code incorrect).",
       "fidelity": "unknown",
@@ -1967,7 +1971,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Both registers fail closed in both directions, including the write-to-TSCL that enables counting. The core already maintains a 64-bit cpu->cycles, so this is plumbing rather than missing semantics, but any firmware using TSC as a timebase faults at the first MVC.",
       "fidelity": "unknown",
@@ -1994,7 +1998,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Fails closed. Matters for any fault or trace handler that reads the E1 PC. Note that cpu->pc is not PCE1 in general: at the moment an interrupt is taken, cpu->pc is the first annulled packet, not the packet in E1.",
       "fidelity": "unknown",
@@ -2021,7 +2025,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "All six fail closed in both directions. REP is the SWENR vector target and so is blocked on the exception model. GFPGFR/GPLYA/GPLYB only matter to Galois-field instructions (GMPY family, ISA track). DIER and DNUM are debug and multicore and are not meaningful on a single-core C6747.",
       "fidelity": "unknown",
@@ -2048,7 +2052,7 @@
       "confidence": "medium",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Reachable with full 32-bit read/write storage (no reserved-bit masking applied). Field semantics \u2014 rounding modes, sticky warning bits, which instruction writes which field \u2014 are the floating-point track's and are exercised in tests/cstub/c674x.c by seeding c.control[18..20] directly rather than through MVC. This track asserts only MVC reachability.",
       "fidelity": "unknown",
@@ -2477,7 +2481,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Every register in Table 6-1 that is exception-specific is absent: ECR, EFR, IERR, NTSR, REP. There is no EXCEP input, no internal-exception detection, no NXF/EXF/IXF/SXF flag, and no exception vector at ISTP+0x20. Critically, exceptions cannot even be ENABLED: TSR.GEE and TSR.XEN are silently dropped by MVC reg,TSR, so the 6.2.1 enable sequence is a no-op. Firmware with an exception service routine, or that reads EFR to classify a fault, would fault at the first MVC. On the device side, EXPMASK/MEXPFLAG exist as registers but drive nothing (see IC-DEV-INTC-EXCCOMBINER).",
       "fidelity": "unknown",
@@ -3851,7 +3855,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "None found. I reproduced SPRUFE8B Example 3-4 (LDW .D1 *++A4[9],A1 with AMR=0004 0001h, A4=100h -> A4=104h at E1, A1=mem[104h] at E5) and Example 3-6 (LDNW .D1 *++A4[2],A1 with A4=3Ah -> A4=22h, A1=5678 9ABCh) literally, checking against the manual's own printed result values.",
       "fidelity": "strict",
@@ -3999,7 +4003,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "The block-size guard applies only to nonaligned transfers. An aligned LDW inside a 2-byte circular block (AMR mode 1, BK0 = 0) is accepted and reads four linear bytes, escaping the circle \u2014 demonstrated by probe 3 (A2 = 0xa3a2a1a0 from linear bytes 0x40..0x43). The manual leaves this undefined, but the sibling undefined case fails closed, so the handling is inconsistent.",
       "fidelity": "approximation",
@@ -4151,7 +4155,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Guarantee established: within each cycle the store-commit loop runs before the load-sample loop, so a store issued in any strictly earlier packet is visible to a later load (probe 3 case B: next-packet load reads 0xdeadbeef). The only same-cycle case is an overlapping store and load in one execute packet, which faults 'simultaneous overlapping RAM accesses not implemented' with byte-granular overlap detection that applies circular wrap to both operands. Excluded entirely: bus arbitration, master priority, SCR/bridge routing, EDMA-vs-CPU contention, and any notion of a transfer being in flight on an external bus. Memory is instantaneous once committed.",
       "fidelity": "strict",
@@ -4197,7 +4201,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "The contract is correctly stated as a requirement, but at least three already-implemented device registers violate it and are reachable through tools/cdj_dsp/replay.c:344-366: Timer64P TIM12/TIM34 with TCR.READRSTMODE set plus the TIM34 read shadow (cdj_c6747_timer.c:49-64); SPI SPIBUF at 0x40, which calls consume_receive and clears per-character receive status (cdj_c6747_spi.c:236-244); SPI SPIINTVEC0 at 0x64, which clears flag bits and may call consume_receive (cdj_c6747_spi.c:199-214). Probe 2 shows one LDW invokes the read callback twice, the E1 read applies the side effect, and the destination register receives 0 instead of the counter value. What the contract therefore excludes: every read-clear, read-consume, read-advance or read-latch device register is unreadable-by-CPU-load without corruption. Reachability in the real firmware was not established, so this is latent rather than proven live.",
       "fidelity": "approximation",
@@ -5268,7 +5272,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "The p-bit scan, the eight-instruction cap and the compact p-bits-field substitution are modelled exactly. The sibling rule in the same section that each instruction must use a different functional unit is NOT modelled - tracked separately as PKT-UNIT.",
       "fidelity": "strict",
@@ -5488,7 +5492,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Two divergences. (1) Two NOP n with the SAME count are rejected, but 3.8.11.5 printed page 83 explicitly permits that case - probe shows NOP4||NOP4 stops with 'multiple multicycle instructions'. Fail-closed, near-zero firmware impact. (2) IDLE is unsupported: its encoding 0x0001E000 is matched by nop_cycles as a NOP with count field 15 and rejected as 'reserved NOP count' (confirmed in analysis/dsp/isa_probe.json, IDLE all-probed-forms-rejected). The DINT/RINT parallel-conflict list of 3.8.11.3 IS implemented as a separate format check at :624-657 so an unimplemented member still rejects the whole packet atomically.",
       "fidelity": "approximation",
@@ -5528,7 +5532,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped a cited \"test\" that was a scratchpad probe no longer on disk. The divergence it recorded (a PROT fetch packet with two parallel loads is rejected) was instead reproduced by the coordinator from TI-assembled encodings and is recorded in DSP_ARCHITECTURE_COVERAGE.md section 5.4; a test that asserts the refusal would be asserting the defect. The row keeps reference-backed-tests on its two real tests at tests/cstub/c674x.c:149-208."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "Divergence: a PROT fetch packet containing TWO parallel loads (one .D1, one .D2) is rejected as 'multiple multicycle instructions' because the first protected load sets elapsed=5 and the second trips the multicycle guard. The manual adds four cycles per LD in the fetch packet, which for two parallel LDs is still four cycles; it does not forbid the packet. Probe confirms: prot=0 accepts with 2 queued loads, prot=1 rejects with cycles==0. The same shape exists in the loop path ('invalid protected loop load packet'). The PROT duration is established BEFORE format-specific lowering so Dpp/Dstk and mixed-width loads all get identical timing, which is correct.",
       "fidelity": "approximation",
@@ -5609,7 +5613,7 @@
             "to": "unknown"
           }
         },
-        "reason": "Coordinator: fidelity downgraded from strict to unknown. No cycle oracle was applied anywhere in this audit, so E1/E3/E5 phase timing is read from source against the manual rather than measured; and one of the two cited \"tests\" is an emulator source location, not a test. Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests. Coordinator: fidelity strict -> unknown. No cycle oracle was applied in this audit, so E1/E3/E5 phase timing is read from source, not measured."
       },
       "exclusions_and_approximations": "The queue models E1 address validation, E3 sampling (load->due == cycles+2) and E5 register write, which is Table 4-44's phase structure. Collisions between a delayed E5 write and a same-cycle E1 write fail closed ('delayed-result write conflict', 'parallel delayed-result write conflict'), as do delayed FP-status collisions. The queue is reused for non-memory delayed effects (ISR/ICR -> IFR after one packet, SAT, FP status) to keep the checkpoint ABI stable; those are sentinel sizes 32/33/34/0/16, not architectural queue entries. Queue depths stores[24]/loads[40] are implementation bounds with fail-closed overflow, not architectural limits.",
       "fidelity": "unknown",
@@ -5848,7 +5852,7 @@
       "confidence": "high",
       "coordinator_adjustment": {
         "changes": {},
-        "reason": "Coordinator: dropped 1 cited \"test(s)\" that were scratchpad probes or emulator source locations rather than committed, rerunnable tests."
+        "reason": "Coordinator: dropped 1 cited test(s) that were scratchpad probes or emulator source rather than committed, rerunnable tests."
       },
       "exclusions_and_approximations": "CONFIRMED: the core models the BUFFER, not re-fetch. During loading, each operation is decoded once and stored in cpu->loop_instructions[tag] with its ORIGINAL pc/word/compact/header; during the kernel (sealed and not post) there is NO cdj_c674x_fetch call on that path at all and the packet is rebuilt from loop_instructions; during the epilog one fetch per cycle supplies post-SPKERNEL program-memory operations merged into one composite packet under a single architectural commit. The schedule is tags[48][8] indexed by load cycle with issue selecting every origin congruent to cycle mod ii - a direct model of 7.7.3.3 LBC indexing. GAP: the 14-execute-packet storage limit of 7.4.1/7.7 is NOT enforced. 48 cycles and 112 tags are. Probe: 20 stored body packets accepted (loop_tags==20). Note that 112 == 14x8 so the tag cap matches the OPERATION capacity of a 14-packet buffer but permits 48 sparse packets. CRITICAL EVIDENCE NOTE: cpu->loop_packets is a SOURCE-FETCH counter (incremented at :2575); the assertion loop_packets==21 at tests/cstub/c674x.c:523 counts source fetches, NOT buffered issues, and is architecturally correct because NOP cycles store nothing.",
       "fidelity": "approximation",
