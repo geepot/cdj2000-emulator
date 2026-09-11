@@ -6,9 +6,9 @@
  *
  * The manual's complete set of 32-bit encodings with the literal 0001 in bits
  * 31-28 is 28 instructions: the three ADDA long-immediate forms, CALLP,
- * DINT, RINT and the 22 classified here, of which DPACKX2, DPACK2, SHFL3 and
- * the eight-strong CMPY/DDOTP group are now implemented and routed to the
- * caller's dispatch table. */
+ * DINT, RINT and the 22 classified here, of which DPACKX2, DPACK2, SHFL3, the
+ * four dual ADD/SUB forms and the eight-strong CMPY/DDOTP group plus SMPY32 and
+ * MPY2IR are now implemented and routed to the caller's dispatch table. */
 
 /* Figure D-3 (printed page 735), .L unit nonconditional: op is bits 11-5 and
  * bits 4-2 are 110, the same low bits as the predicable Figure D-1. */
@@ -92,7 +92,8 @@ CdjC674xUncondKind cdj_c674x_uncond_classify(uint32_t word)
         if (l == L_DST5 || (l == L_DST4 && !(word & (1u << 23))))
             /* DPACKX2, DPACK2 and SHFL3 have semantics in
              * cdj_c674x_packbits.c and a dispatch row of their own. */
-            return op == 0x33 || op == 0x34 || op == 0x36 ?
+            return op == 0x33 || op == 0x34 || op == 0x36 ||
+                   (op >= 0x0c && op <= 0x0f) ?
                    CDJ_C674X_UNCOND_ARM_TABLE :
                    CDJ_C674X_UNCOND_UNIMPLEMENTED;
     }

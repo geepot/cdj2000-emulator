@@ -558,6 +558,70 @@ static void cross_path(void)
     assert(cpu.r[0][3] == 0x00000008u);
 }
 
+/* ---- the nonconditional .L dual ADD/SUB forms ---------------------------- */
+static void dual_addsub(void)
+{
+    /* Figure D-3 word: 0001 in bits 31-28, dst 27-23, src2 22-18, src1 17-13,
+     * x 12, opfield 11-5, 110 in bits 4-2, s 1, p 0.  These forms spend only
+     * bits 27-24 on dst and reserve bit 23 as 0. */
+    #define D3(dst, src2, src1, op, side) \
+        (0x10000000u | (uint32_t)(dst) << 23 | (uint32_t)(src2) << 18 | \
+         (uint32_t)(src1) << 13 | (uint32_t)(op) << 5 | 0x18u | \
+         (uint32_t)(side) << 1)
+
+    /* TRANSCRIBED, each from its entry's Example 1, all four with
+     * A0 = 0700 C005h.  The ADD goes to dst_o and the SUB to dst_e in every
+     * form, which is what these cases pin.
+     *   ADDSUB   p132  A1 = FFFF FFFFh -> A2 0700 C006h  A3 0700 C004h
+     *   ADDSUB2  p133  A1 = FFFF 0001h -> A2 0701 C004h  A3 06FF C006h
+     *   SADDSUB  p427  A1 = FFFF FFFFh -> A2 0700 C006h  A3 0700 C004h
+     *   SADDSUB2 p429  A1 = FFFF 0001h -> A2 0701 C004h  A3 06FF C006h */
+    static const struct {
+        unsigned op; uint32_t src2, dst_e, dst_o;
+    } cases[] = {
+        { 0x0c, 0xffffffffu, 0x0700c006u, 0x0700c004u },
+        { 0x0d, 0xffff0001u, 0x0701c004u, 0x06ffc006u },
+        { 0x0e, 0xffffffffu, 0x0700c006u, 0x0700c004u },
+        { 0x0f, 0xffff0001u, 0x0701c004u, 0x06ffc006u },
+    };
+    for (unsigned i = 0; i < 4; ++i)
+    for (unsigned side = 0; side < 2; ++side) {
+        reset();
+        cpu.r[side][0] = 0x0700c005u;
+        cpu.r[side][1] = cases[i].src2;
+        run(D3(2, 1, 0, cases[i].op, side));
+        assert(cpu.r[side][2] == cases[i].dst_e);   /* dst_e, E1 */
+        assert(cpu.r[side][3] == cases[i].dst_o);   /* dst_o, E1 */
+    }
+
+    /* SADDSUB REPORTS SATURATION AND SADDSUB2 DOES NOT, which is stated rather
+     * than an asymmetry of convenience.  Printed page 427: "If either result
+     * saturates, the L1 or L2 bit in SSR and the SAT bit in CSR are written one
+     * cycle after the results are written to dst_o:dst_e."  Printed page 429
+     * exempts the packed form: "This operation is performed on each halfword
+     * separately.  This instruction does not affect the SAT bit in CSR or the
+     * L1 or L2 bits in SSR."  Both halves are checked, because an
+     * implementation setting the flags unconditionally would satisfy the first
+     * and fail the second. */
+    for (unsigned side = 0; side < 2; ++side) {
+        reset();
+        cpu.r[side][0] = 0x7fffffffu; cpu.r[side][1] = 0x7fffffffu;
+        run(D3(2, 1, 0, 0x0e, side));                /* SADDSUB, add clamps */
+        assert(cpu.r[side][3] == 0x7fffffffu);
+        run(0); run(0);
+        assert((cpu.control[1] >> 9) & 1u);           /* CSR.SAT */
+        assert(cpu.control[21] == (1u << side));      /* SSR L1/L2 */
+
+        reset();
+        cpu.r[side][0] = 0x7fff7fffu; cpu.r[side][1] = 0x7fff7fffu;
+        run(D3(2, 1, 0, 0x0f, side));                 /* SADDSUB2, halves clamp */
+        assert(cpu.r[side][3] == 0x7fff7fffu);
+        run(0); run(0);
+        assert(!((cpu.control[1] >> 9) & 1u) && !cpu.control[21]);
+    }
+    #undef D3
+}
+
 int main(void)
 {
     assembler_words();
@@ -571,5 +635,6 @@ int main(void)
     predication();
     cross_path();
     printf("c674x packbits ok\n");
+    dual_addsub();
     return 0;
 }

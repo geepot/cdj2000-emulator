@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef CDJ_C674X_PACKBITS_H
 #define CDJ_C674X_PACKBITS_H
+#include <stdbool.h>
 #include <stdint.h>
 /* Pack/unpack, shuffle, bit-manipulation and merge-byte semantics, SPRUFE8B
  * (July 2010).  Every rule below is cited to the printed page of the
@@ -67,4 +68,35 @@ uint32_t cdj_c674x_shrmb(uint32_t src1, uint32_t src2);
 uint64_t cdj_c674x_dpack2(uint32_t src1, uint32_t src2);
 /* DPACKX2 (printed page 256): two PACKLH2 operations. */
 uint64_t cdj_c674x_dpackx2(uint32_t src1, uint32_t src2);
+
+/* ADDSUB (printed page 132), ADDSUB2 (133), SADDSUB (427) and SADDSUB2 (429):
+ * the nonconditional .L dual-result forms, all "Single-cycle / Delay Slots 0",
+ * all writing dst_o:dst_e in E1.  In every one the ADD goes to dst_o and the
+ * SUB to dst_e.
+ *
+ *   opfield  instruction  saturates  packed
+ *   0001100  ADDSUB       no         no
+ *   0001101  ADDSUB2      no         2x16
+ *   0001110  SADDSUB      yes        no
+ *   0001111  SADDSUB2     yes        2x16
+ *
+ * SADDSUB and SADDSUB2 differ in more than width.  SADDSUB states positively
+ * that "If either result saturates, the L1 or L2 bit in SSR and the SAT bit in
+ * CSR are written one cycle after the results are written to dst_o:dst_e",
+ * while SADDSUB2 carries the packed exemption - "This operation is performed on
+ * each halfword separately.  This instruction does not affect the SAT bit in
+ * CSR or the L1 or L2 bits in SSR" - so the narrow form reports saturation and
+ * the packed one deliberately does not.  `saturated` is therefore true only for
+ * SADDSUB. */
+#define CDJ_C674X_ADDSUB    0x0cu
+#define CDJ_C674X_ADDSUB2   0x0du
+#define CDJ_C674X_SADDSUB   0x0eu
+#define CDJ_C674X_SADDSUB2  0x0fu
+typedef struct {
+    uint64_t value;    /* dst_o in the high word, dst_e in the low */
+    bool saturated;    /* SADDSUB only; always false for SADDSUB2 */
+    bool valid;
+} CdjC674xAddsubResult;
+CdjC674xAddsubResult cdj_c674x_addsub(unsigned opfield, uint32_t src1,
+                                      uint32_t src2);
 #endif

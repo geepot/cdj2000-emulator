@@ -61,6 +61,20 @@ int main(void)
             }
             if ((xi ^ xj) & mi & mj) continue;   /* cannot both match */
             uint32_t w = shared_word(mi, xi, mj, xj);
+            /* cdj_c674x_arm_lookup's format rule resolves one whole class of
+             * mask/match overlap without a predicate: a row whose mask leaves
+             * bits 31-28 free is never selected for a word carrying the
+             * nonconditional 0001 opcode field there.  So if either row pins
+             * those bits to 0001, every word the pair shares is one the other
+             * row is ineligible for unless it pins them too - the pair cannot
+             * collide, and reporting it would be a false alarm that grows with
+             * every nonconditional row added.  Mirrors
+             * cdj_c674x_arm_table_row_claims, which applies the same rule. */
+            bool i_nonconditional = (mi >> 28) == 0xfu && (xi >> 28) == 1u;
+            bool j_nonconditional = (mj >> 28) == 0xfu && (xj >> 28) == 1u;
+            if ((i_nonconditional && (mj >> 28) != 0xfu) ||
+                (j_nonconditional && (mi >> 28) != 0xfu))
+                continue;
             if (!ai && !aj) {
                 ++hard;
                 printf("shadow %u %u mask=%08" PRIx32 " match=%08" PRIx32

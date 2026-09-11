@@ -1897,6 +1897,14 @@ static bool arm_addkpc(CdjC674xArm *x)
     return true;
 }
 
+/* Shared helpers defined further down, declared here because the family
+ * markers below come before them: dp_queue is the delayed double-precision
+ * pair write, and queue_saturation is the CSR.SAT / SSR[unit] effect of a
+ * saturating .L instruction. */
+static bool dp_queue(CdjC674xArm *x, uint64_t due, unsigned dst,
+                     uint32_t value, uint32_t status, bool multiplier);
+static bool queue_saturation(CdjC674xArm *x);
+
 /* ---- wave 5 arm bodies ---------------------------------------------------
  *
  * One anchor per instruction family, so independently developed families insert
@@ -2345,10 +2353,25 @@ static bool arm_packbits_dual(CdjC674xArm *x)
     x->reg_write = false;
     if (x->dst & 1)
         return stop(x->cpu, x->pc, x->insn->word, "invalid long register pair");
+    /* The four dual ADD/SUB forms share this arm: same unit, same format, same
+     * single-cycle dst_o:dst_e write.  Only SADDSUB reports saturation - its
+     * page states the CSR.SAT and SSR effect positively, while SADDSUB2's note
+     * exempts the packed form from both. */
+    unsigned dual = (x->w >> 5) & 0x7fu;
+    bool saturated = false;
     switch (x->w & 0xffc) {
     case 0x698: result = cdj_c674x_dpack2(src1, src2); break;
     case 0x678: result = cdj_c674x_dpackx2(src1, src2); break;
-    default:    result = cdj_c674x_shfl3(src1, src2); break;
+    case 0x6d8: result = cdj_c674x_shfl3(src1, src2); break;
+    default: {
+        CdjC674xAddsubResult r = cdj_c674x_addsub(dual, src1, src2);
+        if (!r.valid)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "nonconditional .L opfield not implemented");
+        result = r.value;
+        saturated = r.saturated;
+        break;
+    }
     }
     if (x->written[x->side][x->dst] || x->written[x->side][x->dst + 1])
         return stop(x->cpu, x->pc, x->insn->word,
@@ -2356,14 +2379,13 @@ static bool arm_packbits_dual(CdjC674xArm *x)
     x->out->r[x->side][x->dst] = (uint32_t)result;
     x->out->r[x->side][x->dst + 1] = (uint32_t)(result >> 32);
     x->written[x->side][x->dst] = x->written[x->side][x->dst + 1] = true;
+    /* SADDSUB, printed page 427: "If either result saturates, the L1 or L2 bit
+     * in SSR and the SAT bit in CSR are written one cycle after the results are
+     * written to dst_o:dst_e." */
+    if (saturated && !queue_saturation(x)) return false;
     return true;
 }
 /* wave5-arms: double-precision floating point */
-/* Defined with the rest of the double-precision plumbing below; the
- * approximation arm sits at this family's marker, which comes first. */
-static bool dp_queue(CdjC674xArm *x, uint64_t due, unsigned dst,
-                     uint32_t value, uint32_t status, bool multiplier);
-
 static bool arm_approx(CdjC674xArm *x)
 {
     /* RCPSP (printed pages 411-412), RSQRSP (420-421), RCPDP (409-410) and
@@ -3277,6 +3299,10 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x00000130, NULL,                  arm_packed8 }, /* MPYU4   */
     { 0x00000ffc, 0x00000170, NULL,                  arm_packed8 }, /* MPYSU4  */
     /* wave5-rows: pack, unpack, shuffle and bit manipulation */
+    { 0xf0000ffc, 0x10000198, NULL,                  arm_packbits_dual },
+    { 0xf0000ffc, 0x100001b8, NULL,                  arm_packbits_dual },
+    { 0xf0000ffc, 0x100001d8, NULL,                  arm_packbits_dual },
+    { 0xf0000ffc, 0x100001f8, NULL,                  arm_packbits_dual },
     /* Masks read off each entry's own Opcode figure: bits 17-13 and 11-2 for
      * the .L/.S/.M src2-only forms, bits 11-2 alone where 17-13 carry src1, and
      * bits 31-28 plus 11-2 for the three nonconditional .L forms. */

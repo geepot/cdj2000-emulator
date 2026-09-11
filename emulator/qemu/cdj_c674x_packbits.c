@@ -192,3 +192,65 @@ uint64_t cdj_c674x_dpackx2(uint32_t src1, uint32_t src2)
     uint32_t odd = (src2 & 0xffffu) << 16 | (src1 >> 16);
     return (uint64_t)odd << 32 | even;
 }
+
+/* ---- the nonconditional .L dual-result forms ----------------------------- */
+
+static int32_t sat32_signed(int64_t v, bool *saturated)
+{
+    if (v > INT64_C(0x7fffffff))  { *saturated = true; return (int32_t)0x7fffffff; }
+    if (v < -INT64_C(0x80000000)) { *saturated = true; return (int32_t)0x80000000; }
+    return (int32_t)v;
+}
+
+static uint32_t sat16_halves(int32_t hi, int32_t lo)
+{
+    if (hi > 32767) hi = 32767; else if (hi < -32768) hi = -32768;
+    if (lo > 32767) lo = 32767; else if (lo < -32768) lo = -32768;
+    return (uint32_t)((hi & 0xffff) << 16 | (lo & 0xffff));
+}
+
+CdjC674xAddsubResult cdj_c674x_addsub(unsigned opfield, uint32_t src1,
+                                      uint32_t src2)
+{
+    CdjC674xAddsubResult r = { .value = 0, .saturated = false, .valid = true };
+    int32_t s1h = (int16_t)(src1 >> 16), s1l = (int16_t)(src1 & 0xffffu);
+    int32_t s2h = (int16_t)(src2 >> 16), s2l = (int16_t)(src2 & 0xffffu);
+    uint32_t add, sub;
+
+    switch (opfield) {
+    case CDJ_C674X_ADDSUB:
+        /* Printed page 132: src1 + src2 -> dst_o, src1 - src2 -> dst_e, with no
+         * sat() printed on either line. */
+        add = src1 + src2;
+        sub = src1 - src2;
+        break;
+    case CDJ_C674X_ADDSUB2:
+        /* Printed page 133: the same pair done on each halfword separately, so
+         * a halfword carry does not cross into the other half. */
+        add = (uint32_t)(((s1h + s2h) & 0xffff) << 16 | ((s1l + s2l) & 0xffff));
+        sub = (uint32_t)(((s1h - s2h) & 0xffff) << 16 | ((s1l - s2l) & 0xffff));
+        break;
+    case CDJ_C674X_SADDSUB:
+        /* Printed page 427: sat(src1 + src2) -> dst_o, sat(src1 - src2) ->
+         * dst_e, over the full 32 bits.  This is the form that reports
+         * saturation in CSR.SAT and SSR. */
+        add = (uint32_t)sat32_signed((int64_t)(int32_t)src1 + (int32_t)src2,
+                                     &r.saturated);
+        sub = (uint32_t)sat32_signed((int64_t)(int32_t)src1 - (int32_t)src2,
+                                     &r.saturated);
+        break;
+    case CDJ_C674X_SADDSUB2:
+        /* Printed page 429: saturating on each halfword.  Its own note exempts
+         * it from CSR.SAT and the SSR L1/L2 bits, so `saturated` stays false
+         * here however the halves clamp - that is the documented behaviour, not
+         * an omission. */
+        add = sat16_halves(s1h + s2h, s1l + s2l);
+        sub = sat16_halves(s1h - s2h, s1l - s2l);
+        break;
+    default:
+        r.valid = false;
+        return r;
+    }
+    r.value = (uint64_t)add << 32 | sub;   /* dst_o = add, dst_e = sub */
+    return r;
+}
