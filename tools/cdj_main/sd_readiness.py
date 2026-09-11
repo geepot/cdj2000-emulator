@@ -48,6 +48,7 @@ MEDIA_MODE_FALLBACK = 0x04CF222C   # media-mode's value when state is not 4/5
 LATCH = 0x049832EC           # 1 once the gate has fired
 DEVICE_POINTER = 0x049832F0  # -> device; +0x1c callback, +0x66 status byte
 SDHI_INFO1 = 0xFFE4001C      # bit 5, active low, is card detect
+FLAGS_BYTE = 0x051E21D0      # r14+76; bit 1 set => media mode 1 => not ready
 
 
 # The telnet monitor ECHOES the command, so "xp /1wx 0xffe4001c" puts the
@@ -90,6 +91,8 @@ def sample(monitor: socket.socket) -> dict:
     latch = read_words(monitor, LATCH, 1)[0]
     device = read_words(monitor, DEVICE_POINTER, 1)[0]
     info1 = read_words(monitor, SDHI_INFO1 & ~3, 1)[0]
+    flags_word = read_words(monitor, FLAGS_BYTE & ~3, 1)[0]
+    flags = (flags_word >> (8 * (3 - (FLAGS_BYTE & 3)))) & 0xFF
 
     media_mode = 1 if mode_state in (4, 5) else fallback
     arms = {
@@ -105,6 +108,7 @@ def sample(monitor: socket.socket) -> dict:
         # INFO1 is a halfword at 0xffe4001c; bit 5 is active low.
         card_detect_bit=(info1 >> 5) & 1,
         card_present=not ((info1 >> 5) & 1),
+        flags_byte=flags, flags_bit1=bool(flags & 2),
     )
     if 0x04000000 <= device < 0x05000000:
         result["callback"] = read_words(monitor, device + 0x1C, 1)[0]
@@ -153,9 +157,9 @@ def main() -> int:
             row = sample(monitor)
             arms = " ".join("%s=%s" % (k.split()[0], "T" if v else "F")
                             for k, v in row["readiness_arms"].items())
-            print("t=%5.1f  state=%#010x entry=%#010x mode=%#x  [%s]  "
+            print("t=%5.1f  flags=%#04x bit1=%d  state=%#010x entry=%#010x mode=%#x  [%s]  "
                   "ready=%s  card=%s  latch=%#x  device=%#010x%s"
-                  % (elapsed, row["mode_state"], row["table_entry"],
+                  % (elapsed, row["flags_byte"], row["flags_bit1"], row["mode_state"], row["table_entry"],
                      row["media_mode"], arms, row["ready"],
                      row["card_present"], row["latch"], row["device"],
                      ("  cb=%#010x status=%#04x" %
