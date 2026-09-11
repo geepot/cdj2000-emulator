@@ -1890,6 +1890,23 @@ static bool arm_addkpc(CdjC674xArm *x)
     return true;
 }
 
+/* ---- wave 5 arm bodies ---------------------------------------------------
+ *
+ * One anchor per instruction family, so independently developed families insert
+ * at distinct lines and their patches do not collide.  Arithmetic goes in the
+ * family's own pure file (see cdj_c674x_mpy.c for the pattern): an arm here only
+ * moves operands in and the result out, and must not touch anything at or past
+ * offsetof(CdjC674x, loop).  Add the matching table row under the SAME family
+ * marker inside cdj_c674x_arms[] below, then run
+ * tests/test_c674x.py::test_c674x_dispatch_table_has_no_shadowed_rows - a row
+ * that overlaps an existing one is otherwise silently unreachable. */
+/* wave5-arms: dot-product and complex-multiply */
+/* wave5-arms: packed 16-bit */
+/* wave5-arms: packed 8-bit */
+/* wave5-arms: pack, unpack, shuffle and bit manipulation */
+/* wave5-arms: double-precision floating point */
+/* wave5-arms: 32-bit multiply, Galois, dual-result and 40-bit long forms */
+
 static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x00000618, NULL,                  arm_sat_long },
     { 0x00000ffc, 0x00000638, NULL,                  arm_sat_long },
@@ -2005,6 +2022,12 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x0f830ffe, 0x00800362, NULL,                  arm_bnop_reg },
     { 0x0f83effe, 0x00000362, NULL,                  arm_b_reg },
     { 0x00001ffe, 0x00000162, NULL,                  arm_addkpc },
+    /* wave5-rows: dot-product and complex-multiply */
+    /* wave5-rows: packed 16-bit */
+    /* wave5-rows: packed 8-bit */
+    /* wave5-rows: pack, unpack, shuffle and bit manipulation */
+    /* wave5-rows: double-precision floating point */
+    /* wave5-rows: 32-bit multiply, Galois, dual-result and 40-bit long forms */
 };
 
 unsigned cdj_c674x_arm_table_rows(void)
