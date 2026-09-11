@@ -178,7 +178,7 @@ AMR/circular-addressing validation:
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_circular.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-circular.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-circular-family-san
 /tmp/cdj-circular-family-san
 sh scripts/build-qemu-sh4.sh build/qemu
@@ -218,7 +218,7 @@ Saturating arithmetic batch validation:
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_c674x_saturation.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -fno-omit-frame-pointer -Iemulator/qemu tests/cstub/c674x-saturation.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-saturation-family-san
 /tmp/cdj-saturation-family-san
 sh scripts/build-qemu-sh4.sh build/qemu
@@ -525,6 +525,29 @@ port supports the observed initial upload, not arbitrary DSP firmware yet.
 using synthetic memory and a stopped CPU; no Pioneer firmware is required.
 
 ### Partial C674x execution core
+
+Where the core lives. `cdj_c674x.c` owns fetch, the execute packet's
+transactional commit, the pipeline and delayed-result queues, and the decode
+table. Semantics that need no CPU state sit in pure files beside it:
+`cdj_c674x_sp.c` (binary32 add/sub/multiply, integer conversion, compares),
+`cdj_c674x_mpy.c` (saturating 16x16), `cdj_c674x_uncond.c` (the C64x+
+nonconditional forms), `cdj_c674x_control.c` (the control-register read view
+and MVC reachability) and `cdj_c674x_loop.c` (the SPLOOP schedule).
+Conditional 32-bit instructions are dispatched through `cdj_c674x_arms[]` in
+`cdj_c674x.c`: a new family is one table row plus one `arm_*` function, with
+its arithmetic in a pure file of its own. Table order is load-bearing - some
+families deliberately shadow a later, wider pattern - so rows are appended or
+inserted deliberately, never sorted.
+
+A new core `.c` has to be added to every list that names the others, or the
+link fails: `SOURCES` in `tools/cdj_dsp/replay.py`, `CORE_SOURCES` in
+`tools/cdj_dsp/isa_probe.py`, `CORE` in `tools/cdj_dsp/audit_sweeps.py`, the
+build comment in `tools/cdj_dsp/benchmark_core.c`, the `cc` command lines in
+this file, and the `cc` invocations in `tests/test_c674x.py`,
+`test_c674x_circular.py`, `test_c674x_saturation.py`,
+`test_c674x_spkernel_fields.py`, `test_dsp_fetch_state.py` and
+`test_dsp_isa_audit.py`. `replay.py` derives each header from its `.c` by
+suffix, so only a header with no matching `.c` needs a separate entry there.
 
 `cdj_c674x.c` decodes instructions independently from TI SPRUFE8B. It currently
 supports the observed 32-bit startup forms of MVK/MVKH, AND, floating-point
@@ -1034,7 +1057,7 @@ SPKERNEL restriction remain incomplete.
 
 ```sh
 .venv/bin/pytest -q
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-prot-loop-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-prot-loop-san
 /tmp/cdj-prot-loop-san
 .venv/bin/python -m tools.cdj_dsp.replay runs/nxs-bnop-immediate-connected/dsp-l2.bin runs/dsp-protected-loop-1 --verify-repeat
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1157,7 +1180,7 @@ lockout. Privilege checking is not modeled.
 
 ```sh
 .venv/bin/pytest -q
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-syscfg.c emulator/qemu/cdj_c6747_syscfg.c emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-cfgchip-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c6747-syscfg.c emulator/qemu/cdj_c6747_syscfg.c emulator/qemu/cdj_c6747_pll.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-cfgchip-san
 /tmp/cdj-cfgchip-san
 .venv/bin/python -m tools.cdj_dsp.replay runs/nxs-pll-enable-connected/dsp-l2.bin runs/dsp-cfgchip-1 --verify-repeat
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1309,7 +1332,7 @@ Reproduce focused and complete validation:
 
 ```sh
 .venv/bin/python -m pytest -q tests/test_c674x.py tests/test_dsp_replay.py tests/test_dsp_inventory.py
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-fp-batch-san
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-fp-batch-san
 /tmp/cdj-fp-batch-san
 .venv/bin/python -m pytest -q
 sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
@@ -1371,7 +1394,7 @@ Reproduce the focused and complete checks:
 
 ```sh
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-batch-san
 /tmp/cdj-c674x-batch-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1453,7 +1476,7 @@ Reproduce focused, complete and sanitizer validation:
   tests/test_dsp_inventory.py tests/test_dsp_coverage.py tests/test_dsp_replay.py
 .venv/bin/python -m pytest -q
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-coverage-san
 /tmp/cdj-c674x-coverage-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1464,7 +1487,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -o /tmp/cdj-checkpoint-coverage-san
 /tmp/cdj-checkpoint-coverage-san /tmp/cdj-checkpoint-coverage-san.cdjdsp
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
+  -I emulator/qemu tools/cdj_dsp/replay.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c \
   emulator/qemu/cdj_c674x_loop.c emulator/qemu/cdj_c6747_syscfg.c \
   emulator/qemu/cdj_c6747_psc.c emulator/qemu/cdj_c6747_mcasp.c \
   emulator/qemu/cdj_c6747_gpio.c emulator/qemu/cdj_c6747_i2c.c \
@@ -1729,7 +1752,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   emulator/qemu/cdj_c6747_cache.c -o /tmp/cdj-c6747-cache-san
 /tmp/cdj-c6747-cache-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c \
+  -I emulator/qemu tests/cstub/c674x.c emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c \
   emulator/qemu/cdj_c674x_loop.c -o /tmp/cdj-c674x-mpy-san
 /tmp/cdj-c674x-mpy-san
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -1996,7 +2019,7 @@ sh scripts/build-qemu-sh4.sh build/qemu
 cc -std=c11 -Wall -Wextra -Werror \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   -Iemulator/qemu tests/cstub/c674x.c \
-  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_loop.c \
+  emulator/qemu/cdj_c674x.c emulator/qemu/cdj_c674x_sp.c emulator/qemu/cdj_c674x_control.c emulator/qemu/cdj_c674x_uncond.c emulator/qemu/cdj_c674x_mpy.c emulator/qemu/cdj_c674x_loop.c \
   -o /tmp/cdj-c674x-san
 /tmp/cdj-c674x-san
 .venv/bin/python -m pytest -q

@@ -94,7 +94,7 @@ def test_c6747_pll_cycle_clock(tmp_path):
         '-I', str(ROOT / 'emulator/qemu'), str(ROOT / 'tests/cstub/c6747-pll-clock.c'),
         *[str(ROOT / 'emulator/qemu' / name) for name in
           ('cdj_c6747_pll.c', 'cdj_c674x.c', 'cdj_c674x_uncond.c', 'cdj_c674x_mpy.c',
-           'cdj_c674x_loop.c')],
+           'cdj_c674x_sp.c', 'cdj_c674x_control.c', 'cdj_c674x_loop.c')],
         '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
@@ -152,6 +152,8 @@ def test_c674x_packets_and_branch_delays(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
@@ -165,6 +167,8 @@ def test_c674x_nonconditional_encodings(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=10)
 
@@ -190,5 +194,7 @@ def test_c6747_syscfg_unlock_and_pipeline(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)

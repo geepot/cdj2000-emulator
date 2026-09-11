@@ -42,6 +42,8 @@ PROBE = ROOT / "tests" / "cstub" / "c674x-isa-probe.c"
 CORE = (ROOT / "emulator" / "qemu" / "cdj_c674x.c",
         ROOT / "emulator" / "qemu" / "cdj_c674x_uncond.c",
         ROOT / "emulator" / "qemu" / "cdj_c674x_mpy.c",
+        ROOT / "emulator" / "qemu" / "cdj_c674x_sp.c",
+        ROOT / "emulator" / "qemu" / "cdj_c674x_control.c",
         ROOT / "emulator" / "qemu" / "cdj_c674x_loop.c")
 
 
