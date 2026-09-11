@@ -3183,6 +3183,56 @@ unsigned cdj_c674x_arm_table_rows(void)
     return sizeof(cdj_c674x_arms) / sizeof(cdj_c674x_arms[0]);
 }
 
+bool cdj_c674x_arm_table_predicates_are_word_only(uint32_t word)
+{
+    /* cdj_c674x_arm_table_row_claims evaluates `also` predicates against an arm
+     * carrying only w and a.  That is only sound while no predicate reads
+     * anything else.  Rather than assert it in a comment, evaluate every
+     * predicate twice for the same word with every OTHER field set to two
+     * different patterns: a predicate that reads one of them can only agree by
+     * coincidence, and across a sweep of words it will not.  Returns false the
+     * first time a predicate disagrees with itself. */
+    for (unsigned i = 0; i < cdj_c674x_arm_table_rows(); ++i) {
+        const CdjC674xArmEntry *entry = &cdj_c674x_arms[i];
+        if (!entry->also) continue;
+        CdjC674x cpu_a, cpu_b;
+        memset(&cpu_a, 0x00, sizeof cpu_a);
+        memset(&cpu_b, 0xff, sizeof cpu_b);
+        CdjC674xArm one = {
+            .cpu = &cpu_a, .out = &cpu_a, .w = word, .a = (word >> 13) & 31,
+            .pc = 0, .value = 0, .side = 0, .dst = 0, .b = 0, .cross = 0,
+            .scalar_sat_op = 0, .enabled = false, .reg_write = false,
+            .control_write = false, .long_offset = false,
+        };
+        CdjC674xArm two = {
+            .cpu = &cpu_b, .out = &cpu_b, .w = word, .a = (word >> 13) & 31,
+            .pc = 0xffffffffu, .value = 0xffffffffu, .side = 1, .dst = 31,
+            .b = 31, .cross = 1, .scalar_sat_op = 7, .enabled = true,
+            .reg_write = true, .control_write = true, .long_offset = true,
+        };
+        if (entry->also(&one) != entry->also(&two)) return false;
+    }
+    return true;
+}
+
+bool cdj_c674x_arm_table_row_claims(unsigned index, uint32_t word)
+{
+    if (index >= cdj_c674x_arm_table_rows()) return false;
+    const CdjC674xArmEntry *entry = &cdj_c674x_arms[index];
+    if ((word & entry->mask) != entry->match) return false;
+    if (!entry->also) return true;
+    /* Every `also` predicate is a pure function of the instruction word: a
+     * sweep over them is therefore well defined without a CPU.  They read only
+     * x->w and x->a, and a is the src1 field exactly as the execute loop
+     * decodes it (see the `unsigned a = (w >> 13) & 31` there).  Anything a
+     * predicate does not read stays zeroed, so if one ever grows a dependency
+     * on further state this call would evaluate it against zeros - which is
+     * why cdj_c674x_arm_table_predicates_are_word_only() below exists to fail
+     * the moment that stops being true. */
+    CdjC674xArm probe = { .w = word, .a = (word >> 13) & 31 };
+    return entry->also(&probe);
+}
+
 bool cdj_c674x_arm_table_row(unsigned index, uint32_t *mask, uint32_t *match,
                              bool *has_also)
 {

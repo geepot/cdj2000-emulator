@@ -914,6 +914,53 @@ marked `unresolved` rather than split.
 Missing implementation and missing validation are separated. Ranking weighs
 firmware-development and correct-audio value, dependencies, risk and effort.
 
+### Open items carried forward (living list)
+
+Recorded here rather than left in a conversation, so nothing below depends on
+anyone remembering it. Each says what would close it.
+
+**Instruction set**
+- **22 rows remain unimplemented**, of which roughly 20 share one blocker: bits
+  31-28 are Figure E-3's nonconditional `0001` field, so
+  `cdj_c674x_uncond_classify()` reports UNIMPLEMENTED before the arm table is
+  consulted (`CMPY`, `CMPYR`, `CMPYR1`, `DDOTP*`, `SMPY32`, `XORMPY`, `GMPY`,
+  `MPY2IR`, `ADDSUB*`, `SADDSUB*`, `RPACK2`, `SWE`, `SWENR`, `SPMASKR`). Four
+  families hit this independently and all four refused rather than each
+  weakening the predicate gate, which is why the gate is intact. `pack-bits`
+  did reach `DPACK2`, `DPACKX2` and `SHFL3` through that format, so it is
+  enablement work, not a dead end. Closing it: one coordinated change adding a
+  `CdjC674xUncondKind` for "nonconditional encoding the arm table implements",
+  removing those opfields from `m_unit_op()`'s UNIMPLEMENTED list, and letting
+  such a word fall through to `cdj_c674x_arm_lookup` with `enabled = true`.
+- **`RCPDP`/`RCPSP`/`RSQRDP`/`RSQRSP` stay refused** and should. See §0.4.
+- **`ABS`'s effect on `CSR.SAT` and `SSR` is unresolved** — see the list below.
+  The structural argument that it SHOULD set them (the packed forms carry
+  explicit exemption notes, which would be redundant if the default were "no
+  effect") is real but is an inference from document layout, not a statement.
+  Closing it needs either a TI statement or hardware.
+
+**Evidence and validation**
+- **The 15 double-precision rows are validation PARTIAL** (§0.4): transcribed
+  examples verified, two analogies labelled, derived cases not individually
+  re-traced.
+- **`analysis/dsp/coverage_inventory.json` is stale.** Its header says
+  `generated_from`, and its `PER-TIMER64P` and `IC-DEV-EVENT-SOURCES` rows still
+  read "it will fail today" and "2 of 124 events" although both landed in wave 4.
+  Regenerate it rather than hand-editing.
+- **Two recorded faults remain unexplained**: `parallel register write conflict`
+  at `0xc004f306` and `delayed-result write conflict` at `0x11800108`.
+- **146 checkpoints are unreadable** out of 61,219, and checkpoint round-trip
+  zero-byte coverage stands at 7,147 of 15,808.
+- **No instruction-timing oracle exists.** `cpu->cycles` is an issue count with
+  no stall, memory or cache model; nothing relates it to Hz. The Timer64P
+  counter is an order, not a rate (§0).
+- **`BUILD.md` carries historical markers** and understates SPLOOP support.
+
+**Method**
+- The dispatch shadow gate proves no UNPREDICATED row is shadowed. The
+  predicate-aware sweep (`tests/cstub/c674x-arm-claims.c`) closes the rest by
+  enumerating each flagged pair's free bits exhaustively.
+
 ### Top five, with scope and acceptance criteria
 
 **Superseded once already.** The original top five, written before reachability

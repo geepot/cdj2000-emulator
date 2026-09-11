@@ -137,4 +137,13 @@ bool cdj_c674x_step_capture_direct(CdjC674x *, CdjC674xRead, CdjC674xWrite,
 unsigned cdj_c674x_arm_table_rows(void);
 bool cdj_c674x_arm_table_row(unsigned index, uint32_t *mask, uint32_t *match,
                              bool *has_also);
+/* Whether row `index` actually claims `word` - mask/match AND its `also`
+ * predicate.  This is what the closed-form check above cannot see: 251 pairs
+ * overlap on mask/match alone and are separated only by a predicate, so the
+ * mask/match check over-reports and something has to decide whether any word
+ * really reaches two rows.  Every predicate is a pure function of the word, so
+ * evaluating one needs no CPU; predicates_are_word_only() re-establishes that
+ * for a given word, and must be true for a claims() result to mean anything. */
+bool cdj_c674x_arm_table_row_claims(unsigned index, uint32_t word);
+bool cdj_c674x_arm_table_predicates_are_word_only(uint32_t word);
 #endif

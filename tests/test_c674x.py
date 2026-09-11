@@ -379,3 +379,56 @@ def test_c674x_32bit_multiply_galois_and_long_forms(tmp_path):
         str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
         str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=10)
+
+
+def test_c674x_no_word_reaches_two_dispatch_rows(tmp_path):
+    """No instruction word may be claimed by two rows of cdj_c674x_arms[].
+
+    test_c674x_dispatch_table_has_no_shadowed_rows answers a weaker question: it
+    compares mask/match only and so over-reports, flagging 251 pairs that are
+    separated solely by an `also` predicate.  That check cannot tell a genuine
+    double claim from a pair the predicates keep apart, and the table comment's
+    original assurance came from a sweep that was never re-run as the table grew
+    from 120 rows to 211.
+
+    This is that sweep, done exhaustively rather than by sampling and without
+    needing 2^32 words: for each pair whose mask/match already agree, every bit
+    in mask_i | mask_j is fixed by the two matches, so only the remaining bits
+    are free, and enumerating those covers the pair's whole overlap region.
+    Every `also` predicate is a pure function of the instruction word, which is
+    checked rather than assumed before the sweep runs.
+
+    Zero skipped pairs is asserted alongside zero double claims: a pair skipped
+    for having too many free bits is a hole in the coverage, and a run that
+    skipped everything would otherwise look identical to a clean one.
+    """
+    cc = shutil.which('cc')
+    if not cc: pytest.skip('requires C compiler')
+    binary = tmp_path / 'arm-claims-test'
+    subprocess.run([cc, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+        '-I', str(ROOT / 'emulator/qemu'),
+        str(ROOT / 'tests/cstub/c674x-arm-claims.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_dotp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_packed8.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_packed16.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_packbits.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_mpy32.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_dp.c'),
+        str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
+        '-o', str(binary)], check=True)
+    out = subprocess.run([str(binary)], check=True, timeout=300,
+                         capture_output=True, text=True).stdout
+    lines = out.splitlines()
+    claims = [line for line in lines if line.startswith('double-claim ')]
+    assert not claims, 'words reaching two dispatch rows:\n' + '\n'.join(claims)
+    assert 'double-claims 0' in lines, out
+    assert 'skipped 0' in lines, out
+    assert 'word-only-probes 4096' in lines, out
+    # Pin the pair count so this stays tied to the mask/match check above: if
+    # that one's 251 moves, this must be updated in the same change.
+    assert 'pairs-examined 251' in lines, out
