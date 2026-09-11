@@ -82,44 +82,55 @@ change. A 45 s connected firmware boot
 116,092 events, with the same 27 boot phases as the pre-patch baseline; stock
 firmware does not arm Timer64P in that window.
 
-### §0.4 The double-precision family's reported evidence was not real
+### §0.4 The double-precision family: what re-verification found
 
-**Implementation is present; the evidence claimed for it is not, so these 15
-rows are recorded as validation NOT ASSESSED rather than reference-backed.**
-The rows are `ABSDP`, `ADDDP`, `SUBDP`, `MPYDP`, `MPYSPDP`, `MPYSP2DP`,
-`CMPEQDP`, `CMPGTDP`, `CMPLTDP`, `SPDP`, `DPSP`, `DPINT`, `DPTRUNC`, `INTDP`
-and `INTDPU`.
+The wave 5 implementation report for this family certified it with evidence
+that does not exist: a randomized host-FPU oracle harness, a pytest test named
+`test_c674x_double_precision_is_correctly_rounded`, 24,000 oracle samples for
+each of six instructions, and a fourth mutation round run against that harness.
+None of it is in the patch, and eight of the twelve values the report flags as
+derived have no corresponding case in `tests/cstub/c674x-dp.c`. Both adversarial
+reviews found this independently and a direct check confirms it.
 
-Two independent adversarial reviews of the same patch, and a direct check
-afterwards, agree on what is wrong. The implementation report certified the
-family with a randomized host-FPU oracle harness and a pytest test named
-`test_c674x_double_precision_is_correctly_rounded`, claiming 24,000 oracle
-samples for each of six instructions, and a fourth mutation-testing round of 10
-mutants run against that harness. **None of it exists in the patch.** Grepping
-the committed tree finds no such test, no oracle harness, and no randomized
-sampling. Eight of the twelve values the report itself flags as derived rather
-than transcribed have no corresponding case in `tests/cstub/c674x-dp.c` either.
+**The transcribed core, however, is real.** Every value in
+`test_manual_examples` was checked against the manual text: `ABSDP`
+`C004 0000h` -> `4004 0000h`, `ADDDP` 8.6 + -2.5 -> `4018 6666h 6666 6666h`,
+`SUBDP` -> `4026 3333h 3333 3333h`, `MPYDP` -> `C035 8000h`. Each appears in
+SPRUFE8B at the cited page with the cited operands. The cstub is 930 lines with
+115 assertions and it separates transcribed cases from derived ones honestly.
 
-What DOES exist is `tests/cstub/c674x-dp.c`: 930 lines, 113 assertions, which
-passes. That is real but it is much less than was claimed, and because the
-report overstated its own evidence it cannot be used to certify the rest. The
-specific semantic questions the reviewers raised are therefore open, not
-settled:
+Re-verifying the four questions the reviewers raised resolved three of them
+differently from how they were reported:
 
-- `ADDDP`/`SUBDP` note 1 says these set the warning bits in FADCR "not in the
-  floating-point auxiliary configuration register (FAUCR) as for other .S unit
-  instructions". That rule is unpinned - a mutant that breaks it survives.
-- `MPYDP` pins four special-case results (LFPN x LFPN under RMODE 0 and 1) for
-  which SPRUFE8B gives no basis in that instruction's entry.
-- `DPINT`/`DPTRUNC` pin a sign-selected NaN answer, while note 1 on printed
-  pages 258 and 262 states the maximum signed integer without selecting by sign.
-- The `RCPDP`/`RCPSP`/`RSQRDP`/`RSQRSP` refusals are correct in outcome, but the
-  stated justification misquotes what those pages do and do not fix.
+- **`ADDDP`/`SUBDP` warning bits in FADCR, not FAUCR — CORRECT, and was already
+  pinned.** Note 1 was quoted accurately, and probing all four forms shows
+  FADCR bit 7 set and FAUCR clear on an inexact sum, on `.S` as well as `.L`.
+  FAUCR was already asserted clear in 15 existing places. The review overstated
+  this: nothing was broken. A test naming the note explicitly has been added.
+- **`MPYDP` overflow rounding — REAL, and now labelled.** The four LFPN cases
+  are derived by analogy from `ADDDP`'s rounding table. The word LFPN does not
+  occur anywhere in the `MPYDP` entry, whose notes 1-5 cover only NaN, signed
+  infinity, signed zero, denormals and rounding-sets-INEX. The old comment
+  claimed ADDDP's tables were "the only statement the manual makes about them
+  for .M"; the manual makes no such statement. Behaviour kept and pinned so the
+  choice is visible, now labelled an analogy.
+- **`DPINT`/`DPTRUNC` NaN result — REAL, and now labelled.** Note 1 reads "the
+  maximum signed integer (7FFF FFFFh or 8000 0000h) is placed in dst" and does
+  not say which. The cstub pins a sign-selected answer, mirroring note 2's
+  signed-infinity case where the sign is meaningful. A NaN's sign is not, so
+  this is a reading of the note, not the note.
+- **`RCPDP`/`RCPSP`/`RSQRDP`/`RSQRSP` refusal — right outcome, false reason.**
+  The old justification said those pages give no example with a concrete
+  result. They do: printed page 410 gives `RCPDP` 4.00 -> 0.25. That example
+  constrains nothing, because 1/4 is exactly representable; the pages fix only
+  a tolerance ("mantissa error is less than 2-8") and hand the rest to a
+  Newton-Raphson refinement whose seed is never specified bit for bit. The
+  refusal stands on the corrected reason.
 
-**Do not quote the 211-accepted figure as 211 validated rows.** Acceptance is a
-decoder measurement; for these 15 rows the semantic dimension is unknown. They
-need a re-verification pass with values traced to the manual one at a time, or
-the real oracle harness actually written, before their validation status moves.
+**Status: these 15 rows remain validation PARTIAL, not reference-backed.** The
+transcribed examples are verified and the two analogies above are now labelled,
+but the report's overstatement means its derived cases cannot be taken on trust
+row by row. Do not read the 211-accepted figure as 211 validated rows.
 
 Still deliberately **not** done, and why:
 

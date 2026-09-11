@@ -543,9 +543,22 @@ static void test_derived_multiply_dp(void)
         {UINT64_C(0x0000000000000001), UINT64_C(0x7ff0000000000000),
          nan_out, 0x014, 0},
         {UINT64_C(0x0000000000000001), 0, 0, 0x004, 0},
-        /* Overflow and underflow round exactly as ADDDP's tables do, which
-         * is the only statement the manual makes about them for .M; LFPN x
-         * LFPN overflows and SFPN x SFPN underflows. */
+        /* OVERFLOW AND UNDERFLOW ROUNDING IS DERIVED BY ANALOGY, NOT STATED.
+         * An earlier comment here said ADDDP's rounding tables are "the only
+         * statement the manual makes about them for .M".  That is wrong in a
+         * way worth spelling out: the manual makes NO such statement for
+         * MPYDP.  The word LFPN does not occur anywhere in the MPYDP entry,
+         * and its notes 1-5 cover only NaN, signed infinity, signed zero,
+         * denormalized sources and rounding-sets-INEX - never what an
+         * overflowing product rounds to.  The rounding table that names +LFPN
+         * and +infinity per rounding mode belongs to ADDDP.
+         *
+         * These four rows therefore assert this core's chosen behaviour -
+         * that a .M overflow rounds the way the .L/.S adder does - which is a
+         * reasonable reading of one FPU but is an ANALOGY.  They are kept so
+         * the choice is pinned and visible rather than drifting, and recorded
+         * in DSP_ARCHITECTURE_COVERAGE.md as unresolved.  LFPN x LFPN
+         * overflows and SFPN x SFPN underflows. */
         {UINT64_C(0x7fefffffffffffff), UINT64_C(0x7fefffffffffffff),
          UINT64_C(0x7ff0000000000000), 0x0e0, 0},
         {UINT64_C(0x7fefffffffffffff), UINT64_C(0x7fefffffffffffff),
@@ -724,7 +737,18 @@ static void test_derived_conversions(void)
         {UINT64_C(0x0000000000000000), 0, 0x000, 0, 0, 0x000},
         /* note 3 */
         {UINT64_C(0x0000000000000001), 0, 0x088, 0, 0, 0x088},
-        /* note 1 */
+        /* Note 1, and an UNRESOLVED CHOICE inside it.  The note reads in full
+         * "If src2 is NaN, the maximum signed integer (7FFF FFFFh or
+         * 8000 0000h) is placed in dst and the INVAL bit is set."  It offers
+         * both values and does NOT say which is chosen.  These two rows pin a
+         * sign-selected answer - a NaN with the sign bit clear gives
+         * 7FFF FFFFh, one with it set gives 8000 0000h - which mirrors how
+         * note 2 must work for signed infinity, where the sign IS meaningful.
+         * For a NaN the sign bit carries no arithmetic meaning, so this is a
+         * reading of the note rather than the note itself.  Recorded in
+         * DSP_ARCHITECTURE_COVERAGE.md; it is pinned here so the choice is
+         * visible and stable rather than accidental, not because the manual
+         * settles it. */
         {UINT64_C(0x7ff8000000000000), 0x7fffffff, 0x012, 0, 0x7fffffff, 0x012},
         {UINT64_C(0xfff8000000000000), 0x80000000, 0x012, 0, 0x80000000, 0x012},
         /* note 2 */
@@ -805,10 +829,25 @@ static void test_derived_conversions(void)
 static void test_rejections(void)
 {
     CdjC674x c;
-    /* RCPDP, RCPSP, RSQRDP and RSQRSP are deliberately NOT decoded: printed
-     * pages 409, 411, 418 and 420 fix only that "the mantissa is accurate to
-     * the eighth binary position", never the bits it delivers, so there is no
-     * defensible result to produce.  They must stay a halt. */
+    /* RCPDP, RCPSP, RSQRDP and RSQRSP are deliberately NOT decoded.  The
+     * refusal stands, but an earlier version of this comment justified it by
+     * saying those pages give no example with a concrete result.  They do:
+     * printed page 410 prints RCPDP .S1 A1:A0,A3:A2 with A1:A0 = 4010 0000h
+     * 0000 0000h (4.00) giving A3:A2 = 3FD0 0000h 0000 0000h (0.25) two cycles
+     * later, and the other three entries print examples of their own.
+     *
+     * The real reason is that those examples do not constrain the
+     * approximation.  1/4 is exactly representable, so 0.25 is what ANY
+     * correct implementation returns and the example reveals nothing about the
+     * low-order mantissa bits for an input whose reciprocal is not exact.
+     * What the pages do fix is only that "the mantissa is accurate to the
+     * eighth binary position (therefore, mantissa error is less than 2-8)" -
+     * a tolerance, not a value - and they hand the rest to a Newton-Raphson
+     * refinement whose seed they never specify bit for bit.  Two
+     * implementations can differ below bit 8 and both satisfy the manual, so
+     * producing any particular seed here would be invention, and firmware that
+     * refines it would carry our invented bits into its result.  They must
+     * stay a halt. */
     static const uint32_t approximations[] = {
         0x041C0B60,     /* RCPDP  .S1 A7:A6, A9:A8 */
         0x02980F60,     /* RCPSP  .S1 A6, A5       */
@@ -915,6 +954,42 @@ static void test_predication_and_stickiness(void)
     assert(c.r[0][4] == 0 && c.control[19] == ((1u << 26) | 0x211));
 }
 
+/* ---- ADDDP/SUBDP use FADCR even on .S ------------------------------------
+ *
+ * Note 1 on the ADDDP and SUBDP pages: "This instruction takes the rounding
+ * mode from and sets the warning bits in the floating-point adder
+ * configuration register (FADCR), not in the floating-point auxiliary
+ * configuration register (FAUCR) as for other .S unit instructions."
+ *
+ * The .L forms would use FADCR anyway, so only the .S forms actually test the
+ * exception the note carves out.  This was correct in the implementation but
+ * pinned by nothing, so an .S form rerouted to FAUCR would have gone unnoticed;
+ * that gap is what this closes.
+ *
+ * 1.0 + 2^-60 is used because the exact sum needs more than 53 significand
+ * bits, so it must round and must therefore raise INEX somewhere - which is
+ * what makes "in FADCR and not in FAUCR" an observable distinction rather than
+ * two registers that both happen to stay zero.  DERIVED, not transcribed: the
+ * manual prints no example with an inexact double sum. */
+static void test_adddp_subdp_warn_in_fadcr_not_faucr(void)
+{
+    static const struct { const char *name; unsigned encoding; } forms[] = {
+        { "ADDDP .L", ADDDP_L }, { "ADDDP .S", ADDDP_S },
+        { "SUBDP .L", SUBDP_L }, { "SUBDP .S", SUBDP_S },
+    };
+    for (unsigned i = 0; i < sizeof forms / sizeof forms[0]; ++i) {
+        CdjC674x c;
+        load(&c, dp_word(4, 2, 0, 0, forms[i].encoding, 0));
+        set_pair(&c, 0, 0, UINT64_C(0x3FF0000000000000));   /* 1.0   */
+        set_pair(&c, 0, 2, UINT64_C(0x3C30000000000000));   /* 2^-60 */
+        run(&c, 10);
+        /* INEX is FADCR bit 7 for the adder (Table 2-20, printed page 51). */
+        assert(c.control[18] == 0x80);
+        assert(c.control[19] == 0);
+        assert(c.control[20] == 0);
+    }
+}
+
 int main(void)
 {
     test_encodings_match_ti_assembler();
@@ -925,6 +1000,7 @@ int main(void)
     test_derived_conversions();
     test_rejections();
     test_predication_and_stickiness();
+    test_adddp_subdp_warn_in_fadcr_not_faucr();
     printf("c674x double-precision tests passed\n");
     return 0;
 }
