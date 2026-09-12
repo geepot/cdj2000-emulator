@@ -84,6 +84,16 @@ def read_words(monitor: socket.socket, address: int, count: int) -> list[int]:
                        % (address, text[-200:]))
 
 
+def byte_of(word: int, address: int) -> int:
+    """Byte at `address` out of the aligned word containing it.
+
+    SH4 here is LITTLE-endian: byte n of a word is bits 8n..8n+7.  Reading it
+    big-endian is what made the media-mode flag look like 0x00 for a whole run
+    while the firmware was acting on a set bit 1 - see NXS_SD_READINESS.md.
+    """
+    return (word >> (8 * (address & 3))) & 0xFF
+
+
 def sample(monitor: socket.socket) -> dict:
     mode_state = read_words(monitor, MODE_STATE, 1)[0]
     table_entry = read_words(monitor, TABLE_ENTRY, 1)[0]
@@ -92,7 +102,7 @@ def sample(monitor: socket.socket) -> dict:
     device = read_words(monitor, DEVICE_POINTER, 1)[0]
     info1 = read_words(monitor, SDHI_INFO1 & ~3, 1)[0]
     flags_word = read_words(monitor, FLAGS_BYTE & ~3, 1)[0]
-    flags = (flags_word >> (8 * (3 - (FLAGS_BYTE & 3)))) & 0xFF
+    flags = byte_of(flags_word, FLAGS_BYTE)
 
     media_mode = 1 if mode_state in (4, 5) else fallback
     arms = {
@@ -113,8 +123,7 @@ def sample(monitor: socket.socket) -> dict:
     if 0x04000000 <= device < 0x05000000:
         result["callback"] = read_words(monitor, device + 0x1C, 1)[0]
         status_word = read_words(monitor, (device + 0x66) & ~3, 1)[0]
-        shift = 8 * (3 - ((device + 0x66) & 3))
-        result["status_byte"] = (status_word >> shift) & 0xFF
+        result["status_byte"] = byte_of(status_word, device + 0x66)
         result["status_bit40_set"] = bool(result["status_byte"] & 0x40)
     return result
 
