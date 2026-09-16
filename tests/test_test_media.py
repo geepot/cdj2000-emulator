@@ -25,6 +25,18 @@ def test_invalid_insert_schedule_fails_before_launch(monkeypatch, extra):
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize('limit', ['0', '-1', '10000001'])
+def test_invalid_dsp_tx_capture_limit_fails_before_launch(monkeypatch, limit):
+    from tools.cdj_main import nxs_vm
+    monkeypatch.setattr(nxs_vm.sys, 'argv', [
+        'nxs_vm', 'unused-run', '--capture-dsp-tx-records', limit])
+    monkeypatch.setattr(nxs_vm.subprocess, 'Popen',
+                        lambda *args, **kwargs: pytest.fail('must not launch'))
+    with pytest.raises(SystemExit) as error:
+        nxs_vm.main()
+    assert error.value.code == 2
+
+
 def test_generated_wav_is_stereo_pcm_and_low_level(tmp_path):
     track = tmp_path / 'test.wav'
     test_media.write_track(track)

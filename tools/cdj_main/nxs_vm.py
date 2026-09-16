@@ -598,6 +598,8 @@ def main():
                         help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
     parser.add_argument('--capture-dsp-tx', action='store_true',
                         help='capture genuine XBUF words consumed by coarse McASP slot progression')
+    parser.add_argument('--capture-dsp-tx-records', type=int, default=65536,
+                        help='maximum DSP XBUF JSON records to retain (default: 65536)')
     parser.add_argument('--deferred-dsp-scheduling', action='store_true',
                         help='opt into diagnostic 4096-step deferred DSP scheduling (not timing evidence)')
     args = parser.parse_args()
@@ -610,6 +612,8 @@ def main():
         parser.error('--timestamp-run cannot be combined with a positional run directory')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
+    if not 1 <= args.capture_dsp_tx_records <= 10000000:
+        parser.error('--capture-dsp-tx-records must be 1..10000000')
     if args.gui_link is not None:
         host, _, port = args.gui_link.partition(':')
         if not host or not port.isdigit() or not 1024 <= int(port) <= 65535:
@@ -795,6 +799,7 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
+        main_env['CDJ_NXS_DSP_TX_CAPTURE_LIMIT'] = str(args.capture_dsp_tx_records)
     # Genuine NXS validation must transport the firmware's bytes unchanged, so
     # both board-side aids stay off by default. They are not optional for one
     # job, though: RUNNING.md measures the card's library reaching the screen in

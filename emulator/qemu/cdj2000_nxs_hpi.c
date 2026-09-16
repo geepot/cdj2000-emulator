@@ -79,6 +79,7 @@ typedef struct {
     FILE *tx_capture;
     char *tx_capture_path;
     uint64_t tx_capture_sequence;
+    uint64_t tx_capture_limit;
     bool tx_capture_failed;
 } NxsHpi;
 static NxsHpi *nxs_hpi;
@@ -574,8 +575,15 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                         ok = false;
                         break;
                     }
+                    if (s->tx_capture_sequence >= s->tx_capture_limit) {
+                        info_report("nxs-hpi: DSP transmit capture reached bounded limit of %" PRIu64 " records",
+                                    s->tx_capture_limit);
+                        fclose(s->tx_capture);
+                        s->tx_capture = NULL;
+                        break;
+                    }
                 }
-                if (!ok) break;
+                if (!ok || !s->tx_capture) break;
             }
         }
     }
@@ -1007,6 +1015,19 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     s->functional_audio = audio && !strcmp(audio, "1");
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {
+        const char *limit_text = getenv("CDJ_NXS_DSP_TX_CAPTURE_LIMIT");
+        char *limit_end = NULL;
+        s->tx_capture_limit = 65536;
+        if (limit_text && *limit_text) {
+            errno = 0;
+            uint64_t limit = g_ascii_strtoull(limit_text, &limit_end, 10);
+            if (errno || !limit || !limit_end || *limit_end) {
+                error_report("nxs-hpi: invalid DSP transmit capture limit %s",
+                             limit_text);
+                exit(EXIT_FAILURE);
+            }
+            s->tx_capture_limit = limit;
+        }
         s->tx_capture_path = g_strdup(tx_path);
         s->tx_capture = fopen(s->tx_capture_path, "wb");
         if (!s->tx_capture) {
