@@ -174,7 +174,8 @@ def legacy_dsp_budget(fast: bool, requested: int | None) -> int:
 
 
 def send_source_key_when_ready(run: Path, source: str, contact: tuple[int, int],
-                               hold_ms: int, stop: threading.Event,
+                               hold_ms: int, settle_seconds: float,
+                               stop: threading.Event,
                                result_path: Path) -> None:
     """Press a media source after its QMP readiness predicate becomes true.
 
@@ -207,6 +208,12 @@ def send_source_key_when_ready(run: Path, source: str, contact: tuple[int, int],
             result.update(outcome='error', error=last_error or
                           'media readiness did not become true')
         else:
+            result['settle_seconds'] = settle_seconds
+            if stop.wait(settle_seconds):
+                result.update(outcome='cancelled')
+                result_path.write_text(json.dumps(result, indent=2,
+                                                  sort_keys=True) + '\n')
+                return
             endpoint = json.loads((run / 'run.json').read_text())['endpoints']
             host = endpoint.get('panel_host', '127.0.0.1')
             port = endpoint['panel_port']
@@ -628,6 +635,9 @@ def main():
                         help='with --debug, wait for the selected SD/USB '
                              'source readiness predicate over QMP, then send '
                              'one panel press; avoids virtual-time retry delays')
+    parser.add_argument('--source-key-ready-delay', type=float, default=0,
+                        help='host seconds to settle after readiness before the '
+                             'source press (0..30; default: 0)')
     parser.add_argument('--source-key-retries', type=int, default=0,
                         help='repeat the source press this many times while '
                              'media manager settles (0 keeps one press)')
@@ -717,6 +727,11 @@ def main():
         parser.error('--source-key-when-ready cannot be combined with --source-key-at')
     if args.source_key_when_ready and args.source_key_retries:
         parser.error('--source-key-when-ready cannot be combined with --source-key-retries')
+    if (not math.isfinite(args.source_key_ready_delay) or
+            not 0 <= args.source_key_ready_delay <= 30):
+        parser.error('--source-key-ready-delay must be finite and within 0..30 seconds')
+    if args.source_key_ready_delay and not args.source_key_when_ready:
+        parser.error('--source-key-ready-delay requires --source-key-when-ready')
     if not math.isfinite(args.frame_interval) or args.frame_interval < 0:
         parser.error('--frame-interval must be finite and nonnegative')
     run = automatic_run_path() if args.timestamp_run or args.run is None else (ROOT / args.run).resolve()
@@ -942,6 +957,8 @@ def main():
                    panel_key_hold_ms=main_env.get('CDJ_PANEL_HOLD_MS'),
                    panel_key_strategy=('qmp-readiness' if args.source_key_when_ready
                                         else 'virtual-time schedule'),
+                   panel_key_readiness_settle_seconds=(args.source_key_ready_delay
+                                                       if args.source_key_when_ready else None),
                    panel_key_readiness_file=('source-key-ready.json'
                                              if args.source_key_when_ready else None),
                    writes='temporary QEMU snapshot overlays; discarded at exit',
@@ -1024,6 +1041,7 @@ def main():
                 source_worker = threading.Thread(
                     target=send_source_key_when_ready,
                     args=(run, source_key, contact, args.panel_hold_ms,
+                          args.source_key_ready_delay,
                           source_worker_stop, run / 'source-key-ready.json'),
                     name='nxs-source-key-readiness', daemon=True)
                 source_worker.start()
