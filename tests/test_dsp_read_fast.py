@@ -14,6 +14,8 @@ def test_dsp_ram_and_peripheral_dispatch(tmp_path):
         pytest.skip('requires C compiler')
     directory = ROOT / 'emulator/qemu'
     source = (directory / 'cdj2000_nxs_hpi.c').read_text()
+    assert 'cdj_dsp_checkpoint_write_with_l1d(' in source
+    assert 's->shared_ram, SHARED_RAM_SIZE, s->l1d, sizeof(s->l1d)' in source
     # Only QEMU's unused enclosing register/timer types need stand-ins.
     prefix = source[source.index('#include "cdj_c674x.h"'):source.index('static NxsHpi *nxs_hpi;')]
     start = source.index('static bool dsp_read(')
@@ -31,6 +33,12 @@ typedef int MemoryRegion;
 typedef int QEMUTimer;
 static uint32_t ldl_le_p(const uint8_t *p)
 { return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+static void stw_le_p(uint8_t *p, uint16_t v) { p[0] = v; p[1] = v >> 8; }
+static void stl_le_p(uint8_t *p, uint32_t v)
+{ stw_le_p(p, v); stw_le_p(p + 2, v >> 16); }
+static void stq_le_p(uint8_t *p, uint64_t v)
+{ stl_le_p(p, v); stl_le_p(p + 4, v >> 32); }
+#define info_report(...) ((void)0)
 '''
     checks = r'''
 static void check_ram(NxsHpi *s, uint32_t base, uint32_t size, uint8_t *bytes)
@@ -54,6 +62,31 @@ int main(void)
     check_ram(s, 0x00800000, L2_SIZE, s->l2);
     check_ram(s, SHARED_RAM_BASE, SHARED_RAM_SIZE, s->shared_ram);
     uint32_t value = 0;
+    cdj_c6747_cache_reset(&s->cache);
+    assert(!dsp_read(s, 0x00f00000, &value));
+    assert(!host_memory(s, 0x11f00000));
+    assert(!dsp_memory_span(s, 0x00f00000, 4));
+    assert(cdj_c6747_cache_write(&s->cache, CDJ_C6747_CACHE_BASE + 0x40,
+                                 3, 4, true));
+    s->l1d[0] = 0x78; s->l1d[1] = 0x56;
+    assert(dsp_read(s, 0x00f00000, &value) && value == 0x5678);
+    assert(dsp_read(s, 0x11f00000, &value) && value == 0x5678);
+    assert(host_memory(s, 0x11f00000) == s->l1d);
+    assert(dsp_memory_span(s, 0x00f00000, 0x4000) == s->l1d);
+    assert(dsp_memory_span(s, 0x11f00000, 0x4000) == s->l1d);
+    assert(!dsp_memory_span(s, 0x00f04000, 1));
+    assert(!dsp_memory_span(s, 0x11f04000, 1));
+    assert(!host_memory(s, 0x00f00000));
+    assert(dsp_l1d_write(s, 0x00f00004, UINT64_C(0x1122334455667788),
+                     8, false));
+    assert(!s->l1d[4]);
+    assert(dsp_l1d_write(s, 0x00f00004, UINT64_C(0x1122334455667788),
+                     8, true));
+    assert(dsp_read(s, 0x11f00004, &value) && value == 0x55667788);
+    assert(dsp_read(s, 0x00f00008, &value) && value == 0x11223344);
+    assert(dsp_l1d_write(s, 0x11f00003, 0xa5, 1, true));
+    assert(s->l1d[3] == 0xa5);
+    assert(!dsp_l1d_write(s, 0x00f03ffc, 0, 8, true));
     cdj_c6747_emifb_reset(&s->emifb);
     assert(cdj_c6747_emifb_sdram_enabled(&s->emifb));
     s->sdram[0] = 0x12; s->sdram[SDRAM_SIZE - 1] = 0x34;

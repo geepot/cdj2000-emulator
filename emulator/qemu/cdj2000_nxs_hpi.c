@@ -42,6 +42,7 @@
 typedef struct {
     MemoryRegion registers;
     uint8_t l2[L2_SIZE];
+    uint8_t l1d[CDJ_DSP_L1D_SIZE];
     uint32_t address;
     CdjC6747Hpi hpi;
     bool reset_released, dsp_started, dsp_halted, dsp_running;
@@ -154,9 +155,10 @@ static bool capture_checkpoint(NxsHpi *s, const char *reason)
                                              state.checkpoint_sequence);
     g_autofree char *path = g_build_filename(directory, name, NULL);
     char error[160] = {0};
-    if (!cdj_dsp_checkpoint_write(path, &state, s->l2, sizeof(s->l2),
-                                  s->shared_ram, SHARED_RAM_SIZE,
-                                  s->sdram, SDRAM_SIZE, error, sizeof(error))) {
+    if (!cdj_dsp_checkpoint_write_with_l1d(
+            path, &state, s->l2, sizeof(s->l2),
+            s->shared_ram, SHARED_RAM_SIZE, s->l1d, sizeof(s->l1d),
+            s->sdram, SDRAM_SIZE, error, sizeof(error))) {
         error_report("nxs-hpi: checkpoint failed: %s", error);
         return false;
     }
@@ -213,6 +215,10 @@ void cdj_nxs_hpi_reset_line(bool released)
         cdj_c6747_spi_transfer_reset(&s->spi_transfer);
         cdj_wm8740_reset(&s->wm8740);
         cdj_c6747_cache_reset(&s->cache);
+        /* SRAM contents are undefined across external reset.  Clear the
+         * functional backing store so a later SRAM partition cannot expose
+         * bytes retained from the preceding DSP lifetime. */
+        memset(s->l1d, 0, sizeof(s->l1d));
         cdj_c6747_edma_reset(&s->edma);
         cdj_c6747_mcasp_reset(&s->mcasp);
         cdj_c6747_mcasp_control_reset(&s->mcasp_control);
@@ -258,6 +264,10 @@ void cdj_nxs_hpi_boot_phase(unsigned phase)
 
 static uint8_t *host_memory(NxsHpi *s, uint32_t address)
 {
+    uint32_t l1d_offset;
+    if (address >= 0x11f00000u &&
+        cdj_c6747_l1d_sram_span(&s->cache, address, 4, &l1d_offset))
+        return s->l1d + l1d_offset;
     if (address >= L2_BASE && address <= L2_BASE + L2_SIZE - 4)
         return s->l2 + address - L2_BASE;
     if (address >= SHARED_RAM_BASE &&
@@ -282,6 +292,12 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     /* RAM and its local L2 alias do not overlap any peripheral window.
      * Instruction fetches dominate reads: avoid probing every MMIO device.
      * Keep SDRAM's dynamic enable gate and all alignment checks. */
+    uint32_t l1d_offset;
+    if (!(address & 3) && cdj_c6747_l1d_sram_span(
+            &s->cache, address, 4, &l1d_offset)) {
+        *value = ldl_le_p(s->l1d + l1d_offset);
+        return true;
+    }
     if (!(address & 3) && address >= SHARED_RAM_BASE &&
         address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4) {
         *value = ldl_le_p(s->shared_ram + address - SHARED_RAM_BASE);
@@ -329,6 +345,9 @@ static uint8_t *dsp_memory_span(NxsHpi *s, uint32_t address, size_t size)
 {
     uint64_t end = (uint64_t)address + size;
     if (!size || end > UINT64_C(0x100000000)) return NULL;
+    uint32_t l1d_offset;
+    if (cdj_c6747_l1d_sram_span(&s->cache, address, size, &l1d_offset))
+        return s->l1d + l1d_offset;
     if (address >= L2_BASE && end <= (uint64_t)L2_BASE + L2_SIZE)
         return s->l2 + address - L2_BASE;
     if (address >= 0x00800000u &&
@@ -342,6 +361,23 @@ static uint8_t *dsp_memory_span(NxsHpi *s, uint32_t address, size_t size)
                                     &sdram_offset))
         return s->sdram + sdram_offset;
     return NULL;
+}
+
+static bool dsp_l1d_write(NxsHpi *s, uint32_t address, uint64_t value,
+                          unsigned size, bool commit)
+{
+    uint32_t offset;
+    if ((size != 1 && size != 2 && size != 4 && size != 8) ||
+        !cdj_c6747_l1d_sram_span(&s->cache, address, size, &offset))
+        return false;
+    if (commit) {
+        uint8_t *target = s->l1d + offset;
+        if (size == 8) stq_le_p(target, value);
+        else if (size == 1) *target = value;
+        else if (size == 2) stw_le_p(target, value);
+        else stl_le_p(target, value);
+    }
+    return true;
 }
 
 typedef struct {
@@ -570,6 +606,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     NxsHpi *s = opaque;
+    if (dsp_l1d_write(s, address, value, size, commit)) return true;
     if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
         cdj_c6747_pll_write_mapped(address, size)) {
         if (commit) info_report("nxs-pll: locked write ignored address=%#x value=%#x",
