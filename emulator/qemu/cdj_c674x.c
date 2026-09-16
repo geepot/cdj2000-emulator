@@ -1781,6 +1781,11 @@ static bool arm_mvc_read(CdjC674xArm *x)
         return stop(x->cpu, x->pc, x->insn->word,
                     "control register read not implemented");
     x->value = cdj_c674x_control_read(x->cpu, x->b);
+    /* SPRUFE8B 2.9.14.4: reading TSCL snapshots the simultaneously observed
+     * high half into TSCH. Keep it in the transactional copy so a later
+     * packet rejection, or a false predicate, has no architectural effect. */
+    if (x->enabled && x->b == 10)
+        x->out->control[16] = (uint32_t)(cdj_c674x_timestamp(x->cpu) >> 32);
     return true;
 }
 
@@ -4128,6 +4133,14 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 out.control[dst] = value & 0x07ff07ffu;
             } else if (dst == 21) {
                 out.control[21] = value & 0x3fu;
+            } else if (dst == 10) {
+                /* SPRUFE8B 2.9.14.1-.3, printed page 56: reset clears the
+                 * counter and disables it; writing TSCL enables it, the value
+                 * is ignored, counting starts in the following cycle, and
+                 * once enabled it cannot be disabled under program control.
+                 * Therefore a later write has no counter state to change. */
+                if (out.control_ready[16] == 0)
+                    out.control_ready[16] = cpu->cycles + 1u;
             } else if (dst == 4) {
                 /* Reset remains enabled. NMIE can be set by MVC but not
                  * manually cleared; maskable enables are ordinary RW bits. */

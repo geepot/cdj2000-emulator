@@ -299,6 +299,12 @@ static void exhaustive_round_trip(const char *path)
         restored_sdram, sizeof(restored_sdram), error, sizeof(error)));
     /* One comparison over every byte, padding included. */
     assert(memcmp(&before, &after, sizeof(before)) == 0);
+    /* TSCL enable origin and the TSCH snapshot intentionally reuse existing
+     * ABI fields, so schema 12 round-trips timestamp state without a layout
+     * or migration change. */
+    assert(after.cpu.control_ready[16] == before.cpu.control_ready[16] &&
+           after.cpu.control[16] == before.cpu.control[16] &&
+           after.cpu.control_ready[16] != 0u);
     assert(memcmp(l2, restored_l2, sizeof(l2)) == 0);
     assert(memcmp(shared_ram, restored_shared_ram, sizeof(shared_ram)) == 0);
     assert(memcmp(l1d, restored_l1d, sizeof(l1d)) == 0);

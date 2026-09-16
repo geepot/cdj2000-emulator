@@ -2,13 +2,20 @@
 /* Control-register read view and MVC reachability, SPRUFE8B July 2010.
  * Moved verbatim out of cdj_c674x.c.
  *
- * These three functions touch nothing but cpu->control[], which sits in the
- * transactional prefix of CdjC674x, so they never reach the struct tail past
- * offsetof(CdjC674x, loop).  The MVC *write* masks are not here: they also
+ * These helpers touch only the transactional prefix through control_ready[]
+ * and cycles, so they never reach the struct tail past offsetof(CdjC674x,
+ * loop).  The MVC *write* masks are not here: they also
  * update control_ready[] and post delayed IFR effects on the writeback queue,
  * so they stay with the execute packet's commit step in cdj_c674x.c.
  */
 #include "cdj_c674x_control.h"
+
+uint64_t cdj_c674x_timestamp(const CdjC674x *cpu)
+{
+    uint64_t origin = cpu->control_ready[16];
+    if (origin == 0 || cpu->cycles <= origin) return 0;
+    return cpu->cycles - origin;
+}
 
 uint32_t cdj_c674x_control_read(const CdjC674x *cpu, unsigned id)
 {
@@ -35,6 +42,10 @@ uint32_t cdj_c674x_control_read(const CdjC674x *cpu, unsigned id)
     case 6: case 7:                 /* IRP, NRP */
     case 13: case 14:               /* ILC, RILC */
         return cpu->control[id];
+    case 11:                        /* TSCH; TI dis6x 0x002c03e2 */
+        return cpu->control[16];
+    case 10:                        /* TSCL; TI dis6x 0x022803e2 */
+        return (uint32_t)cdj_c674x_timestamp(cpu);
     case 27:                        /* ITSR */
         return (cpu->control[id] & 0x0000c6deu) |
                ((cpu->control[1] >> 1) & 1u);
@@ -55,12 +66,13 @@ uint32_t cdj_c674x_control_read(const CdjC674x *cpu, unsigned id)
 bool cdj_c674x_control_read_supported(unsigned id)
 {
     return id == 0 || id == 1 || id == 2 || id == 4 || id == 5 || id == 6 || id == 7 ||
-           id == 13 || id == 14 || id == 26 || id == 27 ||
+           id == 10 || id == 11 || id == 13 || id == 14 ||
+           id == 26 || id == 27 ||
            (id >= 18 && id <= 21);
 }
 
 bool cdj_c674x_control_write_supported(unsigned id)
 {
-    return id <= 7 || id == 13 || id == 14 ||
+    return id <= 7 || id == 10 || id == 13 || id == 14 ||
            id == 26 || id == 27 || (id >= 18 && id <= 21);
 }

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "cdj_c674x.h"
+#include "cdj_c674x_control.h"
 #include "cdj_c674x_loop.h"
 static uint32_t memory[64];
 static bool read_word(void *unused, uint32_t address, uint32_t *value)
@@ -3767,5 +3768,74 @@ int main(void)
     assert(cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(!cdj_c674x_step(&c, read_word, NULL, NULL));
     assert(c.cycles == 1 && c.r[1][3] == 0 && c.branch_target == 0x1040);
-    puts("C674x sign extension, parallel reads, branch delay, NOP and atomic fault passed");
+    /* TSCL/TSCH, SPRUFE8B 2.9.14: reset-disabled, a write to TSCL starts
+     * counting on the following cycle, TSCL reads latch the high half, and
+     * the counter includes idle CPU clocks. */
+    cdj_c674x_reset(&c, 0x1000);
+    assert(cdj_c674x_control_read(&c, 10) == 0 &&
+           cdj_c674x_control_read(&c, 11) == 0);
+    c.r[1][0] = 0xdeadbeef;
+    CdjC674xPacket tsc = {.count = 1, .next_pc = 0x1004,
+        .instructions = {{.pc = 0x1000,
+            .word = (10u << 23) | 0x3a2u}}}; /* MVC B0,TSCL */
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.cycles == 1 && c.control_ready[16] == 1);
+    tsc.next_pc += 4; tsc.instructions[0].pc += 4;
+    tsc.instructions[0].word = (10u << 18) | 0x3e2u; /* MVC TSCL,B0 */
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.r[1][0] == 0 && c.cycles == 2 && c.control[16] == 0);
+    tsc.next_pc += 4; tsc.instructions[0].pc += 4;
+    tsc.instructions[0].word = (1u << 23) | (10u << 18) | 0x3e2u;
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.r[1][1] == 1 && c.cycles == 3);
+    /* A later TSCL write cannot reset or disable an enabled counter. */
+    uint64_t origin = c.control_ready[16];
+    tsc.instructions[0].word = (10u << 23) | 0x3a2u;
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.control_ready[16] == origin && cdj_c674x_timestamp(&c) == 3);
+    /* Force a low-half rollover and prove TSCH is the TSCL-time snapshot,
+     * not a live view observed by the following MVC. */
+    c.cycles = origin + (UINT64_C(1) << 32) + 7u;
+    tsc.instructions[0].word = (2u << 23) | (10u << 18) | 0x3e2u;
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.r[1][2] == 7u && c.control[16] == 1u);
+    c.cycles += UINT64_C(1) << 32;
+    tsc.instructions[0].word = (3u << 23) | (11u << 18) | 0x3e2u;
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.r[1][3] == 1u);
+    c.idle_cycles = 1;
+    uint64_t before_idle = cdj_c674x_timestamp(&c);
+    assert(cdj_c674x_step(&c, read_word, NULL, NULL));
+    assert(cdj_c674x_timestamp(&c) == before_idle + 1u);
+    /* False predicates and rejected packets cannot start or snapshot TSC. */
+    cdj_c674x_reset(&c, 0x1000);
+    tsc.instructions[0].word = (1u << 29) | (10u << 23) | 0x3a2u;
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.control_ready[16] == 0);
+    c.control_ready[16] = 1; c.cycles = UINT64_C(1) << 33;
+    c.control[16] = 0x55aa55aa; c.r[1][4] = 0x12345678;
+    tsc.instructions[0].word = (1u << 29) | (4u << 23) |
+                                (10u << 18) | 0x3e2u;
+    assert(cdj_c674x_execute(&c, &tsc, read_word, NULL, NULL));
+    assert(c.control[16] == 0x55aa55aa && c.r[1][4] == 0x12345678);
+    /* A conflicting packet cannot enable TSCL partially. */
+    cdj_c674x_reset(&c, 0x1000);
+    CdjC674xPacket rejected_enable = {.count = 2, .next_pc = 0x1010,
+        .instructions = {
+            {.pc = 0x1008, .word = (10u << 23) | 0x3a2u},
+            {.pc = 0x100c, .word = (10u << 23) | 0x3a2u}}};
+    assert(!cdj_c674x_execute(&c, &rejected_enable, read_word, NULL, NULL));
+    assert(c.control_ready[16] == 0 && c.cycles == 0);
+    c.fault = NULL;
+    c.control_ready[16] = 1; c.cycles = UINT64_C(1) << 33;
+    c.control[16] = 0x55aa55aa;
+    CdjC674xPacket rejected = {.count = 2, .next_pc = 0x1010,
+        .instructions = {
+            {.pc = 0x1008, .word = (10u << 18) | 0x3e2u},
+            {.pc = 0x100c, .word = (10u << 18) | 0x3e2u}}};
+    assert(!cdj_c674x_execute(&c, &rejected, read_word, NULL, NULL));
+    assert(c.control[16] == 0x55aa55aa &&
+           c.cycles == (UINT64_C(1) << 33));
+
+    puts("C674x sign extension, parallel reads, branch delay, NOP, TSC and atomic fault passed");
 }
