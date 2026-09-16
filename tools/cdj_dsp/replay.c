@@ -346,9 +346,9 @@ static uint8_t *host_memory(uint32_t a)
 {
     if (a >= 0x11800000 && a <= 0x1183fffc) return ram + a - 0x11800000;
     if (a >= 0x80000000 && a <= 0x8001fffc) return shared_ram + a - 0x80000000;
-    if (cdj_c6747_emifb_sdram_enabled(&emifb) &&
-        a >= 0xc0000000 && a <= 0xc1fffffc)
-        return sdram + a - 0xc0000000;
+    uint32_t offset;
+    if (cdj_c6747_emifb_sdram_offset(&emifb, a, 4, sizeof(sdram), &offset))
+        return sdram + offset;
     return NULL;
 }
 static bool read_bus(void *unused, uint32_t a, uint32_t *v)
@@ -379,9 +379,9 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
              (uint32_t)shared_ram[offset + 3] << 24;
         return true;
     }
-    if (cdj_c6747_emifb_sdram_enabled(&emifb) && !(a & 3) &&
-        a >= 0xc0000000 && a <= 0xc1fffffc) {
-        unsigned offset = a - 0xc0000000;
+    uint32_t offset;
+    if (!(a & 3) &&
+        cdj_c6747_emifb_sdram_offset(&emifb, a, 4, sizeof(sdram), &offset)) {
         *v = sdram[offset] | (uint32_t)sdram[offset + 1] << 8 |
              (uint32_t)sdram[offset + 2] << 16 | (uint32_t)sdram[offset + 3] << 24;
         return true;
@@ -403,9 +403,10 @@ static uint8_t *memory_span(uint32_t address, size_t size)
         return ram + address - 0x11800000u;
     if (address >= 0x80000000u && end <= UINT64_C(0x80020000))
         return shared_ram + address - 0x80000000u;
-    if (cdj_c6747_emifb_sdram_enabled(&emifb) &&
-        address >= 0xc0000000u && end <= UINT64_C(0xc2000000))
-        return sdram + address - 0xc0000000u;
+    uint32_t offset;
+    if (cdj_c6747_emifb_sdram_offset(&emifb, address, size, sizeof(sdram),
+                                    &offset))
+        return sdram + offset;
     return NULL;
 }
 
@@ -740,12 +741,12 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
         if (commit) for (unsigned i = 0; i < size; ++i)
             shared_ram[a - 0x80000000 + i] = v >> (8 * i);
     }
-    if (!ok && cdj_c6747_emifb_sdram_enabled(&emifb) &&
-        (size == 1 || size == 2 || size == 4 || size == 8) &&
-        a >= 0xc0000000 && a <= 0xc2000000 - size) {
+    uint32_t offset;
+    if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
+        cdj_c6747_emifb_sdram_offset(&emifb, a, size, sizeof(sdram), &offset)) {
         ok = true;
         if (commit) for (unsigned i = 0; i < size; ++i)
-            sdram[a - 0xc0000000 + i] = v >> (8 * i);
+            sdram[offset + i] = v >> (8 * i);
     }
     uint32_t physical = global(a);
     if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&

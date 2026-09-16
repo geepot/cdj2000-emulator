@@ -1,0 +1,2826 @@
+{
+  "head": "dee053908b59f9b56a60d8021fb59cda1b739353",
+  "installed_qemu_sha256": "c8959f12f353f859545d8edb7636bc3228c02d78ffb7fa0b44a0c2a12e83e6fb",
+  "blackfin_sha256": "f2456de58913620499485fee640926ef05c1207e6bc334a1233a91ababb96535",
+  "objects": [
+    {
+      "file": "qemu-system-sh4-unsigned",
+      "sha256": "c8959f12f353f859545d8edb7636bc3228c02d78ffb7fa0b44a0c2a12e83e6fb"
+    },
+    {
+      "file": "libcommon.a.p/accel_accel-common.c.o",
+      "sha256": "9617e29c6f1df0603252ab7fb3f903118ce905bfab70aaa91d75a7bd02692681"
+    },
+    {
+      "file": "libcommon.a.p/disas_sh4.c.o",
+      "sha256": "bad7c310b68711f9e0cfef05c0521eaa77a467518c38389c47b06150fa54e813"
+    },
+    {
+      "file": "libcommon.a.p/disas_disas-host.c.o",
+      "sha256": "e38d54c1a2fd1e7c3bcc0d214ddbb0e3bec3798ab25d24880eda7babfbb761ec"
+    },
+    {
+      "file": "libcommon.a.p/disas_disas-target.c.o",
+      "sha256": "c12221f1508c82c537ecf522dedb5d31184d2f180989d6b4f6039497451947a4"
+    },
+    {
+      "file": "libcommon.a.p/disas_objdump.c.o",
+      "sha256": "a972c776d7df69fd01f6b8f8c86820f1de3567a2f96d917365a578b12ebee20b"
+    },
+    {
+      "file": "libcommon.a.p/disas_disas-common.c.o",
+      "sha256": "d662916fb0b4b69e38ba68d8390520dd79906e60e0360576dd5e0cc4e69a3ff4"
+    },
+    {
+      "file": "libcommon.a.p/fpu_softfloat.c.o",
+      "sha256": "7a170733ff214481ef475a2aedc78ec9ba7d80ad690f11a1de064543ce0ffab5"
+    },
+    {
+      "file": "libcommon.a.p/plugins_loader.c.o",
+      "sha256": "f4b5c1ed27e1047833abada9c4742e568a5a1a4818bdb245d7cd17c2698cc481"
+    },
+    {
+      "file": "libcommon.a.p/hw_core_cpu-common.c.o",
+      "sha256": "78f4356142f166682ae05a0c9c9ca6765ca39e63c4888a5e96c27e0e8987a5ab"
+    },
+    {
+      "file": "libcommon.a.p/hw_core_machine-smp.c.o",
+      "sha256": "f57c1c1dcfdc31a31241e349df02080a42d237c422a4b44d067c535a03798edd"
+    },
+    {
+      "file": "libcommon.a.p/gdbstub_gdb-xml-stub.c.o",
+      "sha256": "aa21844fe52eed0360e63e57368a4c8bc1ad2f488c4eb3f55d5dac0725621a42"
+    },
+    {
+      "file": "libcommon.a.p/cpu-common.c.o",
+      "sha256": "2d3a44dfacd1a29f548ec345aa6aae5e83060d64ed2145ffac12467dd6bd73ac"
+    },
+    {
+      "file": "libcommon.a.p/page-vary-common.c.o",
+      "sha256": "59ded96a6326c982066584a4ef369219c7cf4d4561ba3ec7462580a3ce16ea21"
+    },
+    {
+      "file": "libcommon.a.p/target-info.c.o",
+      "sha256": "797d6d808df6eac521b21e9ec76cabe32bad8013dcec5a1f2e85525bcc00b045"
+    },
+    {
+      "file": "libsystem.a.p/trace_control-target.c.o",
+      "sha256": "063dea6021201a5fa1b468caa421d5796d02e794d129c6641af913b6bdfdbf2e"
+    },
+    {
+      "file": "libsystem.a.p/trace_trace-hmp-cmds.c.o",
+      "sha256": "fd5af639aab1430f16131060493f0178023db302a219637403710c9860b41438"
+    },
+    {
+      "file": "libsystem.a.p/qom_qom-hmp-cmds.c.o",
+      "sha256": "690e8982d4abc21000cfb0ee1379c03ae0d96ce7fc2b5748a11a03bc5aedb1ff"
+    },
+    {
+      "file": "libsystem.a.p/crypto_tls-cipher-suites.c.o",
+      "sha256": "24a85654cf701e6bdc842d3c858bae17b603a92521d9af5b080de344c6144490"
+    },
+    {
+      "file": "libsystem.a.p/ui_input-barrier.c.o",
+      "sha256": "c615ddd1fa3f9eb3d860517607b632364b6ed1d27f1a98797ed68a3007595db9"
+    },
+    {
+      "file": "libsystem.a.p/ui_input.c.o",
+      "sha256": "ece7d2de9b1ae9eb1c47a192023953597cd04e32c9ecdd42fca4a4f3170062c4"
+    },
+    {
+      "file": "libsystem.a.p/ui_ui-qmp-cmds.c.o",
+      "sha256": "e0d38c1404d5a72aabb385bfd584af469cc5fcae0cff4bf225b951c3e2f4e880"
+    },
+    {
+      "file": "libsystem.a.p/ui_util.c.o",
+      "sha256": "3e86c7730fafadd0574e8efd7c52425ba6052ab975f909aacb0ccb4298cb6d83"
+    },
+    {
+      "file": "libsystem.a.p/ui_ui-hmp-cmds.c.o",
+      "sha256": "e66efa75858654ea6047c37a48782e2af7236d8ad28b67020bc59ecd44087476"
+    },
+    {
+      "file": "libsystem.a.p/ui_console-vc.c.o",
+      "sha256": "c75d3d5311db08434205f764387e895b17bd76cd6c5f799d6f086f7af83b3065"
+    },
+    {
+      "file": "libsystem.a.p/ui_dbus-module.c.o",
+      "sha256": "be4afa3c4bc42038d82811c1249f339ad19370b805866f73f9e67fd347b25b57"
+    },
+    {
+      "file": "libsystem.a.p/ui_cocoa.m.o",
+      "sha256": "dd12551838db91d1345481507c0ab57777d2c6958a56fc268b9df8aae4011e07"
+    },
+    {
+      "file": "libsystem.a.p/ui_vnc-stubs.c.o",
+      "sha256": "0a6ab06697a4e29da70a8d8d5dd11cb4c0fda73377f526bc1100ed092b234818"
+    },
+    {
+      "file": "libsystem.a.p/audio_audio-hmp-cmds.c.o",
+      "sha256": "1ae8a57eb916ab98ffdfaa92269c177022e0b783e453e9b46141dde549eaadef"
+    },
+    {
+      "file": "libsystem.a.p/audio_wavcapture.c.o",
+      "sha256": "967e9fce0a9180bebee92f84244b40baad8761a18b4b2edbca47591b8b52fb8d"
+    },
+    {
+      "file": "libsystem.a.p/chardev_msmouse.c.o",
+      "sha256": "1d4cc3ed63b3ae76dae352639223d33044fccedd0023b78e04fa6303db9b41a3"
+    },
+    {
+      "file": "libsystem.a.p/chardev_wctablet.c.o",
+      "sha256": "206f86e94e3dc3d7966f77c67def33c63cece1c76513334b276d1a973e94ae4d"
+    },
+    {
+      "file": "libsystem.a.p/chardev_testdev.c.o",
+      "sha256": "07f32569268e85d569d98743cc63228994b6c9cca80e4c7cf1cb8f407bdb3b89"
+    },
+    {
+      "file": "libsystem.a.p/chardev_char-hmp-cmds.c.o",
+      "sha256": "e5bcd71bb2dc05e5797ffd1a4231ffceb326fd2db9ef56cd4ee1e427cfc8626d"
+    },
+    {
+      "file": "libsystem.a.p/fsdev_qemu-fsdev-opts.c.o",
+      "sha256": "038e0fd5f9eb973cb561ddcd0f14a5cd65e90dc7183c4e02a1328a6851c8f369"
+    },
+    {
+      "file": "libsystem.a.p/fsdev_qemu-fsdev-throttle.c.o",
+      "sha256": "45c86886e9bd18fa48bc9d0920cc6cfad77cbde0076d27796fd1b292c11ad986"
+    },
+    {
+      "file": "libsystem.a.p/fsdev_9p-iov-marshal.c.o",
+      "sha256": "35361929e02f19c270df7deb3c586ad7df328e740ca53a982b699cd80695a7b8"
+    },
+    {
+      "file": "libsystem.a.p/fsdev_9p-marshal.c.o",
+      "sha256": "cfa58ef18410f22a7857dd869066975a8ae75e37b4a01393f41f84359c45505f"
+    },
+    {
+      "file": "libsystem.a.p/fsdev_qemu-fsdev.c.o",
+      "sha256": "e099dc17784cd36e30b3180682ee27449561e99f35b2a209a47f35dcd5ec8fcf"
+    },
+    {
+      "file": "libsystem.a.p/dump_dump.c.o",
+      "sha256": "6bb4319ab2705744fc784793d3676460a09f38addfd7a3736b70378011ed916e"
+    },
+    {
+      "file": "libsystem.a.p/dump_dump-hmp-cmds.c.o",
+      "sha256": "8f532b2c3d6d17c6d417220a2359f1f8d97fca1d7f984812c47e1428c0b04b32"
+    },
+    {
+      "file": "libsystem.a.p/dump_win_dump-stubs.c.o",
+      "sha256": "7a86c94dbd8ef47b6a4ad82646b17252016b2cf667e81a991e44dc596b9445ee"
+    },
+    {
+      "file": "libsystem.a.p/accel_accel-system.c.o",
+      "sha256": "c3e6278387db56268b6da71594007b2823a652ae7d3cdf951f2a006395ac1fa0"
+    },
+    {
+      "file": "libsystem.a.p/accel_accel-blocker.c.o",
+      "sha256": "bc80d28eb5564d2cc08e2a371596fd4a71216a94b837310cc19433fa90348712"
+    },
+    {
+      "file": "libsystem.a.p/accel_accel-qmp.c.o",
+      "sha256": "444b764643f1051a4735c565f2cbdb29635b36f316eb70ef6aa80bfd61477306"
+    },
+    {
+      "file": "libsystem.a.p/accel_accel-irq.c.o",
+      "sha256": "8997c386bc4aadcd44c050e41024d280688be783b4a40b08112f424559a8c370"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_cpu-exec.c.o",
+      "sha256": "e5bc39bbb18459175c9763943d12370170606457f949d15ba0f05b35d5760b57"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_cpu-exec-common.c.o",
+      "sha256": "48e7509f6eac0f9256e124c0c0f8cd63141a2ea24ff58648ae95281894230cc0"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-runtime.c.o",
+      "sha256": "c793ebf56035ab41233f90e323c67f468ed87f1264cadb1db5eb80506c285305"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-runtime-gvec.c.o",
+      "sha256": "cf1a73c7ff0a8b62b5929d060ad419ddf59ac1a6aec1ceb32056da126c69958a"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tb-maint.c.o",
+      "sha256": "5bc2a7151c7644a2d42d450955cf458e2fb1466c624865ff98d1f782ac8a43e7"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-all.c.o",
+      "sha256": "1ca421356367e7a83b51d717510e04e5bed053c355f648953d5785bb4cdb3d8e"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-stats.c.o",
+      "sha256": "ba3a1d391f32831bf3829302cc6a0ea3463737ab4faa0e30ac4bfe07a3c380dd"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_translate-all.c.o",
+      "sha256": "09f7a84650aa5f3c8edf81bda230e674aa1977a3b6f4c2a563708a296017ab5a"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_translator.c.o",
+      "sha256": "898aadc7bd35e8100021d419fc6f629c7de31248ad94cc70d35defbe924f1979"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_plugin-gen.c.o",
+      "sha256": "7ef6b46091b497166ee03a0691c0d28eb340ea00309bf498f615e5e5a1bda447"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_cputlb.c.o",
+      "sha256": "b89ddaffe9641c5c3b3bad1693661d75d0375fe951232c93762cf8954e84b57a"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_icount-common.c.o",
+      "sha256": "2faa01ad1163da2e401c1463ce1f446ebd2264d271fe3deed6ac7d427a418ff4"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_monitor.c.o",
+      "sha256": "000c807ece6aa93e6b48647fc599a5c5d193a8ba0c22112df0ffe3bc8f2741d5"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-accel-ops.c.o",
+      "sha256": "cd20e71eff43d29014ab29198b594de330c5eb42f4a73d0719501594384556b5"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-accel-ops-icount.c.o",
+      "sha256": "58fa5eea33322438d1affeddc95f46133f6cf217f571e1a76eb85c5afbb98827"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-accel-ops-mttcg.c.o",
+      "sha256": "86d513cbe292797fb66325770d325633057d37e500f47d27e898891099bc8fe2"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_tcg-accel-ops-rr.c.o",
+      "sha256": "69e59bc0decda825161b8c2a8cc08c61e61a016636c9bc71bd12735bbabff0aa"
+    },
+    {
+      "file": "libsystem.a.p/accel_tcg_watchpoint.c.o",
+      "sha256": "7c71b4df04a9c2e97ed24529e79b6700615f8f94d854c91a35cab6acc1cbe069"
+    },
+    {
+      "file": "libsystem.a.p/accel_dummy-cpus.c.o",
+      "sha256": "500428490d9ad4e53dc432567df33c77a00ac3666f60b2e5dad48e6a794e9cd8"
+    },
+    {
+      "file": "libsystem.a.p/backends_cryptodev-builtin.c.o",
+      "sha256": "2ae4bc4a545c5504483f0da8a574160857811ccc20e65d7b0657056bff02996e"
+    },
+    {
+      "file": "libsystem.a.p/backends_cryptodev.c.o",
+      "sha256": "319e08bb36defb7eb27e40bdd0ca57f6878ed1a8e0c37532906cbf651c961e5d"
+    },
+    {
+      "file": "libsystem.a.p/backends_hostmem-ram.c.o",
+      "sha256": "29b30217de3e5aa1adce32684619e7f653261be25fdda20e40874be05fd3d3fd"
+    },
+    {
+      "file": "libsystem.a.p/backends_hostmem.c.o",
+      "sha256": "ca1f3f8e5e285c659871bc695c9564d4d5d265741aee2482b1ea85b9844747c2"
+    },
+    {
+      "file": "libsystem.a.p/backends_rng-builtin.c.o",
+      "sha256": "8562cf585fc6142e01dcafd8e371fa355272b4c27bcf916b688205a1ad2d88a1"
+    },
+    {
+      "file": "libsystem.a.p/backends_rng-egd.c.o",
+      "sha256": "f768207a72de7dc6e7f85e72948bf754e89af5f94963f43160cb42b572e7fac9"
+    },
+    {
+      "file": "libsystem.a.p/backends_rng.c.o",
+      "sha256": "e0e3c8e5ce7ff11072e1c9373167c43d0379b9bd6e84955d8f5c10ec7afad956"
+    },
+    {
+      "file": "libsystem.a.p/backends_confidential-guest-support.c.o",
+      "sha256": "d744248bcd7df9424b80477f500bf80759e7ce8f8dfe66f662f72a1377fa5b27"
+    },
+    {
+      "file": "libsystem.a.p/backends_cryptodev-hmp-cmds.c.o",
+      "sha256": "31922a63e96e114cad7e96c7f8d336923fae0479cf4c30007961de4e2618f6cf"
+    },
+    {
+      "file": "libsystem.a.p/backends_rng-random.c.o",
+      "sha256": "7b3f679d74e875326d7b9d8c50774f6bf9b8f86e9b470ff349f4fef7843caf9a"
+    },
+    {
+      "file": "libsystem.a.p/backends_hostmem-file.c.o",
+      "sha256": "5d113be90d6044b2abdee673f0d4a722608fe61a7115d091588c839faa787659"
+    },
+    {
+      "file": "libsystem.a.p/backends_hostmem-shm.c.o",
+      "sha256": "f7290be51cc6e4deb2ce157e4b448517b989cf115e1c0a794eee5721a71b89a0"
+    },
+    {
+      "file": "libsystem.a.p/backends_cryptodev-vhost.c.o",
+      "sha256": "addc5406157da99f0eb62fba2e4cdf8f68b1d51391e6cde893a416adb6aa5e34"
+    },
+    {
+      "file": "libsystem.a.p/backends_dbus-vmstate.c.o",
+      "sha256": "b9604e1356f85ce21d10b882d269c6284eb50cb1cb02a0a2ed8fc73a3a844a9b"
+    },
+    {
+      "file": "libsystem.a.p/backends_spdm-socket.c.o",
+      "sha256": "4d75e2df49e6e56c06fcc42e835470dc8287f9f9284725e69b8fbef69807727a"
+    },
+    {
+      "file": "libsystem.a.p/backends_tpm_tpm_backend.c.o",
+      "sha256": "e0404511ed1ac761d7fce33453d2f9175a204ae5a6208c68f92a9d55661ec252"
+    },
+    {
+      "file": "libsystem.a.p/backends_tpm_tpm_util.c.o",
+      "sha256": "28f672cde4f4ea934613d2146391a07ba4bdf91e60a3d83257a1e7d2c2f5bab5"
+    },
+    {
+      "file": "libsystem.a.p/disas_disas-mon.c.o",
+      "sha256": "e2100587e4576602c542232026bf9f8fd2bf57eb0e60330afcedfa861cfbd43e"
+    },
+    {
+      "file": "libsystem.a.p/migration_block-dirty-bitmap.c.o",
+      "sha256": "610a8381127b211066399bb311fed88a2db2283ae6ac9983260fff7d6f7184bb"
+    },
+    {
+      "file": "libsystem.a.p/migration_block-active.c.o",
+      "sha256": "9945530cb0eb280d07faaf274e61c4f62e371fa06d3af7c1ff75b40517c30741"
+    },
+    {
+      "file": "libsystem.a.p/migration_channel.c.o",
+      "sha256": "008a485174b3364fb49bfe2651bbecc0d943c7d9182b1e30592e7c261fd4e09d"
+    },
+    {
+      "file": "libsystem.a.p/migration_channel-block.c.o",
+      "sha256": "e7d594e64cceebaed0b3fc0e80cc95295121ed3106e10f61e89d6a758fe10f25"
+    },
+    {
+      "file": "libsystem.a.p/migration_cpr.c.o",
+      "sha256": "ead7bd57fe7df993e55612686d94dc2029eddcd83a441b582222e32508995bf5"
+    },
+    {
+      "file": "libsystem.a.p/migration_cpr-transfer.c.o",
+      "sha256": "044673278a47d961515436ffe1b87cc647249e63d9256e341e836d9fd8c876ba"
+    },
+    {
+      "file": "libsystem.a.p/migration_cpr-exec.c.o",
+      "sha256": "93fe8fa20924ea04fa272d87228ced871d1fdc215d502c0ab5eaabd9a813c198"
+    },
+    {
+      "file": "libsystem.a.p/migration_cpu-throttle.c.o",
+      "sha256": "6c71bc2343608b0f7853121a99af986c7964315c059e6e4836fc51681dd31f4d"
+    },
+    {
+      "file": "libsystem.a.p/migration_dirtyrate.c.o",
+      "sha256": "34a9ba559f649609f741e7a624a58e16c037a0e8fe64ce3c43ca642785f0ba92"
+    },
+    {
+      "file": "libsystem.a.p/migration_exec.c.o",
+      "sha256": "4af13056106f96c103bfe3667bdfec04b1c44f9fe510b972c0d41a5fdfe51a43"
+    },
+    {
+      "file": "libsystem.a.p/migration_fd.c.o",
+      "sha256": "146566c469557297111f45a7cc148fc35b5c23cd6dcbff049067afd9226dc6b6"
+    },
+    {
+      "file": "libsystem.a.p/migration_file.c.o",
+      "sha256": "937b5307147fba53c041bde288831f3184d473221e50f9aff617c9d65ce52022"
+    },
+    {
+      "file": "libsystem.a.p/migration_global_state.c.o",
+      "sha256": "a1121e01ca41f9ace9c24e66cd788e890ec6d96fd4b18b612481f5d27083e7da"
+    },
+    {
+      "file": "libsystem.a.p/migration_migration.c.o",
+      "sha256": "f9916a06ebbca2880f73581f5649c171925592e1d2c049cba081a445362a0f10"
+    },
+    {
+      "file": "libsystem.a.p/migration_multifd.c.o",
+      "sha256": "67e6250bf9dc57b6aed7df46f27bad2bd7fcdc72973ccf566eac55bb394bbae5"
+    },
+    {
+      "file": "libsystem.a.p/migration_multifd-device-state.c.o",
+      "sha256": "902020cab415ef42dd580b03f3984c784deb82b1c50e6782d41511b377c1b5d7"
+    },
+    {
+      "file": "libsystem.a.p/migration_multifd-nocomp.c.o",
+      "sha256": "37dddba1210d467a32e71dcc8c9740b31c1183a488501e15baaa987e9398d179"
+    },
+    {
+      "file": "libsystem.a.p/migration_multifd-zlib.c.o",
+      "sha256": "51262c17b451b4a7862b1781eb89d4ef8d6f3b77646e161e2f31e6ea9f414264"
+    },
+    {
+      "file": "libsystem.a.p/migration_multifd-zero-page.c.o",
+      "sha256": "310521d938272345a82e2a9a06a8de9ad39e21acea908e1bac7c5325d2420dcb"
+    },
+    {
+      "file": "libsystem.a.p/migration_options.c.o",
+      "sha256": "75125841e930983a7084a638899fb488021afc25a12e06e1f3a4088b0d6ac972"
+    },
+    {
+      "file": "libsystem.a.p/migration_postcopy-ram.c.o",
+      "sha256": "384c6e9849a09c0de149982347bda6a9b8bfc2b43ad7c513121fc6c4e3309129"
+    },
+    {
+      "file": "libsystem.a.p/migration_ram.c.o",
+      "sha256": "a0b085848c2e7c355be254bbb714b29a15856998b2b1c9eff749d01b3a87c364"
+    },
+    {
+      "file": "libsystem.a.p/migration_savevm.c.o",
+      "sha256": "55324f24df774d0a6169bb8e8264af334b01b78d5318aac13bfa0d7df1013aa3"
+    },
+    {
+      "file": "libsystem.a.p/migration_socket.c.o",
+      "sha256": "7c0061223317b0683216fe2b6d63ef770bd2686bfe718304dc78f781b61ae87d"
+    },
+    {
+      "file": "libsystem.a.p/migration_tls.c.o",
+      "sha256": "e1efb1c49ea25eb2a787d9d28cc383a406647ec83259f290c50a2478cab1225f"
+    },
+    {
+      "file": "libsystem.a.p/migration_migration-hmp-cmds.c.o",
+      "sha256": "4d979500a46b50c676868072d4976cc103632e1ff3b637d5dfbd11079c1119cb"
+    },
+    {
+      "file": "libsystem.a.p/migration_colo-failover.c.o",
+      "sha256": "5a06f3ed2d69d321fefd2632b0286db952e50ae507226bf4eae47b522c39c541"
+    },
+    {
+      "file": "libsystem.a.p/migration_colo.c.o",
+      "sha256": "9f1332bbff41c4caad68b14af5acdc78884ff966ab226d339327aaa76c77ba5f"
+    },
+    {
+      "file": "libsystem.a.p/migration_multifd-colo.c.o",
+      "sha256": "fc63c91a886092b2d20e938ae8600cddef00e0517c30275eb587e7d5795dbdb4"
+    },
+    {
+      "file": "libsystem.a.p/migration_multifd-zstd.c.o",
+      "sha256": "861d303e8006d64c4dae8270ca5addafc7d557d5288e4dcda3d5cbf23d57be54"
+    },
+    {
+      "file": "libsystem.a.p/monitor_fds.c.o",
+      "sha256": "63fcffa573476930d5ed2a7c5bc1ddcc5a3b4a97bc5406b9d2503d46b908027e"
+    },
+    {
+      "file": "libsystem.a.p/monitor_qemu-config-qmp.c.o",
+      "sha256": "ddf699fad5b65db8abe617dd1b21c398ecbfc058c4cd6d0fbe024c0ef7f935e4"
+    },
+    {
+      "file": "libsystem.a.p/monitor_qmp-cmds.c.o",
+      "sha256": "0e12ef95e451cdf852aef60a749e4e18aa484d8b3c81a437918c7d6977c61294"
+    },
+    {
+      "file": "libsystem.a.p/monitor_hmp-cmds.c.o",
+      "sha256": "c88b7cd21a1c5c4db2f104569dc8dcfa32e2629d702a7b40a94f57b40c3816c0"
+    },
+    {
+      "file": "libsystem.a.p/monitor_hmp.c.o",
+      "sha256": "961f58b5c5a8c42598652468c98f158b92f95bf8bda3122e0f50dea5ef1ac0a2"
+    },
+    {
+      "file": "libsystem.a.p/net_announce.c.o",
+      "sha256": "fd28abc7213995047b5e74cb9f9e0dbe507243a5629f6f14722ce05eda05019d"
+    },
+    {
+      "file": "libsystem.a.p/net_checksum.c.o",
+      "sha256": "f67e9e903fda9bb71d654f004aff362aae77eb35a4be0040da27b924e33eb136"
+    },
+    {
+      "file": "libsystem.a.p/net_dgram.c.o",
+      "sha256": "92dd69ac9f2d9f6d4f6d6883c03a094601e677ba83e02cc2056cf0e7e56763cb"
+    },
+    {
+      "file": "libsystem.a.p/net_dump.c.o",
+      "sha256": "10867739c4219cf55f7a23dfdbd8017fc38a552286eb672e163a136baada0881"
+    },
+    {
+      "file": "libsystem.a.p/net_eth.c.o",
+      "sha256": "6b9690c0ce292487a94fe757338539f51a70520685d7af4d0a4138f6d721c129"
+    },
+    {
+      "file": "libsystem.a.p/net_filter-buffer.c.o",
+      "sha256": "7f78617ed8be3d2aebdad628e41033fcb0f8ad0ee60d95c6f9a6d3aad4beef16"
+    },
+    {
+      "file": "libsystem.a.p/net_filter-mirror.c.o",
+      "sha256": "53cd9b10de8de8f4552de1524913206eaf93011c51c8fa02b406a4b3db75c908"
+    },
+    {
+      "file": "libsystem.a.p/net_filter.c.o",
+      "sha256": "37a1469ecb6803a4b7a0556801dffafa4bf79df8819ee92c87a1e486434d69ea"
+    },
+    {
+      "file": "libsystem.a.p/net_hub.c.o",
+      "sha256": "9d6bd61551f3f4149cdf9e91cdcccd91ff75bac3e9cef14a17a6e741f504e730"
+    },
+    {
+      "file": "libsystem.a.p/net_net.c.o",
+      "sha256": "20b7f8f2be0289d5a671e592aeb175009df26ebf149813fe78d357a6cd2dd438"
+    },
+    {
+      "file": "libsystem.a.p/net_queue.c.o",
+      "sha256": "13f42f9706a2e762233b1f21d601f4d8e0d7b99c7fca8a7063fcef132d32423e"
+    },
+    {
+      "file": "libsystem.a.p/net_socket.c.o",
+      "sha256": "74a2f9965fffbaf0816ff853f7364762a4e2d29f5ac82541698c82ea26c77a87"
+    },
+    {
+      "file": "libsystem.a.p/net_stream.c.o",
+      "sha256": "ff40cbd50793d42eba88e7795633b775fead424a9166e75123ed8c654ca627a0"
+    },
+    {
+      "file": "libsystem.a.p/net_stream_data.c.o",
+      "sha256": "f718549ad749a9545deaeb8ea44ffb80e2b550668cad3dfd8aa2587d3ddf2905"
+    },
+    {
+      "file": "libsystem.a.p/net_util.c.o",
+      "sha256": "8ce7be2a8c394516c949414ccc0414dda534744eed1365e78050986181a7159d"
+    },
+    {
+      "file": "libsystem.a.p/net_net-hmp-cmds.c.o",
+      "sha256": "8cc6b820f56a0fd97620577236b1c88ec07b5949ab1f12d7d6ca8a48e80187eb"
+    },
+    {
+      "file": "libsystem.a.p/net_colo-compare.c.o",
+      "sha256": "65191b7b54b349a9d1561c1167ea6b58d59e291809c221fc1061ffda2103beb3"
+    },
+    {
+      "file": "libsystem.a.p/net_colo.c.o",
+      "sha256": "e22f8a984646d779857cdfdaeccbbbad22683c623c3ef9b453e32b6cd1178042"
+    },
+    {
+      "file": "libsystem.a.p/net_filter-rewriter.c.o",
+      "sha256": "c1bdd666e6b3a1002a14b6949688bc58d735c2ac7fd1bcc6ab34ee055ebfb0c5"
+    },
+    {
+      "file": "libsystem.a.p/net_filter-replay.c.o",
+      "sha256": "bedc1883b1b5cfdc5699874cf66864078a709b184e9a506ab08de2e50a734d48"
+    },
+    {
+      "file": "libsystem.a.p/net_tap.c.o",
+      "sha256": "d0a26f60dd068e5ff68b8a993f7447b014c29cb23f5f5a95bdc8ffb49c4d214f"
+    },
+    {
+      "file": "libsystem.a.p/net_tap-bsd.c.o",
+      "sha256": "5ba82b26253a096fb12a7ce3e90d024eefab390bd9a7327bcd3e3795728d22e7"
+    },
+    {
+      "file": "libsystem.a.p/net_vmnet-common.m.o",
+      "sha256": "dee4361beb34eb0c3c26fef414475e44467e719066e16eae31abd72cdbc86408"
+    },
+    {
+      "file": "libsystem.a.p/net_vmnet-bridged.m.o",
+      "sha256": "9c5d2cb275eedcbd04c14c820f51f4d57d1f262524354bad4ce234ef96542d16"
+    },
+    {
+      "file": "libsystem.a.p/net_vmnet-host.c.o",
+      "sha256": "ea00fc861346be0d2f72a7f4a2d4c1e6c47127e7358f828d0da0a086df4df1ac"
+    },
+    {
+      "file": "libsystem.a.p/net_vmnet-shared.c.o",
+      "sha256": "49ec1097f9ad6c41587e2fe1d006d0c57983c153d6c247ca9f546a92990d1dd9"
+    },
+    {
+      "file": "libsystem.a.p/net_can_can_core.c.o",
+      "sha256": "cb8fbefc78fe730a8f350b9c59f96dd9a282f428d78d29b6fd983f9b45b52f4b"
+    },
+    {
+      "file": "libsystem.a.p/net_can_can_host.c.o",
+      "sha256": "2d79c97336f969c957cab758c47a006cf3fe24c08ee20b66c5a5783a2a75f99e"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay.c.o",
+      "sha256": "05b6895e47e200bc53411c322203ef5df880bef256ed5ac9c3f42f2ea65200ce"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-internal.c.o",
+      "sha256": "4462a6f35f7b24b7123c560878d420d715c4410c2b50d0124cf5b29751a5144e"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-events.c.o",
+      "sha256": "3c486fb4ad6f9d951feb324bc6f24fcde32821981b6ca7100067c56970f09def"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-time.c.o",
+      "sha256": "e544e39ab35b6c377b64b803cb140be050164dcab839073da62a8d7177443929"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-input.c.o",
+      "sha256": "50deed04bd67fecf17ecf151f9b5a3154087fdffda30d90f6b91939b826965b6"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-char.c.o",
+      "sha256": "0debfff620263db206d81eb9c5af4deeff31ea9f38c70389c96f0aed5d6af55c"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-snapshot.c.o",
+      "sha256": "ff4ce6857261383ee5e2d0f5ec269f1689084a4b9564309114331bfa9e585fed"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-net.c.o",
+      "sha256": "65316212cc1066e7f2a46f6b64f6d107719aee285f89b0e330ce1aaef0285759"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-audio.c.o",
+      "sha256": "2c5873dbd50547d3bed49ac3ed8a99f1d66c66094409e173f71bec4aa45289b2"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-random.c.o",
+      "sha256": "6c38e99248b3d616d237c60af48d1ec7c4227179cfc778a7e6cb308d97c46eea"
+    },
+    {
+      "file": "libsystem.a.p/replay_replay-debugging.c.o",
+      "sha256": "181bda07eb19c241c6e1bbf8f6ff6a59c3aa2bd381787c9b04c8567190bd113e"
+    },
+    {
+      "file": "libsystem.a.p/stats_stats-qmp-cmds.c.o",
+      "sha256": "a33c1a5d6b260e78e79b04b5017cd268288b99b7ffa2b3b7880ae98ad2fbbf09"
+    },
+    {
+      "file": "libsystem.a.p/stats_stats-hmp-cmds.c.o",
+      "sha256": "b2216514ba53f25829d565529b21a10c89a0b85a6e7f26088f26b10e9ae0fe40"
+    },
+    {
+      "file": "libsystem.a.p/tcg_optimize.c.o",
+      "sha256": "9e9a2c6eceb888fe2640303a1dbb224cbe37bdd0bda0ba8b81a547d50c15ef7d"
+    },
+    {
+      "file": "libsystem.a.p/tcg_region.c.o",
+      "sha256": "66ff1d1d44e91e03529683c3fee2bc19a16a813f880b032680a4c47c1b41aba3"
+    },
+    {
+      "file": "libsystem.a.p/tcg_tcg.c.o",
+      "sha256": "2f2591b53fea558c0afe402e7310729eae91a012204f6bd595097d1c31f00e3f"
+    },
+    {
+      "file": "libsystem.a.p/tcg_tcg-common.c.o",
+      "sha256": "35f1a60fd8bcc6e76bdd51ed2ad9d9648e7663d9239f89eb1e5167c2b8c60a17"
+    },
+    {
+      "file": "libsystem.a.p/tcg_tcg-op.c.o",
+      "sha256": "0a92793f8afa5caafa97d26896226b3724ae6053e9d0259ddf3280b94bdb19ee"
+    },
+    {
+      "file": "libsystem.a.p/tcg_tcg-op-ldst.c.o",
+      "sha256": "2d00755546d002b9607f5ec3f628a019b40dee6cda91839f7d32a54a5a6cc125"
+    },
+    {
+      "file": "libsystem.a.p/tcg_tcg-op-gvec.c.o",
+      "sha256": "38ae5460313086e76f628d1dc1e02f8278e3e4ef735ff5b349710ebf7d853b3a"
+    },
+    {
+      "file": "libsystem.a.p/tcg_tcg-op-vec.c.o",
+      "sha256": "55e8c6437b30bac0efb08a496e2e95f0d53fd6563fc32b629a3fb2ab62318f9a"
+    },
+    {
+      "file": "libsystem.a.p/plugins_system.c.o",
+      "sha256": "906ab3917196415e1236790fc698f012351cbc6202e7913ac83cd39b67b12ee6"
+    },
+    {
+      "file": "libsystem.a.p/plugins_api-system.c.o",
+      "sha256": "90417fe88a6f19446cb36ee715a14932f79f176ac272bef04908409b196b5978"
+    },
+    {
+      "file": "libsystem.a.p/plugins_api.c.o",
+      "sha256": "a2cc98ef5e0f75a7b251ae694905b621a91843c04263d8fd1314612c6ce53ea7"
+    },
+    {
+      "file": "libsystem.a.p/plugins_core.c.o",
+      "sha256": "7048bf40c65a990f56cd78972b8a89a357d6ea838aeaad61b1f0bf2d498b365a"
+    },
+    {
+      "file": "libsystem.a.p/ebpf_ebpf_rss-stub.c.o",
+      "sha256": "05c675b171f47458a3622ff3d1669308b352905679b86de95781adcc565d3302"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p-local.c.o",
+      "sha256": "c5c2bdfc2726a414254afbbec4f78adf3c04a0ab1c3cd6c26c4bad4569f480a3"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p-posix-acl.c.o",
+      "sha256": "1b35860b5081ca825fd4c11c2541cc20e6d623fb5eb326165b79fcdbfe9cc1df"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p-synth.c.o",
+      "sha256": "132451ac1af5f4e56fb73bbd0c4df20b886269068e6ce4a3746b83345d042e76"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p-util-generic.c.o",
+      "sha256": "d0ff46ed43254a90bd62d7624baa0fe79b55a926e1fc846bb435f0c0ce179b44"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p-xattr-user.c.o",
+      "sha256": "38b4b78c6039eba012a3559f029a6825652f71685fc21294b29f2962c7134a07"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p-xattr.c.o",
+      "sha256": "9056f7b79a0a1864804c61b843c10e955a71f2b170c4fad2a76f1f38f2b2165b"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p.c.o",
+      "sha256": "b2cf7ef4fd3936446d042c7dccc16d24b3e8bca613da08979d4975792f7babd1"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_codir.c.o",
+      "sha256": "f6811a60013a6beead9eda87a432fe53a523cb51414907e869bf9d893bf00510"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_cofile.c.o",
+      "sha256": "e3a5a97546c6882bd4a17f0e25cf224347112d3abd937c0574fd7b43f07c1461"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_cofs.c.o",
+      "sha256": "ae35f6066bc4b0aba4a0f3a048f7c604bf02231ef1c4785b700932eb79122d9b"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_coth.c.o",
+      "sha256": "360ed1c086b49581093f3eb32b8ec102c148720f9a16a81b49a33da5be4c4782"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_coxattr.c.o",
+      "sha256": "4a93aea9fb333155dfcdd1768c77f1a3bd4bd3b931a484131138d7323a7f812a"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_9p-util-darwin.c.o",
+      "sha256": "8996c84c3c49f3c652d9d6cec2dd7e6d9fa3b48634326b405adec05c1a6ec03f"
+    },
+    {
+      "file": "libsystem.a.p/hw_9pfs_virtio-9p-device.c.o",
+      "sha256": "b6a92145716cd0f591ec57388603b71054e8b358edcbd96e43076be12acce1a3"
+    },
+    {
+      "file": "libsystem.a.p/hw_acpi_acpi-qmp-cmds.c.o",
+      "sha256": "5539a0f5541494f52b3360bf4401d3903a4ea971ddbafb867963ec0d3593e472"
+    },
+    {
+      "file": "libsystem.a.p/hw_acpi_acpi_interface.c.o",
+      "sha256": "d4537faf08f44da751989dd0db57080e0f0282dc4824638db54764bd1c4200b9"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_model.c.o",
+      "sha256": "03918995b4f1c962e35fb2aa2deebce6235efd1d30c234a477a10529b975ce65"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_ac97.c.o",
+      "sha256": "b0b3351f97e7ff0d58418092e388dc6fabcb56daa5455bc51fac43c69c7f6f83"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_fmopl.c.o",
+      "sha256": "80121734997b783a98a1acd2867bc65ee4df1f30ad776ed3acc21844de8b7f6c"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_adlib.c.o",
+      "sha256": "b7f6081450c37abcf08fba762c0e049ecb7e5d0d7285235532678ca6bf71dd7b"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_cs4231a.c.o",
+      "sha256": "17007712a680fa5b55a1fca567e769d1d0e36ece007e612b2b1cfb0b4b7bf5db"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_es1370.c.o",
+      "sha256": "5715dd57234934df9f6ac0076c8d6fdb1f0582f7b626e751c3e0e0341d5012f4"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_gus.c.o",
+      "sha256": "5abf1d30c1e210fe6b515c4aa46613c7e5d15bbaeeb6bc2307c4d58fa562c5d3"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_gusemu_hal.c.o",
+      "sha256": "1b0bd2a06e06672c1dad92eac0129ba1ae61c44b8e1ce68a9264fa58cca4b9e9"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_gusemu_mixer.c.o",
+      "sha256": "cbfa56c6d17a0c5746f918a77349b7561f7a7a10df50d3b6560655a08e186644"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_intel-hda.c.o",
+      "sha256": "522a001fd1eab19350ba7972266c77d86775ec878be6bfe4db55cda17951ef26"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_hda-codec.c.o",
+      "sha256": "ebdb9bb6a44ddd93beaaee324fac48b7ebacce4253b1133a095b72f8a0a9dfa1"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_pcspk.c.o",
+      "sha256": "a3ed00ef08af036bb2592059b854039a97a62563120d7ae781582e2aaf7cfca1"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_sb16.c.o",
+      "sha256": "a0786ce8c4e3990b6e335635a31ee216033f6c2ee43e812e01d1c1fbebf9db59"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_virtio-snd.c.o",
+      "sha256": "586be5730caf33a946f65601579d4b72b91426a48c99203400a3def7dd919963"
+    },
+    {
+      "file": "libsystem.a.p/hw_audio_virtio-snd-pci.c.o",
+      "sha256": "4c516ff8c4ab3478fd47164ec01c96f66c0dfd80e574507247d6c73491f1199e"
+    },
+    {
+      "file": "libsystem.a.p/hw_block_block.c.o",
+      "sha256": "3b3e475de0ee05d7d503d37ef333175f387c3eff733c6e19b2ff695a91334d99"
+    },
+    {
+      "file": "libsystem.a.p/hw_block_cdrom.c.o",
+      "sha256": "dd2ef03f78e77e903648af17e04e3964aa039e71fb9d73b053a6ee7884b2d51b"
+    },
+    {
+      "file": "libsystem.a.p/hw_block_hd-geometry.c.o",
+      "sha256": "e002a18b65687d78d3a05c4f7c2a9bb0ad5ec95bf90b4b4c5e74b0ea46fd0ca2"
+    },
+    {
+      "file": "libsystem.a.p/hw_block_pflash_cfi02.c.o",
+      "sha256": "62144cffa75f09df17381abb5b7d81bdbf8a91d9ed3e69cf90bdc57229895a05"
+    },
+    {
+      "file": "libsystem.a.p/hw_block_virtio-blk.c.o",
+      "sha256": "735fc466d5212cc0aaebe0168bb2605298b0446abd594eb5cbd602c62e61e149"
+    },
+    {
+      "file": "libsystem.a.p/hw_block_virtio-blk-common.c.o",
+      "sha256": "e5ab09b0c59631d3fcd6926f24e4a5d1b6a86f296fc3a9af86a5d329e88dbedf"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_ipoctal232.c.o",
+      "sha256": "3d13b23f24c04b581f27490302fd7132dc5638b165816f4da01c723cbbad5936"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_parallel-isa.c.o",
+      "sha256": "d83ec991fec6b94cd5725387a9438c21b3f5376f61d411345245d1bac7867a89"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_parallel.c.o",
+      "sha256": "50969ae1407ac00584ec089f1840c65079a2287390e182901d7c773406a86938"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_serial.c.o",
+      "sha256": "6dca602e0bf3aaf8f53ad19541a4bcba12645239e6647ad04270f692b2bd6e69"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_serial-isa.c.o",
+      "sha256": "3422ae652b084587ffc95d335a040e1bf2a03ac2855c5cbc5a7de9c559a507fe"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_serial-mm.c.o",
+      "sha256": "0319d4236d38bdd190bdcb14b80008b0d175010fa588c3a54d2db571802a2463"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_serial-pci.c.o",
+      "sha256": "9975132b200ca7630ebaa5f17682fa5e0ba045b139258ef9cfc8d1c1a6fcfbfa"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_serial-pci-multi.c.o",
+      "sha256": "6d83c9cc10bb2fc135e7ad7c89b98ded2f07aabe8f96e96b5d30451e5b80a664"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_virtio-serial-bus.c.o",
+      "sha256": "a04a7d6016a205c4ea8ee503b06dc13410582c10247fe7a2ce5ab00adf0d3d84"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_virtio-console.c.o",
+      "sha256": "50720156e7d902009863b0995d60704122d6d330c0de256a8e0f83c4d4ce849a"
+    },
+    {
+      "file": "libsystem.a.p/hw_char_sh_serial.c.o",
+      "sha256": "1533936441f0f59a49ced80114f9970b7d31e144935ea6473003e7b0f40bf9f9"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_generic-loader.c.o",
+      "sha256": "7de85164404b02d06a958d1a4f50afeb589dfdb155685d09956bfce4b37f0b06"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_ptimer.c.o",
+      "sha256": "6b8ad1f0aca74579dc970103af1deb76a4dad026adf962da993cda5bcb694cc2"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_cpu-system.c.o",
+      "sha256": "f7d7faee82cd5df61b21d676d8cb9c1dcf42981e122141abae162672d869d62d"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_fw-path-provider.c.o",
+      "sha256": "b88645726d5284dc61d04bd1f04b0aed1b772c0d02a378fb96900d5b8cde8dbf"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_hotplug.c.o",
+      "sha256": "29b45150a8e8a7c688c8fad29d2936ef0b39b45638f5f452f433c3caa9246cef"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_loader.c.o",
+      "sha256": "2963f60af98dc991b546c4e10b9bed930da5f8e8869b38541a6e1dd3fc254c3c"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_machine-qmp-cmds.c.o",
+      "sha256": "195556721c92309f5c54da2b83169c1f7bd9939e03a66a8356fe7d33e0da950c"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_machine.c.o",
+      "sha256": "38c41d99e302fd6c1e4b4bd653bc46c55bfc8bfb67ab8c8a4d89f16677e5107d"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_nmi.c.o",
+      "sha256": "a991056d27226d9344092bbcb57eefdc2f186f823dc3a315544f151051b39533"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_null-machine.c.o",
+      "sha256": "b419a22ea55c70afcce9b9913ea6b31fb8451f6a59918fe76c033d5e6843a7cf"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_numa.c.o",
+      "sha256": "7866b490631f3f92e2d05c6ccbf36c029cf9a8cb286776b83be7eea9aed589f6"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_qdev-fw.c.o",
+      "sha256": "08cd59e143b330812383f8f592087837eb300e55808eb6745f0216c58b1ffb71"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_qdev-hotplug.c.o",
+      "sha256": "5dac1bb0134a6be724cff138900a47b2eb5fcacde06a2b68065902ecd099c3c3"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_qdev-properties-system.c.o",
+      "sha256": "d0efaa39657cdaec9e34577dc402c35029963ffac534a841337153394474c10c"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_reset.c.o",
+      "sha256": "86e75786bdbbe6d41126b87c170e262ef5720ce19a23433962bd772a80787f5b"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_sysbus.c.o",
+      "sha256": "d5ed654ff5a2c055d63b786bf8c4b881ea52ec20bced9159873378bc9d5cc651"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_vm-change-state-handler.c.o",
+      "sha256": "cecc0172067d0a89d05a08e3a59272ddab5999343508966b6353feaea6bb4bf2"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_clock-vmstate.c.o",
+      "sha256": "d4b1eae8d0a8986692ff5b7a6d9fc20d2df4540a88cb715f376cac62e68b8f91"
+    },
+    {
+      "file": "libsystem.a.p/hw_core_machine-hmp-cmds.c.o",
+      "sha256": "a3ba6d7c966ebe22bb474c205fa2fb9ce350a8a4977a3861543db889c5550f88"
+    },
+    {
+      "file": "libsystem.a.p/hw_cpu_core.c.o",
+      "sha256": "649874903a193a1eb80e36ccc1083dfef829d2607f37194ace05c3fa3f16ef6b"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_i2c-ddc.c.o",
+      "sha256": "237da59c7c0d815568f0006442e504e365b5761f7262db22d73105aaaa68140c"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_edid-generate.c.o",
+      "sha256": "557f53a8a1ab24c3888e934863a2f8d6a29c4ff348536a62ab30d52913ba38ac"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_edid-region.c.o",
+      "sha256": "8eb4625257a339537ffe32009fcd87008bc12c454776dc1aacc31ee1f30ce6d0"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_cirrus_vga.c.o",
+      "sha256": "5468e8c94e16e30baaf2c2144aa171a2c8da2b871c0dbde06f32f8028f145601"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_vga-pci.c.o",
+      "sha256": "be9b84dc1f65d8b282c4a85024f002e69ec918967d21a9abd9186dded3f2a7db"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_bochs-display.c.o",
+      "sha256": "d660c085d9dc464986dc6465d80b9ce77ee88399fc4fe9d9ccf89d2bc846047b"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_sm501.c.o",
+      "sha256": "ba0d787efd40ceb5bdf2e2c9414f0e7aba3811b087ded18b2969375dffefde2d"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_vga.c.o",
+      "sha256": "258542df9930c3c7241ecb2da33e48024f71db4befa83f419950997b17015e29"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_virtio-dmabuf.c.o",
+      "sha256": "ee0f1c2624c415d4bb434062d939eaf1857b504d77b1f1c0d4102cef890d4806"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_ati.c.o",
+      "sha256": "69372bc7e3039e17ff94298122ff3232b1cd6b848329f220596e73d3ee2e7122"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_ati_2d.c.o",
+      "sha256": "e45c5ac0dbc6131e4640296e50d722267fd9a6a1ecaa3f0673d42c04d0e60f72"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_ati_dbg.c.o",
+      "sha256": "9f3ec4367ed7e45311ec340618e8cce9aaee1a810e57f4da57cf3952357d0139"
+    },
+    {
+      "file": "libsystem.a.p/hw_dma_i82374.c.o",
+      "sha256": "eee8064d2d9675148a1542ecb26c8e9d4fa3c0d00df0597ea5489a43c33ad4ba"
+    },
+    {
+      "file": "libsystem.a.p/hw_dma_i8257.c.o",
+      "sha256": "f4ce549d73f9bd037634c3c08a30b70ec3081bc1826eb2b8f768ec26d0c77105"
+    },
+    {
+      "file": "libsystem.a.p/hw_hyperv_hv-balloon-stub.c.o",
+      "sha256": "3d59bfd4e0cefbccdf00a14f89d9d16f3d9e0852a5ee18c4dd9ee548310aff5f"
+    },
+    {
+      "file": "libsystem.a.p/hw_i2c_core.c.o",
+      "sha256": "f19397c657659dce057d365020670cc4e47f94ac6012962cf21eb69e0169ee5b"
+    },
+    {
+      "file": "libsystem.a.p/hw_i2c_bitbang_i2c.c.o",
+      "sha256": "dfa7b31db1efe6b1ea7f0501b3a5a032b4bccb801f83de37b7b126099e86e39f"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_ahci.c.o",
+      "sha256": "fc87cced3c618aa74a1be8d43b06ca2b0c1e030e212a99e6de4b257df718d229"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_ich.c.o",
+      "sha256": "23a35fed97516871f64b9c4cf6da7bc1e987116c6bb33a3bc27142943ab0adb2"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_ide-bus.c.o",
+      "sha256": "df798937ffba2597d3bbbeca33dd6b7deb8c2d75652374e349b635da7e9707df"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_cf.c.o",
+      "sha256": "c90ca4c8209ff2d778393744d0efaa87c6da5326e03b2eb3252d8e48ea174938"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_core.c.o",
+      "sha256": "166179688441b924c9fcc5bc5fbbae7fa3a9e0ab1ee8964d06baab73f3079a1d"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_atapi.c.o",
+      "sha256": "42349995ce887e3ffe1c16841bcdda55b39898bb5691673917588551d2a4e96b"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_ide-dev.c.o",
+      "sha256": "909db1fc466e343be8a76de00c3e59f03a8ae60567f0b490da91f0811f91f52d"
+    },
+    {
+      "file": "libsystem.a.p/hw_ide_mmio.c.o",
+      "sha256": "3b3c6d7fbd2d439a471d8c6e8771eed452b929ca16f44d513a356b97f4f18722"
+    },
+    {
+      "file": "libsystem.a.p/hw_input_hid.c.o",
+      "sha256": "90823b53ad4f9dde7263b5b166994f261ed0b3bd7cb9149e52a3ea650e4509b9"
+    },
+    {
+      "file": "libsystem.a.p/hw_input_virtio-input.c.o",
+      "sha256": "06da9cef7f04464ab427a0b1fef59531befdc8a232727e1f106412bd4ca01709"
+    },
+    {
+      "file": "libsystem.a.p/hw_input_virtio-input-hid.c.o",
+      "sha256": "61ad6acc9c41b9c2778c104d0ca8b7d253f69b944a2d383bebfd377563f4b395"
+    },
+    {
+      "file": "libsystem.a.p/hw_intc_intc.c.o",
+      "sha256": "355c190bc5246697d8a7e521cc826d58e55cb14811ad76b14df9281726461a0b"
+    },
+    {
+      "file": "libsystem.a.p/hw_intc_i8259_common.c.o",
+      "sha256": "200a6d29f5b219aeec108292372e78b29b9279d4df9fa8d0fd40e8a7d7123175"
+    },
+    {
+      "file": "libsystem.a.p/hw_intc_i8259.c.o",
+      "sha256": "167ffb84162f64c3e77dfbcaac5b5b30e71bbc25d45b1b00c07a41fd2d4d6cdd"
+    },
+    {
+      "file": "libsystem.a.p/hw_intc_ioapic-stub.c.o",
+      "sha256": "ce400d0362b3c8307224d940f71cc59e72da273349c1a68df2d8abd3425179b8"
+    },
+    {
+      "file": "libsystem.a.p/hw_intc_kvm_irqcount.c.o",
+      "sha256": "3d24f85714d2e73249d5b6c5b1e79cc54845a234748e999fad1854bdeff8e1d9"
+    },
+    {
+      "file": "libsystem.a.p/hw_ipack_ipack.c.o",
+      "sha256": "a4959fc3f4a2deb147e846462fcd93d2ec507057569a09ace70d02791d8450e9"
+    },
+    {
+      "file": "libsystem.a.p/hw_ipack_tpci200.c.o",
+      "sha256": "3377c9ad74a9608a2ba1b1078732cbb87608052edf2426db57b1a099980035ed"
+    },
+    {
+      "file": "libsystem.a.p/hw_isa_i82378.c.o",
+      "sha256": "95962fe7de84e3fe9ed0151f26b110e6b8954d006c993424557f2a94fb2dff61"
+    },
+    {
+      "file": "libsystem.a.p/hw_isa_isa-bus.c.o",
+      "sha256": "6c8e04abbe38901539a9cdba3301a94afac70dd53fa0b28dc3c925a80a044c8d"
+    },
+    {
+      "file": "libsystem.a.p/hw_misc_pc-testdev.c.o",
+      "sha256": "aa51fd34b5305a5a7941f7bb0e3a3f3946cbe93bb0e1f5cf9665e6aa4df4b765"
+    },
+    {
+      "file": "libsystem.a.p/hw_misc_pci-testdev.c.o",
+      "sha256": "bc5c0d4c3c9ffaa94b5bcaf9b72c3955188de079ff002d109bd0dfd7b4704f15"
+    },
+    {
+      "file": "libsystem.a.p/hw_misc_iommu-testdev.c.o",
+      "sha256": "c2ba979a3898fc11e0909a8cdf20b6554fc2aad938be67bd825b7025d164095d"
+    },
+    {
+      "file": "libsystem.a.p/hw_misc_pvpanic.c.o",
+      "sha256": "2cd57ab344e8bd3fe6d8024f0a7dcfbc23f4c4b1bb8abbab713dac51f3f829d5"
+    },
+    {
+      "file": "libsystem.a.p/hw_misc_pvpanic-pci.c.o",
+      "sha256": "f4cc0e4c59ad2792be497f2ffe10ea537de96504daf5ff96ac66a8ca951246f3"
+    },
+    {
+      "file": "libsystem.a.p/hw_misc_i2c-echo.c.o",
+      "sha256": "ecaf040a3db700cee19af24af103ec5c63baacff760c5a0ba9f59c29d13ac260"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_ne2000.c.o",
+      "sha256": "903ddcd68f0fd79e54014da4972f9b529210befc7df5a185b3ed2a2512af400b"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_ne2000-pci.c.o",
+      "sha256": "5c3de1b37b381af00df5bc05dfabf735f0ac1098f7d3b492e1da8df62617dc63"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_eepro100.c.o",
+      "sha256": "bb7d207cc2ebfac7ed3c2e6237dddb1953f918bf136630107b3c991b24e998b0"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_pcnet-pci.c.o",
+      "sha256": "7c43e043c9fe84266c7cc2f290fde96f05144ca92e10cc6f81dfe6919e39eb16"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_pcnet.c.o",
+      "sha256": "15d77283014cc7be3b44450a987aa342b2ba53c1a467c9cd7b46ea91f39b8d1a"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_e1000.c.o",
+      "sha256": "8235ed131cdd953552a31e28546c5b7433a530adafe401e4d8007c54b6699791"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_e1000x_common.c.o",
+      "sha256": "5363abe9d3d409c49f8cf63adf1644b2f67ea64f90e498da9a921a13df4ebc3d"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_rtl8139.c.o",
+      "sha256": "cc697e26bd353f19af58a17020ad20c633e6584c3ce5c67f93f2170fffd75396"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_tulip.c.o",
+      "sha256": "aaf0af453ff7f45385b57f49014891052260cad088620d649d94a586059b5717"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_net_tx_pkt.c.o",
+      "sha256": "867c7c160c1f2e2d4e9e46475eb609fa96a4216484bd7b0b585454c642bb8d87"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_net_rx_pkt.c.o",
+      "sha256": "7429dbb458a18d89a274566e197fcdc900673778d2a53fdd5e794ba3cbca6bde"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_vmxnet3.c.o",
+      "sha256": "b1b6bd45c3f5f0895e4338fefeb9ada52b6b554b02402ae3a3300a226ce01611"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_ne2000-isa.c.o",
+      "sha256": "6112aedbf62838a1b52ab84b7f92d74a0c8f82d75d290fb45af62ad9a2b4137a"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_virtio-net.c.o",
+      "sha256": "f378706a4723da1b425930c94844f87df66334b969f1841cdef14f262d299797"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_rocker_rocker-hmp-cmds.c.o",
+      "sha256": "8ecb1b4bab6964ad2ef3b88d4883c906e025f7eafa8fbeb073cd30fecbc61869"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_can_can_sja1000.c.o",
+      "sha256": "74ce7731dbe94480e4f0ca72912c151cd4b64d5c1f8eaeac7038a23a32784d6d"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_can_can_kvaser_pci.c.o",
+      "sha256": "54241a0ff11663b82b766ac055cab6bfbb6d355d0c4c154e79d9f42b15c55be9"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_can_can_pcm3680_pci.c.o",
+      "sha256": "9d226f0635aa467b9e1e1e0145a20db6815ddbed0f36914ecb2b3e1e62e4c3f8"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_can_can_mioe3680_pci.c.o",
+      "sha256": "24f8919ff63dd10ffcb6bcc758230363c5ec90d6a7c6c681f0fb99cc5fbcd2f3"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_can_ctucan_core.c.o",
+      "sha256": "a52eca06efcf5af2ececae2718c643cfdcd66c3193260ecc56dc356e1753961b"
+    },
+    {
+      "file": "libsystem.a.p/hw_net_can_ctucan_pci.c.o",
+      "sha256": "62cb0d05e87267f047a4aed2e55ca3712c94d6226195c6391de8643b1489afa4"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvme_ctrl.c.o",
+      "sha256": "0d01cbe0d034776a61158b90c7092effdaae9e9eaa338fa40e09001a2b46b09c"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvme_dif.c.o",
+      "sha256": "4cdc90f70b176c8ab3e2d0a40308a018b8451e9aca2022df7d9964c01c9d784a"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvme_ns.c.o",
+      "sha256": "ae77ca4ddb972ecc19bd099be714b094e1cb96e592455644a0d6c42a9914191c"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvme_subsys.c.o",
+      "sha256": "09ef76f60887f6254adecdc92ef8f4ad7904d117ca6b40d8500f03d015174637"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvme_nguid.c.o",
+      "sha256": "7177d7d4e0ad7cce657e7f53cfe6b839a116c192dc759817f0263d39cbf59158"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvram_fw_cfg-interface.c.o",
+      "sha256": "e243e8609cd110d03e99a7b76681864d9b6afd6b1a757751f3067c3668593ba1"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvram_fw_cfg.c.o",
+      "sha256": "73ab8ba144879723bd07658f47b9fe0923e89588eabbaf2f8d68032b9abf8843"
+    },
+    {
+      "file": "libsystem.a.p/hw_nvram_eeprom93xx.c.o",
+      "sha256": "2794d08aebe37dcdc5099725d3505ee5aaad08f41665cc5bdc4fe791563da5e3"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_msi.c.o",
+      "sha256": "8d3cd222922d7a30499e02076d80e7ccf20a63b4b994d4c9c617871aad7e3054"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_msix.c.o",
+      "sha256": "e4fe978e6ea5a90e4ed9c19a41fa18be0c6e5e9e87b9ef08ec52955ebd83a919"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pci.c.o",
+      "sha256": "c776a5b559aaaaade4f4a8e5d89d1076035bcb712e1e8b17fb2ab8c552bf02d3"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pci_bridge.c.o",
+      "sha256": "18d68fce961e1d82dfd46ef2e987f49fa5cf947c874a7c2ce0584c08508479b7"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pci_host.c.o",
+      "sha256": "62da8b46718dc7d5b0ebc64a59c8bf9a45b53b672053bda26a0a887b6b73409a"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pci-qmp-cmds.c.o",
+      "sha256": "f802912e49cdf200521a4231cf4527a776880e4a8e0a38db261ca5ce7394f753"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pcie_sriov.c.o",
+      "sha256": "be506780d9c9a1ee6125b4debde38d070727aa22632407785d6a32a659cdd81b"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_shpc.c.o",
+      "sha256": "e12655561a7c93d5deba3aa8e07d1b358f14bc7011012374c0055294670ca74d"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_slotid_cap.c.o",
+      "sha256": "8731f833ae1df611d6630725c299bf048764d0c4f24e307ca13765b5f7115278"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pci-hmp-cmds.c.o",
+      "sha256": "31df030b57ab95947beab54401d69d2f81cdfcb7cbcce8fcaf372d55b1d32af3"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pcie.c.o",
+      "sha256": "7765cadf900e26b5d36af68310e84ee14a9f18c1c72df34def4d14111cf68144"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pcie_aer.c.o",
+      "sha256": "b954dc212bac382d31a71b3052f259cad0821298814b8bfc5dd5a94047b99bbe"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci_pcie_doe.c.o",
+      "sha256": "a1937d5336264e2ef8fe6de8a1043417bcd8c9ea79c983b719f2414aad86ab58"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci-bridge_pci_bridge_dev.c.o",
+      "sha256": "94aa0afa76267560eccb372ebd95c52104347883a5e714aee9a0e4e033af3dc6"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci-bridge_pci_expander_bridge_stubs.c.o",
+      "sha256": "500cfa43903631e1184ac0c7cb20e9b7c856747fd0fba5716fa61d6a1bc52f48"
+    },
+    {
+      "file": "libsystem.a.p/hw_pci-host_sh_pci.c.o",
+      "sha256": "da76cac09b8f7b386e9b8b2ca451720ffc1a4e3240670afa5039b79d1953cf3a"
+    },
+    {
+      "file": "libsystem.a.p/hw_rtc_mc146818rtc.c.o",
+      "sha256": "921974f6c51417b1ef146559aef6a43064bf3cf2d500a742ee8b8c37fea3a042"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_emulation.c.o",
+      "sha256": "5add0c46ba6fc013146a04309f81c28928e0f4c5eea402d63720bf0dbdb14ae6"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_scsi-bus.c.o",
+      "sha256": "2b8fabd5aef339b03c3453e63a683888c658cfc8b328cb72f8945e31047fcdfa"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_scsi-disk.c.o",
+      "sha256": "0fc30fd9e0107d82d25b5a2bb7df82f9bdb1e9af56e4c649f7bd7c0683618add"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_scsi-generic.c.o",
+      "sha256": "3e0be8e5213cc9c2b75e413200174de7148dc96236a909f46fc315d00eba53cd"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_esp.c.o",
+      "sha256": "9ddc444482396c4a74534ddbaf128fe8297c574c12181c4067ce9319a6edb40e"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_esp-pci.c.o",
+      "sha256": "87dcc6c83ae940ed307095cd2bf0735c43280fd1b4a51639064f124d81c6e311"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_lsi53c895a.c.o",
+      "sha256": "227b1270efb8a24d87e22e05b200b7c5d9d16b9e88ccd666f1a749e0ceefe39f"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_megasas.c.o",
+      "sha256": "c14285ce11a977aea5407198aa3846001e4ed14880c57dffd31f994f57283fba"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_mptsas.c.o",
+      "sha256": "ee536479fecd1697e7924fee4a1afb010da2cd7be4d305cfee726811e12ba912"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_mptconfig.c.o",
+      "sha256": "949a27d9dbb64ab83d327d180d95e6ff1013e3a567daf68139027884b8a550ec"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_mptendian.c.o",
+      "sha256": "570f5dfd80a94b9e74caaeeef8c17954821ed3d33c0935af72a36826cf70c874"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_vmw_pvscsi.c.o",
+      "sha256": "bf0c82fb766d97eb6a75508932ba5cb21af7ef63f139ade99458783504c39afb"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_virtio-scsi-dataplane.c.o",
+      "sha256": "b149291c94e4cd5ac308d39aad6599ce08b4a35c02deb8cf0c6537970544fb44"
+    },
+    {
+      "file": "libsystem.a.p/hw_scsi_virtio-scsi.c.o",
+      "sha256": "72b9dde6753372ecfbd27e1fbb34d66d7ae2efa8730a2f2f33a0896589d661b1"
+    },
+    {
+      "file": "libsystem.a.p/hw_sd_sd.c.o",
+      "sha256": "cf056c9ec1061907aba5acfcdf0a6866973678ee3ac2ecb6549f1e9651019fdd"
+    },
+    {
+      "file": "libsystem.a.p/hw_sd_core.c.o",
+      "sha256": "240bff7130914ae8a811c0701637e6e1a540442ac59d85b85e5946314abaefae"
+    },
+    {
+      "file": "libsystem.a.p/hw_sd_sdhci.c.o",
+      "sha256": "7f0aab62bdeb7c2734dae6f74040a94df6cd7105dbec902f4785da5f9502f885"
+    },
+    {
+      "file": "libsystem.a.p/hw_sd_sdhci-pci.c.o",
+      "sha256": "f0fabd4c7780a6dc83ad9ebdf337e44a2530e6eb369ddc9705a360eb1b7c8c39"
+    },
+    {
+      "file": "libsystem.a.p/hw_timer_i8254_common.c.o",
+      "sha256": "7c0e38aab4400acc9cd4c5e10e92daac3a5885b8916962e2fd9790984dee3609"
+    },
+    {
+      "file": "libsystem.a.p/hw_timer_i8254.c.o",
+      "sha256": "c4691cb5e97b10e10e9d665080703686d29d50d4ed84eb19e4cc0882f7dbc9fb"
+    },
+    {
+      "file": "libsystem.a.p/hw_timer_sh_timer.c.o",
+      "sha256": "53eb5f96c8ae405d45bab045ae7f4e9b1194f674712fd2197b909606586d4439"
+    },
+    {
+      "file": "libsystem.a.p/hw_uefi_hardware-info.c.o",
+      "sha256": "f87f66781b7f915b2321b29db3c220407262d1e44ab09acc86de51faac634496"
+    },
+    {
+      "file": "libsystem.a.p/hw_uefi_ovmf-log.c.o",
+      "sha256": "4d4e9756a75636e0635fade71c4f86815778db931d635808aa6ee61dec8f64e0"
+    },
+    {
+      "file": "libsystem.a.p/hw_ufs_ufs.c.o",
+      "sha256": "9fd0b73103603b65dfbeb852c1fc266c1b2219a7b9b9eeb82fa0b9ef20547fa0"
+    },
+    {
+      "file": "libsystem.a.p/hw_ufs_lu.c.o",
+      "sha256": "3a8fb48f753af1db0b42943d4b6eb6273feaee45fc9e978e6b56b3f059956166"
+    },
+    {
+      "file": "libsystem.a.p/hw_ufs_ufs-pci.c.o",
+      "sha256": "43e6be7907cfdd1b97ac6dde7960c5467c6abbba90527d0aca7df0c3d2dd21d2"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_bus.c.o",
+      "sha256": "7462dcb00505a68c368deaff089388afb4f384361495c42958e3543a1b6902d7"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_combined-packet.c.o",
+      "sha256": "578c1ba324bd41e63d5df7375471a106d6e8aa6a54aad09172355827245e0838"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_core.c.o",
+      "sha256": "321db2c4648ceb9256a39c35fb1cb26dc360b6a83b865ba4d26abd34ebc232b1"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_desc.c.o",
+      "sha256": "8ad1e6477fe473d297d60a2f95a1795d691e51e8c65f5ac4994ec6ed8f035114"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_desc-msos.c.o",
+      "sha256": "6f8caa3fa17cf781ddbf33bcf894057f06ae821726a74c3cfd73898ce60089ac"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_libhw.c.o",
+      "sha256": "5a99be0718603f7749be2e4fe027ef44500bc68514820fe25c7cafe51a166018"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_pcap.c.o",
+      "sha256": "8a103f354200f75a32d8b3874668a2d17ed08832b88ce8943e019cfe7f5b4a10"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-uhci.c.o",
+      "sha256": "53a96a22f0888b607b51daaa34a7395dcf4b3f28fb62936a73cf6e87dd9353d9"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-ohci.c.o",
+      "sha256": "01ad23ccb630e333e9c5a1e80a08a4edeea3781e66c967d926379b1c53463165"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-ohci-pci.c.o",
+      "sha256": "3350e1049a2659df54840cd51c57915877eb6fb2dcb9ccc10d37da7ef5d1cd42"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-ohci-sysbus.c.o",
+      "sha256": "a9391ee33a149f8f797ccc62ddbb7edb169030244f00da9b2e637baacaba7a53"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-ehci.c.o",
+      "sha256": "27997daf7d1b63ca79920cffa67fa38312de099c1ef318a3675e4c26d7d73659"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-ehci-pci.c.o",
+      "sha256": "bb37100607df624ae5b0d374c22c0e7903e9d23adf09c3bff8a41fe1c286f880"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-xhci.c.o",
+      "sha256": "659d5c635b3b72e3c36f23e15eb4153a0aeb783435218ca96db7023ba8003ff3"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-xhci-pci.c.o",
+      "sha256": "7c2ae742bd9773d822d4ca2d81be6f144d12201f4ae7bf988ee86b6ab2598c13"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_hcd-xhci-nec.c.o",
+      "sha256": "48707008b0b67c4186d315932a68038e0e79b1997bb0bb5ac85985b05977de77"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-hub.c.o",
+      "sha256": "eb473832f67ebe2da2f964921e3d9015f1d01aa2d0fe91d7e68298a4bcd0f195"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-hid.c.o",
+      "sha256": "200dda734c36185108e2867d2f41046acf26566ec8ff066a525b5e2deac6a5c1"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-wacom.c.o",
+      "sha256": "8fe5da8aeca852572450fefbf3320adfd06f4d87228d8bb4f877c6e0e1ebccce"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-storage.c.o",
+      "sha256": "c38dc08f51480a01cf1ce5dfcac3afe65e3ceea32b53a4db118b3ba5e17b454d"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-storage-bot.c.o",
+      "sha256": "fc6204cac6357a3f49de5aadc3da846908843a82efeaf6156e2a52df938476f1"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-storage-classic.c.o",
+      "sha256": "df7a63c2f1d9947fc61657252a7ffefe6b9cc250183c247ea93be8216b670953"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-uas.c.o",
+      "sha256": "d5c297c95e035c578f23784fc78adc46c75b7a183390dedae832ee8fbd09b42d"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-audio.c.o",
+      "sha256": "589270421d8ef44901481f90175ce9784eaedb835efba93cffd51aca12115f7b"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-serial.c.o",
+      "sha256": "3c078d463edf8facbc88a72f8335bd4e1e4f7fc2cb7ef1daba8cf4c035dfc928"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-network.c.o",
+      "sha256": "5454e870a0961d38ed5738e6a2bb12dd87620a3bd41539e454227e524a5c085c"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-mtp.c.o",
+      "sha256": "4d91b7b40eec7ce187198b3217632c94c697e74c64f3d26cf39b9e62041c4a58"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_dev-smartcard-reader.c.o",
+      "sha256": "c6f4648c3585d7880c1bfdeba1589502531c6546976b5b249fe9341fd00e1cee"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_u2f.c.o",
+      "sha256": "65bc3087d57e693ed549d0b53bf34865fabbd882c2073645571c9d2164ee1f60"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-bus.c.o",
+      "sha256": "0bc1594e47e76699d5db2b2c4e12424a1e1612c388eca76a2c3732fe3483a830"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_iothread-vq-mapping.c.o",
+      "sha256": "7017d5d664cf31488138f24d57c75d4044bfefec666dea8781d8cabf9fe7988f"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-config-io.c.o",
+      "sha256": "585bf682d95b343db9f8ea6400286d18f1e5f34b88a0d2641d7ac3b9ce94daae"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-pci.c.o",
+      "sha256": "cc72119d280799399006537052f8403d4445bff2637b08991ef37fe6e3e07132"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-crypto.c.o",
+      "sha256": "6235441cc1bc9334c25477cc6e17bb6f1d504f5a08c8f604570d5eb533cd5f75"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-iommu.c.o",
+      "sha256": "1207a08d5613639bf0be4e6e587d157019c2dfc15673ff021424194ea7060d23"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio.c.o",
+      "sha256": "e2a621c56bf0419d94ca97a299cee9eebcda3857d1d34c91b2ee2fb27539157c"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-qmp.c.o",
+      "sha256": "78b270221930061e84ee03aa290495ea15de9b83a7ab94fd6a343c780e5707df"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-rng.c.o",
+      "sha256": "79db314518b554939000f952c26e378b779831d11b5b4ad10462726661c635fb"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-rtc.c.o",
+      "sha256": "a55b96d2926e66425991108a5ad021c923b0506b75871f8acaaeff0ec38102bf"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-balloon.c.o",
+      "sha256": "cc291ed13b75449ac6c0bdf78f55fc4afbbac413d0b23ec216c0e8eddd971b6e"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-crypto-pci.c.o",
+      "sha256": "aa9458d3f091ed296a0bd7f8bcbb2685fddf1e6a3faeceb962a81ba32cd6a009"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-input-pci.c.o",
+      "sha256": "b14be821d858513bf055283387111aa1991a4f2d3b3fefcbabb6824270f3409f"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-rng-pci.c.o",
+      "sha256": "61b8f94ce6a03e255090574cd79408bfd64442b378d249a33e51e086cdeb53c9"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-rtc-pci.c.o",
+      "sha256": "5a51171c429f3dcc63f6738c6105c154e73ae4d8789a64a08f4650a05f316249"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-balloon-pci.c.o",
+      "sha256": "2dd5a1885f6a35220e165418e1d83ca7582faa519ccf583f13c5082382b22a77"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-9p-pci.c.o",
+      "sha256": "1402167318defece01fc280ccc42491dff48092290e88c08a42a40b3c0e88569"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-scsi-pci.c.o",
+      "sha256": "edcc39d7de5bd2fded025804fbd68f416b967f5cb8d80b8f0a7b96f75e435362"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-blk-pci.c.o",
+      "sha256": "729bda8c76a1e290434efd9e7f093a7f5f13009083133649838046b334fdf62a"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-net-pci.c.o",
+      "sha256": "0a2feba5eb7a32ca73a79e752faf04940aa17eaf1e46c75d6fe3dd541f457b41"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-serial-pci.c.o",
+      "sha256": "61e5fa73b25ee13be90c0bf59fca40309590b8e0d95b8b307518afed2aa90565"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-iommu-pci.c.o",
+      "sha256": "b6c5c227248e1bc1aef3dd3adc56acba6913c567cba25c17c311fd8ab3c7bd0b"
+    },
+    {
+      "file": "libsystem.a.p/hw_virtio_virtio-hmp-cmds.c.o",
+      "sha256": "2cdce20a884abeeff08c204b125fc23cfbf181aff6290fdf631a4797e17b6423"
+    },
+    {
+      "file": "libsystem.a.p/hw_watchdog_watchdog.c.o",
+      "sha256": "ca4442a84118095b7b1955dd82376f59353403f7bd63bd42f710a6ea2e81928d"
+    },
+    {
+      "file": "libsystem.a.p/hw_watchdog_wdt_i6300esb.c.o",
+      "sha256": "2d2c82aac10e5c9743625845928ea6d618295912d1bf54bfb19e620b3712e56e"
+    },
+    {
+      "file": "libsystem.a.p/hw_watchdog_wdt_ib700.c.o",
+      "sha256": "6ca533ddf865336550d380fedc0d4fd27ec87fe05351fb1a84222deb0786c457"
+    },
+    {
+      "file": "libsystem.a.p/hw_xen_xen_stubs.c.o",
+      "sha256": "552e9ba7b0396039af5ffaaac62893e23835cd124f0db2a9efbe5eaf13e5a8bb"
+    },
+    {
+      "file": "libsystem.a.p/gdbstub_gdbstub.c.o",
+      "sha256": "4b1f932b84f7047bc463efb44339286b0db7f5efe3098052223103f6caef52d6"
+    },
+    {
+      "file": "libsystem.a.p/gdbstub_syscalls.c.o",
+      "sha256": "9f116fd6cf2adf219d05944575d8be2314ca2938fe46383ab94cddad1218066f"
+    },
+    {
+      "file": "libsystem.a.p/gdbstub_system.c.o",
+      "sha256": "d207860658ab563f34656ae91eab8027b680269474143d769f62d65a7fe03420"
+    },
+    {
+      "file": "libsystem.a.p/block_blkreplay.c.o",
+      "sha256": "679c0da5d3acab701cfeca7a68b5fdb4e5c873ee9bc9d1570934c7c5c01c40d4"
+    },
+    {
+      "file": "libsystem.a.p/block_block-ram-registrar.c.o",
+      "sha256": "9a4c75f387e3864c3812c53054c93c526029ddb957a026fe58536d72360dd6a5"
+    },
+    {
+      "file": "libsystem.a.p/block_qapi-system.c.o",
+      "sha256": "8df9c06459a3e2293130ab46b074c19b7922382c42fbe46aa450064f78545c78"
+    },
+    {
+      "file": "libsystem.a.p/block_monitor_block-hmp-cmds.c.o",
+      "sha256": "9f8748a4ebd0073fdee7e317aafeed04adbe5e99c0974250955b177ac0520cfd"
+    },
+    {
+      "file": "libsystem.a.p/block_monitor_qmp-cmds.c.o",
+      "sha256": "24dee93dbdacd4867989cea8f0c2f2d5c7dbdcfc29e4d2683e8d9fd73a38da27"
+    },
+    {
+      "file": "libsystem.a.p/cpu-target.c.o",
+      "sha256": "3455ab79c2b994ac9a5eeaafe81f4ace38548dea21e9a01ef3df9282908aeec2"
+    },
+    {
+      "file": "libsystem.a.p/system_vl.c.o",
+      "sha256": "36daea5b12571d86bd99d3a5cae44e10e4690732229fc2cf4dc85ab481de5a33"
+    },
+    {
+      "file": "libsystem.a.p/system_arch_init.c.o",
+      "sha256": "ab9e8721c480cc82e475e50d50bdd93e1702f3d632cc2829cc7927923c2ccd63"
+    },
+    {
+      "file": "libsystem.a.p/system_balloon.c.o",
+      "sha256": "8d0c88a949dacf919dc3be238bca9b72409fb3fa870bc6cdce33a6773a67b6bb"
+    },
+    {
+      "file": "libsystem.a.p/system_bootdevice.c.o",
+      "sha256": "77c8a122f44f1c28a4d68523efdd561078b0bd969ad3e81c2c2fbefb72662855"
+    },
+    {
+      "file": "libsystem.a.p/system_cpus.c.o",
+      "sha256": "10e4ea89440464e4dfbccc63756ea219b5b52c8cfcbaf490e1a4c52a1a1b279e"
+    },
+    {
+      "file": "libsystem.a.p/system_cpu-timers.c.o",
+      "sha256": "d7d6b2f156e6375b125fee3b5d7726aa07ccfd145e9f89babeeda860b7127590"
+    },
+    {
+      "file": "libsystem.a.p/system_dirtylimit.c.o",
+      "sha256": "ccbb421f45f71b29960f8056b341e31b89e2739ea286fe9615bebd4b47e7e94c"
+    },
+    {
+      "file": "libsystem.a.p/system_dma-helpers.c.o",
+      "sha256": "3ec2fde8d9ae22c488aa399f99f651c978c89fbe8fffd7660bda8de3290036ea"
+    },
+    {
+      "file": "libsystem.a.p/system_exit-with-parent.c.o",
+      "sha256": "398189194a82d0552e12ebe6aa6efc724d9b8202904cc90271c8d65d06381970"
+    },
+    {
+      "file": "libsystem.a.p/system_globals.c.o",
+      "sha256": "414468961760b5c4e50f447f4904f8f3b5994cf1baed0728f7357af5d2d287e1"
+    },
+    {
+      "file": "libsystem.a.p/system_ioport.c.o",
+      "sha256": "3e367eba3977aeb320e3efb5883e637bd9a92b69d12809270d848968382d9a60"
+    },
+    {
+      "file": "libsystem.a.p/system_ram-block-attributes.c.o",
+      "sha256": "d66b79035a8434cd448ba8d26d36120786f9e1e795943b23e923290377a2419e"
+    },
+    {
+      "file": "libsystem.a.p/system_ram-discard-manager.c.o",
+      "sha256": "1a065bbf55c427fc03b33d7f12c015617d534a8c1789998ab94b7e7321ba967f"
+    },
+    {
+      "file": "libsystem.a.p/system_memory_mapping.c.o",
+      "sha256": "ae6180bcafb13997a9013bb1aa7cc35b5cb3bbeca67a8e3a421032920a0447cb"
+    },
+    {
+      "file": "libsystem.a.p/system_memory.c.o",
+      "sha256": "267f7a0155b7ba79c7591689ef5278132a475e0334ca3035e17ca8ddc269ffff"
+    },
+    {
+      "file": "libsystem.a.p/system_physmem.c.o",
+      "sha256": "6d1dceb24d373e31cac084aa9807815ca2112c58ab4240ffde43ea719ec980bf"
+    },
+    {
+      "file": "libsystem.a.p/system_physmem-qmp-cmds.c.o",
+      "sha256": "12058daa3c024dcd5345f79e41772904366364a50dd1b9708cf57a00bf66a670"
+    },
+    {
+      "file": "libsystem.a.p/system_qdev-monitor.c.o",
+      "sha256": "0b7b396f3e503531aba1f53d6c4e61d5be8a9cd9632804d5126f7fcaa31d59dc"
+    },
+    {
+      "file": "libsystem.a.p/system_qtest.c.o",
+      "sha256": "83141f681226ea99a01c2bfdd3cad79ae103e216a84c3403e86b7b43b105389e"
+    },
+    {
+      "file": "libsystem.a.p/system_rtc.c.o",
+      "sha256": "c2b4be5867bafc5e287678f822b638dbc4ada9028e84acad04014afdc896a996"
+    },
+    {
+      "file": "libsystem.a.p/system_runstate-action.c.o",
+      "sha256": "de31bc97017a417871dcaf2963c8254a5e2cb015883665e1da5083af2159d85b"
+    },
+    {
+      "file": "libsystem.a.p/system_runstate.c.o",
+      "sha256": "47d3ad5608c9ad1ff9e6aebd8daf9f3915148bcacdd1638755178c6859630667"
+    },
+    {
+      "file": "libsystem.a.p/system_watchpoint.c.o",
+      "sha256": "9b4a03105d05047c13fe46d7cb3cea82fc7846dd429e8818c64ee20e4fa2b50e"
+    },
+    {
+      "file": "libsystem.a.p/system_dirtylimit-hmp-cmds.c.o",
+      "sha256": "f774f026da28d2ae2329101f521b4273f4e08d763ad7b18cb7b5384616cf3a6d"
+    },
+    {
+      "file": "libsystem.a.p/system_runstate-hmp-cmds.c.o",
+      "sha256": "bd6dd1bcdc47a9f8c411156b1395ef4fbace31935547caedd3b164be99453bba"
+    },
+    {
+      "file": "libsystem.a.p/system_tpm-hmp-cmds.c.o",
+      "sha256": "c8701f8d3f3641df0cf2ead75f207fda9e8fa1b38a5eed12427bae7081e9e821"
+    },
+    {
+      "file": "libsystem.a.p/system_tpm.c.o",
+      "sha256": "121c7b1113484ccaec38176720047ef0314bedc285eb39b1e28e25dd86f7a0ec"
+    },
+    {
+      "file": "libsystem.a.p/system_device_tree-stub.c.o",
+      "sha256": "3e0be8e5213cc9c2b75e413200174de7148dc96236a909f46fc315d00eba53cd"
+    },
+    {
+      "file": "libsystem.a.p/page-vary-system.c.o",
+      "sha256": "cf27538913dc6b30c09f110451e0e6425de0ae20026d3a75cf12295a435f498e"
+    },
+    {
+      "file": "libsystem.a.p/target-info-qom.c.o",
+      "sha256": "2eec5ead662c6b36cf43f79a17ddfe3f4c635f5b4c01283ed2a8fd592369a3ce"
+    },
+    {
+      "file": "libsystem.a.p/ui_curses.c.o",
+      "sha256": "92029c9a2b98ad83caf6038482a9ba3c8df160d1ee01d5dd5c3bbc8254e142a0"
+    },
+    {
+      "file": "libsystem.a.p/ui_dbus-chardev.c.o",
+      "sha256": "40ffd7705b0a5dbf372ce036faf9488133c66e2777905ce5be0b05ce17fb961e"
+    },
+    {
+      "file": "libsystem.a.p/ui_dbus-clipboard.c.o",
+      "sha256": "b62f00368661c837e1cc2c6fd7223ad945900172cf09679ab7831090c15b9950"
+    },
+    {
+      "file": "libsystem.a.p/ui_dbus-console.c.o",
+      "sha256": "12d7c9dab07266920acc527b6d15b422fc25237e4cadae7b968304e5af401a9d"
+    },
+    {
+      "file": "libsystem.a.p/ui_dbus-error.c.o",
+      "sha256": "4072c03f32f0afb443d002b6cebdf84706ad0f487c28be46b2529c299ce6fb68"
+    },
+    {
+      "file": "libsystem.a.p/ui_dbus-listener.c.o",
+      "sha256": "77c8c9b6872aa1921d7a0945d0f84d0fc8018973501cf219f2e499033d04ff74"
+    },
+    {
+      "file": "libsystem.a.p/ui_dbus.c.o",
+      "sha256": "32ba679e6c57f3360e1625e9b6b596a7ad6569c0c693c60d2de7e0ac92738efe"
+    },
+    {
+      "file": "libsystem.a.p/accel_qtest_qtest.c.o",
+      "sha256": "9e2634568ce169e02acb54d33334955cebb6d2153844c85d55ca6107030d8c3d"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_virtio-gpu-base.c.o",
+      "sha256": "5d789e6f7b207c0fae3fee78a40e076fc12e4c1d7558b31ce2b3154a386c12a1"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_virtio-gpu.c.o",
+      "sha256": "a5a9d21521a1090aecffdb1c569db9b872e01134861426fea052e5266d222ec2"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_virtio-gpu-udmabuf-stubs.c.o",
+      "sha256": "77a42955e7bb276fad5bf85f99735dbe2f66bbec0f56460f5e472b20623fb251"
+    },
+    {
+      "file": "libsystem.a.p/hw_display_virtio-gpu-pci.c.o",
+      "sha256": "2f11244cc13b6765693129b2f2f40085368fe2f6ae3f3e3dbf40d4bd7e14b12b"
+    },
+    {
+      "file": "libsystem.a.p/hw_usb_host-libusb.c.o",
+      "sha256": "d11bf6d0ffd11d9aef4f4e151e71d1509eeae90e6f09c7a4bfdebb5e50797ddb"
+    },
+    {
+      "file": "libsystem.a.p/meson-generated_.._ui_dbus-display1.c.o",
+      "sha256": "12fcc24175f442e7aa1a4527276ebd2cf9b8c74547fefc749c7a8356bb7fe657"
+    },
+    {
+      "file": "libsystem_sh4.a.p/target_sh4_gdbstub.c.o",
+      "sha256": "15cf77db65cd62fbcd291c9dd5b998be6146fa2bb2cd84365db4dbb607676f14"
+    },
+    {
+      "file": "libsystem_sh4.a.p/target_sh4_monitor.c.o",
+      "sha256": "b5c2ccbc5df8588fa989128ce0ed6f32c5e11d7c1ff3fb86189fd707a659a2f0"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_sh7750.c.o",
+      "sha256": "e3591732568ca464451dd35a708999c05569c271e796122191d0ae2e541ed968"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_sh7750_regnames.c.o",
+      "sha256": "c4bacbdc7f08934e30005efb7ee4881f1ac4f08a97df68d1d982bc99a7b4ccce"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_r2d.c.o",
+      "sha256": "d31e05a1f13a3d9ce0ff8e89b6c588a4e81881fa9c8249c2b9d578a9fe479864"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_cache.c.o",
+      "sha256": "0f6240a2e83fa55a241b56f49e364c550f12cdd8e0d128a40574cb5fb6664c03"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_edma.c.o",
+      "sha256": "d28e85c91ad89b79ccddc8cd5b3620b491a8c553840bfb0ec0256f52e562e762"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_emifb.c.o",
+      "sha256": "f8f413b900e7c5e0b49db1c7fa920f67c54c10f7d201b7897e9ae8492e1bdf94"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_gpio.c.o",
+      "sha256": "6a7d38c492fa298d4034ba39a9c5cc759474f75d95abecba77e49bcf5b9893fc"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_hpi.c.o",
+      "sha256": "7663a480b172b9ae6ff993bcf93eb5bce4016cb0aec4b6a8df26dfd929d9c49b"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_i2c.c.o",
+      "sha256": "1c7eb22ffa393c80e95702777b88c6508ff603574b77e093c956ac0fa4d35708"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_intc.c.o",
+      "sha256": "5a345c7adca303dbbf2fc15384dbb0314f76cf4cf70a8f2c87bd3c14e1e73506"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_mcasp.c.o",
+      "sha256": "b74b3992f997109a2098626ca57007b0f34f1d59e5597b175cf063cbc5a90046"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_pll.c.o",
+      "sha256": "a7d87dbb901a48fb2394aaa4acadd4d3bc4b976f86f798df32cc23e3b1f90f06"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_psc.c.o",
+      "sha256": "7653765ca306657c1f3bef1f14c51a722b23157ea3b96e1101a6565d159afccf"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_spi.c.o",
+      "sha256": "261d9de1e6c984d1560087efd1f9509aa55060bcfed87da456dbce70120c108e"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_syscfg.c.o",
+      "sha256": "14ce9a1a407aafbd3eecc3f5252368f95ff1b9dcae0d1a30cdbc77c6a20db9bf"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c6747_timer.c.o",
+      "sha256": "4c0a54bb4b5ce4bce0eebe454ac80d8120758d97b9e48f27f17c46ff4f69ccba"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c674x_control.c.o",
+      "sha256": "72369784e15e62beaa54368402a42f0f8f44893548568915bf33f5e9f3db8a64"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c674x_loop.c.o",
+      "sha256": "15b1b6f5b75d3a96abbc854b9c78f35ef3e155181aaf86bad1934ea50e5c6624"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c674x_mpy.c.o",
+      "sha256": "e8dbf14cddcfc26e7bb98008817d4ad29f5f87f12f95198839cb0f717a4a74c8"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c674x_sp.c.o",
+      "sha256": "569fe9ed0fa8d77a26380352a9647341adf28f201308968cfae8a49522f5e4fa"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c674x_uncond.c.o",
+      "sha256": "cda9dccc5621456c6882add264ca6b6f5520027b8358279d7fc2d3e7c29f3aa8"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_c674x.c.o",
+      "sha256": "04afc4d5145a4ad71a2dd59a9e8116971472e654bb9852759066c56b660d5423"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_dsp_checkpoint.c.o",
+      "sha256": "e928a545faab9bca98d6acaa42786eccff77b743252d85e0f244b9224df65f68"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_dsp_scheduler.c.o",
+      "sha256": "e849f4d6483cfc7ca49523a03d674db09bf5c10af541ef89ad68e82765a41342"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_mfi_identity.c.o",
+      "sha256": "bb368583b5f20ab3e8193ffcbca66d2f9c1a7d738402a5bd58454e61e37b5b8e"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_nxs_eth.c.o",
+      "sha256": "0de0a519ca6cba36337c7483bd5d4140c8b5edea19d66655d4ff4e541e45c02a"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_nxs_iic.c.o",
+      "sha256": "51720a94055ad7ad44b15b7b0f0bbbc06e5dc8af3fcd5709d56ac16a19a5f906"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_rtl8201fl.c.o",
+      "sha256": "b04b43a2086fc4b171653ad4cb96a18adc1e65a22c396418627ba6ebc27c3d45"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_sh7764_eth.c.o",
+      "sha256": "e8c54ae7a044d985638fc5d64200a300eb9ade21a163e9637e53587fe2a9a920"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj_sh7764_iic.c.o",
+      "sha256": "5a6363ef8fc888b715791efcb04f2f58011f23672af02270b8f8ced09e8c09b0"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_ata.c.o",
+      "sha256": "54b95248c06865c316581fcd67e8fbfcfd896606e93bb1ff40024c1fc97f56cd"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_dsp_model.c.o",
+      "sha256": "32b5ae4b471c766bd542c85f37f72b2fa4f1ab484aca1421ba02e984e947683b"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_dsp.c.o",
+      "sha256": "a4959e92a2a4cbcbb13ecabff939cc7c60c8a1eacdd7342d39d246fd6bb39a4d"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_input.c.o",
+      "sha256": "4ea7c89d6bc9dfb55a587378056642e1495c42340440dec48e80ac655f13ef65"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_main.c.o",
+      "sha256": "2778d355077b1ed5019930490db0e488edc6efaa6141042f4eb919eded207b81"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_nxs_hpi.c.o",
+      "sha256": "82cf3ebcc74f4e245da890cf9a0b23425c385266d33a4fdfa6fbe3e59e81cb01"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_usb_model.c.o",
+      "sha256": "6f80c7822359cf6f92f81d2ad3ce0c85757cf421e035c40d4ba556a46884a580"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_usb.c.o",
+      "sha256": "c375ef3a2f32434b583dfe626f911935b7efd254cbac17a5936421323654692d"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_sh4_cdj2000_usbh.c.o",
+      "sha256": "b38c86a3465102c6f8556b5ea7f06a11e9ef9d9a0419914dc9ebc3d3ed0a7827"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/target-info-stub.c.o",
+      "sha256": "ff9c56f353fce9e8d494a56ef4a09fe17af41b48a2d657957e70bedc1ff8c60f"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/target_sh4_cpu.c.o",
+      "sha256": "dc7bf8d855d2e1a23af587d27d9862b5eb3d22af0984c84151cae4148e7bd462"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/target_sh4_helper.c.o",
+      "sha256": "23dad86aadf0651320d9bf5c2d7b560f93010388f75c4531d2221b7831a57046"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/target_sh4_op_helper.c.o",
+      "sha256": "9d02972eb998fbb731ccbbff0cfee62179db6ee3fecccc9af9e29978537e4e55"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/target_sh4_translate.c.o",
+      "sha256": "9c2543df914031859d84ae5603861c2ae3eab57d1ebd04c46d67375b981a8c80"
+    },
+    {
+      "file": "libqemu-sh4-softmmu.a.p/hw_intc_sh_intc.c.o",
+      "sha256": "90bcb077db35810baddf2ae00dea62822506cf87957cf0b7d3fcefe5256eaf11"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_bus.c.o",
+      "sha256": "a41ae27daa8a12696c97a94ab32ad4285cbc66c42c1faf282ddffb0ee7c9f641"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_gpio.c.o",
+      "sha256": "d16b1b57d19fe109cf43d0eea01368d4c6302c2717edb3c3f6896343fe0a11aa"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_qdev-properties.c.o",
+      "sha256": "ed4ccac052e557cb5569ed3b1ab84c60183d54cd82bb8c7d2c8e85bf7e037810"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_qdev.c.o",
+      "sha256": "c867323d4ccdc711aa949d4f3940e555e40a59daa46e24bb1488e7b1b8ff0ae8"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_resetcontainer.c.o",
+      "sha256": "18fafcdca775b01e13172e82ecd12de0547058e4a2a2bd8dc8dcfa2c63100bcb"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_resettable.c.o",
+      "sha256": "5f96fd8093acc5264d39fff5f76e718d7fedf998907c7fa36bab605eb2aa9bb3"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_vmstate-if.c.o",
+      "sha256": "dcd58c73b2947cf5a0d52a644ec58a950f68a818806af88285bb213e8ce52885"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_irq.c.o",
+      "sha256": "10650e01fb0c36b4e5d8cb050c802ff1a5b62eb7fcc1a26f3127cbdcf9a5c380"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_clock.c.o",
+      "sha256": "72ad9bd51508c1b070181614b2c7ef168e8cc89a2c7213bc571290e44563c869"
+    },
+    {
+      "file": "libhwcore.a.p/hw_core_qdev-clock.c.o",
+      "sha256": "d9fcd1231500e53179435cf9be39b7ee799d29d2b31619f073066c2184862e52"
+    },
+    {
+      "file": "libqom.a.p/qom_container.c.o",
+      "sha256": "294b20446a99704b138d94c369171bbe20bf8f1761768ad2cb10f68b2e8b3add"
+    },
+    {
+      "file": "libqom.a.p/qom_object.c.o",
+      "sha256": "cc2565b17aa1bca0ac59ca7454b83ca73cfe538492a573913c0f5782fb56a76e"
+    },
+    {
+      "file": "libqom.a.p/qom_object_interfaces.c.o",
+      "sha256": "2eac31fd4932f7872b90011abd27bd130c863557385b09857eddd978e521d24a"
+    },
+    {
+      "file": "libqom.a.p/qom_qom-qobject.c.o",
+      "sha256": "d5305381fc56e5b38621b142e6674ed615270cb1c0a17225dcb5439510eef33f"
+    },
+    {
+      "file": "libqom.a.p/qom_compat-properties.c.o",
+      "sha256": "097bc8ce5045ffcf5ff6bce677b1d34b679c0950374f827a0f503268cb848f94"
+    },
+    {
+      "file": "libevent-loop-base.a.p/event-loop-base.c.o",
+      "sha256": "f38a506338b72f12baa56fcf6beeb5fe087bd360c2e9141869ab182ff61f34d2"
+    },
+    {
+      "file": "ui/libqemuui.a.p/clipboard.c.o",
+      "sha256": "0905a8f5e82f55704a2fe4cd27f9b51e8bf1ff55a50836a6a900094de86b747d"
+    },
+    {
+      "file": "ui/libqemuui.a.p/console.c.o",
+      "sha256": "0311117ff878018b84a630cdbe99edf6ac3c85a965fe4ad148f2a862a4b062a8"
+    },
+    {
+      "file": "ui/libqemuui.a.p/cursor.c.o",
+      "sha256": "c94f83dbf7b24990b6e52a9c2b6ce9fc79e1fcccd379fb2784b86b968f2b9766"
+    },
+    {
+      "file": "ui/libqemuui.a.p/dmabuf.c.o",
+      "sha256": "de1455493034c030416d641f6a777b0e99f14100a4c52609a86196834d1a0cd1"
+    },
+    {
+      "file": "ui/libqemuui.a.p/display-surface.c.o",
+      "sha256": "118784a796b891f2739a707e1b7dfe6938494028d3000f26019091c184392bae"
+    },
+    {
+      "file": "ui/libqemuui.a.p/input-keymap.c.o",
+      "sha256": "34b91a7b17e7be50218f1077e4bc343e35023c3346b4d7497ba14885ef74aee4"
+    },
+    {
+      "file": "ui/libqemuui.a.p/kbd-state.c.o",
+      "sha256": "2c9a067b08db867af8e91eb0fcd1a7844e6ab69294816679c1f69355dcad46a3"
+    },
+    {
+      "file": "ui/libqemuui.a.p/keymaps.c.o",
+      "sha256": "1db77ab7e529bd573eef288fe239370d486f7e6b18225c22608019c1a7fe2d7e"
+    },
+    {
+      "file": "ui/libqemuui.a.p/qemu-pixman.c.o",
+      "sha256": "1917dce9723b27eb710ccc2b0261225fd8d5fa8b5a1a08e85c6154dce339c6ad"
+    },
+    {
+      "file": "ui/libqemuui.a.p/spice-module.c.o",
+      "sha256": "a1ca3a05d43e30acb6c85e0e0975a776df2d86469fd4ad99c14d57f8d1a426f8"
+    },
+    {
+      "file": "ui/libqemuui.a.p/vgafont.c.o",
+      "sha256": "1fcfe31a43a33a97e63df3cb500eea9b809cf07f902901555940930c55b02fdf"
+    },
+    {
+      "file": "ui/libqemuui.a.p/cp437.c.o",
+      "sha256": "f89d605a0c8eba736b3ae0a5bac235821aa48d151832c72d654643d070094f30"
+    },
+    {
+      "file": "ui/libqemuui.a.p/vt100.c.o",
+      "sha256": "9a39a288d459036ca5ee5925a062ceea14275c480526dab354ce90b38fc2ce87"
+    },
+    {
+      "file": "libmigration.a.p/migration_migration-stats.c.o",
+      "sha256": "b6a5d1a6dd0c1584356e02b9206f5501fb39a6d03a97e10503cb9187f216e5b8"
+    },
+    {
+      "file": "libmigration.a.p/migration_page_cache.c.o",
+      "sha256": "853dcb5fd9cce9b7713bd6b47e88a1622894f1a9bde44c8e85bee5816677056f"
+    },
+    {
+      "file": "libmigration.a.p/migration_xbzrle.c.o",
+      "sha256": "f4aa50585e2d40fa4a246a7e90a7dbb18dbdc894fa7444518d2da33d9a39bda4"
+    },
+    {
+      "file": "libmigration.a.p/migration_vmstate-types.c.o",
+      "sha256": "eb4d9ed760a50d5da3b6a86d5f599a931b5460c785acfe9ed07cb2f393e77326"
+    },
+    {
+      "file": "libmigration.a.p/migration_vmstate.c.o",
+      "sha256": "52ac8656d20a9bbc2fb9bce407c0c5194507607a4214917f473b8ed59a52e9d6"
+    },
+    {
+      "file": "libmigration.a.p/migration_qemu-file.c.o",
+      "sha256": "fa04a0c7de4d7c954973dd6390b47dcc8216a2601cbe238d32d89c5ce947947b"
+    },
+    {
+      "file": "libmigration.a.p/migration_yank_functions.c.o",
+      "sha256": "9a7f0bebe78851fb82cd73c273bd20dc3be6950b5f69c412327659f4d46e7824"
+    },
+    {
+      "file": "libio.a.p/io_channel-buffer.c.o",
+      "sha256": "b5ca1a032d29d6a11cda6b0e5384608f537d7556089f3e7bc8faf7d3345448b4"
+    },
+    {
+      "file": "libio.a.p/io_channel-command.c.o",
+      "sha256": "5f026b5d91f931baef9f372a5f744f294d7ed192bbdb740649a5ea156736a0bb"
+    },
+    {
+      "file": "libio.a.p/io_channel-file.c.o",
+      "sha256": "02fd0836589b2ebd0dcbf8cbd45bb88ef151a45f3404a698554a5f81711c7168"
+    },
+    {
+      "file": "libio.a.p/io_channel-null.c.o",
+      "sha256": "2a3a827f744582a29c1acccf009d02114cf0a1b6edcd63983f2bb0b09c6ded28"
+    },
+    {
+      "file": "libio.a.p/io_channel-socket.c.o",
+      "sha256": "acf35bd82ac6ec5fc68c489f34306868de647fba6276c82435aae251b86c569e"
+    },
+    {
+      "file": "libio.a.p/io_channel-tls.c.o",
+      "sha256": "aaf34d9a1b0ba0b2fc51689784d3b7a9f118324f20ebace65e579c86cc72e7f2"
+    },
+    {
+      "file": "libio.a.p/io_channel-util.c.o",
+      "sha256": "e5607259e7e768d20016e14be47236f21578d1592cd8fba17b2ec17c8fd64772"
+    },
+    {
+      "file": "libio.a.p/io_channel-watch.c.o",
+      "sha256": "3d7f60cca128d553e1bc48892bae6533d041912969619a140eec29b069f28b60"
+    },
+    {
+      "file": "libio.a.p/io_channel-websock.c.o",
+      "sha256": "ab930f4ebe19e403c943f889edaec21f510a98e82b94bb7214323c9c1a3ba7fc"
+    },
+    {
+      "file": "libio.a.p/io_channel.c.o",
+      "sha256": "12c7bed31f4b7c63551cd6b0ed381793da2a49b83446c2e90f7c58b75958f033"
+    },
+    {
+      "file": "libio.a.p/io_dns-resolver.c.o",
+      "sha256": "ca90b01136e92e9675e7ea4a9e8e54b4fb9cab3dfa0538d498c1de2f20256602"
+    },
+    {
+      "file": "libio.a.p/io_net-listener.c.o",
+      "sha256": "670d30b4d09438ec5d8e273896a00499da996ad94aef9ecce6887e591c4fcf10"
+    },
+    {
+      "file": "libio.a.p/io_task.c.o",
+      "sha256": "0f614f0d12f62e995b2bee240be439c4e2d37dc873949855a46fbd1b2add7986"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_afsplit.c.o",
+      "sha256": "d1d866c59df15d46ce5f8621bdf3416ec7929ba0bd80e77df8b4a9eafa063fc8"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_akcipher.c.o",
+      "sha256": "f36100c593252976d48ac29a235c01fa6c3d7270ce35ff2225c84be4c5939d4f"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_block-luks.c.o",
+      "sha256": "5c464c0522932bb65195a6f78b2b74b612700b6f14afc72082b830d07ebc12da"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_block-qcow.c.o",
+      "sha256": "af2059306e6250ccd7a21179a7034ca5341d87586d9db4fa95223cd1255c10f4"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_block.c.o",
+      "sha256": "6ab43d0c3c3c587f30666a3c99b098ccf0cb205cf747d6a0063e2bc9a9551d95"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_cipher.c.o",
+      "sha256": "28381190d849815e912329e7ef1497c374ae3654013c642724253f870cc3139b"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_der.c.o",
+      "sha256": "c778470a5ab89594e154b8fa4b1092c5cca09f80d652826de9f2e0c5a3d1465c"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_hash.c.o",
+      "sha256": "d20818f621c0fa33d544d3d489dc3af9b883aa51590b65a560a1f3c75ba17125"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_hmac.c.o",
+      "sha256": "0ae70eb1f74c59b770f7696c1b07a03ea6c1d72f1cc2ec2ec8900c69b9bec625"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_ivgen-essiv.c.o",
+      "sha256": "f002fc548d9c1d26aac8e660c8228d334b40afabc810e216427ec4050e3d9cb3"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_ivgen-plain.c.o",
+      "sha256": "25d9e599f3fb0958d9d9877dc9f63f18caa6fca78e50bd2983f3ddbfaf582833"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_ivgen-plain64.c.o",
+      "sha256": "b7d0c30795445483f2289c985c03c330bace26c1dc8a60bf941a3c66602b7156"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_ivgen.c.o",
+      "sha256": "36096063f026f865dea25fc696bfe08115b7c4046b14749c3b7877ebacc61e3b"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_pbkdf.c.o",
+      "sha256": "ea4f3f972b8026b4f6a2a32e3b0f5847011964e4b6d263d5feb36e4b5db0b733"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_secret_common.c.o",
+      "sha256": "ad6273078d52fc0f6a1b766fa858dbda5a5792e6715e3f15ce6784af9a616c4f"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_secret.c.o",
+      "sha256": "ca75531ae314aa0db115a19e2fd1632d1a73d4d864ecae7e3a22ece1af2c99a7"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_tlscreds.c.o",
+      "sha256": "3aac9da2bac903e260cfd89a41b2cdc6216cd5259ead712525f2a817ee3010dc"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_tlscredsanon.c.o",
+      "sha256": "8f1d02beb19f4905eb8b6b8140e610d83b81529ba9f3b8ed22902db9eee2b996"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_tlscredspsk.c.o",
+      "sha256": "434c23e414c2f6f042e00bf6b40f28c8ee393b005dddfce30cb910ad08b02764"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_tlscredsx509.c.o",
+      "sha256": "4c6c959b09ee388ee53e3391971c7aa2743a8dc3dd3f8295577dd6789df00edc"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_tlssession.c.o",
+      "sha256": "b2314d97e8e9a08a6a53cc20ca432758546711313fd00663594e5e9dd3a81573"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_rsakey.c.o",
+      "sha256": "f101b448394f38b174df4b2a65c6d9d72b92151c04ec9300806261146943d15c"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_x509-utils.c.o",
+      "sha256": "ab1c00da16f76517dcc616a6f1d3efecd0a7000f24d5e909cb60f83ef44e540a"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_tlscredsbox.c.o",
+      "sha256": "68c53a7a08b3712bb0a5a7f03cbb155862936f4ed4e6359f4aad1e93616e28a2"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_hash-gnutls.c.o",
+      "sha256": "55e3136e3601c27569ee425fcd5b0c0821fac190405688a89984e4ddff626d2a"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_hmac-gnutls.c.o",
+      "sha256": "d8d1b0604c691f0a8bf6908f63eceb4b1e9d494bfa7049a1e493c8b44e79139b"
+    },
+    {
+      "file": "libcrypto.a.p/crypto_pbkdf-gnutls.c.o",
+      "sha256": "8f7f1ef5f8a7222371796aa0d586d7c92e9380ed392e2fd4fa6ab6dbf186a1df"
+    },
+    {
+      "file": "libauthz.a.p/authz_base.c.o",
+      "sha256": "48a181940694b0def2c75448abf4c1156520e3e5da22edffa254d9c7c7cf0b1f"
+    },
+    {
+      "file": "libauthz.a.p/authz_list.c.o",
+      "sha256": "1154c4c2887bac9a6f96aa8f572aea93ef970a82ee70d20cb14906d09f4d1a80"
+    },
+    {
+      "file": "libauthz.a.p/authz_listfile.c.o",
+      "sha256": "88865b83ba0c4186b38845e22be5a4853ba3d7442b5d053b9ed4e0607a3834d6"
+    },
+    {
+      "file": "libauthz.a.p/authz_simple.c.o",
+      "sha256": "9a20c4824216017888048a49384772a02a1351abd22a1022a6f8753f032b617e"
+    },
+    {
+      "file": "libauthz.a.p/authz_pamacct.c.o",
+      "sha256": "e4721e15f12be44fae042851598799817b27d58da9d2303ed6a5022d84e5b76a"
+    },
+    {
+      "file": "libblockdev.a.p/nbd_server.c.o",
+      "sha256": "cd9bbef911f740248d5bd41c5b9648600db38a4327276ec3f58e741bad237edd"
+    },
+    {
+      "file": "libblockdev.a.p/block_export_export.c.o",
+      "sha256": "d0a846c5f825abc2f0372a3308faa8b6cc39059467411efbccecc4abe97ff625"
+    },
+    {
+      "file": "libblockdev.a.p/block_export_fuse.c.o",
+      "sha256": "07cf93e7e07391e9585c99ffcc20c7b63f667db78a9744aabff9584d9e6d6ceb"
+    },
+    {
+      "file": "libblockdev.a.p/blockdev.c.o",
+      "sha256": "ea0e399fe4709e4eca13d512e7e834b937054d9ebba13b082f6b7e05ed2c3e5c"
+    },
+    {
+      "file": "libblockdev.a.p/blockdev-nbd.c.o",
+      "sha256": "0a9c3e33609f7dfadac2c1f032b399081413dbe897e22ef6aa46b492fc42694d"
+    },
+    {
+      "file": "libblockdev.a.p/iothread.c.o",
+      "sha256": "d71ff2c87ecc7d1547ee4a293a68c470449394f45a05597ff0595be2524717d7"
+    },
+    {
+      "file": "libblockdev.a.p/job-qmp.c.o",
+      "sha256": "316dd98c4fe633466ba491f8cbda588a09b2c72bc38a5586778886162e186241"
+    },
+    {
+      "file": "libblockdev.a.p/os-posix.c.o",
+      "sha256": "75a13794173835ad2017f0a680c9892f31ac4af4de370d9f97a8bedaed2d37a3"
+    },
+    {
+      "file": "libblock.a.p/block.c.o",
+      "sha256": "29e7d54ccd0180028c856ccc73c71ad876d3fadeffeba00be0e68e92df13fc34"
+    },
+    {
+      "file": "libblock.a.p/blockjob.c.o",
+      "sha256": "fd8861469e77ae56a060a414b21ba26a919067fa859cbeb27f41e2aef9b0ae10"
+    },
+    {
+      "file": "libblock.a.p/job.c.o",
+      "sha256": "1c54ba7c80befeec0a172c14410dc72788686a9c2d318786868423d9dc71bba0"
+    },
+    {
+      "file": "libblock.a.p/qemu-io-cmds.c.o",
+      "sha256": "0f629e44fa7b6a99556435c7968aebabaa075293a7f33aa9e78f98137d423130"
+    },
+    {
+      "file": "libblock.a.p/replication.c.o",
+      "sha256": "c74ee6cbf29cc8c47025e9e301c95de8c7231f7b8f3b15bc09341ac49c340654"
+    },
+    {
+      "file": "libblock.a.p/nbd_client.c.o",
+      "sha256": "d44cfebb74e6c10e094c97f2d4fe232cdc1f1de3fd866b981893bcd414eaca09"
+    },
+    {
+      "file": "libblock.a.p/nbd_client-connection.c.o",
+      "sha256": "ea34373d36c65fb387236ab14f574f1c883a35cdfa94b538a26792c6f7b468c2"
+    },
+    {
+      "file": "libblock.a.p/nbd_common.c.o",
+      "sha256": "113113562a4a4a5db17e4617bfa1cdf4de066f72ba8e2ee1f16a1637441077ee"
+    },
+    {
+      "file": "libblock.a.p/scsi_utils.c.o",
+      "sha256": "9b8f0c9756d867a06d6c7d35c032ba46f3ca3853b9aa58cdeeaf959209395898"
+    },
+    {
+      "file": "libblock.a.p/scsi_pr-manager-stub.c.o",
+      "sha256": "5813e29741a37dfcfd8945907df3fd7935150e639510b38877ab41d60832bd77"
+    },
+    {
+      "file": "libblock.a.p/block_accounting.c.o",
+      "sha256": "2f84341ffa5d0d0eedcf67662d74428098db9f721c289a4faf298022ab429167"
+    },
+    {
+      "file": "libblock.a.p/block_aio_task.c.o",
+      "sha256": "4e25ad0910629d7815c974c3e5b45c820caa728e88b6c1a43fa68e609e74e44e"
+    },
+    {
+      "file": "libblock.a.p/block_amend.c.o",
+      "sha256": "cdc14b35eda000bfd640e5808dd1dd5964e63de8e68ed43523003af8f6aa33dd"
+    },
+    {
+      "file": "libblock.a.p/block_backup.c.o",
+      "sha256": "90875fd0721d53817b03f18a710b1ae66189efc376a0b584fb43e50df0ec9a11"
+    },
+    {
+      "file": "libblock.a.p/block_blkdebug.c.o",
+      "sha256": "02381598379402b4c66c02489e69e43ca1d562f7ad324cac348616f4a261d393"
+    },
+    {
+      "file": "libblock.a.p/block_blklogwrites.c.o",
+      "sha256": "94e4b491f4e93b9aaa3263e4385e93bb953250f1d5d9bd1bd1c7c265a9dc9041"
+    },
+    {
+      "file": "libblock.a.p/block_blkverify.c.o",
+      "sha256": "ecc19d6df46feb7060b702a0bd92996f341150fd6ecf881a9ce1e173d97e3b72"
+    },
+    {
+      "file": "libblock.a.p/block_block-backend.c.o",
+      "sha256": "6676384709f180238b0f9c78fd0a254a029d48959606b06bbb02497a49716a81"
+    },
+    {
+      "file": "libblock.a.p/block_block-copy.c.o",
+      "sha256": "e323a41914d60ea2efc946c85400137a2cbb92a7bd3757f8da88c50552790618"
+    },
+    {
+      "file": "libblock.a.p/block_commit.c.o",
+      "sha256": "c2b41fed8e9ea11c88081ae963d080ea887f19c7eae9f1d9dde57beaecc5a721"
+    },
+    {
+      "file": "libblock.a.p/block_copy-before-write.c.o",
+      "sha256": "efb479929e9a45519af0e75f8fb7b212273297d0df5f8aacda49f5de4cb0e2b3"
+    },
+    {
+      "file": "libblock.a.p/block_copy-on-read.c.o",
+      "sha256": "c67aef693b1891a235409cb3ae3c3343e7515f052c972ba2af6ae80199dc75b0"
+    },
+    {
+      "file": "libblock.a.p/block_create.c.o",
+      "sha256": "8b2be36879fa8e3e1e989a0973f70b82812036bc17b1312e7fc38ee891398255"
+    },
+    {
+      "file": "libblock.a.p/block_crypto.c.o",
+      "sha256": "54b675ec0e191ec56c568a8b6fe1bf07c5b4415bdbe98a5b18f66e378b3c2790"
+    },
+    {
+      "file": "libblock.a.p/block_dirty-bitmap.c.o",
+      "sha256": "3c97d9cbfaa75d7ce000fe46c4e5a2f51ea250f3ba474576f3d94f06411b1805"
+    },
+    {
+      "file": "libblock.a.p/block_filter-compress.c.o",
+      "sha256": "d765482278ad3d278a6f1d33ef58807ae85b87bff52ebbc9e2026759317e4b78"
+    },
+    {
+      "file": "libblock.a.p/block_graph-lock.c.o",
+      "sha256": "cf37c248269af2d6179ef51028da9cdf3cb75918562fe839f3f436656e574216"
+    },
+    {
+      "file": "libblock.a.p/block_io.c.o",
+      "sha256": "893305ed180e28e41bd0f37029725df301e7523cebccef82c9d4adf69efd42bb"
+    },
+    {
+      "file": "libblock.a.p/block_mirror.c.o",
+      "sha256": "172b34eb5c818c469715d411f564970af3db82d003f453320d88dbd7379b826d"
+    },
+    {
+      "file": "libblock.a.p/block_nbd.c.o",
+      "sha256": "2c30a59b05c0490f8e66f8262ddaea9f42a09d8c38037cd7f22384d9a0824a25"
+    },
+    {
+      "file": "libblock.a.p/block_null.c.o",
+      "sha256": "a74edcb77b76a93b334ee248c69e58f3f2b850ab45f0f771e226e843026de91a"
+    },
+    {
+      "file": "libblock.a.p/block_preallocate.c.o",
+      "sha256": "58d30d5f7df8fc3b77d4aef22e0bc539740fc24a7b547bd7f19ddeddf1fd9432"
+    },
+    {
+      "file": "libblock.a.p/block_progress_meter.c.o",
+      "sha256": "6ba502ed7aa46fc37f6170c94d0649c5e4b4cd6bfe60cc8fb0966d1cca399c87"
+    },
+    {
+      "file": "libblock.a.p/block_qapi.c.o",
+      "sha256": "e1055db9c37da1b35ed950ef578606ba90552444c1882bfc8b2df93385789bfb"
+    },
+    {
+      "file": "libblock.a.p/block_qcow2.c.o",
+      "sha256": "5dd9e07cf3c331d7aa6b6fe703614fdfe8d2f589b1a713ce6098164ad9013735"
+    },
+    {
+      "file": "libblock.a.p/block_qcow2-bitmap.c.o",
+      "sha256": "962bb35c93f7f402f939f075d8092111f6d51513c170a363f36ef7f9850246fc"
+    },
+    {
+      "file": "libblock.a.p/block_qcow2-cache.c.o",
+      "sha256": "8fac6894f7b03f5c503d842aa9e7dcd1bc47dfc436408cc33be779552f3026cb"
+    },
+    {
+      "file": "libblock.a.p/block_qcow2-cluster.c.o",
+      "sha256": "4c0fc1f5d004cc9bfc63ad2cb3a793ff1ca8ce038db833d6424217f6b472d155"
+    },
+    {
+      "file": "libblock.a.p/block_qcow2-refcount.c.o",
+      "sha256": "e6c3322847bb69040e5cc8cfe6d37e2c78a596149b4fb11b00203c8dade68cb0"
+    },
+    {
+      "file": "libblock.a.p/block_qcow2-snapshot.c.o",
+      "sha256": "3c7d8b03b13de46018f6b6cfcbe767610ba0db1eb49a902050374eafda118855"
+    },
+    {
+      "file": "libblock.a.p/block_qcow2-threads.c.o",
+      "sha256": "720ba48ecc9678d4ae042109bf00cc8d5c8f4fef227069bd161ad0dfbda29675"
+    },
+    {
+      "file": "libblock.a.p/block_quorum.c.o",
+      "sha256": "e79ae1f1a93639a0bef9018732a6c1737a8eddb6bd5da08828070a270656b9fe"
+    },
+    {
+      "file": "libblock.a.p/block_raw-format.c.o",
+      "sha256": "5cdfdb51cc22c6ae77730d83628875e58b51d0832fae998f8dd1c4ff9795029a"
+    },
+    {
+      "file": "libblock.a.p/block_reqlist.c.o",
+      "sha256": "5c298235605974499bec7107f2f313adddd40e19a5ca43a8ab7ddf0495a7fbc4"
+    },
+    {
+      "file": "libblock.a.p/block_snapshot.c.o",
+      "sha256": "a3592e1fd61d09b5ea94d8f28cb9424aaf2b0500fbe9c77afc8c6fe6285dfaca"
+    },
+    {
+      "file": "libblock.a.p/block_snapshot-access.c.o",
+      "sha256": "c64a3f73272a4713758b0fa8f0aca5c8d928af0e3f3aa918b79dc4b461e13feb"
+    },
+    {
+      "file": "libblock.a.p/block_throttle.c.o",
+      "sha256": "c7bb772582b69ad851ccc96b0158b33734eb04b7d7c9fe992277e1a7af1ed77a"
+    },
+    {
+      "file": "libblock.a.p/block_throttle-groups.c.o",
+      "sha256": "ba0c38fc34002fc158dd479334d649489a1daa9adf4270d449bafb24965b40d3"
+    },
+    {
+      "file": "libblock.a.p/block_write-threshold.c.o",
+      "sha256": "9df1f2d99b4fe5f8acd55b4f266f91e8e75e3457c1db630876261c78ddd2b8ba"
+    },
+    {
+      "file": "libblock.a.p/block_qcow.c.o",
+      "sha256": "3f4e2657694aa4b7ac5ee5715eedce220efa9f164ac3580398256352a909ecab"
+    },
+    {
+      "file": "libblock.a.p/block_vdi.c.o",
+      "sha256": "5fe9d2a658b1fb0b8219a310096ce2fffb3f08a151339cdc236e288f0f202eb2"
+    },
+    {
+      "file": "libblock.a.p/block_vhdx-endian.c.o",
+      "sha256": "bbcb2eb66440b823e24fb7ab8d9471609f39f454ef1f651a648a922ab3c59e18"
+    },
+    {
+      "file": "libblock.a.p/block_vhdx-log.c.o",
+      "sha256": "32191787c8894a87ac934e196901ed82dea42ed5d52e1b29a8544cd8c042d190"
+    },
+    {
+      "file": "libblock.a.p/block_vhdx.c.o",
+      "sha256": "2c09fdba0bd389a73b33dbdaa28c724d70ee6ed9970ee2bfe1fa86bc545fc6fc"
+    },
+    {
+      "file": "libblock.a.p/block_vmdk.c.o",
+      "sha256": "fbd0c7e862a8bbe19cf4214715a2459147711b2622eaf2460af5e7f60288f446"
+    },
+    {
+      "file": "libblock.a.p/block_vpc.c.o",
+      "sha256": "2236e5504e4bc2a54e1a668c457e2476696d280aa6717e2d1ece24d63d4998b6"
+    },
+    {
+      "file": "libblock.a.p/block_cloop.c.o",
+      "sha256": "1d7577fb9ee738180531824d670b2904562738590c22311788f8ce670d969656"
+    },
+    {
+      "file": "libblock.a.p/block_bochs.c.o",
+      "sha256": "27cdf626ae9e3e7b26dd0f5a519f36d77363aee28162dcb9e4eb8430f7a635af"
+    },
+    {
+      "file": "libblock.a.p/block_vvfat.c.o",
+      "sha256": "9f88478ef7ed536799286d558d69f374d8eb5bb84688e6d315a0f06d1f5cbe73"
+    },
+    {
+      "file": "libblock.a.p/block_dmg.c.o",
+      "sha256": "65accbb390e97dc731b3aaa6b089d94fe11ae80349afc2757c004b99bad1a53c"
+    },
+    {
+      "file": "libblock.a.p/block_qed-check.c.o",
+      "sha256": "6e95fe23ce404407a3f69cc30313c62fa52a6b98daab0a7bcddb645322265188"
+    },
+    {
+      "file": "libblock.a.p/block_qed-cluster.c.o",
+      "sha256": "c1cebd4007fd442e4a43d0c21ea6c7f94ba6f115a17c792f2a15f4e02783e8c0"
+    },
+    {
+      "file": "libblock.a.p/block_qed-l2-cache.c.o",
+      "sha256": "5b534a0146edf95a18225e8df05a86dd89a804465f225859c8d9d10966a308f7"
+    },
+    {
+      "file": "libblock.a.p/block_qed-table.c.o",
+      "sha256": "542ee7e6d7e954126c40ecbe855a0858955d80c3ffd2e38950475780559592e7"
+    },
+    {
+      "file": "libblock.a.p/block_qed.c.o",
+      "sha256": "84e681dcca23b8e58bd1e01f980f691d2afafe01853ae2e07e4b415df969886b"
+    },
+    {
+      "file": "libblock.a.p/block_parallels.c.o",
+      "sha256": "520685b0e0ba5ee176c7ef181535a447d5f45c15f3850488c4d743afbc7c6003"
+    },
+    {
+      "file": "libblock.a.p/block_parallels-ext.c.o",
+      "sha256": "1e0a0643a794d1a5da765d1faf939b55c0578cbd4fe6ea95c330b32757b651b9"
+    },
+    {
+      "file": "libblock.a.p/block_file-posix.c.o",
+      "sha256": "100e94e741f63cc5d2e82d997d9bc4d243da2c05c379cae72f45603c488878b0"
+    },
+    {
+      "file": "libblock.a.p/block_replication.c.o",
+      "sha256": "f3536ec3fdf822cc32208546dd10c129a7ef3add7941c3b09cefd693e4fe40fb"
+    },
+    {
+      "file": "libblock.a.p/block_stream.c.o",
+      "sha256": "bc5dcdae07f64c6fcd7d1ba97beae4fbcdd0e97e79c3e2ac8342b6aef7bdc395"
+    },
+    {
+      "file": "libblock.a.p/block_monitor_bitmap-qmp-cmds.c.o",
+      "sha256": "e919ce3a72955867ca5b9bf2fdb9ea455872ea2b3e489ee8d634cec66d55d204"
+    },
+    {
+      "file": "libblock.a.p/block_curl.c.o",
+      "sha256": "63f2b2ee897f1570fc8fdb2d3fe12502ac426720596f0cb69974211faf79c319"
+    },
+    {
+      "file": "libblock.a.p/block_dmg-bz2.c.o",
+      "sha256": "a848c98a9719d345df9288c49fd58b5fa5a22ef6aebd117f00e4dc6832915442"
+    },
+    {
+      "file": "libblock.a.p/meson-generated_.._block_block-gen.c.o",
+      "sha256": "d290873454cdca08cc1e66f76ff3e88943c05d47305a9f0b55103b7ec0439187"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-fe.c.o",
+      "sha256": "78b9fb9ca5a6f25a5b4a463056e438d9efccb640c0e161bc37b3d1fb217c81ce"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-file.c.o",
+      "sha256": "bf4b264daa5b2b4df6934dfefc1270d949f3d0768ad46fc7f68b1104177e6a84"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-io.c.o",
+      "sha256": "86c8c78cfad2ff483acf56585683a08cc9abef2a553b43b263693a60b0e0b951"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-mux.c.o",
+      "sha256": "86b2c4e2296546f8597b3ed55243ba0a505b19459082fab0c645bb8202300983"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-hub.c.o",
+      "sha256": "ee6ec4d02ff89d83f5faa8ea6690da1e9bce92f8855104f04086227b27ab8d2a"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-null.c.o",
+      "sha256": "8947c729383842f1494380858f097983fbe6d0435f07c4f6eba2429203546077"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-pipe.c.o",
+      "sha256": "1a26b4e1bd6bea5379d8a51a0ad0ba8d4d9ed514407e74773ece246db897f8ec"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-ringbuf.c.o",
+      "sha256": "a7da6e1d7fb98aa6f60fb589a9e13954e562747a7390d74d72e3340dba5ec4c6"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-serial.c.o",
+      "sha256": "04cd7b2f9a158db1163e58f712191bd79b2203f96e14d31ea0396b6e23f73a4f"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-socket.c.o",
+      "sha256": "6aae5ee9ad6981fa4909fcd41210115071da6936388e334a43a0f5864dea20e0"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-stdio.c.o",
+      "sha256": "17edc62b217bf22ccc7ea58124f987c8722ba0853f742f713ad2aad91490338b"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-udp.c.o",
+      "sha256": "820c2230140cc5a567825b145d995a008117c99c241a9b56a2f7fb1b43ceccf3"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char.c.o",
+      "sha256": "302aafbfb45db62ea7bbdcc6604e924662dd278d54dba047962d1e4cb140eac5"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-fd.c.o",
+      "sha256": "635e59b82969902adf9ec0a384626b022d39b9d0d78eb630e909d404cff7158f"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-parallel.c.o",
+      "sha256": "3e0be8e5213cc9c2b75e413200174de7148dc96236a909f46fc315d00eba53cd"
+    },
+    {
+      "file": "libchardev.a.p/chardev_char-pty.c.o",
+      "sha256": "051569b30223ebf10915de02b54eceb6cb0535b985da706f7eb330fe1985b8ea"
+    },
+    {
+      "file": "libqmp.a.p/qom_qom-qmp-cmds.c.o",
+      "sha256": "df133978469958908e00261e20f3b6f0b44bcb22d64a8fd6bc9430a11d31b796"
+    },
+    {
+      "file": "libqmp.a.p/monitor_monitor.c.o",
+      "sha256": "3fb9b46203b61ebbe44c705e54ec4e59a6c80b9d299ff6925f10a81bc097ce20"
+    },
+    {
+      "file": "libqmp.a.p/monitor_qmp.c.o",
+      "sha256": "9f94211017b8ee354ed35c561b3fabfd650172d4b1c23a2bc3a75161803cc852"
+    },
+    {
+      "file": "libqmp.a.p/monitor_qmp-cmds-control.c.o",
+      "sha256": "3be3b2c332b81812099e0cfa66b6424ddf580eb3d42944fe56fc73c7cca014fb"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_audio.c.o",
+      "sha256": "79961a7028449fd515117850f0dd9467be8766315bf604ff49b006eb145746ad"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_audio-be.c.o",
+      "sha256": "91928b09d2ff4410e466b600f2a3bb4dbdb8fc11e30e9e85f92674b7d6f4cb4d"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_audio-mixeng-be.c.o",
+      "sha256": "996a16c48d6c9cf8ee991731bd127ce5243056b3b103ae19068c70a10cd5831b"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_mixeng.c.o",
+      "sha256": "f67bf53f8397c2924c7a1672ec2019744186b2e7658071f376fc467056869844"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_noaudio.c.o",
+      "sha256": "f6fa44e51ab1f294fb0bda2d51d09c78d7afc2c6c9722fb26b46be0e6227ab1a"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_wavaudio.c.o",
+      "sha256": "c45a7286e17ea8d8b9637f569a9b0453f53441bdaf30ae2c05099d5e49806df3"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_coreaudio.m.o",
+      "sha256": "6973348f9629f5bafc6c1025d147aed12633f48c6c5c57fe13dfe1df20ae73c4"
+    },
+    {
+      "file": "libqemuaudio.a.p/audio_dbusaudio.c.o",
+      "sha256": "4a3388924a84b51e31571098a1e996c13c33fefa3a958cfaa9770d27fa382587"
+    },
+    {
+      "file": "qemu-system-sh4-unsigned.p/system_main.c.o",
+      "sha256": "49de8e2c5bc7f018c2d0a55bea6069235187c61c2b62cd15dc0aff1b7a2893ba"
+    },
+    {
+      "file": "libqemuutil.a",
+      "sha256": "1ac473f7188489136dbcf04f90a25f0a98ecd88910ab6086426fcab18fe98222"
+    }
+  ],
+  "baseline_core_sha256": "be7704aaeb10648c3de495058aea2c378db4f101a174d107f99e7e022bb39085",
+  "prepared_core_sha256": "7ae6cc81a2c59ab1132558a7f83ba7b2242d728c430f797db6a634005bf1d88a",
+  "dirty_status": " M BUILD.md\n M emulator/qemu/cdj_c674x.c\n M tests/test_c674x.py\n M tests/test_c674x_circular.py\n M tests/test_c674x_saturation.py\n M tests/test_c674x_spkernel_fields.py\n M tests/test_c674x_transaction.py\n M tests/test_dsp_fetch_state.py\n M tests/test_dsp_isa_audit.py\n M tools/cdj_dsp/audit_sweeps.py\n M tools/cdj_dsp/benchmark_core.c\n M tools/cdj_dsp/isa_probe.py\n M tools/cdj_dsp/replay.py\n?? analysis/iterations/15-dsp-lookup/\n?? emulator/qemu/cdj_c674x_dotp.c\n?? emulator/qemu/cdj_c674x_dotp.h\n?? tests/cstub/c674x-dotp.c\n?? tests/test_pcm_bank_evidence.py\n?? tools/cdj_dsp/pcm_bank_evidence.py\n"
+}

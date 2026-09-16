@@ -18,6 +18,10 @@ def test_dsp_ram_and_peripheral_dispatch(tmp_path):
     prefix = source[source.index('#include "cdj_c674x.h"'):source.index('static NxsHpi *nxs_hpi;')]
     start = source.index('static bool dsp_read(')
     read = source[start:source.index('\nstatic uint8_t *dsp_memory_span', start)]
+    start = source.index('static uint8_t *host_memory(')
+    host = source[start:source.index('\nstatic bool valid_data', start)]
+    start = source.index('static uint8_t *dsp_memory_span(')
+    span = source[start:source.index('\ntypedef struct {', start)]
     harness = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -52,9 +56,25 @@ int main(void)
     uint32_t value = 0;
     cdj_c6747_emifb_reset(&s->emifb);
     assert(cdj_c6747_emifb_sdram_enabled(&s->emifb));
-    check_ram(s, SDRAM_BASE, SDRAM_SIZE, s->sdram);
+    s->sdram[0] = 0x12; s->sdram[SDRAM_SIZE - 1] = 0x34;
+    for (uint32_t base = SDRAM_BASE; base < 0xe0000000; base += SDRAM_SIZE) {
+        assert(dsp_read(s, base, &value) && value == 0x12);
+        assert(dsp_read(s, base + SDRAM_SIZE - 4, &value) && value == 0x34000000);
+        assert(!dsp_read(s, base + 1, &value));
+    }
+    s->sdram[0x00ccff9c] = 0xa5;
+    assert(dsp_read(s, 0xd2ccff9c, &value) && value == 0xa5);
+    assert(host_memory(s, 0xd2ccff9c) == s->sdram + 0x00ccff9c);
+    assert(dsp_memory_span(s, 0xd2ccff9c, 8) == s->sdram + 0x00ccff9c);
+    assert(!dsp_memory_span(s, 0xd3fffffc, 8));
+    assert(!dsp_memory_span(s, 0xdffffffc, 8));
+    assert(!dsp_read(s, SDRAM_BASE - 4, &value));
+    assert(!dsp_read(s, 0xe0000000, &value));
     s->emifb.sdcfg &= ~(1u << 16);
     assert(!dsp_read(s, SDRAM_BASE, &value));
+    assert(!dsp_read(s, 0xd2ccff9c, &value));
+    assert(!host_memory(s, 0xd2ccff9c));
+    assert(!dsp_memory_span(s, 0xd2ccff9c, 8));
     assert(dsp_read(s, CDJ_C6747_EMIFB_REVID, &value) && value == 0x4033131f);
     assert(dsp_read(s, CDJ_C6747_EMIFB_SDCFG, &value) && value == s->emifb.sdcfg);
     assert(!dsp_read(s, 0xffffffff, &value));
@@ -62,7 +82,7 @@ int main(void)
 }
 '''
     fixture = tmp_path / 'read.c'
-    fixture.write_text(harness + prefix + read + checks)
+    fixture.write_text(harness + prefix + host + read + span + checks)
     binary = tmp_path / 'read-test'
     models = sorted(directory.glob('cdj_c6747_*.c'))
     subprocess.run([cc, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',

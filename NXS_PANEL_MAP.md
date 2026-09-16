@@ -49,3 +49,24 @@ Further decoder/table comparison identifies 17.1 as LOOP MODE (status
 The legacy 4-BEAT LOOP visual slot is not assigned an invented NXS contact;
 the verified functions remain available in the raw inspector. Native Tk
 profile/layout tests after this correction: 35 passed.
+
+## REV contact polarity
+
+The NXS image supplies the polarity evidence at decoder entry `0x042f5810`,
+not through the legacy map. At image offset `0x002f58b8` the decoder loads raw
+byte 15 (`mov.b @(15,r7),r0`). At `0x042f58d4` it tests bit 1 and the following
+short branch sequence is `bt.s`, `and #0xbf`, `or #0x40`. Therefore raw byte
+15 bit 1 clear leaves status bit 6 clear, while the bit set leaves status bit 6
+set. The decoder does not invert this bit.
+
+The electrical interpretation is established by the native capture
+`runs/agent-play-checkpoints`: with REV low, the loaded deck selected negative
+direction and remained at the start boundary; with REV high, direction became
+forward and the native remaining counter fell from 1500 to 1496 across five
+fresh samples. Thus a high raw level is the verified neutral REV contact level;
+an all-zero panel frame asserts reverse. The separate NXS decoder sequence at
+`0x042f59e4` (`tst #4`, `bt.s`, `or #2`, `and #0xfd`) proves the SD OPEN contact
+(raw byte 17 bit 2) is also active low: raw high clears the status bit, which is
+the closed/neutral state. The launcher already forces that level for
+`CDJ_NXS_SD_LID=closed`. The remaining zero-default contacts have not been
+proven neutral by an equivalent native test.

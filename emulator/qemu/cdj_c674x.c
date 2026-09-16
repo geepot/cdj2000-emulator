@@ -1681,9 +1681,14 @@ static bool arm_sub_reg(CdjC674xArm *x)
 
 static bool arm_sub_reverse(CdjC674xArm *x)
 {
-    /* Reverse-cross .L SUB encodes its cross source in src1 and
-     * its local source in src2. */
-    x->value = x->cpu->r[x->cross][x->a] - x->cpu->r[x->side][x->b];
+    /* Reverse-cross .L SUB encodes its cross source in src1 and its local
+     * source in src2.  The .S reverse encoding instead follows the printed
+     * page 529 operand map: src2(xsint) - src1(sint), so its cross source is
+     * the b field and its local source is the a field. */
+    if ((x->w & 0xffc) == 0xd70)
+        x->value = x->cpu->r[x->cross][x->b] - x->cpu->r[x->side][x->a];
+    else
+        x->value = x->cpu->r[x->cross][x->a] - x->cpu->r[x->side][x->b];
     return true;
 }
 
@@ -2309,10 +2314,14 @@ static bool arm_packbits_mergebyte(CdjC674xArm *x)
 
 static bool arm_packbits_lmbd(CdjC674xArm *x)
 {
-    /* LMBD .L (printed page 304): single-cycle, zero delay slots.  Only the
-     * register-src1 opfield 110 1011 is implemented here; the cst5 form
-     * (110 1010) has no row and keeps reporting "instruction not implemented". */
-    x->value = cdj_c674x_lmbd(x->cpu->r[x->side][x->a],
+    /* LMBD .L (printed page 304): single-cycle, zero delay slots.  The
+     * register-src1 form uses opfield 110 1011; the cst5 form uses 110 1010
+     * and carries the search bit in the same five-bit field as x->a.  LMBD
+     * only consumes the source's LSB, so the unsigned constant's value is
+     * represented directly by that field. */
+    uint32_t src1 = (x->w & 0xffc) == 0xd58 ? x->a
+                                             : x->cpu->r[x->side][x->a];
+    x->value = cdj_c674x_lmbd(src1,
                               x->cpu->r[x->cross][x->b]);
     return true;
 }
@@ -3215,6 +3224,7 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x000000f8, NULL,                  arm_sub_reg },
     { 0x00000ffc, 0x000005e0, NULL,                  arm_sub_reg },
     { 0x00000ffc, 0x000002f8, NULL,                  arm_sub_reverse },
+    { 0x00000ffc, 0x00000d70, NULL,                  arm_sub_reverse },
     { 0x00000ffc, 0x00000a58, NULL,                  arm_cmp },
     { 0x00000ffc, 0x00000a78, NULL,                  arm_cmp },
     { 0x00000ffc, 0x000008d8, NULL,                  arm_cmp },
@@ -3319,6 +3329,7 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x0003effc, 0x000300f0, NULL,                  arm_packbits_m },
     { 0x00000ffc, 0x00000770, NULL,                  arm_packbits_m },
     { 0x00000ffc, 0x000007b0, NULL,                  arm_packbits_m },
+    { 0x00000ffc, 0x00000d58, NULL,                  arm_packbits_lmbd },
     { 0x00000ffc, 0x00000d78, NULL,                  arm_packbits_lmbd },
     { 0x0003effc, 0x00000c78, NULL,                  arm_packbits_norm },
     { 0x0003effc, 0x00000c18, NULL,                  arm_packbits_norm },

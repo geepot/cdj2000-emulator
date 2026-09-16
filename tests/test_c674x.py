@@ -256,7 +256,9 @@ def test_c674x_dispatch_table_has_no_shadowed_rows(tmp_path):
     # predicated row moves this number and must be changed here deliberately,
     # together with the `also` predicate that justifies the overlap.
     predicated = [line for line in lines if line.startswith('predicated-overlaps ')]
-    assert predicated == ['predicated-overlaps 252'], out
+    # LMBD's cst5 row (0xd58) adds one legitimate overlap with the generic
+    # predicable format row; its `also` predicate keeps the claims disjoint.
+    assert predicated == ['predicated-overlaps 253'], out
 
 
 def test_c674x_packed_dot_products(tmp_path):
@@ -431,4 +433,5 @@ def test_c674x_no_word_reaches_two_dispatch_rows(tmp_path):
     assert 'word-only-probes 4096' in lines, out
     # Pin the pair count so this stays tied to the mask/match check above: if
     # that one's 251 moves, this must be updated in the same change.
-    assert 'pairs-examined 283' in lines, out
+    # The LMBD cst5 dispatch row adds one mask/match pair to the sweep.
+    assert 'pairs-examined 284' in lines, out

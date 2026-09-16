@@ -176,3 +176,42 @@ def test_schema11_invalid_scheduler_mode_is_rejected_by_metadata_readers(tmp_pat
     path.write_bytes(raw)
     with pytest.raises(RuntimeError, match='scheduler state is invalid'):
         checkpoint_metadata(path)
+
+
+def test_checkpoint_metadata_rejects_valid_checksum_with_invalid_geometry(tmp_path):
+    from tools.cdj_main.nxs_vm import checkpoint_metadata
+
+    state = bytes(16)
+    l2 = bytes(0x40000)
+    bitmap = bytes(1024)
+    payload = state + l2 + bitmap
+    # Keep the checksum and total payload length valid while lying about the
+    # fixed L2 geometry.  Metadata readers must agree with replay readers.
+    header = CHECKPOINT_HEADER.pack(
+        b'CDJDSP1\0', 1, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        *([1] * 9), 0x20000, 0x2000000, 4096, 8192, 0,
+        len(payload), _fnv1a(payload),
+    )
+    path = tmp_path / 'invalid-geometry.cdjdsp'
+    path.write_bytes(header + payload)
+    with pytest.raises(RuntimeError, match='incompatible or incomplete'):
+        checkpoint_metadata(path)
+
+
+def test_checkpoint_metadata_rejects_valid_checksum_with_corrupt_sparse_bitmap(tmp_path):
+    from tools.cdj_main.nxs_vm import checkpoint_metadata
+
+    state = bytes(16)
+    l2 = bytes(0x40000)
+    bitmap = bytearray(1024)
+    bitmap[0] = 1  # The header claims zero present SDRAM pages.
+    payload = state + l2 + bitmap
+    header = CHECKPOINT_HEADER.pack(
+        b'CDJDSP1\0', 1, 0x01020304, CHECKPOINT_HEADER.size, len(state),
+        *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 0,
+        len(payload), _fnv1a(payload),
+    )
+    path = tmp_path / 'invalid-sparse-bitmap.cdjdsp'
+    path.write_bytes(header + payload)
+    with pytest.raises(RuntimeError, match='incompatible or incomplete'):
+        checkpoint_metadata(path)

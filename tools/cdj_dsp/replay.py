@@ -169,6 +169,19 @@ def checkpoint_provenance(path: Path, data: bytes, info: dict) -> dict:
             matching[0].get('sha256') == info['checkpoint_sha256']):
         result['origin'] = 'connected_checkpoint'
         return result
+    # Lightweight launcher runs intentionally omit the event transcript.  A
+    # checksum-matched, structurally validated checkpoint remains useful for
+    # standalone fault diagnosis, but it cannot be promoted to connected-run
+    # or architectural evidence.  Require every marker so an old/incomplete
+    # manifest cannot accidentally open this weaker replay path.
+    if (capture_manifest.get('dsp_checkpoint_policy') == 'fault' and
+            capture_manifest.get('checkpoint_capture_complete') is True and
+            capture_manifest.get('complete') is False and
+            capture_manifest.get('architectural_validation_eligible') is False and
+            len(matching) == 1 and
+            matching[0].get('sha256') == info['checkpoint_sha256']):
+        result['origin'] = 'diagnostic_connected_checkpoint'
+        return result
     gate_path = path.parent / 'gate.json'
     gate_data = gate_path.read_bytes() if gate_path.is_file() else b''
     gate = json.loads(gate_data) if gate_data else {}
@@ -229,7 +242,8 @@ def newest_checkpoint(directory: Path, *, timing_mode=None, audio_mode=None,
             provenance = checkpoint_provenance(path, data, info)
             manifest = provenance['capture_manifest']
             if (timing_mode == 'strict' and audio_mode == 'stopped-clock' and
-                    exploratory_ancestry(manifest)):
+                    exploratory_ancestry(manifest) and
+                    provenance['origin'] != 'diagnostic_connected_checkpoint'):
                 raise ValueError('checkpoint inherits exploratory state')
             for field, requested, default in (
                     ('dsp_timing_mode', timing_mode, 'strict'),
@@ -359,6 +373,8 @@ def main():
     if event_data is not None:
         if not checkpoint:
             parser.error('event injection requires a connected checkpoint')
+        if checkpoint_origin == 'diagnostic_connected_checkpoint':
+            parser.error('diagnostic fault-only checkpoint has no connected event transcript; omit --events')
         transcript = capture_manifest.get('event_transcript')
         expected_event_hash = (transcript.get('sha256') if isinstance(transcript, dict)
                                else capture_manifest.get('event_transcript_sha256'))
@@ -397,6 +413,8 @@ def main():
             if event_data is not None else
             'no later MAIN/HPI events injected; replay stops when an external event is required')
         approximations = [
+            'EMIFB mirrors populated 32 MiB SDRAM through the C0000000-DFFFFFFF aperture; upper D-window decoding is inferred from MPU2 coverage and unused SDRAM address pins (SPRUH91D 5.2.2 and 19.2.6.10), not hardware-validated; MPU protection and geometry reconfiguration are not modeled',
+            'EDMA ICR is write-only (SPRUH91D 16.4.2.6.5); read-zero is a firmware compatibility choice, not a hardware-validated read value',
             *(['two-cycle SPLOOPD functional run-ahead; not cycle-accurate']
                if args.functional_dsp_timing else []),
             *(['SPI1 WM8740 control transfers complete at commit; serial timing is not modeled']

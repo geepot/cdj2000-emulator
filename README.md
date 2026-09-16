@@ -37,13 +37,17 @@ a player. It is not a way to use a CDJ-2000 on a desktop.
 * The disc drive, the audio DSP and the USB device report up, so no caution
   banner stands in the way; MAIN's service monitor and caution store are
   readable over the emulated debug port.
-* An SD card image with a rekordbox export is the library: categories,
+* In the legacy CDJ-2000 workflow, an SD card image with a rekordbox export is the library: categories,
   playlists and track lists on screen, a track loaded with its overview
   waveform, detail waveform, beat grid, cue markers, duration, BPM and key,
   and a time display that runs from PLAY (`tools/cdj_main/twoboard.py` runs
   that recipe into a fresh run directory).
-* The DSP model answers the load handshake, keeps the position report,
+* The legacy DSP model answers the load handshake, keeps the position report,
   locates, loops on the beat, and raises events on its interrupt line.
+* The NXS workflow boots stock firmware, browses an SD WAV fixture using native
+  panel controls, loads its track name and duration, and advances the native
+  playhead with `--functional-dsp-audio`. This proves the firmware playback
+  path; the emulator still does not provide audible output.
 * A USB stick is a disk image on the SoC's USB host module. With the two
   update keys held at power-on, MAIN's updater takes a `C2KMAIN.UPD` from it
   and rewrites the flash model; the boot ROM's recovery path (the loader at
@@ -58,12 +62,15 @@ a player. It is not a way to use a CDJ-2000 on a desktop.
 * **No audio.** The DSP is a TI Aureus DA710 with a TMS320C674x core (see
   `RUNNING.md`), and `emulator/qemu/cdj_c674x.c` executes its instruction set
   from TI's published SPRUFE8B - partially: see `DSP_ARCHITECTURE_COVERAGE.md`
-  for what is and is not implemented. What is missing is the signal path, not
-  the instruction set: PLAY changes nothing audible.
+  for what is and is not implemented. Instruction coverage is incomplete;
+  accepting a mnemonic does not establish support for all its encodings or
+  correct execution. See the [current probe scope](analysis/agent-dev-dsp-coverage.md).
+  Native NXS playback also depends on DSP device and timing behavior.
 * **No jog**, no pitch. The position report runs at nominal speed.
-* The detail waveform and beat grid reach the GUI through the link proxy
+* In the legacy scripted workflow, the detail waveform and beat grid reach the GUI through the link proxy
   (`tools/cdj_main/link_inject.py`), which also injects the browse and load
-  requests: no key of the NXS GUI has been found that sends "enter".
+  requests. The NXS native browser can select and load with the encoder's
+  ENTER contact; short clicks and long holds have different meanings.
 * Switching sources after boot is unreliable (six of eight); the card given at
   launch is reliable. The USB stick as a music source has not been tried.
 * The GUI simulator is about thirty times slower than the chip on real work,
@@ -83,6 +90,35 @@ images, no disassembly, no screenshots.
 
 ### NXS research branch: interactive deck
 
+For firmware development, start a deck with a generated test track and local
+debugging in one command:
+
+```sh
+python -m tools.cdj_main.nxs_vm --test-track --debug --lightweight --ui \
+  --seconds 1800 --fresh-link --functional-dsp-audio \
+  --source-key-at 300 --source-key-retries 0
+```
+
+This creates a timestamped run under `runs/`, prints follow-up commands, and
+records the firmware and emulator hashes. The deck shows run progress below
+the LCD; **Diagnostics** provides session state, browser replies, frame age,
+recent actions, fault lines, and debugger endpoints. `--fresh-link` selects
+the existing experimental delivery mode used for native NXS loading.
+
+Agents can control the same run without locating ports:
+
+```sh
+python -m tools.cdj_main.dev runs/my-run status --json
+python -m tools.cdj_main.dev runs/my-run press enter
+python -m tools.cdj_main.dev runs/my-run wait-playback --timeout 120
+python -m tools.cdj_main.dev runs/my-run switch rev off
+python -m tools.cdj_main.dev runs/my-run qmp registers
+python -m tools.cdj_main.dev runs/my-run stop
+```
+
+See [DEVELOPING.md](DEVELOPING.md) for track selection, memory inspection,
+screenshots, firmware overrides, and reproducible agent handoffs.
+
 For the NXS firmware already prepared under `firmware/nxs/`, use the dedicated
 launcher from this repository directory:
 
@@ -98,24 +134,47 @@ up Python changes, and rebuild `bin/cdj-run` after simulator patch changes.
 Ordinary hardware buttons support mouse-down/up and Enter/Space holds, including
 release outside the button or on focus loss. MENU holds now open the real
 firmware's UTILITY screen after the SIC mask-order fix (`69d0d88`). The separate
-E-7206 auth-chip error remains; NXS USB/SD track loading and audio playback are
-not yet validated. The legacy functionality described above is not an NXS
-completion claim. See [RUNNING.md](RUNNING.md) and
+E-7206 auth-chip error remains. Native NXS SD loading of `TESTTONE.WAV` was
+reproduced with stock firmware on 2026-09-15, including the ten-second duration
+on the display. USB track loading and audible playback remain unverified.
+The legacy functionality described above is not an NXS completion claim.
+See [DEVELOPING.md](DEVELOPING.md), [RUNNING.md](RUNNING.md) and
 [NXS_GUI_STALL.md](NXS_GUI_STALL.md) for current evidence and limitations.
 
 The NXS launcher also accepts experimental `--sd IMAGE` and `--usb IMAGE`
 mounts. Generate a plain WAV/FAT32 fixture with
 `python -m tools.cdj_main.test_media runs/test-media`, then supply
 `runs/test-media/test-track.img`. Each image uses a disposable QEMU overlay;
-guest writes are discarded when the run closes. Image attachment does not
-establish firmware track loading or audible playback, which remain unverified.
+guest writes are discarded when the run closes. Image attachment alone does not
+establish firmware track loading or audible playback.
 Add `--trace-media` to record SD-controller and USB-host register activity in
 `main-stderr.log`. This diagnostic adds host overhead and can change timing;
 it does not enable the legacy fake media-state RAM write.
 For insertion diagnostics, `--sd-insert-seconds 110` schedules the existing
 card-presence transition 110 virtual seconds after reset; `0` keeps the slot
-empty. This requires `--sd`. The default remains the controller's 20 seconds.
+empty. This requires `--sd` or `--test-track`. The default remains the controller's 20 seconds.
 Virtual seconds are not a promise about wall-clock boot time.
+
+The media manager can take longer than the first source press. Add
+`--source-key-retries 5` to retry the named source automatically (the default
+interval is 120 virtual seconds), or set `--source-key-at` explicitly when a
+firmware change has a known readiness point.
+
+To quickly inspect what a run achieved, use the read-only run report:
+
+```sh
+python -m tools.cdj_main.run_report runs/my-run
+python -m tools.cdj_main.run_report runs/my-run --json
+```
+
+It summarizes visible media entries, native load responses, framebuffer
+observations, common emulator fault lines, and the raw artifact files. The
+report keeps audio playback separate from track-load evidence.
+
+While a run is still active, `python -m tools.cdj_main.run_state runs/my-run`
+prints the latest browser reply and frame status. Add `--json` for an agent
+to consume the bounded snapshot, including the current session endpoints and
+recent diagnostic lines.
 
 ### Original CDJ-2000 setup
 

@@ -22,6 +22,38 @@ KEY_NAMES.update({
 })
 BUTTON_BITS = sorted(set(KEY_NAMES) | {(15, 6), (15, 7), (17, 3)})
 
+# Derive names from the NXS service table, never the legacy source-key map.
+BUTTON_NAMES = {name.lower(): (byte, 1 << bit)
+                for (byte, bit), name in KEY_NAMES.items()}
+
+# REV is a physical active-low switch: zero requests reverse playback.
+# The stock NXS firmware then correctly stops a freshly loaded track at its
+# start boundary. Keep the neutral level high before applying live controls.
+ACTIVE_LOW_CONTACTS = {(15, 0x02)}
+
+
+def contact_level(byte: int, mask: int, active: bool) -> bool:
+    """Map a named control's active state to its literal electrical level."""
+    return not active if (byte, mask) in ACTIVE_LOW_CONTACTS else active
+
+
+def neutral_frame() -> bytes:
+    frame = bytearray(legacy.PANEL_PAYLOAD_LEN)
+    for byte, mask in ACTIVE_LOW_CONTACTS:
+        frame[byte] |= mask
+    return bytes(frame)
+
+
+def button_mask(name):
+    """Resolve a friendly NXS name or an explicit BYTE.BIT / BYTE:MASK."""
+    key = name.strip().lower().replace('_', ' ').replace('-', ' ')
+    key = {'enter': 'encoder push', 'back': 'return', 'info': 'information'}.get(key, key)
+    if key in BUTTON_NAMES:
+        return BUTTON_NAMES[key]
+    if ':' in key or '.' in key:
+        return legacy.button_mask(key)
+    raise ValueError(f'unknown NXS button {name!r}; use {sorted(BUTTON_NAMES)}')
+
 
 def input_ids():
     return [f"{byte}.{bit}" for byte, bit in BUTTON_BITS] + [

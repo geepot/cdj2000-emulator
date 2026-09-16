@@ -59,8 +59,9 @@ bool cdj_c6747_edma_valid(const CdjC6747Edma *s);
 bool cdj_c6747_edma_read(const CdjC6747Edma *s, uint32_t address,
                          uint32_t *value);
 /* Register validation is side-effect-free.  The architecturally write-only
- * set/clear aliases have narrow underlying-state readback because the recovered
+ * set/clear aliases have narrow compatibility readback because the recovered
  * firmware's generic wrappers use read/OR/write sequences on those addresses.
+ * ICR reads zero so acknowledging one completion preserves unrelated IPR bits.
  * A commit can synchronously execute
  * transfers caused by ESR, newly-enabled pending events, or QDMA trigger words.
  * Unsupported transfer modes and inaccessible bus spans fail closed. */

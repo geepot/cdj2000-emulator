@@ -145,3 +145,16 @@ not an automatic detector; this manual evidence establishes the narrower
 track-load milestone. Remaining work includes real-time audio output and
 the first browser click occasionally requiring a retry. Cold insertion
 also intentionally waits 20 virtual seconds, about 580 wall seconds here.
+
+## Verified native counter playback (2026-09-15)
+
+`runs/agent-play-trace` repeats the stock NXS path with the deterministic
+`TESTTONE.WAV` SD image, fresh-only link delivery, native panel contacts, and
+`--functional-dsp-audio`. The genuine type-7 LOAD request was followed by a
+10.0-second command-5 duration response. `dev wait-playback --min-frames 150`
+observed 64 fresh samples, 63 decreases, and 150 frames of playhead movement
+while the native `play_requested` flag was set. A PLAY pulse cleared that flag
+and left the counter unchanged across the next sample window; a second pulse
+resumed movement. This establishes media playback through firmware, DSP, DMA,
+and the native transport status path. It does not test speaker or host audio
+output.

@@ -51,6 +51,7 @@ typedef struct {
     unsigned boot_phase;
     uint64_t words;
     uint64_t event_sequence, checkpoint_sequence;
+    int64_t checkpoint_check_ns; /* Host-only diagnostic polling throttle. */
     CdjC674x cpu;
     CdjC6747Syscfg syscfg;
     CdjC6747Psc psc;
@@ -108,13 +109,16 @@ static void record_event(NxsHpi *s, const char *type, uint64_t offset,
         error_report("nxs-hpi: DSP event transcript write failed");
 }
 
-static void capture_checkpoint(NxsHpi *s, const char *reason)
+static bool capture_checkpoint(NxsHpi *s, const char *reason)
 {
+    const char *policy = getenv("CDJ_NXS_DSP_CHECKPOINT_POLICY");
+    if (policy && !strcmp(policy, "fault") && !s->dsp_halted &&
+        strcmp(reason, "debug request")) return false;
     const char *directory = getenv("CDJ_NXS_DSP_CHECKPOINT_DIR");
-    if (!directory || !*directory || !s->shared_ram || !s->sdram) return;
+    if (!directory || !*directory || !s->shared_ram || !s->sdram) return false;
     if (g_mkdir_with_parents(directory, 0700)) {
         error_report("nxs-hpi: cannot create DSP checkpoint directory %s", directory);
-        return;
+        return false;
     }
     CdjDspCheckpointState state = {0};
     state.hpi_address = s->address;
@@ -152,11 +156,33 @@ static void capture_checkpoint(NxsHpi *s, const char *reason)
     char error[160] = {0};
     if (!cdj_dsp_checkpoint_write(path, &state, s->l2, sizeof(s->l2),
                                   s->shared_ram, SHARED_RAM_SIZE,
-                                  s->sdram, SDRAM_SIZE, error, sizeof(error)))
+                                  s->sdram, SDRAM_SIZE, error, sizeof(error))) {
         error_report("nxs-hpi: checkpoint failed: %s", error);
-    else
-        info_report("nxs-hpi: checkpoint=%s reason=%s event-sequence=%" PRIu64,
-                    path, reason, state.event_sequence);
+        return false;
+    }
+    info_report("nxs-hpi: checkpoint=%s reason=%s event-sequence=%" PRIu64,
+                path, reason, state.event_sequence);
+    return true;
+}
+
+static void capture_requested_checkpoint(NxsHpi *s)
+{
+    const char *request = getenv("CDJ_NXS_DSP_CHECKPOINT_REQUEST");
+    if (!request || !*request || s->dsp_running) return;
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    if (now < s->checkpoint_check_ns) return;
+    s->checkpoint_check_ns = now + 100000000;
+    if (!g_file_test(request, G_FILE_TEST_EXISTS)) return;
+    bool ok = capture_checkpoint(s, "debug request");
+    g_autofree char *response = ok ?
+        g_strdup_printf("{\"ok\":true,\"file\":\"%020" PRIu64 ".cdjdsp\"}\n",
+                        s->checkpoint_sequence) :
+        g_strdup("{\"ok\":false,\"error\":\"DSP checkpoint capture failed; inspect main-stderr.log\"}\n");
+    g_autofree char *done = g_strconcat(request, ".done", NULL);
+    if (!g_file_set_contents(done, response, -1, NULL))
+        error_report("nxs-hpi: cannot acknowledge DSP checkpoint request");
+    if (remove(request))
+        error_report("nxs-hpi: cannot remove DSP checkpoint request");
 }
 
 bool cdj_nxs_hpi_port(hwaddr address)
@@ -237,9 +263,10 @@ static uint8_t *host_memory(NxsHpi *s, uint32_t address)
     if (address >= SHARED_RAM_BASE &&
         address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4)
         return s->shared_ram + address - SHARED_RAM_BASE;
-    if (cdj_c6747_emifb_sdram_enabled(&s->emifb) && address >= SDRAM_BASE &&
-        address <= SDRAM_BASE + SDRAM_SIZE - 4)
-        return s->sdram + address - SDRAM_BASE;
+    uint32_t sdram_offset;
+    if (cdj_c6747_emifb_sdram_offset(&s->emifb, address, 4, SDRAM_SIZE,
+                                    &sdram_offset))
+        return s->sdram + sdram_offset;
     return NULL;
 }
 
@@ -260,10 +287,11 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
         *value = ldl_le_p(s->shared_ram + address - SHARED_RAM_BASE);
         return true;
     }
-    if (!(address & 3) && address >= SDRAM_BASE &&
-        address <= SDRAM_BASE + SDRAM_SIZE - 4 &&
-        cdj_c6747_emifb_sdram_enabled(&s->emifb)) {
-        *value = ldl_le_p(s->sdram + address - SDRAM_BASE);
+    uint32_t sdram_offset;
+    if (!(address & 3) && address >= SDRAM_BASE && address < 0xe0000000u &&
+        cdj_c6747_emifb_sdram_offset(&s->emifb, address, 4, SDRAM_SIZE,
+                                    &sdram_offset)) {
+        *value = ldl_le_p(s->sdram + sdram_offset);
         return true;
     }
     uint32_t local_address = address;
@@ -309,9 +337,10 @@ static uint8_t *dsp_memory_span(NxsHpi *s, uint32_t address, size_t size)
     if (address >= SHARED_RAM_BASE &&
         end <= (uint64_t)SHARED_RAM_BASE + SHARED_RAM_SIZE)
         return s->shared_ram + address - SHARED_RAM_BASE;
-    if (cdj_c6747_emifb_sdram_enabled(&s->emifb) &&
-        address >= SDRAM_BASE && end <= (uint64_t)SDRAM_BASE + SDRAM_SIZE)
-        return s->sdram + address - SDRAM_BASE;
+    uint32_t sdram_offset;
+    if (cdj_c6747_emifb_sdram_offset(&s->emifb, address, size, SDRAM_SIZE,
+                                    &sdram_offset))
+        return s->sdram + sdram_offset;
     return NULL;
 }
 
@@ -661,14 +690,15 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         }
         return true;
     }
-    if (cdj_c6747_emifb_sdram_enabled(&s->emifb) &&
-        (size == 1 || size == 2 || size == 4 || size == 8) &&
-        address >= SDRAM_BASE && address <= SDRAM_BASE + SDRAM_SIZE - size) {
+    uint32_t sdram_offset;
+    if ((size == 1 || size == 2 || size == 4 || size == 8) &&
+        cdj_c6747_emifb_sdram_offset(&s->emifb, address, size, SDRAM_SIZE,
+                                    &sdram_offset)) {
         if (commit) {
-            if (size == 8) stq_le_p(s->sdram + address - SDRAM_BASE, value);
-            else if (size == 1) s->sdram[address - SDRAM_BASE] = value;
-            else if (size == 2) stw_le_p(s->sdram + address - SDRAM_BASE, value);
-            else stl_le_p(s->sdram + address - SDRAM_BASE, value);
+            if (size == 8) stq_le_p(s->sdram + sdram_offset, value);
+            else if (size == 1) s->sdram[sdram_offset] = value;
+            else if (size == 2) stw_le_p(s->sdram + sdram_offset, value);
+            else stl_le_p(s->sdram + sdram_offset, value);
         }
         return true;
     }
@@ -712,6 +742,7 @@ static void dsp_cycle_tick(void *opaque)
 
 static void report_dsp(NxsHpi *s, const char *reason)
 {
+    capture_requested_checkpoint(s);
     info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
                 s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
@@ -843,6 +874,7 @@ static void start_dsp(NxsHpi *s)
 static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)
 {
     NxsHpi *s = opaque;
+    capture_requested_checkpoint(s);
     uint32_t result = 0xffffffff;
     uint32_t address = s->address;
     bool data_access = offset == 0x80000 || offset == 0xc0000;

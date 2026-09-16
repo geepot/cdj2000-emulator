@@ -13,6 +13,21 @@ from tools.cdj_main import nxs_vm
 FRAME = b'P6\n2 1\n255\n' + b'\n# \x00\xff\x80'
 
 
+def test_source_schedule_can_retry_after_media_manager_settles():
+    assert nxs_vm.source_schedule(22, (19, 0x08), retries=2,
+                                  interval=120) == \
+        '22:19:08;142:19:08;262:19:08'
+
+
+def test_source_key_names_are_limited_to_media_source_contacts():
+    assert set(nxs_vm.NXS_SOURCE_KEYS) == {
+        'sd', 'usb', 'link', 'disc', 'rekordbox'}
+    assert 'play' not in nxs_vm.NXS_SOURCE_KEYS
+    assert 'rev' not in nxs_vm.NXS_SOURCE_KEYS
+    assert nxs_vm.NXS_SOURCE_KEYS['sd'] == (19, 0x08)
+    assert nxs_vm.NXS_SOURCE_KEYS['rekordbox'] == (19, 0x01)
+
+
 def test_sync_profile_collects_commands_before_teardown(tmp_path, monkeypatch):
     monitor = Mock()
     monitor.__enter__ = Mock(return_value=monitor)
@@ -154,6 +169,8 @@ def test_dsp_artifact_manifest_records_scheduler_validation_scope(
     # artifacts and cannot outrank `complete` in either scheduler mode; it used
     # to be reported from the scheduler mode alone.
     assert manifest['complete'] is False
+    assert manifest['dsp_checkpoint_policy'] == 'all'
+    assert manifest['checkpoint_capture_complete'] is False
     assert manifest['architectural_validation_eligible'] is False
     scheduling = [item for item in manifest['approximations']
                   if 'deferred-v1' in item]
@@ -189,6 +206,28 @@ def test_modified_main_provenance_does_not_hash_stock_in_its_place(tmp_path):
     assert manifest['firmware_sha256']['main-firmware.bin'] == nxs_vm.sha256(candidate)
     assert manifest['main_firmware_path'] == str(candidate)
     assert (firmware / 'main-firmware.bin').read_bytes() == b'main-firmware.bin'
+
+
+def test_dsp_capture_keeps_launch_source_hashes_when_sources_change(tmp_path, monkeypatch):
+    firmware = tmp_path / 'firmware'
+    firmware.mkdir()
+    for name in ('main-firmware.bin', 'gui-boot-memory.elf', 'gui-flash-image.bin'):
+        (firmware / name).write_bytes(name.encode())
+    run = tmp_path / 'run'
+    (run / 'dsp-checkpoints').mkdir(parents=True)
+    (run / 'dsp-checkpoints/one.cdjdsp').write_bytes(b'fixture')
+    (run / 'dsp-events.jsonl').write_text('')
+    monkeypatch.setattr(nxs_vm, 'checkpoint_metadata', lambda path: {'file': path.name})
+    monkeypatch.setattr(nxs_vm, 'dsp_source_hashes', lambda: {'source.c': 'edited'})
+    nxs_vm.finalize_dsp_artifacts(
+        run, firmware, False, False, False, 'legacy',
+        source_sha256_at_launch={'source.c': 'launched'})
+    manifest = json.loads((run / 'dsp-checkpoints/manifest.json').read_text())
+    assert manifest['source_sha256'] == {'source.c': 'launched'}
+    assert manifest['source_sha256_observed_at_exit'] == {'source.c': 'edited'}
+    assert manifest['sources_changed_during_run'] is True
+    assert manifest['complete'] is True
+    assert manifest['architectural_validation_eligible'] is False
 
 
 @pytest.mark.parametrize('interval', ['-1', 'nan', 'inf'])
@@ -277,6 +316,10 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     assert manifest['ethernet']['peer'] == ('127.0.0.1:6123' if custom_main else None)
     assert manifest['ethernet']['hardware_timing_validated'] is False
     assert manifest['main_environment']['CDJ_LINK_LINK_ROWS'] == 'off'
+    neutral = bytes.fromhex(manifest['main_environment']['CDJ_PANEL_FRAME'])
+    assert len(neutral) == 22
+    assert neutral[15] == 0x02  # REV is active low; zero is reverse, not idle.
+    assert not any(neutral[:15] + neutral[16:])
     assert manifest['link_delivery'] == ('fresh-only diagnostic' if fresh_link
                                          else 'legacy cached repeats')
     expected_scheduler = 'deferred-v1' if deferred else 'legacy'
