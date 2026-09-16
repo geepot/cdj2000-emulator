@@ -117,6 +117,7 @@ def test_schema1_checkpoint_remains_readable_without_invented_shared_ram():
 @pytest.mark.parametrize(('schema', 'magic'), [
     (10, b'CDJDSP10'),
     (11, b'CDJDSP11'),
+    (12, b'CDJDSP12'),
 ])
 def test_current_checkpoint_magics_are_accepted_by_metadata_readers(
         tmp_path, schema, magic):
@@ -128,7 +129,8 @@ def test_current_checkpoint_magics_are_accepted_by_metadata_readers(
     l2 = bytes(0x40000)
     shared = bytes(SHARED_RAM_SIZE)
     bitmap = bytes(1024)
-    payload = state + l2 + shared + bitmap
+    l1d = bytes(0x8000) if schema >= 12 else b''
+    payload = state + l2 + shared + l1d + bitmap
     header = CHECKPOINT_HEADER.pack(
         magic, schema, 0x01020304, CHECKPOINT_HEADER.size, len(state),
         *([1] * 9), 0x40000, 0x2000000, 4096, 8192, 0,

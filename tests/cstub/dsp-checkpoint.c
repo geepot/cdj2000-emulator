@@ -9,6 +9,7 @@
 static uint8_t l2[CDJ_DSP_L2_SIZE], restored_l2[CDJ_DSP_L2_SIZE];
 static uint8_t shared_ram[CDJ_DSP_SHARED_RAM_SIZE];
 static uint8_t restored_shared_ram[CDJ_DSP_SHARED_RAM_SIZE];
+static uint8_t l1d[CDJ_DSP_L1D_SIZE], restored_l1d[CDJ_DSP_L1D_SIZE];
 static uint8_t sdram[CDJ_DSP_SDRAM_SIZE], restored_sdram[CDJ_DSP_SDRAM_SIZE];
 
 static void unused_tick(void *opaque) { (void)opaque; }
@@ -31,6 +32,33 @@ static uint64_t test_checksum(const void *data, size_t size)
         hash *= UINT64_C(1099511628211);
     }
     return hash;
+}
+
+static void downgrade_to_schema11(const char *path)
+{
+    FILE *file = fopen(path, "rb");
+    assert(file && fseek(file, 0, SEEK_END) == 0);
+    long end = ftell(file);
+    assert(end > 0 && fseek(file, 0, SEEK_SET) == 0);
+    size_t size = (size_t)end;
+    uint8_t *bytes = malloc(size);
+    assert(bytes && fread(bytes, 1, size, file) == size && fclose(file) == 0);
+    TestCheckpointHeader *header = (TestCheckpointHeader *)bytes;
+    assert(header->schema == 12 && header->state_size == sizeof(CdjDspCheckpointState));
+    size_t l1d_offset = sizeof(*header) + header->state_size +
+                        CDJ_DSP_L2_SIZE + CDJ_DSP_SHARED_RAM_SIZE;
+    memmove(bytes + l1d_offset, bytes + l1d_offset + CDJ_DSP_L1D_SIZE,
+            size - l1d_offset - CDJ_DSP_L1D_SIZE);
+    memcpy(header->magic, "CDJDSP11", sizeof(header->magic));
+    header->schema = 11;
+    header->payload_size -= CDJ_DSP_L1D_SIZE;
+    size -= CDJ_DSP_L1D_SIZE;
+    header->payload_checksum = test_checksum(bytes + sizeof(*header),
+                                             header->payload_size);
+    file = fopen(path, "wb");
+    assert(file && fwrite(bytes, 1, size, file) == size &&
+           fflush(file) == 0 && fclose(file) == 0);
+    free(bytes);
 }
 
 static void downgrade_to_schema10(const char *path)
@@ -252,6 +280,7 @@ static void exhaustive_round_trip(const char *path)
 
     fill_pattern(l2, sizeof(l2), 0x12345678u);
     fill_pattern(shared_ram, sizeof(shared_ram), 0x87654321u);
+    fill_pattern(l1d, sizeof(l1d), 0x31415926u);
     /* A fully patterned SDRAM makes every sparse page present; pattern two
      * pages and leave the rest zero so the bitmap is exercised both ways. */
     memset(sdram, 0, sizeof(sdram));
@@ -260,19 +289,19 @@ static void exhaustive_round_trip(const char *path)
                  CDJ_DSP_CHECKPOINT_PAGE_SIZE, 0x5a5a5a5au);
 
     char error[160] = {0};
-    assert(cdj_dsp_checkpoint_write(path, &before, l2, sizeof(l2), shared_ram,
-                                    sizeof(shared_ram), sdram, sizeof(sdram),
-                                    error, sizeof(error)));
+    assert(cdj_dsp_checkpoint_write_with_l1d(
+        path, &before, l2, sizeof(l2), shared_ram, sizeof(shared_ram),
+        l1d, sizeof(l1d), sdram, sizeof(sdram), error, sizeof(error)));
     memset(&after, 0x3c, sizeof(after));
-    assert(cdj_dsp_checkpoint_read(path, &after, restored_l2,
-                                   sizeof(restored_l2), restored_shared_ram,
-                                   sizeof(restored_shared_ram), restored_sdram,
-                                   sizeof(restored_sdram), error,
-                                   sizeof(error)));
+    assert(cdj_dsp_checkpoint_read_with_l1d(
+        path, &after, restored_l2, sizeof(restored_l2), restored_shared_ram,
+        sizeof(restored_shared_ram), restored_l1d, sizeof(restored_l1d),
+        restored_sdram, sizeof(restored_sdram), error, sizeof(error)));
     /* One comparison over every byte, padding included. */
     assert(memcmp(&before, &after, sizeof(before)) == 0);
     assert(memcmp(l2, restored_l2, sizeof(l2)) == 0);
     assert(memcmp(shared_ram, restored_shared_ram, sizeof(shared_ram)) == 0);
+    assert(memcmp(l1d, restored_l1d, sizeof(l1d)) == 0);
     assert(memcmp(sdram, restored_sdram, sizeof(sdram)) == 0);
 
     /* The comparison only means something if the pattern really reached the
@@ -555,6 +584,16 @@ int main(int argc, char **argv)
     assert(!cdj_dsp_checkpoint_write(argv[1], &invalid, l2, sizeof(l2),
                                      shared_ram, sizeof(shared_ram), sdram,
                                      sizeof(sdram), error, sizeof(error)));
+
+    downgrade_to_schema11(argv[1]);
+    memset(restored_l1d, 0xa5, sizeof(restored_l1d));
+    assert(cdj_dsp_checkpoint_read_with_l1d(
+        argv[1], &after, restored_l2, sizeof(restored_l2), restored_shared_ram,
+        sizeof(restored_shared_ram), restored_l1d, sizeof(restored_l1d),
+        restored_sdram, sizeof(restored_sdram), error, sizeof(error)));
+    for (size_t i = 0; i < sizeof(restored_l1d); ++i)
+        assert(restored_l1d[i] == 0);
+    assert(after.scheduler.mode == CDJ_DSP_SCHEDULER_MODE_DEFERRED_V1);
 
     downgrade_to_schema10(argv[1]);
     memset(&after, 0xa5, sizeof(after));

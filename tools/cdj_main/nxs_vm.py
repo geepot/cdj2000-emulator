@@ -28,7 +28,7 @@ CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
                     7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0',
-                    10: b'CDJDSP10', 11: b'CDJDSP11'}
+                    10: b'CDJDSP10', 11: b'CDJDSP11', 12: b'CDJDSP12'}
 SCHEDULER_STATE = struct.Struct('<QQIIBBBB')
 SHARED_RAM_SIZE = 0x20000
 MAX_FRAME_BYTES = 16 * 1024 * 1024
@@ -355,11 +355,13 @@ def checkpoint_metadata(path: Path) -> dict:
     shared_size = SHARED_RAM_SIZE if schema >= 2 else 0
     shared_start = header_size + state_size + l2_size
     bitmap_size = (page_count + 7) // 8
-    expected_payload = (state_size + l2_size + shared_size + bitmap_size +
+    l1d_size = 0x8000 if schema >= 12 else 0
+    expected_payload = (state_size + l2_size + shared_size + l1d_size + bitmap_size +
                         present_pages * page_size)
     if payload_size != expected_payload:
         raise RuntimeError(f'incompatible or incomplete DSP checkpoint: {path}')
-    bitmap_start = header_size + state_size + l2_size + shared_size
+    l1d_start = header_size + state_size + l2_size + shared_size
+    bitmap_start = l1d_start + l1d_size
     bitmap = raw[bitmap_start:bitmap_start + bitmap_size]
     if sum(byte.bit_count() for byte in bitmap) != present_pages:
         raise RuntimeError(f'incompatible or incomplete DSP checkpoint: {path}')
@@ -373,6 +375,10 @@ def checkpoint_metadata(path: Path) -> dict:
                 shared_ram_size=shared_size,
                 shared_ram_sha256=(hashlib.sha256(shared).hexdigest()
                                    if shared_size else None),
+                l1d_size=l1d_size,
+                l1d_sha256=(hashlib.sha256(
+                    raw[l1d_start:l1d_start + l1d_size]).hexdigest()
+                    if l1d_size else None),
                 sdram_size=sdram_size, page_size=page_size,
                 page_count=page_count, present_pages=present_pages,
                 payload_checksum=f'{payload_checksum:016x}')

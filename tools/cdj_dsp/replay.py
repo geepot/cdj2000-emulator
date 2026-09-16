@@ -38,9 +38,10 @@ CHECKPOINT_HEADER = struct.Struct('<8sIIII9I5IQQ')
 CHECKPOINT_MAGIC = {1: b'CDJDSP1\0', 2: b'CDJDSP2\0', 3: b'CDJDSP3\0',
                     4: b'CDJDSP4\0', 5: b'CDJDSP5\0', 6: b'CDJDSP6\0',
                     7: b'CDJDSP7\0', 8: b'CDJDSP8\0', 9: b'CDJDSP9\0',
-                    10: b'CDJDSP10', 11: b'CDJDSP11'}
+                    10: b'CDJDSP10', 11: b'CDJDSP11', 12: b'CDJDSP12'}
 SCHEDULER_STATE = struct.Struct('<QQIIBBBB')
 SHARED_RAM_SIZE = 0x20000
+L1D_SIZE = 0x8000
 DEFAULT_FORMATS = ROOT / 'build/gdb-17.2/include/opcode/tic6x-insn-formats.h'
 ANALYSIS_SOURCES = [ROOT / 'tools/cdj_dsp/coverage.py',
                     ROOT / 'tools/cdj_dsp/inventory.py',
@@ -101,8 +102,11 @@ def checkpoint_info(data: bytes) -> dict:
     shared_size = SHARED_RAM_SIZE if schema >= 2 else 0
     shared_start = l2_start + l2_size
     shared = data[shared_start:shared_start + shared_size]
+    l1d_size = L1D_SIZE if schema >= 12 else 0
+    l1d_start = shared_start + shared_size
+    l1d = data[l1d_start:l1d_start + l1d_size]
     bitmap_size = (page_count + 7) // 8
-    bitmap_start = shared_start + shared_size
+    bitmap_start = l1d_start + l1d_size
     bitmap = data[bitmap_start:bitmap_start + bitmap_size]
     pages = memoryview(data)[bitmap_start + bitmap_size:]
     sdram_hash = hashlib.sha256()
@@ -128,6 +132,9 @@ def checkpoint_info(data: bytes) -> dict:
                     data, header_size, state_size, schema),
                 shared_ram_sha256=(hashlib.sha256(shared).hexdigest()
                                    if schema >= 2 else None),
+                l1d_captured=schema >= 12,
+                l1d_sha256=(hashlib.sha256(l1d).hexdigest()
+                             if schema >= 12 else None),
                 sdram_sha256=sdram_hash.hexdigest(), present_pages=present_pages)
 
 

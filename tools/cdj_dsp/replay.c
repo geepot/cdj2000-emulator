@@ -23,6 +23,9 @@
 #include "cdj_dsp_checkpoint.h"
 static uint8_t ram[0x40000];
 static uint8_t shared_ram[CDJ_DSP_SHARED_RAM_SIZE];
+/* Physical L1D storage. Partition visibility is modeled; cache contents and
+ * timing are not. */
+static uint8_t l1d[CDJ_DSP_L1D_SIZE];
 static uint8_t sdram[0x2000000];
 static CdjC6747Syscfg syscfg;
 static CdjC6747Psc psc;
@@ -344,6 +347,9 @@ static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }
 static uint8_t *host_memory(uint32_t a)
 {
+    uint32_t l1_offset;
+    if (cdj_c6747_l1d_sram_span(&cache, a, 4, &l1_offset))
+        return l1d + l1_offset;
     if (a >= 0x11800000 && a <= 0x1183fffc) return ram + a - 0x11800000;
     if (a >= 0x80000000 && a <= 0x8001fffc) return shared_ram + a - 0x80000000;
     uint32_t offset;
@@ -387,6 +393,14 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
         return true;
     }
     a = global(a);
+    uint32_t l1_offset;
+    if (!(a & 3) && cdj_c6747_l1d_sram_span(
+            &cache, a, 4, &l1_offset)) {
+        *v = l1d[l1_offset] | (uint32_t)l1d[l1_offset+1] << 8 |
+             (uint32_t)l1d[l1_offset+2] << 16 |
+             (uint32_t)l1d[l1_offset+3] << 24;
+        return true;
+    }
     if ((a & 3) || a < 0x11800000 || a > 0x1183fffc) return false;
     a -= 0x11800000;
     *v = ram[a] | (uint32_t)ram[a+1] << 8 | (uint32_t)ram[a+2] << 16 | (uint32_t)ram[a+3] << 24;
@@ -399,6 +413,9 @@ static uint8_t *memory_span(uint32_t address, size_t size)
     address = global(address);
     end = (uint64_t)address + size;
     if (!size || end > UINT64_C(0x100000000)) return NULL;
+    uint32_t l1_offset;
+    if (cdj_c6747_l1d_sram_span(&cache, address, size, &l1_offset))
+        return l1d + l1_offset;
     if (address >= 0x11800000u && end <= UINT64_C(0x11840000))
         return ram + address - 0x11800000u;
     if (address >= 0x80000000u && end <= UINT64_C(0x80020000))
@@ -749,6 +766,13 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
             sdram[offset + i] = v >> (8 * i);
     }
     uint32_t physical = global(a);
+    uint32_t l1_offset;
+    if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
+        cdj_c6747_l1d_sram_span(&cache, physical, size, &l1_offset)) {
+        ok = true;
+        if (commit) for (unsigned i = 0; i < size; ++i)
+            l1d[l1_offset + i] = v >> (8*i);
+    }
     if (!ok && (size == 1 || size == 2 || size == 4 || size == 8) &&
         physical >= 0x11800000 && physical <= 0x11840000 - size) {
         ok = true;
@@ -1161,7 +1185,8 @@ int main(int argc, char **argv)
                        !memcmp(magic, "CDJDSP8\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP9\0", sizeof(magic)) ||
                        !memcmp(magic, "CDJDSP10", sizeof(magic)) ||
-                       !memcmp(magic, "CDJDSP11", sizeof(magic)));
+                       !memcmp(magic, "CDJDSP11", sizeof(magic)) ||
+                       !memcmp(magic, "CDJDSP12", sizeof(magic)));
     rewind(f);
     bool valid = false;
     if (!checkpoint)
@@ -1170,8 +1195,10 @@ int main(int argc, char **argv)
     fclose(f);
     if (checkpoint) {
         char error[160] = {0};
-        if (!cdj_dsp_checkpoint_read(argv[1], &checkpoint_state, ram, sizeof(ram),
-                                     shared_ram, sizeof(shared_ram), sdram,
+        if (!cdj_dsp_checkpoint_read_with_l1d(
+                                     argv[1], &checkpoint_state, ram, sizeof(ram),
+                                     shared_ram, sizeof(shared_ram), l1d,
+                                     sizeof(l1d), sdram,
                                      sizeof(sdram), error, sizeof(error))) {
             fprintf(stderr, "%s\n", error);
             return 2;
@@ -1330,8 +1357,10 @@ int main(int argc, char **argv)
     if (argc >= 8) {
         char error[160] = {0};
         capture_devices(&checkpoint_state, reason);
-        if (!cdj_dsp_checkpoint_write(argv[7], &checkpoint_state, ram, sizeof(ram),
-                                      shared_ram, sizeof(shared_ram), sdram,
+        if (!cdj_dsp_checkpoint_write_with_l1d(
+                                      argv[7], &checkpoint_state, ram, sizeof(ram),
+                                      shared_ram, sizeof(shared_ram), l1d,
+                                      sizeof(l1d), sdram,
                                       sizeof(sdram), error, sizeof(error))) {
             fprintf(stderr, "%s\n", error);
             return 2;
