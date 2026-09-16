@@ -80,6 +80,26 @@ def test_mounts_use_temporary_overlays_and_escape_commas(tmp_path):
     assert test_media.media_drives(None, None) == ([], {})
 
 
+def test_disc_uses_genuine_ide_cd_backend_and_records_input(tmp_path):
+    image = tmp_path / 'AmbiX,, demo.iso'
+    image.write_bytes(b'ISO fixture'.ljust(4096, b'\0'))
+    command, inputs = test_media.media_drives(None, None, image)
+    assert command == [
+        '-drive',
+        ('if=ide,media=cdrom,bus=0,unit=0,format=raw,file=' +
+         str(image).replace(',', ',,')),
+    ]
+    assert inputs == {'disc_image': image}
+
+
+@pytest.mark.parametrize('size', [0, 512, 2049])
+def test_invalid_disc_image_sizes_are_rejected(tmp_path, size):
+    image = tmp_path / 'bad.iso'
+    image.write_bytes(bytes(size))
+    with pytest.raises(ValueError, match='2048-byte ISO sectors'):
+        test_media.media_drives(None, None, image)
+
+
 @pytest.mark.parametrize('size', [0, 513, 1536])
 def test_invalid_sd_image_sizes_are_rejected(tmp_path, size):
     image = tmp_path / 'bad.img'

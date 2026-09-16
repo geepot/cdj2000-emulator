@@ -243,8 +243,10 @@ def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
 ])
 @pytest.mark.parametrize('fresh_link,trace_link', [(False, False), (True, True)])
 @pytest.mark.parametrize('custom_main', [False, True])
+@pytest.mark.parametrize('disc_attached', [False, True])
 def test_run_manifest_records_launched_inputs_and_optional_observations(
-        tmp_path, monkeypatch, interval, deferred, profile, fresh_link, trace_link, custom_main):
+        tmp_path, monkeypatch, interval, deferred, profile, fresh_link, trace_link,
+        custom_main, disc_attached):
     paths = ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
              'firmware/nxs/main-firmware.bin', 'firmware/nxs/gui-boot-memory.elf',
              'firmware/nxs/gui-flash-image.bin')
@@ -255,6 +257,10 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     original_simulator = nxs_vm.sha256(tmp_path / paths[0])
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
     argv = ['nxs_vm', 'run', '--seconds', '2', '--frame-interval', str(interval)]
+    disc = tmp_path / 'AmbiX demo.iso'
+    if disc_attached:
+        disc.write_bytes(b'ISO fixture'.ljust(4096, b'\0'))
+        argv += ['--disc', str(disc)]
     selected_main = tmp_path / 'firmware/nxs/main-firmware.bin'
     if custom_main:
         selected_main = tmp_path / 'modified-main.bin'
@@ -294,6 +300,11 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     def launch(command, **kwargs):
         gui = '--model' in command
         if not gui:
+            disc_drives = [command[index + 1] for index, value in enumerate(command)
+                           if value == '-drive' and 'media=cdrom' in command[index + 1]]
+            assert len(disc_drives) == (1 if disc_attached else 0)
+            if disc_attached:
+                assert 'if=ide,media=cdrom,bus=0,unit=0,format=raw' in disc_drives[0]
             assert command[command.index('-nic') + 1] == (
                 'socket,model=cdj-nxs-ethernet,id=nxsnet,connect=127.0.0.1:6123'
                 if custom_main else 'none')
@@ -339,10 +350,14 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     else:
         assert manifest['scheduling_provenance'] == \
             'legacy synchronous bounded DSP activation'
-    assert len(manifest['input_artifacts']) == 5
+    assert len(manifest['input_artifacts']) == 5 + disc_attached
     assert manifest['input_artifacts']['simulator']['sha256'] == original_simulator
     assert manifest['inputs_differ_at_exit'] == ['simulator']
     assert manifest['input_artifacts']['qemu']['path'] == str(tmp_path / paths[1])
+    assert ('disc_image' in manifest['input_artifacts']) is disc_attached
+    assert ('disc_image' in manifest['media']['images']) is disc_attached
+    if disc_attached:
+        assert manifest['input_artifacts']['disc_image']['sha256'] == nxs_vm.sha256(disc)
     if interval:
         observations = manifest['frame_snapshots']['observations']
         assert len(observations) == 3

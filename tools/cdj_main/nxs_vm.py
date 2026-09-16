@@ -539,6 +539,8 @@ def main():
                         help='create a disposable FAT32 TESTTONE.WAV fixture inside the run and attach it as SD')
     parser.add_argument('--usb', type=Path,
                         help='raw FAT32 USB image; writes go to a temporary overlay')
+    parser.add_argument('--disc', type=Path,
+                        help='raw ISO disc image; attached read-only to the modeled IDE CD drive')
     parser.add_argument('--gui-firmware', type=Path,
                         help='directory containing development gui-boot-memory.elf and gui-flash-image.bin')
     parser.add_argument('--trace-media', action='store_true',
@@ -668,14 +670,14 @@ def main():
         # Validate an explicitly supplied USB before creating the run.  The
         # generated fixture is created below, inside the new run directory.
         if args.test_track:
-            media_drives(None, args.usb)
+            media_drives(None, args.usb, args.disc)
             run.mkdir(parents=True, exist_ok=False)
             test_track_directory = run / 'test-media'
             test_track_manifest = create_test_media(test_track_directory)
             sd_image = test_track_directory / test_track_manifest['image']
         else:
             sd_image = args.sd
-        media_command, media_inputs = media_drives(sd_image, args.usb)
+        media_command, media_inputs = media_drives(sd_image, args.usb, args.disc)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     if not run.exists():
@@ -704,6 +706,11 @@ def main():
         '-serial', f'tcp:127.0.0.1:{args.port},server,nowait',
         '-serial', f'tcp:127.0.0.1:{args.port + 2},server,nowait', '-serial', 'null']
     main_command += media_command
+    if args.trace_media and args.disc:
+        for event in (
+                'ide_bus_exec_cmd', 'ide_atapi_cmd', 'ide_atapi_cmd_packet',
+                'ide_atapi_cmd_error', 'ide_atapi_cmd_read', 'cd_read_sector'):
+            main_command += ['-trace', f'enable={event}']
     if args.debug:
         main_command += ['-qmp', f'unix:{qmp_path},server=on,wait=off',
                          '-gdb', f'tcp:127.0.0.1:{args.port + 3}']
@@ -768,6 +775,7 @@ def main():
     if args.trace_media:
         main_env['CDJ_SDHI_TRACE'] = '1'
         main_env['CDJ_USBH_TRACE'] = '1'
+        main_env['CDJ_ATA_TRACE'] = '1'
     main_env['CDJ_NXS_HPI_DUMP'] = str(run / 'dsp-l2.bin')
     main_env['CDJ_NXS_DSP_CHECKPOINT_DIR'] = str(run / 'dsp-checkpoints')
     main_env['CDJ_NXS_DSP_CHECKPOINT_POLICY'] = 'fault' if args.lightweight else 'all'
