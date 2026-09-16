@@ -25,6 +25,7 @@
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
 #include "cdj_dsp_checkpoint.h"
+#include "cdj_dsp_budget.h"
 #include "cdj_dsp_scheduler.h"
 
 #define HPI_BASE 0x0c000000u
@@ -47,6 +48,7 @@ typedef struct {
     CdjC6747Hpi hpi;
     bool reset_released, dsp_started, dsp_halted, dsp_running;
     bool functional_audio;
+    uint32_t legacy_budget;
     CdjDspScheduler scheduler;
     QEMUTimer *dsp_timer;
     unsigned boot_phase;
@@ -880,7 +882,7 @@ static void run_dsp(NxsHpi *s)
 {
     if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
     if (!s->scheduler.mode) {
-        execute_dsp(s, CDJ_DSP_COOPERATIVE_BUDGET);
+        execute_dsp(s, s->legacy_budget);
         return;
     }
     if (!cdj_dsp_scheduler_request(&s->scheduler)) {
@@ -1002,6 +1004,14 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
+    const char *legacy_budget = getenv("CDJ_NXS_DSP_LEGACY_BUDGET");
+    if (!cdj_dsp_legacy_budget_parse(legacy_budget, &s->legacy_budget)) {
+        error_report("nxs-c674x: invalid legacy DSP budget %s; expected %u..%u packets",
+                     legacy_budget ? legacy_budget : "(null)",
+                     CDJ_DSP_LEGACY_BUDGET_MIN,
+                     CDJ_DSP_LEGACY_BUDGET_DEFAULT);
+        exit(EXIT_FAILURE);
+    }
     if (scheduler && !strcmp(scheduler, "deferred-v1")) {
         cdj_dsp_scheduler_reset(&s->scheduler);
         s->dsp_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, deferred_dsp_tick, s);
@@ -1010,6 +1020,9 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
         error_report("nxs-c674x: unsupported DSP scheduler %s", scheduler);
         exit(EXIT_FAILURE);
     }
+    if (s->legacy_budget != CDJ_DSP_LEGACY_BUDGET_DEFAULT)
+        warn_report("nxs-c674x: legacy cooperative budget reduced to %u packets; exploratory host-fairness mode",
+                    s->legacy_budget);
     nxs_hpi = s;
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     s->functional_audio = audio && !strcmp(audio, "1");

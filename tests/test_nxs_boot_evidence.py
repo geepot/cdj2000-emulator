@@ -314,6 +314,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
             assert kwargs['env']['CDJ_LINK_LINK_ROWS'] == 'off'
             assert kwargs['env']['CDJ_NXS_DSP_SCHEDULER'] == (
                 'deferred-v1' if deferred else 'legacy')
+            assert kwargs['env']['CDJ_NXS_DSP_LEGACY_BUDGET'] == '1000000'
         if gui:
             assert kwargs['env'].get('BFIN_LINK_FRESH_ONLY') == ('1' if fresh_link else None)
             assert kwargs['env'].get('BFIN_SPORT_TX_OUTPUT') == (
@@ -336,6 +337,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     expected_scheduler = 'deferred-v1' if deferred else 'legacy'
     assert manifest['main_environment']['CDJ_NXS_DSP_SCHEDULER'] == expected_scheduler
     assert manifest['dsp_scheduler_mode'] == expected_scheduler
+    assert manifest['dsp_legacy_budget_packets'] == 1000000
     assert manifest['qemu_sync_profile']['enabled'] is profile
     assert ('-enable-sync-profile' in manifest['main']) is profile
     if profile:
@@ -367,3 +369,17 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     else:
         assert 'frame_snapshots' not in manifest
         assert not (tmp_path / 'run/frames').exists()
+@pytest.mark.parametrize('fast,requested,expected', [
+    (False, None, 1000000),
+    (True, None, 65536),
+    (False, 4096, 4096),
+    (False, 1000000, 1000000),
+])
+def test_legacy_dsp_budget_launcher_policy(fast, requested, expected):
+    assert nxs_vm.legacy_dsp_budget(fast, requested) == expected
+
+
+@pytest.mark.parametrize('requested', [0, 4095, 1000001])
+def test_legacy_dsp_budget_launcher_rejects_unsafe_values(requested):
+    with pytest.raises(ValueError, match='4096..1000000'):
+        nxs_vm.legacy_dsp_budget(False, requested)

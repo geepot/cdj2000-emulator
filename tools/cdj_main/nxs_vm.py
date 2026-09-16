@@ -12,6 +12,7 @@ import math
 import os
 import shlex
 import socket
+import threading
 from pathlib import Path
 import struct
 import subprocess
@@ -21,6 +22,7 @@ import time
 from tools.cdj_dsp.tx_capture import tx_capture_metadata
 from tools.cdj_main.run_state import write_json
 from tools.cdj_main.nxs_panel import neutral_frame
+from tools.cdj_main import media_readiness, panel_control
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -161,6 +163,68 @@ def source_schedule(at: float, contact: tuple[int, int], retries: int = 0,
     byte, mask = contact
     return ';'.join('%g:%d:%02x' % (at + index * interval, byte, mask)
                     for index in range(retries + 1))
+
+
+def legacy_dsp_budget(fast: bool, requested: int | None) -> int:
+    """Resolve the explicit host-fairness policy; it is not DSP timing."""
+    value = 65536 if fast else (requested if requested is not None else 1000000)
+    if not 4096 <= value <= 1000000:
+        raise ValueError('legacy DSP budget must be 4096..1000000')
+    return value
+
+
+def send_source_key_when_ready(run: Path, source: str, contact: tuple[int, int],
+                               hold_ms: int, stop: threading.Event,
+                               result_path: Path) -> None:
+    """Press a media source after its QMP readiness predicate becomes true.
+
+    The old ``CDJ_PANEL_KEYS`` schedule is tied to virtual seconds.  On a
+    slow host that can fire before MAIN's media manager has created the source
+    table, and retries then cost several minutes of wall time.  This worker
+    waits on the same read-only predicate exposed by ``dev wait-media`` and
+    sends one real panel pulse as soon as the source is usable.
+    """
+    result = {'source': source, 'strategy': 'qmp-readiness'}
+    try:
+        observed = None
+        last_error = None
+        while not stop.is_set():
+            try:
+                observed = media_readiness.observe_run(
+                    run, timeout=1, poll=0.25, source=source)
+                result['readiness'] = observed
+                if observed['ok']:
+                    break
+            except Exception as error:
+                # QMP can take a moment to publish its socket after MAIN
+                # starts. Retry transient endpoint errors without delaying
+                # the launcher teardown or hiding the final diagnostic.
+                last_error = str(error)
+            stop.wait(0.25)
+        if stop.is_set():
+            result.update(outcome='cancelled')
+        elif observed is None or not observed.get('ok'):
+            result.update(outcome='error', error=last_error or
+                          'media readiness did not become true')
+        else:
+            endpoint = json.loads((run / 'run.json').read_text())['endpoints']
+            host = endpoint.get('panel_host', '127.0.0.1')
+            port = endpoint['panel_port']
+            wire = panel_control.encode_press(contact[0], contact[1], hold_ms)
+            connection = panel_control.PanelControl(host, port, timeout=2.0)
+            try:
+                connection.open()
+                reply = connection.send(wire)
+            finally:
+                connection.close()
+            result.update(outcome='pressed', reply=reply,
+                          ok=reply.strip().lower().startswith('ok'))
+    except Exception as error:  # keep a diagnostic worker from killing MAIN
+        result.update(outcome='error', error=str(error))
+    try:
+        result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+    except OSError:
+        pass
 
 
 def launch_ports(base: int, debug: bool) -> tuple[int, ...]:
@@ -558,8 +622,12 @@ def main():
                              "Defaults to 'sd' when --sd or --test-track is given")
     parser.add_argument('--source-key-at', type=float,
                         help='virtual seconds at which to press it; defaults to '
-                             'two seconds after insertion. This schedule does '
-                             'not wait for NXS media-manager readiness')
+                        'two seconds after insertion. This schedule does '
+                        'not wait for NXS media-manager readiness')
+    parser.add_argument('--source-key-when-ready', action='store_true',
+                        help='with --debug, wait for the selected SD/USB '
+                             'source readiness predicate over QMP, then send '
+                             'one panel press; avoids virtual-time retry delays')
     parser.add_argument('--source-key-retries', type=int, default=0,
                         help='repeat the source press this many times while '
                              'media manager settles (0 keeps one press)')
@@ -602,6 +670,11 @@ def main():
                         help='maximum DSP XBUF JSON records to retain (default: 65536)')
     parser.add_argument('--deferred-dsp-scheduling', action='store_true',
                         help='opt into diagnostic 4096-step deferred DSP scheduling (not timing evidence)')
+    budget = parser.add_mutually_exclusive_group()
+    budget.add_argument('--fast-dsp', action='store_true',
+                        help='exploratory legacy scheduling with 65536 packets per HPI wake')
+    budget.add_argument('--dsp-legacy-budget', type=int,
+                        help='legacy packets per HPI wake (4096..1000000; default: 1000000)')
     args = parser.parse_args()
     if args.sd_insert_seconds is not None and (not (args.sd or args.test_track) or
                                              not 0 <= args.sd_insert_seconds <= 86400):
@@ -612,6 +685,11 @@ def main():
         parser.error('--timestamp-run cannot be combined with a positional run directory')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
+    try:
+        dsp_legacy_budget = legacy_dsp_budget(args.fast_dsp,
+                                              args.dsp_legacy_budget)
+    except ValueError:
+        parser.error('--dsp-legacy-budget must be 4096..1000000')
     if not 1 <= args.capture_dsp_tx_records <= 10000000:
         parser.error('--capture-dsp-tx-records must be 1..10000000')
     if args.gui_link is not None:
@@ -633,6 +711,12 @@ def main():
         parser.error('positive duration and port 1024..65531 required')
     if args.debug_paused and not args.debug:
         parser.error('--debug-paused requires --debug')
+    if args.source_key_when_ready and not args.debug:
+        parser.error('--source-key-when-ready requires --debug')
+    if args.source_key_when_ready and args.source_key_at is not None:
+        parser.error('--source-key-when-ready cannot be combined with --source-key-at')
+    if args.source_key_when_ready and args.source_key_retries:
+        parser.error('--source-key-when-ready cannot be combined with --source-key-retries')
     if not math.isfinite(args.frame_interval) or args.frame_interval < 0:
         parser.error('--frame-interval must be finite and nonnegative')
     run = automatic_run_path() if args.timestamp_run or args.run is None else (ROOT / args.run).resolve()
@@ -759,6 +843,8 @@ def main():
     # the browser still answers NO CARD. See NXS_BROWSE_BLOCKER.md. Explicit
     # options are necessary because inherited CDJ_ variables are sanitized.
     source_key = args.source_key or ('sd' if (args.sd or args.test_track) else 'none')
+    if args.source_key_when_ready and source_key == 'none':
+        parser.error('--source-key-when-ready requires --source-key sd or usb (or attached media default)')
     if source_key != 'none':
         contact = NXS_SOURCE_KEYS.get(source_key)
         if contact is None:
@@ -770,11 +856,14 @@ def main():
             if contact is None or not (0 <= contact[0] <= 21) or not (1 <= contact[1] <= 255):
                 parser.error("--source-key must be sd, usb, link, disc, "
                              "rekordbox, none or BYTE:MASK")
-        insert_at = args.sd_insert_seconds if args.sd_insert_seconds is not None else 20
-        at = args.source_key_at if args.source_key_at is not None else insert_at + 2.0
-        main_env['CDJ_PANEL_KEYS'] = source_schedule(
-            at, contact, args.source_key_retries,
-            args.source_key_retry_interval)
+        if args.source_key_when_ready and source_key not in ('sd', 'usb'):
+            parser.error('--source-key-when-ready supports only sd or usb')
+        if not args.source_key_when_ready:
+            insert_at = args.sd_insert_seconds if args.sd_insert_seconds is not None else 20
+            at = args.source_key_at if args.source_key_at is not None else insert_at + 2.0
+            main_env['CDJ_PANEL_KEYS'] = source_schedule(
+                at, contact, args.source_key_retries,
+                args.source_key_retry_interval)
         main_env['CDJ_PANEL_HOLD_MS'] = str(args.panel_hold_ms)
     if args.trace_media:
         main_env['CDJ_SDHI_TRACE'] = '1'
@@ -793,6 +882,7 @@ def main():
     # Always override any inherited policy. Deferred scheduling changes the
     # connected host/DSP interleaving and must be an explicit run option.
     main_env['CDJ_NXS_DSP_SCHEDULER'] = dsp_scheduler_mode
+    main_env['CDJ_NXS_DSP_LEGACY_BUDGET'] = str(dsp_legacy_budget)
     if args.functional_dsp_timing:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
@@ -850,9 +940,14 @@ def main():
                    panel_key_retries=args.source_key_retries,
                    panel_key_retry_interval_seconds=args.source_key_retry_interval,
                    panel_key_hold_ms=main_env.get('CDJ_PANEL_HOLD_MS'),
+                   panel_key_strategy=('qmp-readiness' if args.source_key_when_ready
+                                        else 'virtual-time schedule'),
+                   panel_key_readiness_file=('source-key-ready.json'
+                                             if args.source_key_when_ready else None),
                    writes='temporary QEMU snapshot overlays; discarded at exit',
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
+        dsp_legacy_budget_packets=dsp_legacy_budget,
         dsp_sdram=dict(physical_bytes=0x02000000,
             aperture='0xc0000000-0xdfffffff',
             addressing='physical 32 MiB mirror',
@@ -893,6 +988,8 @@ def main():
     stop_requested = False
     viewer = None
     snapshots = None
+    source_worker = None
+    source_worker_stop = threading.Event()
     main_process = None
     with (run / 'main-stderr.log').open('w') as mainlog, (run / 'gui.log').open('w') as guilog:
         try:
@@ -919,6 +1016,13 @@ def main():
             write_json(run / 'session.json', session)
             print(f'MAIN {main_process.pid}, GUI {gui.pid}; logs: {run}', flush=True)
             print_agent_commands(run, args.port, args.debug)
+            if args.source_key_when_ready:
+                source_worker = threading.Thread(
+                    target=send_source_key_when_ready,
+                    args=(run, source_key, contact, args.panel_hold_ms,
+                          source_worker_stop, run / 'source-key-ready.json'),
+                    name='nxs-source-key-readiness', daemon=True)
+                source_worker.start()
             deadline = time.monotonic() + args.seconds + 5
             while gui.poll() is None and time.monotonic() < deadline:
                 if (run / 'stop-request.json').is_file():
@@ -946,6 +1050,9 @@ def main():
                           main_exit_before_teardown=main_process.poll() if main_process else None)
             print(f'nxs_vm: {result["error"]}; diagnostics: {run}', file=sys.stderr)
         finally:
+            source_worker_stop.set()
+            if source_worker is not None:
+                source_worker.join(timeout=2)
             session['state'] = 'stopping'
             write_json(run / 'session.json', session)
             if args.qemu_sync_profile:
