@@ -244,9 +244,10 @@ def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
 @pytest.mark.parametrize('fresh_link,trace_link', [(False, False), (True, True)])
 @pytest.mark.parametrize('custom_main', [False, True])
 @pytest.mark.parametrize('disc_attached', [False, True])
+@pytest.mark.parametrize('fast_dsp', [False, True])
 def test_run_manifest_records_launched_inputs_and_optional_observations(
         tmp_path, monkeypatch, interval, deferred, profile, fresh_link, trace_link,
-        custom_main, disc_attached):
+        custom_main, disc_attached, fast_dsp):
     paths = ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
              'firmware/nxs/main-firmware.bin', 'firmware/nxs/gui-boot-memory.elf',
              'firmware/nxs/gui-flash-image.bin')
@@ -268,6 +269,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
         argv += ['--main-firmware', str(selected_main), '--trace-bus', '--ethernet-peer-port', '6123']
     if deferred:
         argv.append('--deferred-dsp-scheduling')
+    if fast_dsp:
+        argv.append('--fast-dsp')
     if profile:
         argv.append('--qemu-sync-profile')
     if fresh_link:
@@ -314,7 +317,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
             assert kwargs['env']['CDJ_LINK_LINK_ROWS'] == 'off'
             assert kwargs['env']['CDJ_NXS_DSP_SCHEDULER'] == (
                 'deferred-v1' if deferred else 'legacy')
-            assert kwargs['env']['CDJ_NXS_DSP_LEGACY_BUDGET'] == '1000000'
+            assert kwargs['env']['CDJ_NXS_DSP_LEGACY_BUDGET'] == (
+                '65536' if fast_dsp else '1000000')
         if gui:
             assert kwargs['env'].get('BFIN_LINK_FRESH_ONLY') == ('1' if fresh_link else None)
             assert kwargs['env'].get('BFIN_SPORT_TX_OUTPUT') == (
@@ -337,7 +341,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     expected_scheduler = 'deferred-v1' if deferred else 'legacy'
     assert manifest['main_environment']['CDJ_NXS_DSP_SCHEDULER'] == expected_scheduler
     assert manifest['dsp_scheduler_mode'] == expected_scheduler
-    assert manifest['dsp_legacy_budget_packets'] == 1000000
+    assert manifest['dsp_legacy_budget_packets'] == (65536 if fast_dsp else 1000000)
     assert manifest['qemu_sync_profile']['enabled'] is profile
     assert ('-enable-sync-profile' in manifest['main']) is profile
     if profile:
@@ -346,9 +350,11 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
         assert 'host overhead' in manifest['qemu_sync_profile']['observer_overhead']
     else:
         collector.assert_not_called()
-    assert manifest['architectural_validation_eligible'] is not deferred
+    assert manifest['architectural_validation_eligible'] is not (deferred or fast_dsp)
     if deferred:
         assert 'not a DSP timing fix' in manifest['scheduling_provenance']
+    elif fast_dsp:
+        assert 'exploratory host-fairness mode' in manifest['scheduling_provenance']
     else:
         assert manifest['scheduling_provenance'] == \
             'legacy synchronous bounded DSP activation'

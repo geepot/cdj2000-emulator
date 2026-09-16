@@ -960,12 +960,16 @@ def main():
                               'timings are diagnostic observations, not uninstrumented performance'),
         architectural_validation_eligible=not (
             args.lightweight or args.functional_dsp_timing or
-            args.functional_dsp_audio or args.deferred_dsp_scheduling),
+            args.functional_dsp_audio or args.deferred_dsp_scheduling or
+            dsp_legacy_budget != 1000000),
         scheduling_provenance=(
             'deferred-v1 is an explicit 4096-step QEMU timer-slice host scheduling approximation; '
             'it is not a DSP timing fix, frequency model, or hardware proof'
             if args.deferred_dsp_scheduling else
-            'legacy synchronous bounded DSP activation'))
+            (f'legacy synchronous DSP activation reduced to {dsp_legacy_budget} packets per HPI wake; '
+             'exploratory host-fairness mode, not hardware timing or validation evidence'
+             if dsp_legacy_budget != 1000000 else
+             'legacy synchronous bounded DSP activation')))
     run_manifest['ethernet'] = dict(
         controller='SH7764 EtherC/E-DMAC', phy='RTL8201FL-VB-CG',
         peer=(f'127.0.0.1:{args.ethernet_peer_port}' if args.ethernet_peer_port else None),
