@@ -85,3 +85,50 @@ def test_dev_wait_media_returns_predicate_exit_status_and_records(tmp_path, monk
     assert dev.main([str(tmp_path), 'wait-media', '--timeout', '0']) == 1
     assert not json.loads(capsys.readouterr().out)['ok']
     assert json.loads((tmp_path / 'actions.jsonl').read_text())['outcome'] == 'timeout'
+
+
+def test_usb_source_uses_slot_three_and_only_value_two_is_ready():
+    from tools.cdj_main import media_readiness as media
+    assert media.TABLE_BASE + 2 * media.SLOT_STRIDE == media.TABLE_ENTRY
+    assert media.TABLE_BASE + 3 * media.SLOT_STRIDE == media.USB_TABLE_ENTRY
+    values = {media.USB_TABLE_ENTRY: 1}
+    intermediate = media.readiness_snapshot(values.__getitem__, "usb")
+    assert intermediate["source"] == "usb"
+    assert intermediate["slot"] == 3
+    assert intermediate["intermediate"] is True
+    assert intermediate["ready"] is False
+    assert intermediate["ok"] is False
+    values[media.USB_TABLE_ENTRY] = 2
+    ready = media.readiness_snapshot(values.__getitem__, "usb")
+    assert ready["ready"] is True
+    assert ready["ok"] is True
+
+
+def test_usb_snapshot_does_not_read_sd_mount_globals():
+    from tools.cdj_main import media_readiness as media
+    seen = []
+
+    def read(address):
+        seen.append(address)
+        return 2 if address == media.USB_TABLE_ENTRY else 0
+
+    result = media.readiness_snapshot(read, "usb")
+    assert result["ok"] is True
+    assert seen == [media.USB_TABLE_ENTRY]
+
+
+def test_observe_run_usb_waits_on_source_entry_only(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import MagicMock
+    from tools.cdj_main import media_readiness as media
+    (tmp_path / "run.json").write_text(json.dumps({
+        "profile": "experimental NXS", "endpoints": {"qmp": "qmp.sock"}}))
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.command.return_value = "04cf2a34: 0x00000001\n"
+    monkeypatch.setattr(media, "Qmp", lambda *a, **kw: client)
+    result = media.observe_run(tmp_path, timeout=0, source="usb")
+    assert result["intermediate"] is True
+    assert result["ok"] is False
+    assert client.command.call_count == 1
+    assert "0x4cf2a34" in client.command.call_args.args[1]["command-line"]
