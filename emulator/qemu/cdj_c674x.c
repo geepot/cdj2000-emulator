@@ -4582,7 +4582,7 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         /* SPLOOPD forces termination false and suppresses ILC decrement
          * during the first three loop cycles.  At later stage boundaries,
          * test ILC before conditionally decrementing it (7.9.2/7.9.3). */
-        if (!interrupt_armed && !interrupt_draining &&
+        if (!scheduler_post && !interrupt_armed && !interrupt_draining &&
             out.loop.cycle >= 4 && out.loop.cycle % out.loop.ii == 0 &&
             out.control[13])
             --out.control[13];

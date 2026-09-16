@@ -779,6 +779,18 @@ int main(void)
         }
         assert(c.r[0][3] == 2 + minimum && c.control[13] == 0);
     }
+    /* Post-loop packets can prepare ILC for a following software loop.
+     * Once SPLOOPD reaches its post phase, it must not consume the new value
+     * written by that packet as though it belonged to the completed loop. */
+    memset(memory, 0, sizeof(memory)); cdj_c674x_reset(&c, 0x1000);
+    c.loop_active = true; c.control[26] = 1u << 14;
+    c.loop.ii = 1; c.loop.iterations = 5; c.loop.delayed_count = true;
+    c.loop.sealed = true; c.loop.cycle = 4;
+    c.loop.post_cycle = c.loop.end_cycle = 4;
+    c.r[0][2] = 8;
+    memory[0] = 13u << 23 | 2u << 18 | 0x13a2; /* MVC A2,ILC */
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!c.loop_active && c.control[13] == 8);
     /* H-6 conditional SPLOOPD requests reload/nested-loop behavior, which
      * remains fail-closed and leaves the setup packet atomic.  SPRUFE8B's
      * SPLOOPD description (printed page 485) is what makes this a reload
