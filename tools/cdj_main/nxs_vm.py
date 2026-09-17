@@ -678,6 +678,8 @@ def main():
                         help='capture genuine XBUF words consumed by coarse McASP slot progression')
     parser.add_argument('--capture-dsp-tx-records', type=int, default=65536,
                         help='maximum DSP XBUF JSON records to retain (default: 65536)')
+    parser.add_argument('--capture-dsp-fault-history', action='store_true',
+                        help='on a DSP fault, save the final 512 pre-step CPU states')
     parser.add_argument('--deferred-dsp-scheduling', action='store_true',
                         help='opt into diagnostic 4096-step deferred DSP scheduling (not timing evidence)')
     budget = parser.add_mutually_exclusive_group()
@@ -905,6 +907,8 @@ def main():
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
         main_env['CDJ_NXS_DSP_TX_CAPTURE_LIMIT'] = str(args.capture_dsp_tx_records)
+    if args.capture_dsp_fault_history:
+        main_env['CDJ_NXS_DSP_FAULT_HISTORY'] = str(run / 'dsp-fault-history.jsonl')
     # Genuine NXS validation must transport the firmware's bytes unchanged, so
     # both board-side aids stay off by default. They are not optional for one
     # job, though: RUNNING.md measures the card's library reaching the screen in

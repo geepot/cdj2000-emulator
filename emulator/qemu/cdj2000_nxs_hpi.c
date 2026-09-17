@@ -35,10 +35,17 @@
 #define SHARED_RAM_SIZE 0x20000u
 #define SDRAM_BASE 0xc0000000u
 #define SDRAM_SIZE 0x02000000u
+#define DSP_FAULT_HISTORY_COUNT 512u
 /* Cooperative QEMU scheduling quantum, not a C6747 timing property. HINT
  * still yields immediately. One million packets lets initialization reach
  * its genuine wait loop after the final MAIN event instead of stranding the
  * DSP merely because no later host transition happens to resume it. */
+
+typedef struct {
+    uint64_t packets, cycles;
+    uint32_t pc, a8, b5, b15, b3, csr, irp, ilc, tsr;
+    uint8_t phase, loop_active;
+} DspFaultHistory;
 
 typedef struct {
     MemoryRegion registers;
@@ -83,6 +90,9 @@ typedef struct {
     uint64_t tx_capture_sequence;
     uint64_t tx_capture_limit;
     bool tx_capture_failed;
+    DspFaultHistory fault_history[DSP_FAULT_HISTORY_COUNT];
+    uint32_t fault_history_next;
+    char *fault_history_path;
 } NxsHpi;
 static NxsHpi *nxs_hpi;
 static void run_dsp(NxsHpi *s);
@@ -789,6 +799,32 @@ static void dsp_cycle_tick(void *opaque)
 
 static void report_dsp(NxsHpi *s, const char *reason)
 {
+    if (s->cpu.fault && s->fault_history_path) {
+        FILE *history = fopen(s->fault_history_path, "w");
+        if (!history) {
+            error_report("nxs-c674x: cannot write DSP fault history %s",
+                         s->fault_history_path);
+        } else {
+            uint32_t first = s->fault_history_next > DSP_FAULT_HISTORY_COUNT ?
+                s->fault_history_next - DSP_FAULT_HISTORY_COUNT : 0;
+            for (uint32_t n = first; n < s->fault_history_next; ++n) {
+                const DspFaultHistory *item =
+                    &s->fault_history[n % DSP_FAULT_HISTORY_COUNT];
+                fprintf(history,
+                        "{\"packets\":%" PRIu64 ",\"cycles\":%" PRIu64
+                        ",\"phase\":%u,\"pc\":%u,\"a8\":%u,\"b5\":%u"
+                        ",\"b15\":%u,\"b3\":%u,\"csr\":%u,\"irp\":%u"
+                        ",\"ilc\":%u,\"tsr\":%u,\"loop_active\":%s}\n",
+                        item->packets, item->cycles, item->phase, item->pc,
+                        item->a8, item->b5, item->b15, item->b3, item->csr,
+                        item->irp, item->ilc, item->tsr,
+                        item->loop_active ? "true" : "false");
+            }
+            if (fclose(history))
+                error_report("nxs-c674x: cannot close DSP fault history %s",
+                             s->fault_history_path);
+        }
+    }
     capture_requested_checkpoint(s);
     info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
@@ -809,12 +845,30 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                                            "phase budget exhausted";
     unsigned steps = 0;
     while (steps < quota) {
+        if (s->fault_history_path) {
+            DspFaultHistory *item = &s->fault_history[
+                s->fault_history_next++ % DSP_FAULT_HISTORY_COUNT];
+            *item = (DspFaultHistory){s->cpu.packets, s->cpu.cycles,
+                s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
+                s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
+                s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
+                0, s->cpu.loop_active};
+        }
         deliver_edma_notifications(s);
         if (!cdj_c674x_interrupt(
                 &s->cpu, cdj_c6747_intc_cpu_pending(&s->intc_delivery))) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU interrupt stopped";
             s->dsp_halted = true;
             break;
+        }
+        if (s->fault_history_path) {
+            DspFaultHistory *item = &s->fault_history[
+                s->fault_history_next++ % DSP_FAULT_HISTORY_COUNT];
+            *item = (DspFaultHistory){s->cpu.packets, s->cpu.cycles,
+                s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
+                s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
+                s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
+                1, s->cpu.loop_active};
         }
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
@@ -1004,6 +1058,9 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
+    const char *fault_history = getenv("CDJ_NXS_DSP_FAULT_HISTORY");
+    if (fault_history && *fault_history)
+        s->fault_history_path = g_strdup(fault_history);
     const char *legacy_budget = getenv("CDJ_NXS_DSP_LEGACY_BUDGET");
     if (!cdj_dsp_legacy_budget_parse(legacy_budget, &s->legacy_budget)) {
         error_report("nxs-c674x: invalid legacy DSP budget %s; expected %u..%u packets",
