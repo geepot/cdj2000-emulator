@@ -81,6 +81,11 @@ def readiness_snapshot(read_word, source: str = "sd") -> dict:
             "media mode == 0": media_mode == 0}
     card_present = not bool((info1 >> 5) & 1)
     gate_ready = bool(any(arms.values()) and card_present and latch == 1)
+    # The mount gate is an intermediate state: a real NXS browse capture saw
+    # mode 2/table 1 answer NO CARD, then mode 3/table 2 list files.  Keep
+    # mount readiness distinct from source-key readiness.
+    browser_source_ready = bool(mode == 3 and table == 2 and
+                                card_present and latch == 1)
     result = {
         "source": "sd",
         "mode_state": mode, "table_entry": table,
@@ -90,6 +95,7 @@ def readiness_snapshot(read_word, source: str = "sd") -> dict:
         "card_present": card_present,
         "mount_latched": latch == 1,
         "gate_ready": gate_ready, "ok": gate_ready,
+        "browser_source_ready": browser_source_ready,
         "device": device,
         "flags_byte": (flags_word >> (8 * (FLAGS_BYTE & 3))) & 0xff,
         "browse_proven": False,
@@ -103,7 +109,15 @@ def readiness_snapshot(read_word, source: str = "sd") -> dict:
     return result
 
 
-def observe_run(run: Path, timeout: float = 0, poll: float = 0.25, source: str = "sd") -> dict:
+def source_key_ready(snapshot: dict) -> bool:
+    """Whether a source press can open the selected browser table."""
+    if snapshot['source'] == 'sd':
+        return bool(snapshot.get('browser_source_ready'))
+    return bool(snapshot['ok'])
+
+
+def observe_run(run: Path, timeout: float = 0, poll: float = 0.25,
+                source: str = "sd", for_source_key: bool = False) -> dict:
     manifest = json.loads((run / "run.json").read_text())
     if not isinstance(manifest, dict) or manifest.get("profile") != "experimental NXS":
         raise ValueError("run manifest is not an experimental NXS profile")
@@ -128,7 +142,8 @@ def observe_run(run: Path, timeout: float = 0, poll: float = 0.25, source: str =
                 "command-line": f"xp /1wx 0x{address:x}"}))
         while True:
             result = readiness_snapshot(read_word, source)
-            if result["ok"] or timeout == 0 or time.monotonic() >= deadline:
+            ready = source_key_ready(result) if for_source_key else result['ok']
+            if ready or timeout == 0 or time.monotonic() >= deadline:
                 return result
             time.sleep(min(poll, max(0, deadline - time.monotonic())))
             if time.monotonic() >= deadline:

@@ -234,9 +234,10 @@ def send_source_key_when_ready(run: Path, source: str, contact: tuple[int, int],
         while not stop.is_set():
             try:
                 observed = media_readiness.observe_run(
-                    run, timeout=1, poll=0.25, source=source)
+                    run, timeout=1, poll=0.25, source=source,
+                    for_source_key=True)
                 result['readiness'] = observed
-                if observed['ok']:
+                if media_readiness.source_key_ready(observed):
                     break
             except Exception as error:
                 # QMP can take a moment to publish its socket after MAIN
@@ -246,9 +247,9 @@ def send_source_key_when_ready(run: Path, source: str, contact: tuple[int, int],
             stop.wait(0.25)
         if stop.is_set():
             result.update(outcome='cancelled')
-        elif observed is None or not observed.get('ok'):
+        elif observed is None or not media_readiness.source_key_ready(observed):
             result.update(outcome='error', error=last_error or
-                          'media readiness did not become true')
+                          'source table did not become browser-ready')
         else:
             result['settle_seconds'] = settle_seconds
             if stop.wait(settle_seconds):
@@ -680,9 +681,9 @@ def main():
                         'two seconds after insertion. This schedule does '
                         'not wait for NXS media-manager readiness')
     parser.add_argument('--source-key-when-ready', action='store_true',
-                        help='with --debug, wait for the selected SD/USB '
-                             'source readiness predicate over QMP, then send '
-                             'one panel press; avoids virtual-time retry delays')
+                        help='with --debug, wait for SD mode 3/table 2 or USB '
+                             'table 2 over QMP, then send one panel press; '
+                             'combine with --fresh-link for NXS browsing')
     parser.add_argument('--source-key-ready-delay', type=float, default=0,
                         help='host seconds to settle after readiness before the '
                              'source press (0..30; default: 0)')
