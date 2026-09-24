@@ -8,7 +8,9 @@ from pathlib import Path
 
 def tx_capture_metadata(path: Path) -> dict:
     counts = Counter()
+    nonzero_counts = Counter()
     sequence = 0
+    first_nonzero = None
     digest = hashlib.sha256()
     with path.open('rb') as raw:
         for raw_line in raw:
@@ -29,9 +31,20 @@ def tx_capture_metadata(path: Path) -> dict:
                     event['clock'] != 'functional-coarse-packet-slot'):
                 raise ValueError(f'invalid DSP transmit capture record {sequence}')
             counts[f"mcasp{event['instance']}.serializer{event['serializer']}"] += 1
+            if event['word']:
+                nonzero_counts[f"mcasp{event['instance']}.serializer{event['serializer']}"] += 1
+                if first_nonzero is None:
+                    first_nonzero = dict(sequence=sequence,
+                                         instance=event['instance'],
+                                         slot=event['slot'],
+                                         serializer=event['serializer'],
+                                         word=event['word'])
     return dict(schema=1, format='canonical JSONL genuine McASP XBUF slot words',
                 file=path.name, sha256=digest.hexdigest(), records=sequence,
                 counts=dict(sorted(counts.items())),
+                nonzero_records=sum(nonzero_counts.values()),
+                nonzero_counts=dict(sorted(nonzero_counts.items())),
+                first_nonzero=first_nonzero,
                 sample_encoding='unsigned 32-bit serializer word; not PCM interpretation',
                 timing='functional coarse packet slots; not serializer-clock or audio timing',
                 synthesized_samples=False)

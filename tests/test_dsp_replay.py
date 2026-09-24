@@ -365,14 +365,26 @@ def test_transmit_capture_metadata_and_repeat_gate(tmp_path):
     capture.write_text(
         '{"sequence":1,"instance":1,"slot":0,"serializer":0,"word":305419896,'
         '"xbuf_sequence":7,"packets":1024,"cycles":2048,'
+        '"source":"genuine_xbuf","clock":"functional-coarse-packet-slot"}\n'
+        '{"sequence":2,"instance":2,"slot":1,"serializer":3,"word":0,'
+        '"xbuf_sequence":8,"packets":2048,"cycles":4096,'
         '"source":"genuine_xbuf","clock":"functional-coarse-packet-slot"}\n')
     metadata = tx_capture_metadata(capture)
-    assert metadata['records'] == 1
-    assert metadata['counts'] == {'mcasp1.serializer0': 1}
+    assert metadata['records'] == 2
+    assert metadata['counts'] == {'mcasp1.serializer0': 1, 'mcasp2.serializer3': 1}
+    assert metadata['nonzero_records'] == 1
+    assert metadata['nonzero_counts'] == {'mcasp1.serializer0': 1}
+    assert metadata['first_nonzero'] == {
+        'sequence': 1, 'instance': 1, 'slot': 0,
+        'serializer': 0, 'word': 305419896,
+    }
     assert metadata['synthesized_samples'] is False
     empty = tmp_path / 'empty.jsonl'
     empty.write_bytes(b'')
-    assert tx_capture_metadata(empty)['records'] == 0
+    empty_metadata = tx_capture_metadata(empty)
+    assert empty_metadata['records'] == 0
+    assert empty_metadata['nonzero_records'] == 0
+    assert empty_metadata['first_nonzero'] is None
     truncated = tmp_path / 'truncated.jsonl'
     truncated.write_bytes(capture.read_bytes()[:-1])
     with pytest.raises((ValueError, json.JSONDecodeError)):
