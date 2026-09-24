@@ -8,6 +8,9 @@
 #include "qemu/error-report.h"
 #include "qemu/bswap.h"
 #include "qemu/timer.h"
+#include "qemu/audio.h"
+#include "qapi/error.h"
+#include "system/runstate.h"
 #include "cdj2000_nxs_hpi.h"
 #include "cdj_c674x.h"
 #include "cdj_c6747_syscfg.h"
@@ -39,6 +42,9 @@
 #define MCASP_VIRTUAL_BATCH_NS 1000000
 #define MCASP_VIRTUAL_MAX_SLOTS 256u
 #define MCASP_VIRTUAL_DSP_QUOTA 4096u
+#define NXS_AUDIO_RATE 44100u
+#define NXS_AUDIO_RING_FRAMES (NXS_AUDIO_RATE * 2u)
+#define NXS_AUDIO_PREFILL_FRAMES (NXS_AUDIO_RATE / 20u)
 /* Cooperative QEMU scheduling quantum, not a C6747 timing property. HINT
  * still yields immediately. One million packets lets initialization reach
  * its genuine wait loop after the final MAIN event instead of stranding the
@@ -65,6 +71,15 @@ typedef struct {
     int64_t mcasp_last_ns;
     uint64_t mcasp_phase, mcasp_debt;
     uint64_t mcasp_dsp_slices;
+    AudioBackend *audio_backend;
+    SWVoiceOut *audio_voice;
+    Notifier audio_shutdown;
+    QemuMutex audio_lock;
+    int16_t *audio_ring;
+    uint32_t audio_rd, audio_wr, audio_fill;
+    int16_t audio_left;
+    bool audio_have_left, audio_priming;
+    uint64_t audio_in, audio_out, audio_underruns, audio_dropped;
     unsigned boot_phase;
     uint64_t words;
     uint64_t event_sequence, checkpoint_sequence;
@@ -130,6 +145,78 @@ static void record_event(NxsHpi *s, const char *type, uint64_t offset,
                 s->hpi.dspint ? "true" : "false", s->cpu.packets,
                 s->cpu.cycles) < 0 || fflush(s->event_log))
         error_report("nxs-hpi: DSP event transcript write failed");
+}
+
+static void nxs_audio_callback(void *opaque, int avail)
+{
+    NxsHpi *s = opaque;
+    int16_t out[512 * 2];
+    while (avail >= 4) {
+        qemu_mutex_lock(&s->audio_lock);
+        if (s->audio_priming && s->audio_fill >= NXS_AUDIO_PREFILL_FRAMES)
+            s->audio_priming = false;
+        if (!s->audio_fill && !s->audio_priming) {
+            ++s->audio_underruns;
+            s->audio_priming = true;
+        }
+        unsigned frames = MIN((unsigned)avail / 4, 512u);
+        bool silence = s->audio_priming;
+        if (!silence) frames = MIN(frames, s->audio_fill);
+        for (unsigned i = 0; i < frames; ++i) {
+            unsigned at = (s->audio_rd + i) % NXS_AUDIO_RING_FRAMES;
+            out[2 * i] = silence ? 0 : s->audio_ring[2 * at];
+            out[2 * i + 1] = silence ? 0 : s->audio_ring[2 * at + 1];
+        }
+        size_t written = audio_be_write(s->audio_backend, s->audio_voice,
+                                        out, frames * 4);
+        unsigned emitted = written / 4;
+        if (!silence) {
+            s->audio_rd = (s->audio_rd + emitted) % NXS_AUDIO_RING_FRAMES;
+            s->audio_fill -= emitted;
+            s->audio_out += emitted;
+        }
+        qemu_mutex_unlock(&s->audio_lock);
+        if (!written) break;
+        avail -= written;
+    }
+}
+
+static void nxs_audio_word(NxsHpi *s, unsigned slot, uint32_t word)
+{
+    int16_t sample = (int16_t)((int32_t)word >> 16);
+    if (slot == 0) {
+        s->audio_left = sample;
+        s->audio_have_left = true;
+        return;
+    }
+    if (slot != 1 || !s->audio_have_left) return;
+    s->audio_have_left = false;
+    qemu_mutex_lock(&s->audio_lock);
+    if (s->audio_fill == NXS_AUDIO_RING_FRAMES) {
+        s->audio_rd = (s->audio_rd + 1) % NXS_AUDIO_RING_FRAMES;
+        --s->audio_fill;
+        ++s->audio_dropped;
+    }
+    s->audio_ring[2 * s->audio_wr] = s->audio_left;
+    s->audio_ring[2 * s->audio_wr + 1] = sample;
+    s->audio_wr = (s->audio_wr + 1) % NXS_AUDIO_RING_FRAMES;
+    ++s->audio_fill;
+    ++s->audio_in;
+    qemu_mutex_unlock(&s->audio_lock);
+}
+
+static void nxs_audio_shutdown(Notifier *notifier, void *opaque)
+{
+    NxsHpi *s = container_of(notifier, NxsHpi, audio_shutdown);
+    info_report("nxs-c674x-audio: frames-in=%" PRIu64 " frames-out=%" PRIu64
+                " underruns=%" PRIu64 " dropped=%" PRIu64 " fill=%u",
+                s->audio_in, s->audio_out, s->audio_underruns,
+                s->audio_dropped, s->audio_fill);
+    audio_be_set_active_out(s->audio_backend, s->audio_voice, false);
+    audio_be_close_out(s->audio_backend, s->audio_voice);
+    s->audio_voice = NULL;
+    object_unparent(OBJECT(s->audio_backend));
+    s->audio_backend = NULL;
 }
 
 static bool capture_checkpoint(NxsHpi *s, const char *reason)
@@ -226,6 +313,13 @@ void cdj_nxs_hpi_reset_line(bool released)
         s->mcasp_last_ns = 0;
         s->mcasp_phase = s->mcasp_debt = 0;
         s->mcasp_dsp_slices = 0;
+        if (s->audio_voice) {
+            qemu_mutex_lock(&s->audio_lock);
+            s->audio_rd = s->audio_wr = s->audio_fill = 0;
+            s->audio_have_left = false;
+            s->audio_priming = true;
+            qemu_mutex_unlock(&s->audio_lock);
+        }
         uint8_t scheduler_mode = s->scheduler.mode;
         cdj_dsp_scheduler_reset(&s->scheduler);
         s->scheduler.mode = scheduler_mode;
@@ -574,13 +668,19 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         s->edma = trial_edma;
         s->mcasp_control = trial_mcasp;
         deliver_edma_notifications(s);
-        if (s->tx_capture) {
+        if (s->tx_capture || s->audio_voice) {
             for (unsigned instance = 1; instance <= 2; ++instance) {
                 for (unsigned serializer = 0; serializer < 16; ++serializer) {
+                    if (s->audio_voice && instance == 1 && serializer == 0 &&
+                        (trial_mcasp.gblctl[1] & 0x1f00u) == 0x1f00u &&
+                        (trial_mcasp.srctl[1][0] & 3u) == 1u)
+                        nxs_audio_word(s, trial_mcasp.xslot[1],
+                                       trial_mcasp.xrsr[1][0]);
                     uint64_t sequence = trial_mcasp.xrsr_source_sequence[instance][serializer];
                     if (!sequence || sequence ==
                         original_mcasp.xrsr_source_sequence[instance][serializer])
                         continue;
+                    if (!s->tx_capture) continue;
                     if (s->tx_capture_nonzero_only &&
                         !trial_mcasp.xrsr[instance][serializer])
                         continue;
@@ -1138,6 +1238,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     const char *virtual_audio = getenv("CDJ_NXS_DSP_VIRTUAL_MCASP");
+    const char *host_audio = getenv("CDJ_NXS_DSP_HOST_AUDIO");
     const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
     const char *fault_history = getenv("CDJ_NXS_DSP_FAULT_HISTORY");
     if (fault_history && *fault_history)
@@ -1171,6 +1272,36 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     }
     if (s->virtual_audio_clock)
         s->mcasp_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, virtual_audio_tick, s);
+    if (host_audio && !strcmp(host_audio, "1")) {
+        if (!s->virtual_audio_clock) {
+            error_report("nxs-c674x: host audio requires virtual McASP clock");
+            exit(EXIT_FAILURE);
+        }
+        Error *audio_error = NULL;
+        struct audsettings settings = {
+            .freq = NXS_AUDIO_RATE, .nchannels = 2,
+            .fmt = AUDIO_FORMAT_S16, .big_endian = HOST_BIG_ENDIAN,
+        };
+        s->audio_backend = audio_be_by_name("cdj-dsp", &audio_error);
+        if (!s->audio_backend) {
+            error_report_err(audio_error);
+            exit(EXIT_FAILURE);
+        }
+        s->audio_ring = g_new0(int16_t, NXS_AUDIO_RING_FRAMES * 2);
+        s->audio_priming = true;
+        qemu_mutex_init(&s->audio_lock);
+        s->audio_voice = audio_be_open_out(s->audio_backend, NULL,
+                                           "cdj-nxs-mcasp1", s,
+                                           nxs_audio_callback, &settings);
+        if (!s->audio_voice) {
+            error_report("nxs-c674x: cannot open 44.1 kHz stereo host voice");
+            exit(EXIT_FAILURE);
+        }
+        audio_be_set_active_out(s->audio_backend, s->audio_voice, true);
+        s->audio_shutdown.notify = nxs_audio_shutdown;
+        qemu_register_shutdown_notifier(&s->audio_shutdown);
+        info_report("nxs-c674x: McASP1 serializer 0 -> 44.1 kHz stereo host voice");
+    }
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {
         const char *limit_text = getenv("CDJ_NXS_DSP_TX_CAPTURE_LIMIT");

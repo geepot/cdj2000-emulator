@@ -250,6 +250,14 @@ def test_virtual_mcasp_clock_requires_functional_audio(monkeypatch):
     assert error.value.code == 2
 
 
+def test_host_dsp_audio_requires_virtual_clock(monkeypatch):
+    monkeypatch.setattr(nxs_vm.sys, 'argv',
+                        ['nxs_vm', 'unused', '--host-dsp-audio-wav'])
+    with pytest.raises(SystemExit) as error:
+        nxs_vm.main()
+    assert error.value.code == 2
+
+
 @pytest.mark.parametrize('interval,deferred,profile', [
     (0, False, False), (0.5, False, False), (0, True, False), (0, True, True),
 ])
@@ -293,6 +301,9 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     expected_fresh = fresh_link is not False
     if virtual_clock:
         argv.extend(('--functional-dsp-audio', '--virtual-mcasp-clock'))
+    host_audio = virtual_clock and profile
+    if host_audio:
+        argv.append('--host-dsp-audio-wav')
     if trace_link:
         argv.append('--trace-link-tx')
     monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
@@ -339,6 +350,12 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
                 '65536' if fast_dsp else '1000000')
             assert kwargs['env'].get('CDJ_NXS_DSP_VIRTUAL_MCASP') == (
                 '1' if virtual_clock else None)
+            assert kwargs['env'].get('CDJ_NXS_DSP_HOST_AUDIO') == (
+                '1' if host_audio else None)
+            assert ('-audiodev' in command) is host_audio
+            if host_audio:
+                assert command[command.index('-audiodev') + 1] == (
+                    f'wav,id=cdj-dsp,path={tmp_path / "run" / "dsp-audio.wav"}')
         if gui:
             assert kwargs['env'].get('BFIN_LINK_FRESH_ONLY') == ('1' if expected_fresh else None)
             assert kwargs['env'].get('BFIN_SPORT_TX_OUTPUT') == (
@@ -365,6 +382,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     assert manifest['dsp_audio_clock'] == (
         'virtual-clock-batch' if virtual_clock else 'stopped-clock')
     assert manifest['dsp_virtual_slice_packets'] == (4096 if virtual_clock else None)
+    assert manifest['dsp_host_audio'] == ('dsp-audio.wav' if host_audio else None)
     assert manifest['qemu_sync_profile']['enabled'] is profile
     assert ('-enable-sync-profile' in manifest['main']) is profile
     if profile:

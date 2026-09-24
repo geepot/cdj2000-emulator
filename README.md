@@ -59,7 +59,9 @@ a player. It is not a way to use a CDJ-2000 on a desktop.
 
 ## What does not
 
-* **No audio.** The DSP is a TI Aureus DA710 with a TMS320C674x core (see
+* **No verified live speaker audio.** The experimental NXS McASP1 WAV sink
+  has so far been checked at idle boot; connected PLAY output remains to be
+  validated. The DSP is a TI Aureus DA710 with a TMS320C674x core (see
   `RUNNING.md`), and `emulator/qemu/cdj_c674x.c` executes its instruction set
   from TI's published SPRUFE8B - partially: see `DSP_ARCHITECTURE_COVERAGE.md`
   for what is and is not implemented. Instruction coverage is incomplete;
@@ -109,8 +111,10 @@ The source key waits for the SD browser table instead of a guessed timestamp.
 For McASP clock experiments, add `--virtual-mcasp-clock` alongside
 `--functional-dsp-audio`. This batches genuine transmit slots from the
 configured McASP1 clock while giving the DSP interpreter bounded time slices.
-It is an experimental timing diagnostic; it does not produce host audio or
-establish DSP instruction timing. See [the audio path review](analysis/dsp/nxs2-audio-path-review.md).
+Add `--host-dsp-audio-wav` to write that stream through QEMU's 44.1 kHz stereo
+WAV backend to `dsp-audio.wav` in the run directory. These modes are
+experimental and do not establish DSP instruction timing or connected PLAY
+output. See [the audio path review](analysis/dsp/nxs2-audio-path-review.md).
 
 Agents can control the same run without locating ports:
 

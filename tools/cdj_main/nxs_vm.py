@@ -520,7 +520,8 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                            main_firmware: Path | None = None,
                            *, dsp_checkpoint_policy: str = 'all',
                            source_sha256_at_launch: dict[str, str] | None = None,
-                           virtual_mcasp_clock: bool = False) -> None:
+                           virtual_mcasp_clock: bool = False,
+                           host_dsp_audio_wav: bool = False) -> None:
     if dsp_checkpoint_policy not in {'all', 'fault'}:
         raise ValueError('DSP checkpoint policy must be all or fault')
     checkpoint_dir = run / 'dsp-checkpoints'
@@ -561,6 +562,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
         dsp_audio_mode=('virtual-clock-batch' if virtual_mcasp_clock else
                         'coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
+        dsp_host_audio=('dsp-audio.wav' if host_dsp_audio_wav else None),
         dsp_scheduler_mode=dsp_scheduler_mode,
         dsp_checkpoint_policy=dsp_checkpoint_policy,
         checkpoint_capture_complete=checkpoint_capture_complete,
@@ -618,11 +620,14 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
               if functional_dsp_timing else []),
             *(['experimental virtual-time McASP batches use the configured McASP1 slot rate '
                'with 4096-packet DSP interpreter slices; McASP2 DIT is coupled, '
-               'no independent DSP clock or host output is modeled']
+               'and no independent DSP instruction clock is modeled']
               if virtual_mcasp_clock else
               ['functional McASP scheduling advances one slot every 1024 executed DSP packets; '
                'not serializer-clock, sample-rate, or audio-output evidence']
               if functional_dsp_audio else []),
+            *(['host WAV sink uses a bounded stereo ring and 50 ms prefill; '
+               'its output is not proof of connected PLAY, audible device output, '
+               'or sample-exact host timing'] if host_dsp_audio_wav else []),
             *(['deferred-v1 divides each bounded DSP activation into 4096-step QEMU timer slices; '
                'this host scheduling approximation is not a DSP timing fix, frequency model, or hardware proof']
               if dsp_scheduler_mode == 'deferred-v1' else [])])
@@ -734,6 +739,8 @@ def main():
                         help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
     parser.add_argument('--virtual-mcasp-clock', action='store_true',
                         help='experimental: batch McASP TX slots from QEMU virtual time at the configured McASP1 rate')
+    parser.add_argument('--host-dsp-audio-wav', action='store_true',
+                        help='experimental: write McASP1 stereo through the QEMU WAV audio backend')
     parser.add_argument('--capture-dsp-tx', action='store_true',
                         help='capture genuine XBUF words consumed by McASP slot progression')
     parser.add_argument('--capture-dsp-tx-nonzero-only', action='store_true',
@@ -761,6 +768,8 @@ def main():
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if args.virtual_mcasp_clock and not args.functional_dsp_audio:
         parser.error('--virtual-mcasp-clock requires --functional-dsp-audio')
+    if args.host_dsp_audio_wav and not args.virtual_mcasp_clock:
+        parser.error('--host-dsp-audio-wav requires --virtual-mcasp-clock')
     if args.capture_dsp_tx_nonzero_only and not args.capture_dsp_tx:
         parser.error('--capture-dsp-tx-nonzero-only requires --capture-dsp-tx')
     try:
@@ -803,6 +812,8 @@ def main():
     if not math.isfinite(args.frame_interval) or args.frame_interval < 0:
         parser.error('--frame-interval must be finite and nonnegative')
     run = automatic_run_path() if args.timestamp_run or args.run is None else (ROOT / args.run).resolve()
+    if args.host_dsp_audio_wav and ',' in str(run):
+        parser.error('host audio WAV run path cannot contain a comma')
     if run.exists():
         parser.error(f'run directory already exists: {run}')
     try:
@@ -880,6 +891,8 @@ def main():
         '-serial', f'tcp:127.0.0.1:{args.port},server,nowait',
         '-serial', f'tcp:127.0.0.1:{args.port + 2},server,nowait', '-serial', 'null']
     main_command += media_command
+    if args.host_dsp_audio_wav:
+        main_command += ['-audiodev', f'wav,id=cdj-dsp,path={run / "dsp-audio.wav"}']
     if args.trace_media and args.disc:
         for event in (
                 'ide_bus_exec_cmd', 'ide_atapi_cmd', 'ide_atapi_cmd_packet',
@@ -983,6 +996,8 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
     if args.virtual_mcasp_clock:
         main_env['CDJ_NXS_DSP_VIRTUAL_MCASP'] = '1'
+    if args.host_dsp_audio_wav:
+        main_env['CDJ_NXS_DSP_HOST_AUDIO'] = '1'
     main_env.pop('CDJ_NXS_DSP_TX_CAPTURE_NONZERO_ONLY', None)
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
@@ -1053,6 +1068,7 @@ def main():
         dsp_scheduler_mode=dsp_scheduler_mode,
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
                          'coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
+        dsp_host_audio=('dsp-audio.wav' if args.host_dsp_audio_wav else None),
         dsp_legacy_budget_packets=dsp_legacy_budget,
         dsp_virtual_slice_packets=4096 if args.virtual_mcasp_clock else None,
         dsp_sdram=dict(physical_bytes=0x02000000,
@@ -1203,7 +1219,8 @@ def main():
                                            dsp_scheduler_mode, main_firmware,
                                            dsp_checkpoint_policy=('fault' if args.lightweight else 'all'),
                                            source_sha256_at_launch=run_manifest['dsp_source_sha256_at_launch'],
-                                           virtual_mcasp_clock=args.virtual_mcasp_clock)
+                                           virtual_mcasp_clock=args.virtual_mcasp_clock,
+                                           host_dsp_audio_wav=args.host_dsp_audio_wav)
             except (OSError, ValueError, RuntimeError) as error:
                 result['finalization_error'] = str(error)
             write_json(run / 'result.json', result)
