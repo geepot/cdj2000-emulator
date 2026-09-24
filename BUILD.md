@@ -1,5 +1,22 @@
 # Building
 
+**Windows (MSYS2 MINGW64, x86-64):** install the packages under
+[What you need](#what-you-need), then:
+
+```sh
+sh scripts/build-bfin-sim.sh
+git clone --depth 1 https://gitlab.com/qemu-project/qemu.git /c/qemu-src
+sh scripts/build-qemu-sh4.sh /c/qemu-src
+export CDJ_QEMU=/c/qemu-src/build/qemu-system-sh4
+```
+
+The NXS launcher resolves `bin/cdj-run.exe` and `CDJ_QEMU`. `--debug` and
+`--qemu-sync-profile` use TCP and telnet chardevs on Windows.
+
+**macOS (Homebrew, including Apple Silicon):** see
+[macOS migration](#macos-migration). The NXS launcher keeps Unix QMP and monitor
+sockets on macOS.
+
 For the optional SH7764 EtherC/RTL8201FL localhost backend, custom Dante MAIN
 input, integration tests and evidence limitations, see [ETHERNET_LOCAL.md](ETHERNET_LOCAL.md).
 The normal QEMU build script includes the new controller/PHY automatically.

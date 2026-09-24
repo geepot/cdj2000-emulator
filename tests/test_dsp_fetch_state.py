@@ -1,8 +1,17 @@
 """Coverage fetch must be independent of registers, pipelines and loop state."""
 from pathlib import Path
+import shutil
 import subprocess
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _cc():
+    cc = shutil.which('cc') or shutil.which('gcc')
+    if not cc:
+        pytest.skip('requires C compiler')
+    return cc
 
 
 def test_fetch_requires_only_pc_and_fault(tmp_path):
@@ -57,7 +66,7 @@ int main(void) {
 }
 ''')
     binary = tmp_path / 'fetch'
-    subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([_cc(), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
                     '-I', str(ROOT / 'emulator/qemu'), str(source),
                     str(ROOT / 'emulator/qemu/cdj_c674x.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
@@ -65,7 +74,7 @@ int main(void) {
                     str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
-                    '-o', str(binary)], check=True)
+                    '-o', str(binary), '-lm'], check=True)
     subprocess.run([str(binary)], check=True)
 
 
@@ -126,7 +135,7 @@ int main(void) {
 }
 ''')
     binary = tmp_path / 'observe'
-    subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([_cc(), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
                     '-I', str(ROOT / 'emulator/qemu'), str(source),
                     str(ROOT / 'emulator/qemu/cdj_c674x.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_uncond.c'),
@@ -134,5 +143,5 @@ int main(void) {
                     str(ROOT / 'emulator/qemu/cdj_c674x_sp.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_control.c'),
                     str(ROOT / 'emulator/qemu/cdj_c674x_loop.c'),
-                    '-o', str(binary)], check=True)
+                    '-o', str(binary), '-lm'], check=True)
     subprocess.run([str(binary)], check=True)
