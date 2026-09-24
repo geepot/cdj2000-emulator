@@ -13,6 +13,7 @@ def tx_capture_metadata(path: Path) -> dict:
     first_nonzero = None
     first_virtual_ns = last_virtual_ns = None
     virtual_time_records = 0
+    clock_mode = None
     digest = hashlib.sha256()
     with path.open('rb') as raw:
         for raw_line in raw:
@@ -33,8 +34,13 @@ def tx_capture_metadata(path: Path) -> dict:
                     not 0 <= event['word'] <= 0xffffffff or
                     event['xbuf_sequence'] <= 0 or event['packets'] < 0 or
                     event['cycles'] < 0 or event['source'] != 'genuine_xbuf' or
-                    event['clock'] != 'functional-coarse-packet-slot'):
+                    event['clock'] not in ('functional-coarse-packet-slot',
+                                           'virtual-clock-batch')):
                 raise ValueError(f'invalid DSP transmit capture record {sequence}')
+            if clock_mode is None:
+                clock_mode = event['clock']
+            elif event['clock'] != clock_mode:
+                raise ValueError('DSP transmit capture mixes clock modes')
             if 'virtual_ns' in event:
                 if type(virtual_ns) is not int or virtual_ns < 0 or (
                         last_virtual_ns is not None and virtual_ns < last_virtual_ns):
@@ -64,5 +70,7 @@ def tx_capture_metadata(path: Path) -> dict:
                 virtual_time_span_ns=(last_virtual_ns - first_virtual_ns
                                       if virtual_time_records else None),
                 sample_encoding='unsigned 32-bit serializer word; not PCM interpretation',
-                timing='functional coarse packet slots; not serializer-clock or audio timing',
+                timing=('experimental virtual-time slot batches; not host audio timing'
+                        if clock_mode == 'virtual-clock-batch' else
+                        'functional coarse packet slots; not serializer-clock or audio timing'),
                 synthesized_samples=False)

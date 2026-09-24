@@ -387,6 +387,14 @@ def test_transmit_capture_metadata_and_repeat_gate(tmp_path):
     timed.write_text('\n'.join(json.dumps(dict(json.loads(line), virtual_ns=100 * index))
                                for index, line in enumerate(capture.read_text().splitlines(), 1)) + '\n')
     assert tx_capture_metadata(timed)['virtual_time_span_ns'] == 100
+    clocked = tmp_path / 'clocked.jsonl'
+    clocked.write_text(timed.read_text().replace(
+        'functional-coarse-packet-slot', 'virtual-clock-batch'))
+    assert 'virtual-time slot batches' in tx_capture_metadata(clocked)['timing']
+    clocked.write_text(timed.read_text().splitlines()[0] + '\n' +
+                       clocked.read_text().splitlines()[1] + '\n')
+    with pytest.raises(ValueError, match='mixes clock modes'):
+        tx_capture_metadata(clocked)
     timed.write_text(timed.read_text().replace('"virtual_ns": 200', '"virtual_ns": 99'))
     with pytest.raises(ValueError, match='virtual timestamp'):
         tx_capture_metadata(timed)

@@ -106,6 +106,12 @@ is the NXS default because cached repeats saturated the GUI receive queue in
 connected runs. Use `--cached-link` only to compare the old transport behavior.
 The source key waits for the SD browser table instead of a guessed timestamp.
 
+For McASP clock experiments, add `--virtual-mcasp-clock` alongside
+`--functional-dsp-audio`. This batches genuine transmit slots from the
+configured McASP1 clock while giving the DSP interpreter bounded time slices.
+It is an experimental timing diagnostic; it does not produce host audio or
+establish DSP instruction timing. See [the audio path review](analysis/dsp/nxs2-audio-path-review.md).
+
 Agents can control the same run without locating ports:
 
 ```sh

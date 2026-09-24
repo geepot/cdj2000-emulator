@@ -36,6 +36,9 @@
 #define SDRAM_BASE 0xc0000000u
 #define SDRAM_SIZE 0x02000000u
 #define DSP_FAULT_HISTORY_COUNT 4096u
+#define MCASP_VIRTUAL_BATCH_NS 1000000
+#define MCASP_VIRTUAL_MAX_SLOTS 256u
+#define MCASP_VIRTUAL_DSP_QUOTA 4096u
 /* Cooperative QEMU scheduling quantum, not a C6747 timing property. HINT
  * still yields immediately. One million packets lets initialization reach
  * its genuine wait loop after the final MAIN event instead of stranding the
@@ -54,10 +57,14 @@ typedef struct {
     uint32_t address;
     CdjC6747Hpi hpi;
     bool reset_released, dsp_started, dsp_halted, dsp_running;
-    bool functional_audio;
+    bool functional_audio, virtual_audio_clock;
     uint32_t legacy_budget;
     CdjDspScheduler scheduler;
     QEMUTimer *dsp_timer;
+    QEMUTimer *mcasp_timer;
+    int64_t mcasp_last_ns;
+    uint64_t mcasp_phase, mcasp_debt;
+    uint64_t mcasp_dsp_slices;
     unsigned boot_phase;
     uint64_t words;
     uint64_t event_sequence, checkpoint_sequence;
@@ -97,6 +104,7 @@ typedef struct {
 } NxsHpi;
 static NxsHpi *nxs_hpi;
 static void run_dsp(NxsHpi *s);
+static void virtual_audio_tick(void *opaque);
 
 static void record_event(NxsHpi *s, const char *type, uint64_t offset,
                          uint64_t address, uint64_t value, unsigned size)
@@ -214,6 +222,10 @@ void cdj_nxs_hpi_reset_line(bool released)
     s->reset_released = released;
     if (!released) {
         if (s->dsp_timer) timer_del(s->dsp_timer);
+        if (s->mcasp_timer) timer_del(s->mcasp_timer);
+        s->mcasp_last_ns = 0;
+        s->mcasp_phase = s->mcasp_debt = 0;
+        s->mcasp_dsp_slices = 0;
         uint8_t scheduler_mode = s->scheduler.mode;
         cdj_dsp_scheduler_reset(&s->scheduler);
         s->scheduler.mode = scheduler_mode;
@@ -578,12 +590,14 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                             "\"xbuf_sequence\":%" PRIu64 ",\"packets\":%" PRIu64 ","
                             "\"cycles\":%" PRIu64 ",\"virtual_ns\":%" PRIi64 ","
                             "\"source\":\"genuine_xbuf\","
-                            "\"clock\":\"functional-coarse-packet-slot\"}\n",
+                            "\"clock\":\"%s\"}\n",
                             ++s->tx_capture_sequence, instance,
                             trial_mcasp.xslot[instance], serializer,
                             trial_mcasp.xrsr[instance][serializer], sequence,
                             s->cpu.packets, s->cpu.cycles,
-                            qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)) < 0 ||
+                            qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
+                            s->virtual_audio_clock ? "virtual-clock-batch" :
+                                                     "functional-coarse-packet-slot") < 0 ||
                         fflush(s->tx_capture)) {
                         s->tx_capture_failed = true;
                         fclose(s->tx_capture);
@@ -611,7 +625,7 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
 
 static bool functional_audio_tick(NxsHpi *s)
 {
-    if (!s->functional_audio ||
+    if (!s->functional_audio || s->virtual_audio_clock ||
         s->cpu.packets % CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL)
         return true;
     if (s->tx_capture_failed) {
@@ -805,6 +819,12 @@ static void dsp_cycle_tick(void *opaque)
 
 static void report_dsp(NxsHpi *s, const char *reason)
 {
+    capture_requested_checkpoint(s);
+    /* A virtual-clock run slices the DSP at 1 ms boundaries. Keep diagnostic
+     * output bounded while retaining every actual fault and host boundary. */
+    if (s->virtual_audio_clock && !s->cpu.fault && !s->hpi.hint &&
+        ++s->mcasp_dsp_slices % 256)
+        return;
     if (s->cpu.fault && s->fault_history_path) {
         FILE *history = fopen(s->fault_history_path, "w");
         if (!history) {
@@ -831,7 +851,6 @@ static void report_dsp(NxsHpi *s, const char *reason)
                              s->fault_history_path);
         }
     }
-    capture_requested_checkpoint(s);
     info_report("nxs-c674x: packets=%" PRIu64 " cycles=%" PRIu64
                 " pc=%#x word=%#x stop=%s B15=%#x B14=%#x B3=%#x",
                 s->cpu.packets, s->cpu.cycles, s->cpu.fault ? s->cpu.fault_pc : s->cpu.pc,
@@ -913,10 +932,12 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
     }
     int64_t executed_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     report_dsp(s, reason);
-    info_report("nxs-dsp-host-time: execution-ns=%" PRId64
-                " reporting-ns=%" PRId64,
-                executed_ns - entered_ns,
-                qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - executed_ns);
+    if (!s->virtual_audio_clock || s->cpu.fault || s->hpi.hint ||
+        !(s->mcasp_dsp_slices % 256))
+        info_report("nxs-dsp-host-time: execution-ns=%" PRId64
+                    " reporting-ns=%" PRId64,
+                    executed_ns - entered_ns,
+                    qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - executed_ns);
 }
 
 static void deferred_dsp_tick(void *opaque)
@@ -944,7 +965,9 @@ static void run_dsp(NxsHpi *s)
 {
     if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
     if (!s->scheduler.mode) {
-        execute_dsp(s, s->legacy_budget);
+        execute_dsp(s, s->virtual_audio_clock ?
+                    MIN(s->legacy_budget, MCASP_VIRTUAL_DSP_QUOTA) :
+                    s->legacy_budget);
         return;
     }
     if (!cdj_dsp_scheduler_request(&s->scheduler)) {
@@ -961,6 +984,52 @@ static void run_dsp(NxsHpi *s)
         timer_mod(s->dsp_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
 }
 
+/* Experimental independent McASP event source. QEMU virtual time is host
+ * paced without icount; batching avoids 88,200 timer callbacks per second.
+ * The coupled McASP2 DIT path remains a functional approximation. */
+static void virtual_audio_tick(void *opaque)
+{
+    NxsHpi *s = opaque;
+    if (!s->dsp_started || s->dsp_halted) return;
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    uint64_t numerator;
+    uint32_t denominator;
+    unsigned slots = s->mcasp_control.afsxctl[1] >> 7;
+    bool active = (s->mcasp_control.gblctl[1] & 0x1f00u) == 0x1f00u;
+    if (!active || slots < 2 || slots > 32 ||
+        !cdj_c6747_mcasp_tx_clock_hz(&s->mcasp_control, 1,
+            cdj_c6747_pll_auxclk_hz(), CDJ_C6747_MCASP_AFSX,
+            &numerator, &denominator)) {
+        s->mcasp_last_ns = now;
+        s->mcasp_phase = s->mcasp_debt = 0;
+    } else if (s->mcasp_last_ns > 0 && now >= s->mcasp_last_ns) {
+        uint64_t elapsed = MIN((uint64_t)(now - s->mcasp_last_ns),
+                               UINT64_C(1000000000));
+        uint64_t divisor = (uint64_t)denominator * 1000000000u;
+        uint64_t scaled = s->mcasp_phase + elapsed * numerator * slots;
+        uint64_t due = scaled / divisor;
+        s->mcasp_phase = scaled % divisor;
+        s->mcasp_debt = MIN(s->mcasp_debt + due, UINT64_C(1000000));
+        unsigned count = MIN(s->mcasp_debt, MCASP_VIRTUAL_MAX_SLOTS);
+        for (unsigned index = 0; index < count; ++index) {
+            if (!advance_functional_mcasp_slots(s)) {
+                s->cpu.fault = s->tx_capture_failed ?
+                    "DSP transmit capture write failed" :
+                    "unsupported virtual McASP transmit slot";
+                s->cpu.fault_pc = s->cpu.pc;
+                s->cpu.fault_word = 0;
+                s->dsp_halted = true;
+                report_dsp(s, s->cpu.fault);
+                return;
+            }
+        }
+        s->mcasp_debt -= count;
+    }
+    s->mcasp_last_ns = now;
+    if (!s->hpi.hint) run_dsp(s);
+    timer_mod(s->mcasp_timer, now + MCASP_VIRTUAL_BATCH_NS);
+}
+
 static void start_dsp(NxsHpi *s)
 {
     /* Boot-ROM handoff abstraction: the host supplies the entry in L2[0].
@@ -969,6 +1038,9 @@ static void start_dsp(NxsHpi *s)
     s->cpu.cycle_tick = dsp_cycle_tick;
     s->cpu.cycle_opaque = s;
     s->dsp_started = true;
+    if (s->mcasp_timer)
+        timer_mod(s->mcasp_timer,
+                  qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + MCASP_VIRTUAL_BATCH_NS);
     record_event(s, "dsp_start", 0, s->cpu.pc, 0, 0);
     capture_checkpoint(s, "DSP start boundary");
     run_dsp(s);
@@ -1065,6 +1137,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     NxsHpi *s = g_new0(NxsHpi, 1);
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
+    const char *virtual_audio = getenv("CDJ_NXS_DSP_VIRTUAL_MCASP");
     const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
     const char *fault_history = getenv("CDJ_NXS_DSP_FAULT_HISTORY");
     if (fault_history && *fault_history)
@@ -1091,6 +1164,13 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     nxs_hpi = s;
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     s->functional_audio = audio && !strcmp(audio, "1");
+    s->virtual_audio_clock = virtual_audio && !strcmp(virtual_audio, "1");
+    if (s->virtual_audio_clock && !s->functional_audio) {
+        error_report("nxs-c674x: virtual McASP requires functional audio");
+        exit(EXIT_FAILURE);
+    }
+    if (s->virtual_audio_clock)
+        s->mcasp_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, virtual_audio_tick, s);
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {
         const char *limit_text = getenv("CDJ_NXS_DSP_TX_CAPTURE_LIMIT");
@@ -1118,7 +1198,9 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     }
     if (cdj_c674x_loop_functional_timing())
         warn_report("nxs-c674x: functional SPLOOPD timing enabled; run is not cycle-validation evidence");
-    if (s->functional_audio)
+    if (s->virtual_audio_clock)
+        warn_report("nxs-c674x: experimental virtual-time McASP batches enabled; not hardware or host-audio validation");
+    else if (s->functional_audio)
         warn_report("nxs-c674x: functional McASP slots every %u packets enabled; run is not audio-timing evidence",
                     CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL);
     cdj_c6747_syscfg_reset(&s->syscfg);

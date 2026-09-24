@@ -519,7 +519,8 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                            dsp_scheduler_mode: str,
                            main_firmware: Path | None = None,
                            *, dsp_checkpoint_policy: str = 'all',
-                           source_sha256_at_launch: dict[str, str] | None = None) -> None:
+                           source_sha256_at_launch: dict[str, str] | None = None,
+                           virtual_mcasp_clock: bool = False) -> None:
     if dsp_checkpoint_policy not in {'all', 'fault'}:
         raise ValueError('DSP checkpoint policy must be all or fault')
     checkpoint_dir = run / 'dsp-checkpoints'
@@ -558,7 +559,8 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
     manifest = dict(schema=11, format=('ABI-bound native state including C6747 INTC/Timer64P/SPI/cache/McASP TX, EDMA, SYSCFG priority, WM8740 control, timed SPI1 transfer and declared DSP activation-scheduler state, '
                                      'L2 and shared RAM plus sparse zero-default SDRAM pages'),
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
-        dsp_audio_mode=('coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
+        dsp_audio_mode=('virtual-clock-batch' if virtual_mcasp_clock else
+                        'coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
         dsp_scheduler_mode=dsp_scheduler_mode,
         dsp_checkpoint_policy=dsp_checkpoint_policy,
         checkpoint_capture_complete=checkpoint_capture_complete,
@@ -614,7 +616,11 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
             'an interrupted SPLOOP resumes by rebuilding the loop buffer from program memory (SPRUFE8B 7.7.3.1); a loop body changed between the interrupt and the return is undetected once an ISR software loop has replaced the retained cross-check',
             *(['interrupt entry retires already-issued results with minimum empty cycles; exact interrupt pipeline latency is not modeled']
               if functional_dsp_timing else []),
-            *(['functional McASP scheduling advances one slot every 1024 executed DSP packets; '
+            *(['experimental virtual-time McASP batches use the configured McASP1 slot rate '
+               'with 4096-packet DSP interpreter slices; McASP2 DIT is coupled, '
+               'no independent DSP clock or host output is modeled']
+              if virtual_mcasp_clock else
+              ['functional McASP scheduling advances one slot every 1024 executed DSP packets; '
                'not serializer-clock, sample-rate, or audio-output evidence']
               if functional_dsp_audio else []),
             *(['deferred-v1 divides each bounded DSP activation into 4096-step QEMU timer slices; '
@@ -726,14 +732,16 @@ def main():
                         help='run past the unresolved SPLOOPD epilog with a labeled two-cycle approximation')
     parser.add_argument('--functional-dsp-audio', action='store_true',
                         help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
+    parser.add_argument('--virtual-mcasp-clock', action='store_true',
+                        help='experimental: batch McASP TX slots from QEMU virtual time at the configured McASP1 rate')
     parser.add_argument('--capture-dsp-tx', action='store_true',
-                        help='capture genuine XBUF words consumed by coarse McASP slot progression')
+                        help='capture genuine XBUF words consumed by McASP slot progression')
     parser.add_argument('--capture-dsp-tx-nonzero-only', action='store_true',
                         help='diagnostic: retain only nonzero genuine XBUF words, so the capture limit survives silent boot')
     parser.add_argument('--capture-dsp-tx-records', type=int, default=65536,
                         help='maximum DSP XBUF JSON records to retain (default: 65536)')
     parser.add_argument('--capture-dsp-fault-history', action='store_true',
-                        help='on a DSP fault, save the final 512 pre-step CPU states')
+                        help='on a DSP fault, save the final 4096 pre-step CPU states')
     parser.add_argument('--deferred-dsp-scheduling', action='store_true',
                         help='opt into diagnostic 4096-step deferred DSP scheduling (not timing evidence)')
     budget = parser.add_mutually_exclusive_group()
@@ -751,6 +759,8 @@ def main():
         parser.error('--timestamp-run cannot be combined with a positional run directory')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
+    if args.virtual_mcasp_clock and not args.functional_dsp_audio:
+        parser.error('--virtual-mcasp-clock requires --functional-dsp-audio')
     if args.capture_dsp_tx_nonzero_only and not args.capture_dsp_tx:
         parser.error('--capture-dsp-tx-nonzero-only requires --capture-dsp-tx')
     try:
@@ -971,6 +981,8 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
+    if args.virtual_mcasp_clock:
+        main_env['CDJ_NXS_DSP_VIRTUAL_MCASP'] = '1'
     main_env.pop('CDJ_NXS_DSP_TX_CAPTURE_NONZERO_ONLY', None)
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
@@ -1039,7 +1051,10 @@ def main():
                    writes='temporary QEMU snapshot overlays; discarded at exit',
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
+        dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
+                         'coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
         dsp_legacy_budget_packets=dsp_legacy_budget,
+        dsp_virtual_slice_packets=4096 if args.virtual_mcasp_clock else None,
         dsp_sdram=dict(physical_bytes=0x02000000,
             aperture='0xc0000000-0xdfffffff',
             addressing='physical 32 MiB mirror',
@@ -1055,6 +1070,9 @@ def main():
             args.functional_dsp_audio or args.deferred_dsp_scheduling or
             dsp_legacy_budget != 1000000),
         scheduling_provenance=(
+            'experimental virtual McASP clock services DSP in 4096-packet slices '
+            'between 1 ms QEMU timer batches; no calibrated DSP instruction clock'
+            if args.virtual_mcasp_clock else
             'deferred-v1 is an explicit 4096-step QEMU timer-slice host scheduling approximation; '
             'it is not a DSP timing fix, frequency model, or hardware proof'
             if args.deferred_dsp_scheduling else
@@ -1184,7 +1202,8 @@ def main():
                                            args.functional_dsp_audio, args.capture_dsp_tx,
                                            dsp_scheduler_mode, main_firmware,
                                            dsp_checkpoint_policy=('fault' if args.lightweight else 'all'),
-                                           source_sha256_at_launch=run_manifest['dsp_source_sha256_at_launch'])
+                                           source_sha256_at_launch=run_manifest['dsp_source_sha256_at_launch'],
+                                           virtual_mcasp_clock=args.virtual_mcasp_clock)
             except (OSError, ValueError, RuntimeError) as error:
                 result['finalization_error'] = str(error)
             write_json(run / 'result.json', result)

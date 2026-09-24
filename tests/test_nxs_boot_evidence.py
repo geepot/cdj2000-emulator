@@ -243,16 +243,25 @@ def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
     assert error.value.code == 2
 
 
+def test_virtual_mcasp_clock_requires_functional_audio(monkeypatch):
+    monkeypatch.setattr(nxs_vm.sys, 'argv', ['nxs_vm', 'unused', '--virtual-mcasp-clock'])
+    with pytest.raises(SystemExit) as error:
+        nxs_vm.main()
+    assert error.value.code == 2
+
+
 @pytest.mark.parametrize('interval,deferred,profile', [
     (0, False, False), (0.5, False, False), (0, True, False), (0, True, True),
 ])
 @pytest.mark.parametrize('fresh_link,trace_link',
                          [(None, False), (False, False), (True, True)])
+@pytest.mark.parametrize('virtual_clock', [False, True])
 @pytest.mark.parametrize('custom_main', [False, True])
 @pytest.mark.parametrize('disc_attached', [False, True])
 @pytest.mark.parametrize('fast_dsp', [False, True])
 def test_run_manifest_records_launched_inputs_and_optional_observations(
         tmp_path, monkeypatch, interval, deferred, profile, fresh_link, trace_link,
+        virtual_clock,
         custom_main, disc_attached, fast_dsp):
     paths = ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
              'firmware/nxs/main-firmware.bin', 'firmware/nxs/gui-boot-memory.elf',
@@ -282,6 +291,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     if fresh_link is not None:
         argv.append('--fresh-link' if fresh_link else '--cached-link')
     expected_fresh = fresh_link is not False
+    if virtual_clock:
+        argv.extend(('--functional-dsp-audio', '--virtual-mcasp-clock'))
     if trace_link:
         argv.append('--trace-link-tx')
     monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
@@ -326,6 +337,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
                 'deferred-v1' if deferred else 'legacy')
             assert kwargs['env']['CDJ_NXS_DSP_LEGACY_BUDGET'] == (
                 '65536' if fast_dsp else '1000000')
+            assert kwargs['env'].get('CDJ_NXS_DSP_VIRTUAL_MCASP') == (
+                '1' if virtual_clock else None)
         if gui:
             assert kwargs['env'].get('BFIN_LINK_FRESH_ONLY') == ('1' if expected_fresh else None)
             assert kwargs['env'].get('BFIN_SPORT_TX_OUTPUT') == (
@@ -349,6 +362,9 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     assert manifest['main_environment']['CDJ_NXS_DSP_SCHEDULER'] == expected_scheduler
     assert manifest['dsp_scheduler_mode'] == expected_scheduler
     assert manifest['dsp_legacy_budget_packets'] == (65536 if fast_dsp else 1000000)
+    assert manifest['dsp_audio_clock'] == (
+        'virtual-clock-batch' if virtual_clock else 'stopped-clock')
+    assert manifest['dsp_virtual_slice_packets'] == (4096 if virtual_clock else None)
     assert manifest['qemu_sync_profile']['enabled'] is profile
     assert ('-enable-sync-profile' in manifest['main']) is profile
     if profile:
@@ -357,8 +373,11 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
         assert 'host overhead' in manifest['qemu_sync_profile']['observer_overhead']
     else:
         collector.assert_not_called()
-    assert manifest['architectural_validation_eligible'] is not (deferred or fast_dsp)
-    if deferred:
+    assert manifest['architectural_validation_eligible'] is not (
+        deferred or fast_dsp or virtual_clock)
+    if virtual_clock:
+        assert '4096-packet slices' in manifest['scheduling_provenance']
+    elif deferred:
         assert 'not a DSP timing fix' in manifest['scheduling_provenance']
     elif fast_dsp:
         assert 'exploratory host-fairness mode' in manifest['scheduling_provenance']
