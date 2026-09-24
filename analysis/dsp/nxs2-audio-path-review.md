@@ -26,6 +26,8 @@ In `runs/agent-audio-fresh-20260924`, two real ENTER presses loaded the 10-secon
 
 The next integration step is to drive McASP1 slot advancement from the existing OSCIN/AUXCLK timebase rather than 1024 DSP packets, then capture **all** slot words during PLAY to measure silence, underruns and continuity. A host ring with prefill, bounded latency and explicit underrun metrics is a sensible output stage after that rate check. The present emulator has working PCM generation but no verified live speaker path.
 
+The exact excerpt can be reproduced with `python -m tools.cdj_dsp.tx_to_wav runs/agent-audio-fresh-20260924/dsp-tx.jsonl /tmp/mcasp1.wav --rate 44100`. The exporter validates the capture, requires McASP1 serializer 0 stereo slot order, reconstructs zeros from XBUF sequence gaps, and labels the WAV with a caller-supplied rate. It is an offline listening tool, not a live output sink or a rate measurement.
+
 ## C66x core approach
 
 Their C66x core uses table-driven decode, packet-shape caching, operand masks, explicit pipeline write latencies and cross-path stalls, SPLOOP iteration overlays, and a fixed-point detector that skips a proven idle poll loop until the next event. Those are worthwhile **architectural and performance ideas** for a measured C674x bottleneck. Their report says the idle loop is a fixed point on 39,564 of 40,019 passes; the skip is guarded by unchanged registers, no external stores/bus activity, no TSC read, no interrupt, and no pending writes. A similarly guarded idle optimization could reduce our host cost without fabricating audio.
