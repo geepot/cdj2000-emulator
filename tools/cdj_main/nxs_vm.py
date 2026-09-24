@@ -724,6 +724,8 @@ def main():
                         help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
     parser.add_argument('--capture-dsp-tx', action='store_true',
                         help='capture genuine XBUF words consumed by coarse McASP slot progression')
+    parser.add_argument('--capture-dsp-tx-nonzero-only', action='store_true',
+                        help='diagnostic: retain only nonzero genuine XBUF words, so the capture limit survives silent boot')
     parser.add_argument('--capture-dsp-tx-records', type=int, default=65536,
                         help='maximum DSP XBUF JSON records to retain (default: 65536)')
     parser.add_argument('--capture-dsp-fault-history', action='store_true',
@@ -745,6 +747,8 @@ def main():
         parser.error('--timestamp-run cannot be combined with a positional run directory')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
+    if args.capture_dsp_tx_nonzero_only and not args.capture_dsp_tx:
+        parser.error('--capture-dsp-tx-nonzero-only requires --capture-dsp-tx')
     try:
         dsp_legacy_budget = legacy_dsp_budget(args.fast_dsp,
                                               args.dsp_legacy_budget)
@@ -963,9 +967,12 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
+    main_env.pop('CDJ_NXS_DSP_TX_CAPTURE_NONZERO_ONLY', None)
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
         main_env['CDJ_NXS_DSP_TX_CAPTURE_LIMIT'] = str(args.capture_dsp_tx_records)
+        if args.capture_dsp_tx_nonzero_only:
+            main_env['CDJ_NXS_DSP_TX_CAPTURE_NONZERO_ONLY'] = '1'
     if args.capture_dsp_fault_history:
         main_env['CDJ_NXS_DSP_FAULT_HISTORY'] = str(run / 'dsp-fault-history.jsonl')
     # Genuine NXS validation must transport the firmware's bytes unchanged, so
@@ -980,7 +987,8 @@ def main():
     run_manifest = dict(main=main_command, gui=gui_command,
         dsp_source_sha256_at_launch=dsp_source_hashes(),
         endpoints=dict(panel_host='127.0.0.1', panel_port=args.port + 4,
-                       qmp=qmp_endpoint if args.debug else None,
+                       qmp=(str(run / 'qmp.sock') if UNIX_CONTROL else qmp_endpoint)
+                           if args.debug else None,
                        gdb_host='127.0.0.1' if args.debug else None,
                        gdb_port=args.port + 3 if args.debug else None),
         debug=dict(enabled=args.debug, main_starts_paused=args.debug_paused,

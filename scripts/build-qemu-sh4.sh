@@ -58,6 +58,13 @@ for patch in \
         patch -d "$QEMU_SRC" -p1 --forward < "$patch"
     elif patch -d "$QEMU_SRC" -p1 --reverse --force --silent --dry-run < "$patch" >/dev/null 2>&1; then
         echo "$(basename "$patch") already applied"
+    elif [ "$patch" = "$REPO/patches/qemu-sh-intc-priority-imask.patch" ] &&
+         grep -Fq 'trace_sh_intc_prio(enum_ids[k], level)' "$QEMU_SRC/hw/intc/sh_intc.c" &&
+         grep -Fq 'desc->pending_prio << 4' "$QEMU_SRC/target/sh4/helper.c" &&
+         grep -Fq 'source->prio > best_priority' "$QEMU_SRC/hw/intc/sh_intc.c"; then
+        # The later priority-order patch replaces this patch's vector-selection
+        # hunk, so reverse dry-run cannot recognize the already-composed tree.
+        echo "$(basename "$patch") already applied (with priority-order patch)"
     else
         echo "patch does not apply cleanly: $patch" >&2
         exit 1

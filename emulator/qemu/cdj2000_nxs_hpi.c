@@ -89,6 +89,7 @@ typedef struct {
     char *tx_capture_path;
     uint64_t tx_capture_sequence;
     uint64_t tx_capture_limit;
+    bool tx_capture_nonzero_only;
     bool tx_capture_failed;
     DspFaultHistory fault_history[DSP_FAULT_HISTORY_COUNT];
     uint32_t fault_history_next;
@@ -567,6 +568,9 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                     uint64_t sequence = trial_mcasp.xrsr_source_sequence[instance][serializer];
                     if (!sequence || sequence ==
                         original_mcasp.xrsr_source_sequence[instance][serializer])
+                        continue;
+                    if (s->tx_capture_nonzero_only &&
+                        !trial_mcasp.xrsr[instance][serializer])
                         continue;
                     if (fprintf(s->tx_capture,
                             "{\"sequence\":%" PRIu64 ",\"instance\":%u,"
@@ -1086,7 +1090,10 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {
         const char *limit_text = getenv("CDJ_NXS_DSP_TX_CAPTURE_LIMIT");
+        const char *nonzero_only = getenv("CDJ_NXS_DSP_TX_CAPTURE_NONZERO_ONLY");
         char *limit_end = NULL;
+        s->tx_capture_nonzero_only = nonzero_only &&
+                                     !strcmp(nonzero_only, "1");
         s->tx_capture_limit = 65536;
         if (limit_text && *limit_text) {
             errno = 0;

@@ -132,7 +132,7 @@ def test_stop_request_cleanly_stops_owned_processes(tmp_path, monkeypatch):
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
     monkeypatch.setattr(nxs_vm, 'occupied_local_ports', lambda base, debug: [])
     monkeypatch.setattr(nxs_vm.sys, 'argv', [
-        'nxs_vm', 'run', '--seconds', '60', '--lightweight'])
+        'nxs_vm', 'run', '--seconds', '60', '--lightweight', '--debug'])
     sleep_count = [0]
     def sleep(duration):
         sleep_count[0] += 1
@@ -161,6 +161,9 @@ def test_stop_request_cleanly_stops_owned_processes(tmp_path, monkeypatch):
     monkeypatch.setattr(nxs_vm.subprocess, 'Popen', launch)
 
     assert nxs_vm.main() == 0
+    manifest = json.loads((tmp_path / 'run/run.json').read_text())
+    if nxs_vm.UNIX_CONTROL:
+        assert manifest['endpoints']['qmp'] == str(tmp_path / 'run/qmp.sock')
     result = json.loads((tmp_path / 'run/result.json').read_text())
     session = json.loads((tmp_path / 'run/session.json').read_text())
     assert result['stop_requested'] is True
