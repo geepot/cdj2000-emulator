@@ -35,7 +35,7 @@
 #define SHARED_RAM_SIZE 0x20000u
 #define SDRAM_BASE 0xc0000000u
 #define SDRAM_SIZE 0x02000000u
-#define DSP_FAULT_HISTORY_COUNT 512u
+#define DSP_FAULT_HISTORY_COUNT 4096u
 /* Cooperative QEMU scheduling quantum, not a C6747 timing property. HINT
  * still yields immediately. One million packets lets initialization reach
  * its genuine wait loop after the final MAIN event instead of stranding the
@@ -43,7 +43,7 @@
 
 typedef struct {
     uint64_t packets, cycles;
-    uint32_t pc, a8, b5, b15, b3, csr, irp, ilc, tsr;
+    uint32_t pc, a8, b5, b15, b3, csr, irp, ilc, tsr, itsr;
     uint8_t phase, loop_active;
 } DspFaultHistory;
 
@@ -818,10 +818,10 @@ static void report_dsp(NxsHpi *s, const char *reason)
                         "{\"packets\":%" PRIu64 ",\"cycles\":%" PRIu64
                         ",\"phase\":%u,\"pc\":%u,\"a8\":%u,\"b5\":%u"
                         ",\"b15\":%u,\"b3\":%u,\"csr\":%u,\"irp\":%u"
-                        ",\"ilc\":%u,\"tsr\":%u,\"loop_active\":%s}\n",
+                        ",\"ilc\":%u,\"tsr\":%u,\"itsr\":%u,\"loop_active\":%s}\n",
                         item->packets, item->cycles, item->phase, item->pc,
                         item->a8, item->b5, item->b15, item->b3, item->csr,
-                        item->irp, item->ilc, item->tsr,
+                        item->irp, item->ilc, item->tsr, item->itsr,
                         item->loop_active ? "true" : "false");
             }
             if (fclose(history))
@@ -856,6 +856,7 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                 s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
                 s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
                 s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
+                s->cpu.control[27],
                 0, s->cpu.loop_active};
         }
         deliver_edma_notifications(s);
@@ -872,6 +873,7 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                 s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
                 s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
                 s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
+                s->cpu.control[27],
                 1, s->cpu.loop_active};
         }
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
