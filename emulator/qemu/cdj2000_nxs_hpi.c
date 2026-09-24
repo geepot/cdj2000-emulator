@@ -576,12 +576,14 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                             "{\"sequence\":%" PRIu64 ",\"instance\":%u,"
                             "\"slot\":%u,\"serializer\":%u,\"word\":%u,"
                             "\"xbuf_sequence\":%" PRIu64 ",\"packets\":%" PRIu64 ","
-                            "\"cycles\":%" PRIu64 ",\"source\":\"genuine_xbuf\","
+                            "\"cycles\":%" PRIu64 ",\"virtual_ns\":%" PRIi64 ","
+                            "\"source\":\"genuine_xbuf\","
                             "\"clock\":\"functional-coarse-packet-slot\"}\n",
                             ++s->tx_capture_sequence, instance,
                             trial_mcasp.xslot[instance], serializer,
                             trial_mcasp.xrsr[instance][serializer], sequence,
-                            s->cpu.packets, s->cpu.cycles) < 0 ||
+                            s->cpu.packets, s->cpu.cycles,
+                            qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)) < 0 ||
                         fflush(s->tx_capture)) {
                         s->tx_capture_failed = true;
                         fclose(s->tx_capture);
