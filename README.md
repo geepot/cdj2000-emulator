@@ -95,15 +95,16 @@ debugging in one command:
 
 ```sh
 python -m tools.cdj_main.nxs_vm --test-track --debug --lightweight --ui \
-  --seconds 1800 --fresh-link --functional-dsp-audio \
-  --source-key-at 300 --source-key-retries 0
+  --seconds 1800 --functional-dsp-audio --source-key-when-ready
 ```
 
 This creates a timestamped run under `runs/`, prints follow-up commands, and
 records the firmware and emulator hashes. The deck shows run progress below
 the LCD; **Diagnostics** provides session state, browser replies, frame age,
-recent actions, fault lines, and debugger endpoints. `--fresh-link` selects
-the existing experimental delivery mode used for native NXS loading.
+recent actions, fault lines, and debugger endpoints. Fresh-only link delivery
+is the NXS default because cached repeats saturated the GUI receive queue in
+connected runs. Use `--cached-link` only to compare the old transport behavior.
+The source key waits for the SD browser table instead of a guessed timestamp.
 
 Agents can control the same run without locating ports:
 

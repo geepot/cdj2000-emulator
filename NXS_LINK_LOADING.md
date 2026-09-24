@@ -6,10 +6,11 @@ records NO CARD, later genuine lists, native ENTER/LOAD, and completed
 before the media manager finishes; halfword 26 remains 0x1000 while browsing
 works and must not be interpreted with the legacy CDJ-2000 media-state map.
 
-`nxs_vm --fresh-link` opts into the existing Blackfin simulator's
+`nxs_vm` now selects the existing Blackfin simulator's
 `BFIN_LINK_FRESH_ONLY=1`: real MAIN records are consumed once, rather than
 synthetic repeated DMA deliveries of cached status/payloads. This is an
-explicit transport diagnostic, not a hardware clock model or a default change.
+NXS launcher default, not a hardware clock model. `--cached-link` reproduces
+the old repeated-delivery path for comparison.
 `--trace-link-tx` captures actual outgoing SPORT packets in `gui-link-tx.bin`.
 Each record is `SPTX`, little-endian u32 SPORT base, u32 length, payload.
 Both options and their environment values are recorded in `run.json`.

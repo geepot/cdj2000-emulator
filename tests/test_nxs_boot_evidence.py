@@ -246,7 +246,8 @@ def test_invalid_frame_interval_rejected_before_launch(monkeypatch, interval):
 @pytest.mark.parametrize('interval,deferred,profile', [
     (0, False, False), (0.5, False, False), (0, True, False), (0, True, True),
 ])
-@pytest.mark.parametrize('fresh_link,trace_link', [(False, False), (True, True)])
+@pytest.mark.parametrize('fresh_link,trace_link',
+                         [(None, False), (False, False), (True, True)])
 @pytest.mark.parametrize('custom_main', [False, True])
 @pytest.mark.parametrize('disc_attached', [False, True])
 @pytest.mark.parametrize('fast_dsp', [False, True])
@@ -278,8 +279,9 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
         argv.append('--fast-dsp')
     if profile:
         argv.append('--qemu-sync-profile')
-    if fresh_link:
-        argv.append('--fresh-link')
+    if fresh_link is not None:
+        argv.append('--fresh-link' if fresh_link else '--cached-link')
+    expected_fresh = fresh_link is not False
     if trace_link:
         argv.append('--trace-link-tx')
     monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
@@ -325,7 +327,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
             assert kwargs['env']['CDJ_NXS_DSP_LEGACY_BUDGET'] == (
                 '65536' if fast_dsp else '1000000')
         if gui:
-            assert kwargs['env'].get('BFIN_LINK_FRESH_ONLY') == ('1' if fresh_link else None)
+            assert kwargs['env'].get('BFIN_LINK_FRESH_ONLY') == ('1' if expected_fresh else None)
             assert kwargs['env'].get('BFIN_SPORT_TX_OUTPUT') == (
                 str(tmp_path / 'run/gui-link-tx.bin') if trace_link else None)
             (tmp_path / 'run/screen.ppm').write_bytes(FRAME)
@@ -341,7 +343,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     assert len(neutral) == 22
     assert neutral[15] == 0x02  # REV is active low; zero is reverse, not idle.
     assert not any(neutral[:15] + neutral[16:])
-    assert manifest['link_delivery'] == ('fresh-only diagnostic' if fresh_link
+    assert manifest['link_delivery'] == ('fresh-only diagnostic' if expected_fresh
                                          else 'legacy cached repeats')
     expected_scheduler = 'deferred-v1' if deferred else 'legacy'
     assert manifest['main_environment']['CDJ_NXS_DSP_SCHEDULER'] == expected_scheduler

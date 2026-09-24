@@ -665,8 +665,12 @@ def main():
                         help='directory containing development gui-boot-memory.elf and gui-flash-image.bin')
     parser.add_argument('--trace-media', action='store_true',
                         help='log SD/USB host activity for media diagnosis (changes host timing)')
-    parser.add_argument('--fresh-link', action='store_true',
-                        help='diagnostic: deliver each real MAIN frame once, without cached repeats')
+    link_mode = parser.add_mutually_exclusive_group()
+    link_mode.add_argument('--fresh-link', dest='fresh_link', action='store_true',
+                           default=True,
+                           help='deliver each real MAIN frame once (NXS default)')
+    link_mode.add_argument('--cached-link', dest='fresh_link', action='store_false',
+                           help='diagnostic: restore legacy cached frame repeats')
     parser.add_argument('--trace-link-tx', action='store_true',
                         help='record actual GUI SPORT transmit frames for loss/queue diagnosis')
     parser.add_argument('--sd-insert-seconds', type=int,
@@ -682,8 +686,7 @@ def main():
                         'not wait for NXS media-manager readiness')
     parser.add_argument('--source-key-when-ready', action='store_true',
                         help='with --debug, wait for SD mode 3/table 2 or USB '
-                             'table 2 over QMP, then send one panel press; '
-                             'combine with --fresh-link for NXS browsing')
+                             'table 2 over QMP, then send one panel press')
     parser.add_argument('--source-key-ready-delay', type=float, default=0,
                         help='host seconds to settle after readiness before the '
                              'source press (0..30; default: 0)')
