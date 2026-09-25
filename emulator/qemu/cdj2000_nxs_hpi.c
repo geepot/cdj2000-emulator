@@ -42,6 +42,7 @@
 #define MCASP_VIRTUAL_BATCH_NS 1000000
 #define MCASP_VIRTUAL_MAX_SLOTS 256u
 #define MCASP_VIRTUAL_DSP_QUOTA 4096u
+#define MCASP_VIRTUAL_REPORT_NS 256000000
 #define NXS_AUDIO_RATE 44100u
 #define NXS_AUDIO_RING_FRAMES (NXS_AUDIO_RATE * 2u)
 #define NXS_AUDIO_PREFILL_FRAMES (NXS_AUDIO_RATE / 20u)
@@ -70,7 +71,8 @@ typedef struct {
     QEMUTimer *mcasp_timer;
     int64_t mcasp_last_ns;
     uint64_t mcasp_phase, mcasp_debt;
-    uint64_t mcasp_dsp_slices;
+    int64_t mcasp_last_report_ns;
+    bool mcasp_have_report;
     AudioBackend *audio_backend;
     SWVoiceOut *audio_voice;
     Notifier audio_shutdown;
@@ -312,7 +314,8 @@ void cdj_nxs_hpi_reset_line(bool released)
         if (s->mcasp_timer) timer_del(s->mcasp_timer);
         s->mcasp_last_ns = 0;
         s->mcasp_phase = s->mcasp_debt = 0;
-        s->mcasp_dsp_slices = 0;
+        s->mcasp_last_report_ns = 0;
+        s->mcasp_have_report = false;
         if (s->audio_voice) {
             qemu_mutex_lock(&s->audio_lock);
             s->audio_rd = s->audio_wr = s->audio_fill = 0;
@@ -917,14 +920,19 @@ static void dsp_cycle_tick(void *opaque)
                                          cdj_c6747_timer_event(bit));
 }
 
-static void report_dsp(NxsHpi *s, const char *reason)
+static bool report_dsp(NxsHpi *s, const char *reason)
 {
     capture_requested_checkpoint(s);
-    /* A virtual-clock run slices the DSP at 1 ms boundaries. Keep diagnostic
-     * output bounded while retaining every actual fault and host boundary. */
-    if (s->virtual_audio_clock && !s->cpu.fault && !s->hpi.hint &&
-        ++s->mcasp_dsp_slices % 256)
-        return;
+    /* Throttle routine reports by virtual time, so a future change in DSP
+     * scheduling granularity cannot multiply checkpoint output. */
+    if (s->virtual_audio_clock && !s->cpu.fault && !s->hpi.hint) {
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        if (s->mcasp_have_report && now >= s->mcasp_last_report_ns &&
+            now - s->mcasp_last_report_ns < MCASP_VIRTUAL_REPORT_NS)
+            return false;
+        s->mcasp_last_report_ns = now;
+        s->mcasp_have_report = true;
+    }
     if (s->cpu.fault && s->fault_history_path) {
         FILE *history = fopen(s->fault_history_path, "w");
         if (!history) {
@@ -959,6 +967,7 @@ static void report_dsp(NxsHpi *s, const char *reason)
                  s->cpu.fault_word, 0);
     if (!s->scheduler.mode || !s->scheduler.pending || s->dsp_halted ||
         !(s->scheduler.slice_id % 256)) capture_checkpoint(s, reason);
+    return true;
 }
 
 static void execute_dsp(NxsHpi *s, unsigned quota)
@@ -1031,9 +1040,8 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                      s->scheduler.slice_id, s->scheduler.remaining, steps);
     }
     int64_t executed_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-    report_dsp(s, reason);
-    if (!s->virtual_audio_clock || s->cpu.fault || s->hpi.hint ||
-        !(s->mcasp_dsp_slices % 256))
+    bool reported = report_dsp(s, reason);
+    if (reported)
         info_report("nxs-dsp-host-time: execution-ns=%" PRId64
                     " reporting-ns=%" PRId64,
                     executed_ns - entered_ns,
