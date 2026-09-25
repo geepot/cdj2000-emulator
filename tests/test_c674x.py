@@ -432,5 +432,5 @@ def test_c674x_no_word_reaches_two_dispatch_rows(tmp_path):
     assert 'skipped 0' in lines, out
     assert 'word-only-probes 4096' in lines, out
     # Pin the pair count so this stays tied to the mask/match check above.
-    # The unconditional GMPY/XORMPY row adds 23 mask/match candidate pairs.
-    assert 'pairs-examined 307' in lines, out
+    # The unconditional GMPY/XORMPY and RPACK2 rows contribute to the count.
+    assert 'pairs-examined 308' in lines, out

@@ -104,9 +104,9 @@ CdjC674xUncondKind cdj_c674x_uncond_classify(uint32_t word)
         }
         /* Figure F-14 (printed page 749), .S unit nonconditional: bits 11-10
          * are 11, op is bits 9-6.  RPACK2 (printed page 416) is its only
-         * member. */
+         * member and has a dispatch-table arm. */
         if (extent == 3u && ((word >> 6) & 0xfu) == 0xbu)
-            return CDJ_C674X_UNCOND_UNIMPLEMENTED;
+            return CDJ_C674X_UNCOND_ARM_TABLE;
     }
     /* Figure H-1 (printed page 765): every bit outside op (16-13) and p is 0.
      * op 0000 is SWE (printed page 557) and 0001 SWENR (558). */

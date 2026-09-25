@@ -2955,6 +2955,29 @@ static bool arm_sat40(CdjC674xArm *x)
     return true;
 }
 
+static bool arm_rpack2(CdjC674xArm *x)
+{
+    /* SPRUFE8B pp.416-417: saturate each signed source after a one-bit
+     * shift, then pack their high halfwords.  The worked example's FDBA
+     * conflicts with its execution rule (FEDCBA98 << 1 gives FDB9). */
+    bool sat1, sat2;
+    uint32_t src1 = saturate32((int64_t)(int32_t)x->cpu->r[x->side][x->a] * 2,
+                               &sat1);
+    uint32_t src2 = saturate32((int64_t)(int32_t)x->cpu->r[x->cross][x->b] * 2,
+                               &sat2);
+    x->value = (src1 & 0xffff0000u) | (src2 >> 16);
+    if (x->enabled && (sat1 || sat2)) {
+        if (x->out->load_count == 40)
+            return stop(x->cpu, x->pc, x->insn->word,
+                        "delayed-status queue full");
+        x->out->loads[x->out->load_count++] = (CdjC674xLoad){
+            .due = x->cpu->cycles + 2, .address = 1u << (2 + x->side),
+            .size = CDJ_C674X_DELAYED_SAT
+        };
+    }
+    return true;
+}
+
 static bool arm_subc(CdjC674xArm *x)
 {
     /* SUBC, printed pages 539-540: unsigned, single cycle, E1 write. */
@@ -3421,6 +3444,7 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x0000083c, 0x00000030, match_mpy2_gmpy4,      arm_mpy2_gmpy4 },
     { 0xf000083c, 0x10000030, match_gmpy_word,       arm_gmpy_word },
     { 0x00000ffc, 0x00000ef0, NULL,                  arm_dmv },
+    { 0xf0000ffc, 0x10000ef0, NULL,                  arm_rpack2 },
     { 0x0003effc, 0x00000818, NULL,                  arm_sat40 },
     { 0x00000ffc, 0x00000978, NULL,                  arm_subc },
     { 0x0003effc, 0x00000358, NULL,                  arm_abs },
