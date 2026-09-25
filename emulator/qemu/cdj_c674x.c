@@ -45,8 +45,21 @@
      CDJ_C674X_LOOP_RETAINED_II_MASK | CDJ_C674X_LOOP_RETAINED_VALID)
 #define CDJ_C674X_LOOP_CONTEXT_VALID (UINT64_C(1) << 56)
 #define CDJ_C674X_LOOP_HAS_SPMASK (UINT64_C(1) << 57)
+#define CDJ_C674X_LOOP_IMMEDIATE_RELOAD (UINT64_C(1) << 58)
 #define CDJ_C674X_LOOP_INTERRUPT_ARMED (UINT64_C(1) << 62)
 #define CDJ_C674X_LOOP_INTERRUPT_DRAINING (UINT64_C(1) << 63)
+/* These timestamp slots are unused by MVC. Keep the checkpointed CPU layout
+ * unchanged while tracking the two overlapping LBCs of section 7.7.3.6. */
+#define CDJ_C674X_RELOAD_POST_END 27u
+#define CDJ_C674X_RELOAD_OLD_START 28u
+#define CDJ_C674X_RELOAD_OLD_END 29u
+#define CDJ_C674X_RELOAD_CURRENT_START 30u
+
+static bool loop_immediate_reload(const CdjC674x *cpu)
+{
+    return cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] &
+           CDJ_C674X_LOOP_IMMEDIATE_RELOAD;
+}
 
 /* SPRUFE8B 7.7.3.2 makes TSR.SPLX hardware-owned loop-buffer state.  Keep
  * it synchronized here instead of adding a second checkpointed state bit. */
@@ -565,6 +578,11 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
      */
     if (cpu->branch_due || cpu->branch_count) return true;
     if (cpu->loop_active) {
+        /* Hardware may interrupt a reload in specific PC/branch states;
+         * that restart path is outside this implementation. */
+        if (loop_immediate_reload(cpu))
+            return stop(cpu, cpu->pc, 0,
+                        "SPKERNELR interrupt restart not implemented");
         if (loop_interrupt_armed(cpu) || loop_interrupt_draining(cpu))
             return true;
 
@@ -4416,7 +4434,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     CdjC674xPacket direct = {0};
     LoopMask masking = {.cpu = &out};
     bool loading = !out.loop.sealed;
-    bool post = out.loop.sealed && out.loop.cycle >= out.loop.post_cycle;
+    bool reload = loop_immediate_reload(&out);
+    bool post = out.loop.sealed && out.loop.cycle >= out.loop.post_cycle &&
+        (!reload || out.loop.cycle <
+         out.control_ready[CDJ_C674X_RELOAD_POST_END]);
     if (loading && !out.loop_wait) {
         CdjC674xPacket source;
         if (!cdj_c674x_fetch(&out, read, opaque, &source))
@@ -4453,13 +4474,18 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
                 (w & 0xf03ffffc) == 0x34000;
             bool compact_kernel = insn.compact &&
                 (w & 0x3c7e) == 0x1c66;
-            if (full_kernel || compact_kernel) {
+            bool full_kernel_reload = !insn.compact &&
+                (w & ~1u) == 0x36000u;
+            if (full_kernel || compact_kernel || full_kernel_reload) {
                 if (i != 0) return stop(cpu, insn.pc, w, "SPKERNEL must start packet");
+                if (reload != full_kernel_reload)
+                    return stop(cpu, insn.pc, w,
+                                "unsupported SPLOOP reload boundary");
                 /* SPRUFE8B Figure H-7: bit 0 is field[5], bits 9:7
                  * are field[2:0], and bits 15:14 are field[4:3].
                  * Table 3-29's stage-bit reversal is applied below,
                  * after reconstructing this combined field. */
-                unsigned field = compact_kernel ?
+                unsigned field = full_kernel_reload ? 0 : compact_kernel ?
                     ((w & 1) << 5) | ((w >> 7) & 7) |
                     (((w >> 14) & 3) << 3) : (w >> 22) & 63;
                 unsigned cbits = 0, stage = 0;
@@ -4573,6 +4599,19 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         }
         if (!cdj_c674x_loop_load(&out.loop, tags, count, finish, delay))
             return stop(cpu, cpu->pc, 0, "invalid loop buffer load");
+        if (finish && reload) {
+            uint64_t loading_stages =
+                (out.loop.length + out.loop.ii - 1) / out.loop.ii;
+            if (out.loop.iterations < loading_stages ||
+                (uint64_t)out.loop.iterations * out.loop.ii < 4)
+                return stop(cpu, cpu->pc, 0,
+                            "SPKERNELR count ends before supported loading boundary");
+            uint64_t last_boundary =
+                (uint64_t)out.loop.iterations * out.loop.ii;
+            if (out.loop.end_cycle < last_boundary)
+                out.loop.end_cycle = last_boundary;
+            out.loop.post_cycle = UINT64_MAX;
+        }
         if (finish && returning) {
             if (loop_retained_valid(&out) &&
                 !loop_retained_schedule_complete(&out))
@@ -4613,8 +4652,16 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     uint32_t tags[8]; unsigned count; bool scheduler_post, drained;
     if (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING)
         masking.mask = 0;
-    if (!cdj_c674x_loop_issue_filtered(&out.loop, tags, &count, &scheduler_post,
-                                     &drained, loop_allow, &masking))
+    bool issued = reload && out.loop.sealed ?
+        cdj_c674x_loop_issue_reload(
+            &out.loop, out.control_ready[CDJ_C674X_RELOAD_CURRENT_START],
+            out.control_ready[CDJ_C674X_RELOAD_OLD_START],
+            out.control_ready[CDJ_C674X_RELOAD_OLD_END],
+            out.control_ready[CDJ_C674X_RELOAD_POST_END],
+            tags, &count, &scheduler_post, &drained, loop_allow, &masking) :
+        cdj_c674x_loop_issue_filtered(&out.loop, tags, &count, &scheduler_post,
+                                     &drained, loop_allow, &masking);
+    if (!issued)
         return stop(cpu, cpu->pc, 0, "loop issue capacity exceeded");
     if (masking.unknown) return stop(cpu, cpu->pc, 0, "buffered SPMASK unit not implemented");
     if (count + direct.count > 8) return stop(cpu, cpu->pc, 0, "loop/direct packet capacity exceeded");
@@ -4630,13 +4677,84 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     if (end_while && !out.loop.sealed)
         return stop(cpu, cpu->pc, 0, "SPLOOPW termination during loading not implemented");
     bool condition = (cpu->r[out.loop_pred_bank][out.loop_pred_reg] != 0) ^ out.loop_pred_invert;
-    out.loop_pred_history =
-        (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
-        ((((out.loop_pred_history & 7) << 1) | condition) & 7);
+    bool reload_boundary = false, reload_taken = false;
+    uint32_t visible_rilc = 0;
+    if (reload) {
+        uint64_t start = out.control_ready[CDJ_C674X_RELOAD_CURRENT_START];
+        uint64_t local = out.loop.cycle - start;
+        reload_boundary = out.loop.sealed &&
+            local == (uint64_t)out.loop.iterations * out.loop.ii;
+        reload_taken = reload_boundary &&
+            (cpu->loop_pred_history & 0x800u);
+        out.loop_pred_history = (cpu->loop_pred_history & 0xffu) |
+            (((cpu->loop_pred_history & 0xf00u) << 1) & 0xf00u) |
+            (condition ? 0x100u : 0);
+        if (reload_boundary &&
+            out.loop.cycle > UINT64_MAX - out.loop.length)
+            return stop(cpu, cpu->pc, 0,
+                        "SPKERNELR post-body cycle overflow");
+        if (reload_taken) {
+            /* Capture the value visible before this execute packet. A
+             * post-body MVC to RILC in the same cycle must not alter the
+             * count copied into ILC at this boundary. */
+            visible_rilc = out.control[14];
+            uint64_t old_end = out.control_ready[CDJ_C674X_RELOAD_OLD_END];
+            uint32_t loading_stages =
+                (out.loop.length + out.loop.ii - 1) / out.loop.ii;
+            if (old_end > out.loop.cycle ||
+                visible_rilc < loading_stages ||
+                out.cycles < out.control_ready[14] ||
+                (uint64_t)visible_rilc * out.loop.ii >
+                    UINT64_MAX - out.loop.cycle - out.loop.length)
+                return stop(cpu, cpu->pc, 0,
+                            "SPKERNELR reload count or overlap unsupported");
+        }
+    } else {
+        out.loop_pred_history =
+            (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
+            ((((out.loop_pred_history & 7) << 1) | condition) & 7);
+    }
+    bool branch_matures = reload && cpu->branch_due &&
+        cpu->branch_due == cpu->cycles + 1;
     if (!cdj_c674x_execute(&out, &combined, read, write, opaque))
         return stop(cpu, out.fault_pc, out.fault_word, out.fault);
+    if (branch_matures && reload) {
+        /* Section 7.9.6.3: a taken branch ends program fetch after its last
+         * delay slot, but the reloaded buffer keeps issuing. The generic
+         * branch path has already installed its target PC; restore SPLX and
+         * close this invocation's program fetch window. */
+        loop_set_active(&out, true);
+        if (out.control_ready[CDJ_C674X_RELOAD_POST_END] > out.loop.cycle)
+            out.control_ready[CDJ_C674X_RELOAD_POST_END] = out.loop.cycle;
+    }
     uint64_t launched = 1 + out.loop.cycle / out.loop.ii;
-    if (out.loop.delayed_count) {
+    if (reload) {
+        uint64_t start = out.control_ready[CDJ_C674X_RELOAD_CURRENT_START];
+        uint64_t local = out.loop.cycle - start;
+        if (local % out.loop.ii == 0) {
+            if (reload_boundary) {
+                out.loop.post_cycle = out.loop.cycle;
+                out.control_ready[CDJ_C674X_RELOAD_POST_END] =
+                    out.loop.cycle + out.loop.length;
+                if (reload_taken) {
+                    out.control_ready[CDJ_C674X_RELOAD_OLD_START] = start;
+                    out.control_ready[CDJ_C674X_RELOAD_OLD_END] =
+                        out.loop.end_cycle;
+                    out.control_ready[CDJ_C674X_RELOAD_CURRENT_START] =
+                        out.loop.cycle;
+                    out.loop.iterations = visible_rilc;
+                    out.control[13] = visible_rilc - 1;
+                    out.loop.end_cycle = out.loop.cycle +
+                        (uint64_t)(out.loop.iterations - 1) * out.loop.ii +
+                        out.loop.length;
+                    uint64_t last_boundary = out.loop.cycle +
+                        (uint64_t)out.loop.iterations * out.loop.ii;
+                    if (out.loop.end_cycle < last_boundary)
+                        out.loop.end_cycle = last_boundary;
+                }
+            } else if (out.control[13]) --out.control[13];
+        }
+    } else if (out.loop.delayed_count) {
         /* SPLOOPD forces termination false and suppresses ILC decrement
          * during the first three loop cycles.  At later stage boundaries,
          * test ILC before conditionally decrementing it (7.9.2/7.9.3). */
@@ -4664,7 +4782,7 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         if (interrupt_draining)
             loop_clear_retained(&out);
     }
-    if (drained && scheduler_post &&
+    if (drained && (reload ? !reload_taken : scheduler_post) &&
         (!interrupt_draining || (!out.load_count && !out.store_count)))
         loop_set_active(&out, false);
     *cpu = out;
@@ -4717,9 +4835,8 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
          * return-window proxy because it has no separate pipeline provenance
          * in the checkpoint ABI; that is sound here because MVC cannot write
          * TSR.SPLX, all normal loop-idle paths clear it, and an active buffer
-         * never reaches this path. Loop-buffer *reload* (7.9.6, printed page
-         * 686) is a different feature and is still not claimed: see the
-         * SPLOOPD reload refusal above and the SPKERNELR rejection. */
+         * never reaches this path. Immediate SPKERNELR reload has its own
+         * state path; SPLOOPD and SPMASKR reload remain unsupported. */
         bool returning = (cpu->control[26] & CDJ_C674X_TSR_SPLX) != 0;
         bool delayed_loop = (full_sploopd || compact_sploopd) && !returning;
         unsigned pred = first.compact ? 0 : w >> 29;
@@ -4743,11 +4860,17 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
          * state, and where it does survive it is still checked ("SPLOOP
          * retained instruction mismatch", "SPLOOP retained schedule
          * mismatch", "SPLOOP interrupt-return interval mismatch"). */
-        if (while_loop ? (!pred || pred == 7) : (!first.compact && (w >> 28) != 0))
+        bool reload_setup = full_sploop && pred != 0;
+        if (while_loop ? (!pred || pred == 7) :
+            reload_setup ? (pred == 7 || returning) :
+            (!first.compact && (w >> 28) != 0))
             return stop(cpu, cpu->pc, w, "unsupported loop predicate");
         if (!while_loop && !delayed_loop &&
             cpu->cycles < cpu->control_ready[13])
             return stop(cpu, cpu->pc, w, "ILC not yet available");
+        if (reload_setup && cpu->branch_due)
+            return stop(cpu, cpu->pc, w,
+                        "SPKERNELR setup with pending branch unsupported");
         CdjC674x out = *cpu;
         /* SPRUFE8B Figure H-5 scatters compact ii-1 across bits 9:7 and
          * bit 14. GNU binutils format nfu_uspl independently agrees. */
@@ -4760,9 +4883,30 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
             return stop(cpu, cpu->pc, w,
                         "SPLOOP interrupt-return interval mismatch");
         loop_set_setup(&out, first.pc, returning);
+        if (reload_setup) {
+            out.control_ready[CDJ_C674X_LOOP_CONTEXT] |=
+                CDJ_C674X_LOOP_IMMEDIATE_RELOAD;
+            out.control_ready[CDJ_C674X_RELOAD_POST_END] = 0;
+            out.control_ready[CDJ_C674X_RELOAD_OLD_START] = 0;
+            out.control_ready[CDJ_C674X_RELOAD_OLD_END] = 0;
+            out.control_ready[CDJ_C674X_RELOAD_CURRENT_START] = 0;
+        }
         out.loop.predicate_loop = while_loop;
         out.loop.delayed_count = delayed_loop;
         out.loop_pred_history = returning ? CDJ_C674X_LOOP_RETURNING : 0;
+        if (reload_setup) {
+            static const unsigned banks[] = {0,1,1,1,0,0,0};
+            static const unsigned regs[] = {0,0,1,2,1,2,0};
+            out.loop_pred_bank = banks[pred];
+            out.loop_pred_reg = regs[pred];
+            out.loop_pred_invert = (w >> 28) & 1;
+            /* The SPLOOP packet is cycle -1 of the buffered schedule.
+             * A first terminal boundary at buffered cycle 3 samples its
+             * predicate, four cycles earlier, from this saved bit. */
+            if (((cpu->r[out.loop_pred_bank][out.loop_pred_reg] != 0) ^
+                 out.loop_pred_invert))
+                out.loop_pred_history = 0x100u;
+        }
         if (while_loop) {
             static const unsigned banks[] = {0,1,1,1,0,0,0};
             static const unsigned regs[] = {0,0,1,2,1,2,0};
