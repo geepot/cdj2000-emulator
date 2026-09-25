@@ -42,6 +42,8 @@ uint32_t cdj_c674x_control_read(const CdjC674x *cpu, unsigned id)
     case 6: case 7:                 /* IRP, NRP */
     case 13: case 14:               /* ILC, RILC */
         return cpu->control[id];
+    case 24:                        /* GFPGFR, SPRUFE8B 2.8.5 */
+        return cpu->control[id] & 0x070000ffu;
     case 11:                        /* TSCH; TI dis6x 0x002c03e2 */
         return cpu->control[16];
     case 10:                        /* TSCL; TI dis6x 0x022803e2 */
@@ -67,12 +69,12 @@ bool cdj_c674x_control_read_supported(unsigned id)
 {
     return id == 0 || id == 1 || id == 2 || id == 4 || id == 5 || id == 6 || id == 7 ||
            id == 10 || id == 11 || id == 13 || id == 14 ||
-           id == 26 || id == 27 ||
+           id == 24 || id == 26 || id == 27 ||
            (id >= 18 && id <= 21);
 }
 
 bool cdj_c674x_control_write_supported(unsigned id)
 {
     return id <= 7 || id == 10 || id == 13 || id == 14 ||
-           id == 26 || id == 27 || (id >= 18 && id <= 21);
+           id == 24 || id == 26 || id == 27 || (id >= 18 && id <= 21);
 }

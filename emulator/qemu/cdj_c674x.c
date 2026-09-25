@@ -552,6 +552,7 @@ void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry)
     cpu->control[1] = 0x14000100;
     cpu->control[4] = 1;
     cpu->control[5] = 0x00700000;
+    cpu->control[24] = 0x0700001du; /* GFPGFR SIZE=7, POLY=1Dh. */
     cpu->pc = entry;
 }
 
@@ -2862,28 +2863,22 @@ static bool arm_mpy2_gmpy4(CdjC674xArm *x)
      * emits 0 there for "GMPY4 .M1 A4, A6, A5" (02988470h), so that 1 is a
      * transcription artifact and bit 28 is the ordinary z of Table 3-9.
      *
-     * GFPGFR selects GMPY4's field size and polynomial (printed page 272), and
-     * "GFPGFR can only be set via the MVC instruction" (printed page 32).  This
-     * core does not model control register 24:
-     * cdj_c674x_control_write_supported rejects MVC to it, so GFPGFR provably
-     * still holds its reset value - field size 7h and polynomial 1Dh (printed
-     * page 32, and Figure 2-6 on printed page 40 marks the fields R/W-7h and
-     * R/W-1Dh) - for any program this core can execute.  The guard below keeps
-     * that reasoning honest if control[24] ever becomes writable. */
+     * GFPGFR selects GMPY4's field size and polynomial (printed page 272).
+     * Section 2.7.1 says an MVC change controls GMPY4 in the next execute
+     * packet, which the transactional E1 MVC write already provides. */
     unsigned op = (x->w >> 6) & 31;
     bool pair = op == 0x00;
     x->reg_write = false;
     if (pair && (x->dst & 1))
         return stop(x->cpu, x->pc, x->insn->word,
                     "invalid multiply result register pair");
-    if (!pair && x->cpu->control[24])
-        return stop(x->cpu, x->pc, x->insn->word,
-                    "GMPY4 with a non-reset GFPGFR not implemented");
     if (x->enabled) {
         uint32_t src1 = x->cpu->r[x->side][x->a];
         uint32_t src2 = x->cpu->r[x->cross][x->b];
+        uint32_t gfpgfr = x->cpu->control[24];
         uint64_t value = pair ? cdj_c674x_mpy2(src1, src2)
-                              : cdj_c674x_gmpy4(src1, src2, 0x1du, 7u);
+                              : cdj_c674x_gmpy4(src1, src2, gfpgfr & 0xffu,
+                                                (gfpgfr >> 24) & 7u);
         return queue_delayed_result(x, x->cpu->cycles + 4, value, x->dst,
                                     pair ? 2 : 1);
     }
@@ -4171,6 +4166,10 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                 /* CSR.PGIE and ITSR.GIE are also one physical bit. */
                 out.control[27] = (out.control[27] & ~1u) |
                                   ((value >> 1) & 1u);
+            } else if (dst == 24) {
+                /* GFPGFR reserves bits 31-27 and 23-8.  Its SIZE and POLY
+                 * fields are ordinary MVC R/W bits (Figure 2-6, page 40). */
+                out.control[24] = value & 0x070000ffu;
             } else if (dst == 18 || dst == 19 || dst == 20) {
                 /* FADCR/FAUCR/FMCR bits 31-27 and 15-11: "A value written to
                  * this field has no effect" (SPRUFE8B Tables 2-25/2-26/2-27,

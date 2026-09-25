@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "cdj_c674x.h"
+#include "cdj_c674x_mpy32.h"
 
 static void issue(CdjC674x *c, uint32_t word)
 {
@@ -187,6 +188,36 @@ static void gmpy4(void)
     issue(&e, word_of(7, 6, 5, 0, 0x470, 0));
     cycles(&e, 3);
     assert(e.r[0][7] == 0xe2e3041fu);
+}
+
+static void gmpy4_configured(void)
+{
+    CdjC674x c; cdj_c674x_reset(&c, 0x1000);
+    assert(c.control[24] == 0x0700001du);
+    c.r[1][4] = 0xffffffffu;
+    issue(&c, 24u << 23 | 4u << 18 | 0x3a2u); /* MVC B4,GFPGFR */
+    assert(c.control[24] == 0x070000ffu); /* Reserved bits ignore writes. */
+    issue(&c, 5u << 23 | 24u << 18 | 0x3e2u); /* MVC GFPGFR,B5 */
+    assert(c.r[1][5] == 0x070000ffu);
+
+    /* SPRUFE8B 2.7.1: a changed GFPGFR controls GMPY4 in the next packet.
+     * The Ghidra fixture independently supplies both non-reset expected
+     * results; one varies POLY and the other also changes SIZE. */
+    c.r[1][4] = 0x0700001bu;
+    issue(&c, 24u << 23 | 4u << 18 | 0x3a2u);
+    c.r[0][5] = 0x57830102u; c.r[0][6] = 0x83125783u;
+    issue(&c, word_of(7, 6, 5, 0, 0x470, 0));
+    cycles(&c, 3);
+    assert(c.r[0][7] == 0xc1f5571du);
+
+    c.r[1][4] = 0x03000003u;
+    issue(&c, 24u << 23 | 4u << 18 | 0x3a2u);
+    c.r[0][5] = 0x0f070201u; c.r[0][6] = 0x0e03010fu;
+    issue(&c, word_of(7, 6, 5, 0, 0x470, 0));
+    cycles(&c, 3);
+    assert(c.r[0][7] == 0x0509020fu);
+    assert(cdj_c674x_gmpy4(0xf1f1f1f1u, 0x11111111u, 3u, 3u) ==
+           0x01010101u); /* Upper lane bits lie outside GF(2^4). */
 }
 
 /* ---- DMV, printed page 234 ---------------------------------------------- */
@@ -749,6 +780,7 @@ int main(void)
     mpyid();
     mpy2();
     gmpy4();
+    gmpy4_configured();
     dmv();
     sat();
     subc();

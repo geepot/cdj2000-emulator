@@ -50,6 +50,10 @@ static unsigned gmpy_byte(unsigned a, unsigned b, unsigned poly, unsigned size)
     unsigned generator = (1u << m) | (poly & mask);
     unsigned product = 0;
 
+    /* GF(2^m) operands are m-bit field elements, even though each lane is
+     * stored in a byte.  Upper bits do not participate for SIZE < 7. */
+    a &= mask;
+    b &= mask;
     for (unsigned i = 0; i < 8; ++i)
         if ((b >> i) & 1u) product ^= a << i;
     /* Carry-less 8x8 product occupies bits 14-0; reduce from the top down. */
