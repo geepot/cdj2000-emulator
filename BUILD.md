@@ -138,25 +138,15 @@ frames. Unchanged images do not prove liveness. `run.json` records the actual
 binary/firmware hashes before launch and after exit. No frame capture or input
 hashing changes firmware traffic, error conditions, or DSP timing semantics.
 
-Exact-address mnemonic/operand inventory (macOS): the GNU source tree prepared
-by the dependency build is reused; these ignored libraries are not in Git.
-From a fresh `build/tic6x-binutils` directory, configure and build:
+Exact-address mnemonic/operand inventory (macOS): the frontend links Homebrew's
+all-targets `binutils` (`brew install binutils`), which ships `libopcodes` with
+the TI C6x disassembler. Rebuild it after `brew upgrade binutils`, since the
+dylib names carry the version:
 
 ```sh
-mkdir -p build/tic6x-binutils
-cd build/tic6x-binutils
-../gdb-17.2/configure --target=tic6x-elf --disable-nls --disable-gdb \
-  --disable-gas --disable-ld --disable-gprof --disable-gold \
-  --disable-libdecnumber --disable-readline --disable-sim --disable-werror
-make -j4 all-bfd all-opcodes all-libiberty
-cd ../..
-cc -std=c11 -Wall -Wextra -Werror -Ibuild/tic6x-binutils/bfd \
-  -Ibuild/gdb-17.2/include -Ibuild/gdb-17.2/bfd \
-  tools/cdj_dsp/tic6x_disasm.c \
-  build/tic6x-binutils/opcodes/.libs/libopcodes.a \
-  build/tic6x-binutils/bfd/.libs/libbfd.a \
-  build/tic6x-binutils/libiberty/libiberty.a \
-  -lz -L/opt/homebrew/opt/zstd/lib -lzstd -o /tmp/cdj-tic6x-disasm
+B=$(brew --prefix binutils)
+cc -std=c11 -Wall -Wextra -Werror -I"$B/include" tools/cdj_dsp/tic6x_disasm.c \
+  "$B"/lib/libopcodes-*.dylib "$B"/lib/libbfd-*.dylib -o /tmp/cdj-tic6x-disasm
 C6X_DISASSEMBLER=/tmp/cdj-tic6x-disasm .venv/bin/python -m pytest -q \
   tests/test_dsp_semantic_inventory.py tests/test_dsp_coverage.py tests/test_dsp_inventory.py
 .venv/bin/python -m tools.cdj_dsp.semantic_inventory \
@@ -165,8 +155,8 @@ C6X_DISASSEMBLER=/tmp/cdj-tic6x-disasm .venv/bin/python -m pytest -q \
   runs/NEW_SEMANTIC_INVENTORY.json --disassembler /tmp/cdj-tic6x-disasm
 ```
 
-The link flags above match this host's Homebrew zstd-enabled BFD build; use the
-equivalent library path for another host. Report output must be new. The
+Elsewhere, link any all-targets or `tic6x-elf` libopcodes/libbfd. Report output
+must be new. The
 frontend batches exact addresses via stdin instead of linear sweeping across
 data. Reports preserve provenance hashes and remain non-validating: canonical
 disassembly does not prove execution, semantic correctness or test completeness.
@@ -2186,9 +2176,10 @@ reproducibility results, not cycle accuracy, full boot, or working audio.
 
 ### Blackfin guest regression tools
 
-Run `DEVELOPER_DIR=/Library/Developer/CommandLineTools sh scripts/build-bfin-tools.sh`
-on macOS (omit DEVELOPER_DIR elsewhere), then
-`python3 -m pytest -q tests/test_blackfin_parallel.py`.
+The tests use `bfin-elf-as`/`bfin-elf-ld` from `PATH` when present, then
+`python3 -m pytest -q tests/test_blackfin_parallel.py` needs nothing else.
+Without them, run `DEVELOPER_DIR=/Library/Developer/CommandLineTools sh scripts/build-bfin-tools.sh`
+on macOS (omit DEVELOPER_DIR elsewhere) first.
 The helper downloads checksum-pinned GNU binutils 2.44 and builds a local
 `bfin-elf` assembler/linker under `build/bfin-binutils`; no system installation
 is needed. An existing archive can be supplied as the script's first argument.
