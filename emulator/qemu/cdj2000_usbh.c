@@ -576,21 +576,18 @@ static void cdj_usbh_issue(CdjUsbhState *s, CdjUsbhPipe *p, int pid,
                        pipe_devsel(s, p), pipe_epnum(p), len);
     }
     /*
-     * BVAL on a bulk FIFO with no bytes pending is the controller's
-     * end-of-buffer indication.  The SH driver can produce this after an
-     * exact-max-packet BOT DATA-OUT transfer (for example a 512-byte
-     * WRITE10).  The transfer-length has already been satisfied, so passing
-     * an extra zero-length packet to QEMU's usb-storage makes it see an
-     * out-of-phase packet and return STALL before the successful CSW.  Treat
-     * this host-controller bookkeeping event as an acknowledged ZLP.  Keep
-     * DCP/control stages on the normal USB path, where a zero-length packet
-     * is a real protocol stage.
+     * Firmware may write BVAL again after the DMA-filled bulk OUT packet
+     * has completed.  The microframe hold handles BVAL during DMA; when
+     * BVAL arrives after an exact-size packet, it must not put a second,
+     * empty packet into an already completed usb-storage BOT data stage.
+     * Control-pipe zero-length packets are real status stages.
      */
     if (pid == USB_TOKEN_OUT && len == 0 && !pipe_is_dcp(p)) {
         p->packet.status = USB_RET_SUCCESS;
         p->packet.actual_length = 0;
         cdj_usbh_packet_done(s, p);
         return;
+    }
     usb_handle_packet(dev, &p->packet);
     if (p->packet.status == USB_RET_ASYNC) {
         return;
