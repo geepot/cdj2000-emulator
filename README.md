@@ -116,11 +116,19 @@ WAV backend to `dsp-audio.wav` in the run directory. These modes are
 experimental and do not establish DSP instruction timing or connected PLAY
 output. See [the audio path review](analysis/dsp/nxs2-audio-path-review.md).
 
+For an offline clock-coupled experiment, use `--dsp-cycle-mcasp-clock` with
+`--functional-dsp-audio --render-dsp-audio-wav`. This advances each McASP1 slot
+after the configured number of modeled SYSCLK1 cycles (4,416 cycles per slot
+for the observed 44.1 kHz firmware setup). It runs more slowly than audio
+wall time and does not feed a live 44.1 kHz voice. A connected load and
+continuous nonzero output have not yet been verified in this mode.
+
 For a WAV paced by DSP slot progression, add `--render-dsp-audio-wav` with
 `--functional-dsp-audio`. This writes every McASP1 stereo slot pair to
 `dsp-render.wav` at the firmware's configured 44.1 kHz format. With the
 default packet-based slot scheduler, its header rate labels the sample
-sequence; it does not measure real-time playback or drive speakers.
+sequence; it does not measure real-time playback or drive speakers. The same
+speaker limitation applies to the DSP-cycle experiment above.
 
 Agents can control the same run without locating ports:
 

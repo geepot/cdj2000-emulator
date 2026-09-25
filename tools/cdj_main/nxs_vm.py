@@ -521,6 +521,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                            *, dsp_checkpoint_policy: str = 'all',
                            source_sha256_at_launch: dict[str, str] | None = None,
                            virtual_mcasp_clock: bool = False,
+                           cycle_mcasp_clock: bool = False,
                            host_dsp_audio_wav: bool = False,
                            render_dsp_audio_wav: bool = False) -> None:
     if dsp_checkpoint_policy not in {'all', 'fault'}:
@@ -562,6 +563,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                                      'L2 and shared RAM plus sparse zero-default SDRAM pages'),
         dsp_timing_mode=('functional-runahead' if functional_dsp_timing else 'strict'),
         dsp_audio_mode=('virtual-clock-batch' if virtual_mcasp_clock else
+                        'dsp-sysclk1-cycle' if cycle_mcasp_clock else
                         'coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
         dsp_host_audio=('dsp-audio.wav' if host_dsp_audio_wav else None),
         dsp_pcm_render=('dsp-render.wav' if render_dsp_audio_wav else None),
@@ -624,6 +626,10 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                'with 4096-packet DSP interpreter slices; McASP2 DIT is coupled, '
                'and no independent DSP instruction clock is modeled']
               if virtual_mcasp_clock else
+              ['experimental DSP-cycle McASP slots use SYSCLK1 and the configured '
+               'McASP1 rate, requiring an integral cycles-per-slot ratio; McASP2 DIT '
+               'is coupled and QEMU host time is independent']
+              if cycle_mcasp_clock else
               ['functional McASP scheduling advances one slot every 1024 executed DSP packets; '
                'not serializer-clock, sample-rate, or audio-output evidence']
               if functional_dsp_audio else []),
@@ -742,9 +748,12 @@ def main():
     parser.add_argument('--functional-dsp-timing', action='store_true',
                         help='run past the unresolved SPLOOPD epilog with a labeled two-cycle approximation')
     parser.add_argument('--functional-dsp-audio', action='store_true',
-                        help='schedule coarse McASP TX slots to exercise genuine firmware DMA/ISR flow')
-    parser.add_argument('--virtual-mcasp-clock', action='store_true',
-                        help='experimental: batch McASP TX slots from QEMU virtual time at the configured McASP1 rate')
+                        help='enable McASP TX slots to exercise genuine firmware DMA/ISR flow')
+    audio_clock = parser.add_mutually_exclusive_group()
+    audio_clock.add_argument('--virtual-mcasp-clock', action='store_true',
+                             help='experimental: batch McASP TX slots from QEMU virtual time at the configured McASP1 rate')
+    audio_clock.add_argument('--dsp-cycle-mcasp-clock', action='store_true',
+                             help='experimental: advance McASP TX slots from modeled DSP SYSCLK1 cycles')
     parser.add_argument('--host-dsp-audio-wav', action='store_true',
                         help='experimental: write McASP1 stereo through the QEMU WAV audio backend')
     parser.add_argument('--render-dsp-audio-wav', action='store_true',
@@ -776,6 +785,8 @@ def main():
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if args.virtual_mcasp_clock and not args.functional_dsp_audio:
         parser.error('--virtual-mcasp-clock requires --functional-dsp-audio')
+    if args.dsp_cycle_mcasp_clock and not args.functional_dsp_audio:
+        parser.error('--dsp-cycle-mcasp-clock requires --functional-dsp-audio')
     if args.host_dsp_audio_wav and not args.virtual_mcasp_clock:
         parser.error('--host-dsp-audio-wav requires --virtual-mcasp-clock')
     if args.render_dsp_audio_wav and not args.functional_dsp_audio:
@@ -1004,8 +1015,12 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
+    main_env.pop('CDJ_NXS_DSP_VIRTUAL_MCASP', None)
     if args.virtual_mcasp_clock:
         main_env['CDJ_NXS_DSP_VIRTUAL_MCASP'] = '1'
+    main_env.pop('CDJ_NXS_DSP_CYCLE_MCASP', None)
+    if args.dsp_cycle_mcasp_clock:
+        main_env['CDJ_NXS_DSP_CYCLE_MCASP'] = '1'
     if args.host_dsp_audio_wav:
         main_env['CDJ_NXS_DSP_HOST_AUDIO'] = '1'
     main_env.pop('CDJ_NXS_DSP_PCM_WAV', None)
@@ -1080,6 +1095,7 @@ def main():
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
+                         'dsp-sysclk1-cycle' if args.dsp_cycle_mcasp_clock else
                          'coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
         dsp_host_audio=('dsp-audio.wav' if args.host_dsp_audio_wav else None),
         dsp_pcm_render=('dsp-render.wav' if args.render_dsp_audio_wav else None),
@@ -1103,6 +1119,9 @@ def main():
             'experimental virtual McASP clock services DSP in 4096-packet slices '
             'between 1 ms QEMU timer batches; no calibrated DSP instruction clock'
             if args.virtual_mcasp_clock else
+            'experimental McASP slot clock follows modeled DSP SYSCLK1 cycles; '
+            'QEMU host time remains independent and cannot feed live audio at 44.1 kHz'
+            if args.dsp_cycle_mcasp_clock else
             'deferred-v1 is an explicit 4096-step QEMU timer-slice host scheduling approximation; '
             'it is not a DSP timing fix, frequency model, or hardware proof'
             if args.deferred_dsp_scheduling else
@@ -1234,6 +1253,7 @@ def main():
                                            dsp_checkpoint_policy=('fault' if args.lightweight else 'all'),
                                            source_sha256_at_launch=run_manifest['dsp_source_sha256_at_launch'],
                                            virtual_mcasp_clock=args.virtual_mcasp_clock,
+                                           cycle_mcasp_clock=args.dsp_cycle_mcasp_clock,
                                            host_dsp_audio_wav=args.host_dsp_audio_wav,
                                            render_dsp_audio_wav=args.render_dsp_audio_wav)
             except (OSError, ValueError, RuntimeError) as error:

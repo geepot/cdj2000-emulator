@@ -64,13 +64,14 @@ typedef struct {
     uint32_t address;
     CdjC6747Hpi hpi;
     bool reset_released, dsp_started, dsp_halted, dsp_running;
-    bool functional_audio, virtual_audio_clock;
+    bool functional_audio, virtual_audio_clock, cycle_audio_clock;
     uint32_t legacy_budget;
     CdjDspScheduler scheduler;
     QEMUTimer *dsp_timer;
     QEMUTimer *mcasp_timer;
     int64_t mcasp_last_ns;
     uint64_t mcasp_phase, mcasp_debt;
+    uint64_t mcasp_next_cycle, mcasp_cycle_period;
     int64_t mcasp_last_report_ns;
     bool mcasp_have_report;
     AudioBackend *audio_backend;
@@ -383,6 +384,7 @@ void cdj_nxs_hpi_reset_line(bool released)
         if (s->mcasp_timer) timer_del(s->mcasp_timer);
         s->mcasp_last_ns = 0;
         s->mcasp_phase = s->mcasp_debt = 0;
+        s->mcasp_next_cycle = s->mcasp_cycle_period = 0;
         s->mcasp_last_report_ns = 0;
         s->mcasp_have_report = false;
         s->pcm_have_left = false;
@@ -780,7 +782,8 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                             s->cpu.packets, s->cpu.cycles,
                             qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
                             s->virtual_audio_clock ? "virtual-clock-batch" :
-                                                     "functional-coarse-packet-slot") < 0 ||
+                            s->cycle_audio_clock ? "dsp-sysclk1-cycle" :
+                                                   "functional-coarse-packet-slot") < 0 ||
                         fflush(s->tx_capture)) {
                         s->tx_capture_failed = true;
                         fclose(s->tx_capture);
@@ -808,16 +811,55 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
 
 static bool functional_audio_tick(NxsHpi *s)
 {
-    if (!s->functional_audio || s->virtual_audio_clock ||
-        s->cpu.packets % CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL)
+    if (!s->functional_audio || s->virtual_audio_clock)
         return true;
-    if (s->tx_capture_failed) {
-        s->cpu.fault = "DSP transmit capture write failed";
-        s->cpu.fault_pc = s->cpu.pc;
-        s->cpu.fault_word = 0;
-        return false;
+    if (s->cycle_audio_clock) {
+        if ((s->mcasp_control.gblctl[1] & 0x1f00u) != 0x1f00u) {
+            s->mcasp_next_cycle = s->mcasp_cycle_period = 0;
+            return true;
+        }
+        if (s->mcasp_next_cycle && s->cpu.cycles < s->mcasp_next_cycle)
+            return true;
+        uint64_t core_num, frame_num;
+        uint32_t core_den, frame_den;
+        unsigned slots = s->mcasp_control.afsxctl[1] >> 7;
+        if (slots != 2 ||
+            !cdj_c6747_pll_sysclk_hz(&s->pll, 1, &core_num, &core_den) ||
+            !cdj_c6747_mcasp_tx_clock_hz(&s->mcasp_control, 1,
+                cdj_c6747_pll_auxclk_hz(), CDJ_C6747_MCASP_AFSX,
+                &frame_num, &frame_den) ||
+            !core_den || !frame_den ||
+            frame_num > UINT64_MAX / (slots * (uint64_t)core_den) ||
+            core_num > UINT64_MAX / frame_den) {
+            s->cpu.fault = "unsupported DSP-cycle McASP clock";
+            s->cpu.fault_pc = s->cpu.pc;
+            return false;
+        }
+        uint64_t slot_num = frame_num * slots * core_den;
+        uint64_t cycle_num = core_num * frame_den;
+        if (!slot_num || cycle_num < slot_num || cycle_num % slot_num) {
+            s->cpu.fault = "nonintegral DSP cycles per McASP slot";
+            s->cpu.fault_pc = s->cpu.pc;
+            return false;
+        }
+        uint64_t period = cycle_num / slot_num;
+        if (!s->mcasp_next_cycle || s->mcasp_cycle_period != period) {
+            info_report("nxs-c674x-audio-clock: SYSCLK1 cycles per McASP1 slot=%" PRIu64,
+                        period);
+            s->mcasp_cycle_period = period;
+            s->mcasp_next_cycle = s->cpu.cycles + period;
+            return true;
+        }
+        do {
+            if (!advance_functional_mcasp_slots(s)) goto slot_fault;
+            s->mcasp_next_cycle += period;
+        } while (s->cpu.cycles >= s->mcasp_next_cycle);
+        return true;
     }
+    if (s->cpu.packets % CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL)
+        return true;
     if (advance_functional_mcasp_slots(s)) return true;
+slot_fault:
     s->cpu.fault = s->tx_capture_failed ? "DSP transmit capture write failed" :
                    s->pcm_failed ? "DSP-paced WAV output failed or format changed" :
                    "unsupported functional McASP transmit slot";
@@ -1329,6 +1371,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     const char *virtual_audio = getenv("CDJ_NXS_DSP_VIRTUAL_MCASP");
+    const char *cycle_audio = getenv("CDJ_NXS_DSP_CYCLE_MCASP");
     const char *host_audio = getenv("CDJ_NXS_DSP_HOST_AUDIO");
     const char *pcm_wav = getenv("CDJ_NXS_DSP_PCM_WAV");
     const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
@@ -1358,8 +1401,11 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     s->functional_audio = audio && !strcmp(audio, "1");
     s->virtual_audio_clock = virtual_audio && !strcmp(virtual_audio, "1");
-    if (s->virtual_audio_clock && !s->functional_audio) {
-        error_report("nxs-c674x: virtual McASP requires functional audio");
+    s->cycle_audio_clock = cycle_audio && !strcmp(cycle_audio, "1");
+    if ((s->virtual_audio_clock || s->cycle_audio_clock) &&
+        (!s->functional_audio ||
+         (s->virtual_audio_clock && s->cycle_audio_clock))) {
+        error_report("nxs-c674x: select one McASP clock with functional audio");
         exit(EXIT_FAILURE);
     }
     if (s->virtual_audio_clock)
@@ -1438,6 +1484,8 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
         warn_report("nxs-c674x: functional SPLOOPD timing enabled; run is not cycle-validation evidence");
     if (s->virtual_audio_clock)
         warn_report("nxs-c674x: experimental virtual-time McASP batches enabled; not hardware or host-audio validation");
+    else if (s->cycle_audio_clock)
+        warn_report("nxs-c674x: experimental SYSCLK1-cycle McASP slots enabled; QEMU host time remains independent");
     else if (s->functional_audio)
         warn_report("nxs-c674x: functional McASP slots every %u packets enabled; run is not audio-timing evidence",
                     CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL);
