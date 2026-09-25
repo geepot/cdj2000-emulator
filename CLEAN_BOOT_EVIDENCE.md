@@ -6,6 +6,13 @@ not robust startup with media. The trace shows MST published before a firmware
 status read-modify-write clears it. Investigation targets the MDE clock-stretch
 boundary before physical TX, not an arbitrary STOP delay or suppressed error.
 
+Current-binary follow-up `runs/agent-auth-repro-20260924` completed a 150-second
+mounted-SD boot with GUI exit 0 and no DSP fault. The trace contains genuine
+identity reads of register 0 as `0x05` and register 1 as `0x01`; the final
+screen has no E-7206 banner. Its default SD key pulse happened before media
+readiness, and the GUI displayed NO CARD, so this run does not prove browsing,
+loading, or robust authentication across repeated boots.
+
 Follow-up: explicit TX_READY now holds the shift-loaded byte while MDE remains
 set. No timer/event can transmit it or generate STOP until firmware clears MDE.
 This interpretation follows SH7764 section16.4.8 SCL hold and is corroborated
