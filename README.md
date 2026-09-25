@@ -116,6 +116,12 @@ WAV backend to `dsp-audio.wav` in the run directory. These modes are
 experimental and do not establish DSP instruction timing or connected PLAY
 output. See [the audio path review](analysis/dsp/nxs2-audio-path-review.md).
 
+For a WAV paced by DSP slot progression, add `--render-dsp-audio-wav` with
+`--functional-dsp-audio`. This writes every McASP1 stereo slot pair to
+`dsp-render.wav` at the firmware's configured 44.1 kHz format. With the
+default packet-based slot scheduler, its header rate labels the sample
+sequence; it does not measure real-time playback or drive speakers.
+
 Agents can control the same run without locating ports:
 
 ```sh

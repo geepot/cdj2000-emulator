@@ -258,6 +258,14 @@ def test_host_dsp_audio_requires_virtual_clock(monkeypatch):
     assert error.value.code == 2
 
 
+def test_dsp_pcm_render_requires_functional_audio(monkeypatch):
+    monkeypatch.setattr(nxs_vm.sys, 'argv',
+                        ['nxs_vm', 'unused', '--render-dsp-audio-wav'])
+    with pytest.raises(SystemExit) as error:
+        nxs_vm.main()
+    assert error.value.code == 2
+
+
 @pytest.mark.parametrize('interval,deferred,profile', [
     (0, False, False), (0.5, False, False), (0, True, False), (0, True, True),
 ])
@@ -304,10 +312,14 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     host_audio = virtual_clock and profile
     if host_audio:
         argv.append('--host-dsp-audio-wav')
+    pcm_render = not virtual_clock and profile
+    if pcm_render:
+        argv.extend(('--functional-dsp-audio', '--render-dsp-audio-wav'))
     if trace_link:
         argv.append('--trace-link-tx')
     monkeypatch.setattr(nxs_vm.sys, 'argv', argv)
     monkeypatch.setenv('CDJ_NXS_DSP_SCHEDULER', 'inherited-must-not-win')
+    monkeypatch.setenv('CDJ_NXS_DSP_PCM_WAV', '/inherited-must-not-win')
     monkeypatch.setenv('BFIN_LINK_FRESH_ONLY', 'inherited-must-not-win')
     monkeypatch.setenv('BFIN_SPORT_TX_OUTPUT', '/must/not/be/written')
     clock = [0.0]
@@ -352,6 +364,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
                 '1' if virtual_clock else None)
             assert kwargs['env'].get('CDJ_NXS_DSP_HOST_AUDIO') == (
                 '1' if host_audio else None)
+            assert kwargs['env'].get('CDJ_NXS_DSP_PCM_WAV') == (
+                str(tmp_path / 'run/dsp-render.wav') if pcm_render else None)
             assert ('-audiodev' in command) is host_audio
             if host_audio:
                 assert command[command.index('-audiodev') + 1] == (
@@ -380,9 +394,11 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     assert manifest['dsp_scheduler_mode'] == expected_scheduler
     assert manifest['dsp_legacy_budget_packets'] == (65536 if fast_dsp else 1000000)
     assert manifest['dsp_audio_clock'] == (
-        'virtual-clock-batch' if virtual_clock else 'stopped-clock')
+        'virtual-clock-batch' if virtual_clock else
+        'coarse-packet-slots' if pcm_render else 'stopped-clock')
     assert manifest['dsp_virtual_slice_packets'] == (4096 if virtual_clock else None)
     assert manifest['dsp_host_audio'] == ('dsp-audio.wav' if host_audio else None)
+    assert manifest['dsp_pcm_render'] == ('dsp-render.wav' if pcm_render else None)
     assert manifest['qemu_sync_profile']['enabled'] is profile
     assert ('-enable-sync-profile' in manifest['main']) is profile
     if profile:
@@ -392,7 +408,7 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
     else:
         collector.assert_not_called()
     assert manifest['architectural_validation_eligible'] is not (
-        deferred or fast_dsp or virtual_clock)
+        deferred or fast_dsp or virtual_clock or pcm_render)
     if virtual_clock:
         assert '4096-packet slices' in manifest['scheduling_provenance']
     elif deferred:

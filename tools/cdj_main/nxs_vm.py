@@ -521,7 +521,8 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
                            *, dsp_checkpoint_policy: str = 'all',
                            source_sha256_at_launch: dict[str, str] | None = None,
                            virtual_mcasp_clock: bool = False,
-                           host_dsp_audio_wav: bool = False) -> None:
+                           host_dsp_audio_wav: bool = False,
+                           render_dsp_audio_wav: bool = False) -> None:
     if dsp_checkpoint_policy not in {'all', 'fault'}:
         raise ValueError('DSP checkpoint policy must be all or fault')
     checkpoint_dir = run / 'dsp-checkpoints'
@@ -563,6 +564,7 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
         dsp_audio_mode=('virtual-clock-batch' if virtual_mcasp_clock else
                         'coarse-packet-slots' if functional_dsp_audio else 'stopped-clock'),
         dsp_host_audio=('dsp-audio.wav' if host_dsp_audio_wav else None),
+        dsp_pcm_render=('dsp-render.wav' if render_dsp_audio_wav else None),
         dsp_scheduler_mode=dsp_scheduler_mode,
         dsp_checkpoint_policy=dsp_checkpoint_policy,
         checkpoint_capture_complete=checkpoint_capture_complete,
@@ -628,6 +630,10 @@ def finalize_dsp_artifacts(run: Path, firmware: Path, functional_dsp_timing: boo
             *(['host WAV sink uses a bounded stereo ring and 50 ms prefill; '
                'its output is not proof of connected PLAY, audible device output, '
                'or sample-exact host timing'] if host_dsp_audio_wav else []),
+            *(['DSP-paced WAV records every McASP1 stereo slot pair at the firmware '
+               'configuration\'s nominal 44.1 kHz rate; the coarse packet scheduler '
+               'does not establish elapsed audio time or live speaker output']
+              if render_dsp_audio_wav else []),
             *(['deferred-v1 divides each bounded DSP activation into 4096-step QEMU timer slices; '
                'this host scheduling approximation is not a DSP timing fix, frequency model, or hardware proof']
               if dsp_scheduler_mode == 'deferred-v1' else [])])
@@ -741,6 +747,8 @@ def main():
                         help='experimental: batch McASP TX slots from QEMU virtual time at the configured McASP1 rate')
     parser.add_argument('--host-dsp-audio-wav', action='store_true',
                         help='experimental: write McASP1 stereo through the QEMU WAV audio backend')
+    parser.add_argument('--render-dsp-audio-wav', action='store_true',
+                        help='record McASP1 stereo slot pairs to a DSP-paced WAV at the configured nominal rate')
     parser.add_argument('--capture-dsp-tx', action='store_true',
                         help='capture genuine XBUF words consumed by McASP slot progression')
     parser.add_argument('--capture-dsp-tx-nonzero-only', action='store_true',
@@ -770,6 +778,8 @@ def main():
         parser.error('--virtual-mcasp-clock requires --functional-dsp-audio')
     if args.host_dsp_audio_wav and not args.virtual_mcasp_clock:
         parser.error('--host-dsp-audio-wav requires --virtual-mcasp-clock')
+    if args.render_dsp_audio_wav and not args.functional_dsp_audio:
+        parser.error('--render-dsp-audio-wav requires --functional-dsp-audio')
     if args.capture_dsp_tx_nonzero_only and not args.capture_dsp_tx:
         parser.error('--capture-dsp-tx-nonzero-only requires --capture-dsp-tx')
     try:
@@ -998,6 +1008,9 @@ def main():
         main_env['CDJ_NXS_DSP_VIRTUAL_MCASP'] = '1'
     if args.host_dsp_audio_wav:
         main_env['CDJ_NXS_DSP_HOST_AUDIO'] = '1'
+    main_env.pop('CDJ_NXS_DSP_PCM_WAV', None)
+    if args.render_dsp_audio_wav:
+        main_env['CDJ_NXS_DSP_PCM_WAV'] = str(run / 'dsp-render.wav')
     main_env.pop('CDJ_NXS_DSP_TX_CAPTURE_NONZERO_ONLY', None)
     if args.capture_dsp_tx:
         main_env['CDJ_NXS_DSP_TX_CAPTURE'] = str(run / 'dsp-tx.jsonl')
@@ -1069,6 +1082,7 @@ def main():
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
                          'coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
         dsp_host_audio=('dsp-audio.wav' if args.host_dsp_audio_wav else None),
+        dsp_pcm_render=('dsp-render.wav' if args.render_dsp_audio_wav else None),
         dsp_legacy_budget_packets=dsp_legacy_budget,
         dsp_virtual_slice_packets=4096 if args.virtual_mcasp_clock else None,
         dsp_sdram=dict(physical_bytes=0x02000000,
@@ -1220,7 +1234,8 @@ def main():
                                            dsp_checkpoint_policy=('fault' if args.lightweight else 'all'),
                                            source_sha256_at_launch=run_manifest['dsp_source_sha256_at_launch'],
                                            virtual_mcasp_clock=args.virtual_mcasp_clock,
-                                           host_dsp_audio_wav=args.host_dsp_audio_wav)
+                                           host_dsp_audio_wav=args.host_dsp_audio_wav,
+                                           render_dsp_audio_wav=args.render_dsp_audio_wav)
             except (OSError, ValueError, RuntimeError) as error:
                 result['finalization_error'] = str(error)
             write_json(run / 'result.json', result)

@@ -82,6 +82,11 @@ typedef struct {
     int16_t audio_left;
     bool audio_have_left, audio_priming;
     uint64_t audio_in, audio_out, audio_underruns, audio_dropped;
+    FILE *pcm_wav;
+    Notifier pcm_shutdown;
+    uint64_t pcm_frames, pcm_nonzero_frames;
+    int16_t pcm_left;
+    bool pcm_have_left, pcm_failed;
     unsigned boot_phase;
     uint64_t words;
     uint64_t event_sequence, checkpoint_sequence;
@@ -221,6 +226,70 @@ static void nxs_audio_shutdown(Notifier *notifier, void *opaque)
     s->audio_backend = NULL;
 }
 
+static bool nxs_pcm_header(FILE *file, uint32_t frames)
+{
+    uint32_t data_size = frames * 4u;
+    uint8_t header[44] = {
+        'R','I','F','F', 0,0,0,0, 'W','A','V','E', 'f','m','t',' ',
+        16,0,0,0, 1,0, 2,0, 0,0,0,0, 0,0,0,0, 4,0, 16,0,
+        'd','a','t','a', 0,0,0,0,
+    };
+    stl_le_p(header + 4, data_size + 36u);
+    stl_le_p(header + 24, NXS_AUDIO_RATE);
+    stl_le_p(header + 28, NXS_AUDIO_RATE * 4u);
+    stl_le_p(header + 40, data_size);
+    return fseek(file, 0, SEEK_SET) == 0 &&
+           fwrite(header, 1, sizeof(header), file) == sizeof(header);
+}
+
+/* Write one frame per McASP1 serializer-0 slot pair. The file records DSP
+ * progression at the firmware's nominal 44.1 kHz format; its wall-clock
+ * playback duration is not a measurement of the coarse packet scheduler. */
+static bool nxs_pcm_word(NxsHpi *s, unsigned slot, uint32_t word)
+{
+    int16_t sample = (int16_t)((int32_t)word >> 16);
+    if (slot == 0) {
+        s->pcm_left = sample;
+        s->pcm_have_left = true;
+        return true;
+    }
+    if (slot != 1 || !s->pcm_have_left) return true;
+    s->pcm_have_left = false;
+    uint64_t numerator;
+    uint32_t denominator;
+    if ((s->mcasp_control.afsxctl[1] >> 7) != 2 ||
+        !cdj_c6747_mcasp_tx_clock_hz(&s->mcasp_control, 1,
+            cdj_c6747_pll_auxclk_hz(), CDJ_C6747_MCASP_AFSX,
+            &numerator, &denominator) ||
+        numerator != (uint64_t)NXS_AUDIO_RATE * denominator)
+        return false;
+    if (s->pcm_frames >= (UINT32_MAX - 36u) / 4u) return false;
+    uint8_t frame[4];
+    stw_le_p(frame, (uint16_t)s->pcm_left);
+    stw_le_p(frame + 2, (uint16_t)sample);
+    if (fwrite(frame, 1, sizeof(frame), s->pcm_wav) != sizeof(frame))
+        return false;
+    ++s->pcm_frames;
+    s->pcm_nonzero_frames += (s->pcm_left != 0 || sample != 0);
+    return true;
+}
+
+static void nxs_pcm_shutdown(Notifier *notifier, void *opaque)
+{
+    NxsHpi *s = container_of(notifier, NxsHpi, pcm_shutdown);
+    if (!s->pcm_wav) return;
+    bool ok = !s->pcm_failed &&
+              nxs_pcm_header(s->pcm_wav, (uint32_t)s->pcm_frames);
+    if (fclose(s->pcm_wav)) ok = false;
+    if (!ok)
+        error_report("nxs-c674x: DSP-paced WAV incomplete");
+    else
+        info_report("nxs-c674x: DSP-paced WAV frames=%" PRIu64
+                    " nonzero=%" PRIu64,
+                    s->pcm_frames, s->pcm_nonzero_frames);
+    s->pcm_wav = NULL;
+}
+
 static bool capture_checkpoint(NxsHpi *s, const char *reason)
 {
     const char *policy = getenv("CDJ_NXS_DSP_CHECKPOINT_POLICY");
@@ -316,6 +385,7 @@ void cdj_nxs_hpi_reset_line(bool released)
         s->mcasp_phase = s->mcasp_debt = 0;
         s->mcasp_last_report_ns = 0;
         s->mcasp_have_report = false;
+        s->pcm_have_left = false;
         if (s->audio_voice) {
             qemu_mutex_lock(&s->audio_lock);
             s->audio_rd = s->audio_wr = s->audio_fill = 0;
@@ -671,14 +741,24 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         s->edma = trial_edma;
         s->mcasp_control = trial_mcasp;
         deliver_edma_notifications(s);
-        if (s->tx_capture || s->audio_voice) {
+        if (s->tx_capture || s->audio_voice || s->pcm_wav) {
             for (unsigned instance = 1; instance <= 2; ++instance) {
                 for (unsigned serializer = 0; serializer < 16; ++serializer) {
-                    if (s->audio_voice && instance == 1 && serializer == 0 &&
+                    if ((s->audio_voice || s->pcm_wav) &&
+                        instance == 1 && serializer == 0 &&
                         (trial_mcasp.gblctl[1] & 0x1f00u) == 0x1f00u &&
-                        (trial_mcasp.srctl[1][0] & 3u) == 1u)
-                        nxs_audio_word(s, trial_mcasp.xslot[1],
-                                       trial_mcasp.xrsr[1][0]);
+                        (trial_mcasp.srctl[1][0] & 3u) == 1u) {
+                        if (s->audio_voice)
+                            nxs_audio_word(s, trial_mcasp.xslot[1],
+                                           trial_mcasp.xrsr[1][0]);
+                        if (s->pcm_wav &&
+                            !nxs_pcm_word(s, trial_mcasp.xslot[1],
+                                          trial_mcasp.xrsr[1][0])) {
+                            s->pcm_failed = true;
+                            ok = false;
+                            break;
+                        }
+                    }
                     uint64_t sequence = trial_mcasp.xrsr_source_sequence[instance][serializer];
                     if (!sequence || sequence ==
                         original_mcasp.xrsr_source_sequence[instance][serializer])
@@ -739,6 +819,7 @@ static bool functional_audio_tick(NxsHpi *s)
     }
     if (advance_functional_mcasp_slots(s)) return true;
     s->cpu.fault = s->tx_capture_failed ? "DSP transmit capture write failed" :
+                   s->pcm_failed ? "DSP-paced WAV output failed or format changed" :
                    "unsupported functional McASP transmit slot";
     s->cpu.fault_pc = s->cpu.pc;
     s->cpu.fault_word = 0;
@@ -1123,6 +1204,8 @@ static void virtual_audio_tick(void *opaque)
             if (!advance_functional_mcasp_slots(s)) {
                 s->cpu.fault = s->tx_capture_failed ?
                     "DSP transmit capture write failed" :
+                    s->pcm_failed ?
+                    "DSP-paced WAV output failed or format changed" :
                     "unsupported virtual McASP transmit slot";
                 s->cpu.fault_pc = s->cpu.pc;
                 s->cpu.fault_word = 0;
@@ -1247,6 +1330,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     const char *virtual_audio = getenv("CDJ_NXS_DSP_VIRTUAL_MCASP");
     const char *host_audio = getenv("CDJ_NXS_DSP_HOST_AUDIO");
+    const char *pcm_wav = getenv("CDJ_NXS_DSP_PCM_WAV");
     const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
     const char *fault_history = getenv("CDJ_NXS_DSP_FAULT_HISTORY");
     if (fault_history && *fault_history)
@@ -1280,6 +1364,21 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     }
     if (s->virtual_audio_clock)
         s->mcasp_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, virtual_audio_tick, s);
+    if (pcm_wav && *pcm_wav) {
+        if (!s->functional_audio) {
+            error_report("nxs-c674x: DSP-paced WAV requires functional audio");
+            exit(EXIT_FAILURE);
+        }
+        s->pcm_wav = fopen(pcm_wav, "wb+");
+        if (!s->pcm_wav || !nxs_pcm_header(s->pcm_wav, 0)) {
+            error_report("nxs-c674x: cannot open DSP-paced WAV %s", pcm_wav);
+            exit(EXIT_FAILURE);
+        }
+        s->pcm_shutdown.notify = nxs_pcm_shutdown;
+        qemu_register_shutdown_notifier(&s->pcm_shutdown);
+        info_report("nxs-c674x: McASP1 serializer 0 -> DSP-paced stereo WAV %s",
+                    pcm_wav);
+    }
     if (host_audio && !strcmp(host_audio, "1")) {
         if (!s->virtual_audio_clock) {
             error_report("nxs-c674x: host audio requires virtual McASP clock");
