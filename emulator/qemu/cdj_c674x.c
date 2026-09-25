@@ -3527,6 +3527,22 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     bool written[2][32] = {{false}}, controls[32] = {false};
     if (cpu->fault) return false;
     if (packet->count > 8) return stop(cpu, cpu->pc, 0, "execute packet exceeds eight instructions");
+    /* SPRUFE8B 3.8.11.5 and 3.8.11.9 forbid NOP n (n > 1) in
+     * parallel with SPMASK. Check the whole packet before executing any
+     * member so the rejection is atomic in either instruction order. */
+    bool seen_spmask = false, seen_multicycle_nop = false;
+    for (unsigned i = 0; i < packet->count; ++i) {
+        const CdjC674xInstruction *insn = &packet->instructions[i];
+        unsigned mask;
+        unsigned nop = nop_cycles(insn);
+        bool spmask = spmask_decode(insn, &mask);
+        if ((spmask && seen_multicycle_nop) ||
+            (nop > 1 && nop <= 9 && seen_spmask))
+            return stop(cpu, insn->pc, insn->word,
+                        "NOP n cannot share SPMASK packet");
+        seen_spmask |= spmask;
+        seen_multicycle_nop |= nop > 1 && nop <= 9;
+    }
     for (unsigned i = 0; i < packet->count; ++i) {
         const CdjC674xInstruction *insn = &packet->instructions[i];
         uint32_t w = insn->word, pc = insn->pc, value = 0;

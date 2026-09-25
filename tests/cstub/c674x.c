@@ -304,6 +304,29 @@ static void test_equal_count_parallel_nops(void)
     assert(c.cycles == 0);
 }
 
+/* SPRUFE8B 3.8.11.5/9 prohibit NOP n (n > 1) alongside SPMASK.
+ * Both orders must fail before an earlier packet member changes the CPU. */
+static void test_multicycle_nop_spmask_conflict(void)
+{
+    CdjC674x c;
+    for (unsigned order = 0; order < 2; ++order) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[order] = 0x00030000u | (order ? 0u : 1u); /* SPMASK 0 */
+        memory[order ^ 1] = 0x00006000u | (order ? 1u : 0u); /* NOP 4 */
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.fault && !strcmp(c.fault,
+                                  "NOP n cannot share SPMASK packet"));
+        assert(c.cycles == 0 && c.pc == 0x1000);
+    }
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0x00030001u; /* SPMASK 0 || */
+    memory[1] = 0;           /* NOP 1 */
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 1 && c.pc == 0x1008);
+}
+
 /* SPRUFE8B IDLE, printed page 274: opcode bits 16-13 = 1111 with every other
  * bit zero except p, i.e. 0001E000 - confirmed by asm6x, which assembles IDLE
  * to 0001E000 and IDLE || NOP to 0001E001 / 00000000.  Description, verbatim:
@@ -612,6 +635,7 @@ int main(void)
     test_protected_fetch_packet_expands_once();
     test_protected_loop_body_expands_once();
     test_equal_count_parallel_nops();
+    test_multicycle_nop_spmask_conflict();
     test_idle_waits_for_an_interrupt_or_a_branch();
     CdjC674x c;
     /* Board clocks advance on every cycle, including PROT/NOP delays;
