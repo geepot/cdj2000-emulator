@@ -34,6 +34,7 @@ the section it supersedes.
 | T64P0/1 TINT12, TINT34 and CMPINT0-7 reach the INTC from `cdj_c6747_timer.c` and appear as CPU interrupts, so 22 of Table 2-1's events are generated instead of 2 | *wave 4, `timer-events`* | §5.5, `IC-DEV-EVENT-SOURCES` |
 | Timer64P review fixes: the PSC34 prescale counter no longer advances while `ENAMODE34 = 0`; Read Reset Mode now captures TIM12/TIM34 into CAP12/CAP34 and reloads PRDn from RELn at `ENAMODEn = 3h`, and is confined to 32-bit unchained mode; chained mode reloads PRD34 from REL34. The step-to-tick approximation is now declared in the **QEMU board** manifest too, not only the replay manifest | *wave 4 review* | §0.2 |
 | Wave 5: 91 of the 115 unimplemented rows implemented across six pure semantics files (dot products, packed 8-bit, packed 16-bit, pack/shuffle/bit-manipulation, 32-bit multiply with Galois and 40-bit long forms, double-precision). Probe: not-implemented 115 -> 24, fully accepted 120 -> 211, partially rejected 8 -> 0. **The 15 double-precision rows carry a validation caveat - see §0.4** | `4d484a0` | §5, §10 |
+| Predicated full-width `SPLOOP` plus `SPKERNELR` now reloads immediately from RILC, with simultaneous prior-epilog and new-prolog issue, four-cycle predicate history, post-body fetch windows and branch delay completion. Tests include TI Example 7-15's schedule. Zero/short reload counts, SPLOOPD/SPMASKR, and interrupt restart remain outside this subset. | *this change* | `LOOP-RELOAD` (partial) |
 
 Measured after those five commits, by the same tools:
 
