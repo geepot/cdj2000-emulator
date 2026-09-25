@@ -401,7 +401,7 @@ Copy the board file and pass `--board` if you need it elsewhere.
 
 ## macOS migration
 
-The `codex/macos-nxs` branch is bringing this project to macOS. Install Xcode
+The `develop` branch carries the macOS migration. Install Xcode
 Command Line Tools and Homebrew `make`, `gmp`, and `mpfr` before running
 `scripts/build-bfin-sim.sh`. On macOS the script uses `gmake`, BSD-compatible
 tar arguments, system zlib and Homebrew's arithmetic libraries. `CDJ_MAKE`

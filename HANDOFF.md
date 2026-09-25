@@ -1,7 +1,7 @@
 # macOS emulator handoff
 
 Development repository: `git@github.com:geepot/cdj2000-emulator.git`, branch
-`codex/macos-nxs`. Parent research repository:
+`develop`. Parent research repository:
 `https://github.com/geepot/cdj2000nxs-research.git`, branch `master`.
 Keep the layout `CDJ/references/geepot-cdj2000-emulator` when practical.
 The parent prototype remains useful evidence; this fork is the active emulator.
