@@ -2695,7 +2695,10 @@ static bool arm_dp_convert(CdjC674xArm *x)
      *
      * All three name the ODD register of the source pair, for the same
      * reason ABSDP does: "the operand is read in one cycle by using the src2
-     * port for the 32 MSBs and the src1 port for the 32 LSBs". */
+     * port for the 32 MSBs and the src1 port for the 32 LSBs".  TI asm6x
+     * emits zero in the encoded src1 field even for nonzero pairs; older GNU
+     * tic6x puts the even register number there.  Both select b:b-1, so do
+     * not use the encoded a field to locate the low word. */
     unsigned encoding = x->w & 0xffc;
     if (!(x->b & 1))
         return stop(x->cpu, x->pc, x->insn->word,
@@ -3382,9 +3385,9 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x00000700, NULL,                  arm_mpydp },
     { 0x00000ffc, 0x000005b0, NULL,                  arm_mpydp },
     { 0x00000ffc, 0x000005f0, NULL,                  arm_mpydp },
-    { 0x0003effc, 0x00000138, NULL,                  arm_dp_convert },
-    { 0x0003effc, 0x00000118, NULL,                  arm_dp_convert },
-    { 0x0003effc, 0x00000038, NULL,                  arm_dp_convert },
+    { 0x00000ffc, 0x00000138, NULL,                  arm_dp_convert },
+    { 0x00000ffc, 0x00000118, NULL,                  arm_dp_convert },
+    { 0x00000ffc, 0x00000038, NULL,                  arm_dp_convert },
     { 0x0003effc, 0x00000738, NULL,                  arm_intdp },
     { 0x0003effc, 0x00000778, NULL,                  arm_intdp },
     /* wave5-rows: 32-bit multiply, Galois, dual-result and 40-bit long forms */
