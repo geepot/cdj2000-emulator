@@ -371,6 +371,16 @@ static bool spmask_decode(const CdjC674xInstruction *insn, unsigned *mask)
     return false;
 }
 
+/* SPRUFE8B SPMASKR, printed page 489: outside SPLOOP it is a NOP. Its
+ * within-loop mask and delayed reload semantics remain separate and must not
+ * fall through to that idle-buffer behavior. */
+static bool spmaskr_decode(const CdjC674xInstruction *insn)
+{
+    uint32_t w = insn->word;
+    return insn->compact ? (w & 0x3c7eu) == 0x3c66u :
+           (w & 0xfc03fffeu) == 0x00032000u;
+}
+
 /* Format-level unit classification (SPRUFE8B appendices C-G). Zero means
  * unknown: never infer that an unknown operation is safe to mask or replay.
  * This classifies units, not opcode validity; execution still validates ISA. */
@@ -2696,7 +2706,10 @@ static bool arm_dp_convert(CdjC674xArm *x)
      *
      * All three name the ODD register of the source pair, for the same
      * reason ABSDP does: "the operand is read in one cycle by using the src2
-     * port for the 32 MSBs and the src1 port for the 32 LSBs". */
+     * port for the 32 MSBs and the src1 port for the 32 LSBs".  TI asm6x
+     * emits zero in the encoded src1 field even for nonzero pairs; older GNU
+     * tic6x puts the even register number there.  Both select b:b-1, so do
+     * not use the encoded a field to locate the low word. */
     unsigned encoding = x->w & 0xffc;
     if (!(x->b & 1))
         return stop(x->cpu, x->pc, x->insn->word,
@@ -3421,9 +3434,9 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x00000700, NULL,                  arm_mpydp },
     { 0x00000ffc, 0x000005b0, NULL,                  arm_mpydp },
     { 0x00000ffc, 0x000005f0, NULL,                  arm_mpydp },
-    { 0x0003effc, 0x00000138, NULL,                  arm_dp_convert },
-    { 0x0003effc, 0x00000118, NULL,                  arm_dp_convert },
-    { 0x0003effc, 0x00000038, NULL,                  arm_dp_convert },
+    { 0x00000ffc, 0x00000138, NULL,                  arm_dp_convert },
+    { 0x00000ffc, 0x00000118, NULL,                  arm_dp_convert },
+    { 0x00000ffc, 0x00000038, NULL,                  arm_dp_convert },
     { 0x0003effc, 0x00000738, NULL,                  arm_intdp },
     { 0x0003effc, 0x00000778, NULL,                  arm_intdp },
     /* wave5-rows: 32-bit multiply, Galois, dual-result and 40-bit long forms */
@@ -3565,14 +3578,30 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     bool written[2][32] = {{false}}, controls[32] = {false};
     if (cpu->fault) return false;
     if (packet->count > 8) return stop(cpu, cpu->pc, 0, "execute packet exceeds eight instructions");
+    /* SPRUFE8B 3.8.11.5 and 3.8.11.9 forbid NOP n (n > 1) in
+     * parallel with SPMASK. Check the whole packet before executing any
+     * member so the rejection is atomic in either instruction order. */
+    bool seen_spmask = false, seen_multicycle_nop = false;
+    for (unsigned i = 0; i < packet->count; ++i) {
+        const CdjC674xInstruction *insn = &packet->instructions[i];
+        unsigned mask;
+        unsigned nop = nop_cycles(insn);
+        bool spmask = spmask_decode(insn, &mask) || spmaskr_decode(insn);
+        if ((spmask && seen_multicycle_nop) ||
+            (nop > 1 && nop <= 9 && seen_spmask))
+            return stop(cpu, insn->pc, insn->word,
+                        "NOP n cannot share SPMASK(R) packet");
+        seen_spmask |= spmask;
+        seen_multicycle_nop |= nop > 1 && nop <= 9;
+    }
     for (unsigned i = 0; i < packet->count; ++i) {
         const CdjC674xInstruction *insn = &packet->instructions[i];
         uint32_t w = insn->word, pc = insn->pc, value = 0;
         bool compact = insn->compact;
         unsigned ignored_mask;
-        if (spmask_decode(insn, &ignored_mask)) {
-            if (i) return stop(cpu, pc, w, "SPMASK must start packet");
-            continue; /* Idle loop buffer: SPMASK is a NOP, section 7.15. */
+        if (spmask_decode(insn, &ignored_mask) || spmaskr_decode(insn)) {
+            if (i) return stop(cpu, pc, w, "SPMASK(R) must start packet");
+            continue; /* Idle loop buffer: SPMASK(R) is a NOP. */
         }
         unsigned nop = nop_cycles(insn);
         if (nop) {
@@ -4466,6 +4495,9 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
             CdjC674xInstruction insn = source.instructions[i];
             uint32_t w = insn.word;
             unsigned mask;
+            if (spmaskr_decode(&insn))
+                return stop(cpu, insn.pc, w,
+                            "SPMASKR reload not implemented");
             if (spmask_decode(&insn, &mask)) {
                 if (i) return stop(cpu, insn.pc, w, "SPMASK must start packet");
                 continue;
@@ -4638,6 +4670,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         bool has_mask = spmask_decode(&source.instructions[0], &masking.mask);
         for (unsigned i = has_mask ? 1 : 0; i < source.count; ++i) {
             unsigned mask;
+            if (spmaskr_decode(&source.instructions[i]))
+                return stop(cpu, source.instructions[i].pc,
+                            source.instructions[i].word,
+                            "SPMASKR reload not implemented");
             if (spmask_decode(&source.instructions[i], &mask))
                 return stop(cpu, source.instructions[i].pc, source.instructions[i].word,
                             "SPMASK must start packet");
