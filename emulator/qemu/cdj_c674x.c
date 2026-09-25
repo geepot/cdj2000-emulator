@@ -2782,6 +2782,12 @@ static bool match_mpy2_gmpy4(const CdjC674xArm *x)
            op == 0x11;                   /* GMPY4, printed page 272 */
 }
 
+static bool match_gmpy_word(const CdjC674xArm *x)
+{
+    unsigned op = (x->w >> 6) & 31u;
+    return op == 0x1bu || op == 0x1fu; /* XORMPY / GMPY, Figure E-3 */
+}
+
 /* Queue one already-computed delayed result, rejecting a same-cycle overlap
  * with another delayed write to the same registers exactly as the existing .M
  * arms do.  count is 1 for a scalar result and 2 for a register pair. */
@@ -2802,6 +2808,21 @@ static bool queue_delayed_result(CdjC674xArm *x, uint64_t due, uint64_t value,
         .due = due, .value = value, .bank = x->side, .dst = dst,
         .size = count == 2 ? 16u : 0u
     };
+    return true;
+}
+
+static bool arm_gmpy_word(CdjC674xArm *x)
+{
+    /* Figure E-3's unconditional GMPY and XORMPY use the M1/M2 polynomial
+     * register (GPLYA/GPLYB) or zero respectively.  Both write in E4. */
+    unsigned op = (x->w >> 6) & 31u;
+    x->reg_write = false;
+    if (x->enabled) {
+        uint32_t poly = op == 0x1fu ? x->cpu->control[22 + x->side] : 0u;
+        uint32_t value = cdj_c674x_gmpy_word(x->cpu->r[x->side][x->a],
+                                              x->cpu->r[x->cross][x->b], poly);
+        return queue_delayed_result(x, x->cpu->cycles + 4, value, x->dst, 1);
+    }
     return true;
 }
 
@@ -3398,6 +3419,7 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     /* wave5-rows: 32-bit multiply, Galois, dual-result and 40-bit long forms */
     { 0x0000007c, 0x00000000, match_mpyi,            arm_mpyi },
     { 0x0000083c, 0x00000030, match_mpy2_gmpy4,      arm_mpy2_gmpy4 },
+    { 0xf000083c, 0x10000030, match_gmpy_word,       arm_gmpy_word },
     { 0x00000ffc, 0x00000ef0, NULL,                  arm_dmv },
     { 0x0003effc, 0x00000818, NULL,                  arm_sat40 },
     { 0x00000ffc, 0x00000978, NULL,                  arm_subc },

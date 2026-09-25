@@ -209,14 +209,14 @@ def test_control_register_reachability_and_reserved_bits(tmp_path):
     result = control(_sweep("control", tmp_path))
     assert result["ids_swept"] == 32
     # AMR CSR IFR IER ISTP IRP NRP TSCL TSCH ILC RILC FADCR FAUCR FMCR SSR
-    # GFPGFR TSR ITSR. TI dis6x independently encodes TSCL as id 10 (0x022803e2)
+    # GPLYA GPLYB GFPGFR TSR ITSR. TI dis6x independently encodes TSCL as id 10 (0x022803e2)
     # and TSCH as id 11 (0x002c03e2).
     assert result["readable_ids"] == [0, 1, 2, 4, 5, 6, 7, 10, 11, 13, 14,
-                                      18, 19, 20, 21, 24, 26, 27]
+                                      18, 19, 20, 21, 22, 23, 24, 26, 27]
     # ISR (3) is write-only; TSCL (10) is the exceptional nominally read-only
     # register whose ignored-value write enables the timestamp counter.
     assert result["writable_ids"] == [0, 1, 2, 3, 4, 5, 6, 7, 10, 13, 14,
-                                      18, 19, 20, 21, 24, 26, 27]
+                                      18, 19, 20, 21, 22, 23, 24, 26, 27]
 
     masks = result["rows"]
     # IRP, NRP, ILC and RILC are full 32-bit registers with no reserved field

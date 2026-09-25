@@ -77,6 +77,22 @@ uint32_t cdj_c674x_gmpy4(uint32_t src1, uint32_t src2, unsigned poly,
     return result;
 }
 
+uint32_t cdj_c674x_gmpy_word(uint32_t src1, uint32_t src2, uint32_t poly)
+{
+    /* SPRUFE8B GMPY execution pseudocode, printed page 270.  Eight shifts
+     * process multiplier bits 8..1; the final XOR handles bit 0.  Unsigned
+     * shifts give the specified low 32 bits without C signed overflow. */
+    uint32_t product = 0;
+    for (unsigned bit = 8; bit != 0; --bit) {
+        if (src2 & (1u << bit)) product ^= src1;
+        bool carry = (product & 0x80000000u) != 0;
+        product <<= 1;
+        if (carry) product ^= poly;
+    }
+    if (src2 & 1u) product ^= src1;
+    return product;
+}
+
 uint32_t cdj_c674x_sat40(uint64_t src2, bool *saturated)
 {
     /* SAT, printed page 437: "if (src2 > (2^31 - 1)), (2^31 - 1) -> dst;

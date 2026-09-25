@@ -52,10 +52,8 @@ static int m_unit_op(unsigned op)
     switch (op) {
     case 0x1b: /* XORMPY,   printed page 566 */
     case 0x1f: /* GMPY,     printed page 270 */
-        return M_UNIMPLEMENTED;
-    /* These eight have semantics in cdj_c674x_dotp.c and a dispatch row of
-     * their own, so they are routed to the caller's arm table rather than
-     * refused. */
+        return M_ARM_TABLE;
+    /* The remaining implemented .M operations also route to their arm rows. */
     case 0x0a: /* CMPY,     printed page 215 */
     case 0x0b: /* CMPYR,    printed page 217 */
     case 0x0c: /* CMPYR1,   printed page 219 */
