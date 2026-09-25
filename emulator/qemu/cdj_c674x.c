@@ -371,6 +371,16 @@ static bool spmask_decode(const CdjC674xInstruction *insn, unsigned *mask)
     return false;
 }
 
+/* SPRUFE8B SPMASKR, printed page 489: outside SPLOOP it is a NOP. Its
+ * within-loop mask and delayed reload semantics remain separate and must not
+ * fall through to that idle-buffer behavior. */
+static bool spmaskr_decode(const CdjC674xInstruction *insn)
+{
+    uint32_t w = insn->word;
+    return insn->compact ? (w & 0x3c7eu) == 0x3c66u :
+           (w & 0xfc03fffeu) == 0x00032000u;
+}
+
 /* Format-level unit classification (SPRUFE8B appendices C-G). Zero means
  * unknown: never infer that an unknown operation is safe to mask or replay.
  * This classifies units, not opcode validity; execution still validates ISA. */
@@ -3535,11 +3545,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         const CdjC674xInstruction *insn = &packet->instructions[i];
         unsigned mask;
         unsigned nop = nop_cycles(insn);
-        bool spmask = spmask_decode(insn, &mask);
+        bool spmask = spmask_decode(insn, &mask) || spmaskr_decode(insn);
         if ((spmask && seen_multicycle_nop) ||
             (nop > 1 && nop <= 9 && seen_spmask))
             return stop(cpu, insn->pc, insn->word,
-                        "NOP n cannot share SPMASK packet");
+                        "NOP n cannot share SPMASK(R) packet");
         seen_spmask |= spmask;
         seen_multicycle_nop |= nop > 1 && nop <= 9;
     }
@@ -3548,9 +3558,9 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         uint32_t w = insn->word, pc = insn->pc, value = 0;
         bool compact = insn->compact;
         unsigned ignored_mask;
-        if (spmask_decode(insn, &ignored_mask)) {
-            if (i) return stop(cpu, pc, w, "SPMASK must start packet");
-            continue; /* Idle loop buffer: SPMASK is a NOP, section 7.15. */
+        if (spmask_decode(insn, &ignored_mask) || spmaskr_decode(insn)) {
+            if (i) return stop(cpu, pc, w, "SPMASK(R) must start packet");
+            continue; /* Idle loop buffer: SPMASK(R) is a NOP. */
         }
         unsigned nop = nop_cycles(insn);
         if (nop) {
@@ -4440,6 +4450,9 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
             CdjC674xInstruction insn = source.instructions[i];
             uint32_t w = insn.word;
             unsigned mask;
+            if (spmaskr_decode(&insn))
+                return stop(cpu, insn.pc, w,
+                            "SPMASKR reload not implemented");
             if (spmask_decode(&insn, &mask)) {
                 if (i) return stop(cpu, insn.pc, w, "SPMASK must start packet");
                 continue;
@@ -4612,6 +4625,10 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
         bool has_mask = spmask_decode(&source.instructions[0], &masking.mask);
         for (unsigned i = has_mask ? 1 : 0; i < source.count; ++i) {
             unsigned mask;
+            if (spmaskr_decode(&source.instructions[i]))
+                return stop(cpu, source.instructions[i].pc,
+                            source.instructions[i].word,
+                            "SPMASKR reload not implemented");
             if (spmask_decode(&source.instructions[i], &mask))
                 return stop(cpu, source.instructions[i].pc, source.instructions[i].word,
                             "SPMASK must start packet");

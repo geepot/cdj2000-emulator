@@ -316,7 +316,7 @@ static void test_multicycle_nop_spmask_conflict(void)
         memory[order ^ 1] = 0x00006000u | (order ? 1u : 0u); /* NOP 4 */
         assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
         assert(c.fault && !strcmp(c.fault,
-                                  "NOP n cannot share SPMASK packet"));
+                                  "NOP n cannot share SPMASK(R) packet"));
         assert(c.cycles == 0 && c.pc == 0x1000);
     }
     memset(memory, 0, sizeof(memory));
@@ -325,6 +325,47 @@ static void test_multicycle_nop_spmask_conflict(void)
     memory[1] = 0;           /* NOP 1 */
     assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
     assert(c.cycles == 1 && c.pc == 0x1008);
+}
+
+/* SPRUFE8B SPMASKR, printed page 489: an SPMASKR outside the software-loop
+ * mechanism is a NOP; an active-loop reload must not be silently discarded. */
+static void test_spmaskr_outside_loop(void)
+{
+    CdjC674x c;
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0x00032000u; /* SPMASKR 0 */
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 1 && c.pc == 0x1004 && !c.loop_active);
+
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    memory[0] = 0x00032001u; /* SPMASKR 0 || NOP 1 */
+    memory[1] = 0;
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.cycles == 1 && c.pc == 0x1008);
+
+    for (unsigned order = 0; order < 2; ++order) {
+        memset(memory, 0, sizeof(memory));
+        cdj_c674x_reset(&c, 0x1000);
+        memory[order] = 0x00032000u | (order ? 0u : 1u);
+        memory[order ^ 1] = 0x00006000u | (order ? 1u : 0u); /* NOP 4 */
+        assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+        assert(c.fault && !strcmp(c.fault,
+                                  "NOP n cannot share SPMASK(R) packet"));
+        assert(c.cycles == 0 && c.pc == 0x1000);
+    }
+
+    memset(memory, 0, sizeof(memory));
+    cdj_c674x_reset(&c, 0x1000);
+    c.control[13] = 3;
+    memory[0] = 0x00038000u; /* SPLOOP 1 */
+    memory[1] = 0x00032000u; /* active-loop SPMASKR reload */
+    assert(cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(!cdj_c674x_step(&c, read_word, write_memory, NULL));
+    assert(c.fault && !strcmp(c.fault,
+                              "SPMASKR reload not implemented"));
+    assert(c.cycles == 1);
 }
 
 /* SPRUFE8B IDLE, printed page 274: opcode bits 16-13 = 1111 with every other
@@ -636,6 +677,7 @@ int main(void)
     test_protected_loop_body_expands_once();
     test_equal_count_parallel_nops();
     test_multicycle_nop_spmask_conflict();
+    test_spmaskr_outside_loop();
     test_idle_waits_for_an_interrupt_or_a_branch();
     CdjC674x c;
     /* Board clocks advance on every cycle, including PROT/NOP delays;
