@@ -914,3 +914,82 @@ def test_a_closed_channel_raises_rather_than_silently_dropping_a_press():
     finally:
         panel.close()
         listener.close()
+
+
+def test_state_lamps_and_press_ids_parse():
+    reply = ("ok state frames=12 commands=3 queue=0 phase=idle held=00 "
+             "level_mask=00 level_value=00 a0=-0/0 sd_lid=raw "
+             "lamps=CUE:on,PLAY_PAUSE:blink,SOURCE_SD:3 last_press=4:100-103")
+    state = panel_control.parse_state(reply)
+    assert state["last_press"] == "4:100-103"
+    assert panel_control.lamps_of(state) == {
+        "CUE": "on", "PLAY_PAUSE": "blink", "SOURCE_SD": "3"}
+    assert panel_control.lamps_of({"lamps": "-"}) == {}
+    assert panel_control.press_id_of("ok press id=17") == 17
+    assert panel_control.press_id_of("ok press") is None
+
+
+def test_jog_holds_the_enable_bit_and_walks_the_ring_counter():
+    # The proven path (beat/skips-jog): byte 15 bit 7 held while analogue
+    # field 4 moves, 72 counts per step.
+    assert panel_control.button_mask(panel_control.JOG_ENABLE) == (15, 0x80)
+    assert panel_control.JOG_FIELD == 4
+    assert panel_control.ANALOG_FIELDS[panel_control.JOG_FIELD] == (8, 2)
+
+    sent: list[str] = []
+
+    class Fake(panel_control.PanelControl):
+        def send(self, line: str) -> str:
+            sent.append(line.strip())
+            return "ok"
+
+        def state(self) -> str:
+            return "ok state frames=1 a4=360/360"
+
+    Fake().jog(5)
+    assert sent == ["down 15 80", "rotary 4 360", "up 15 80"]
+
+
+def test_jog_backwards_reaches_a_negative_target(monkeypatch):
+    # A driven field reports "a4=-360/-360"; the sign is the value's own.
+    monkeypatch.setattr(panel_control.time, "sleep", lambda _: None)
+    sent: list[str] = []
+
+    class Fake(panel_control.PanelControl):
+        def send(self, line: str) -> str:
+            sent.append(line.strip())
+            return "ok"
+
+        def state(self) -> str:
+            return "ok state frames=1 a4=-360/-360"
+
+    Fake().jog(-5, timeout=1.0)
+    assert sent == ["down 15 80", "rotary 4 -360", "up 15 80"]
+
+
+def _bend(state: str, reverse: bool) -> list[str]:
+    sent: list[str] = []
+
+    class Fake(panel_control.PanelControl):
+        def send(self, line: str) -> str:
+            sent.append(line.strip())
+            return "ok"
+
+        def state(self) -> str:
+            return state
+
+    Fake().bend(0.05, reverse=reverse)
+    return sent
+
+
+def test_bend_sets_the_period_spins_and_rests():
+    sent = _bend("ok state frames=1 a4=100/100", reverse=True)
+    assert sent[:2] == ["down 15 80", "analog 5 %d" % panel_control.JOG_BEND_PERIOD]
+    assert sent[2] == "analog 4 %d" % (100 - panel_control.JOG_BEND_STEP)
+    assert sent[-2:] == ["analog 5 0", "up 15 80"]
+
+
+def test_bend_starts_from_a_negative_count():
+    # After jog(-N) the ring counter is negative; the bend continues from it.
+    sent = _bend("ok state frames=1 a4=-360/-360", reverse=False)
+    assert sent[2] == "analog 4 %d" % ((-360 + panel_control.JOG_BEND_STEP) & 0xFFFF)
