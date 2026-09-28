@@ -124,6 +124,17 @@ typedef struct {
     DspFaultHistory fault_history[DSP_FAULT_HISTORY_COUNT];
     uint32_t fault_history_next;
     char *fault_history_path;
+    /* Opt-in idle-loop yield (CDJ_NXS_DSP_IDLE_YIELD=1); see dsp_idle_repeat.
+     * Host-side scheduling state only: never checkpointed. */
+    bool idle_yield, idle_dirty, idle_anchor_valid;
+    unsigned idle_anchor_step;
+    uint32_t idle_anchor_pc;
+    uint32_t idle_anchor_r[2][32], idle_anchor_control[32];
+    uint64_t idle_anchor_ready[32], idle_anchor_cycles;
+    uint64_t idle_yields;
+    /* RAM words written since the anchor, with their anchor-time values. */
+    unsigned idle_log_count;
+    uint32_t idle_log_address[64], idle_log_value[64];
 } NxsHpi;
 static NxsHpi *nxs_hpi;
 static void run_dsp(NxsHpi *s);
@@ -515,6 +526,11 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
         *value = ldl_le_p(s->sdram + sdram_offset);
         return true;
     }
+    /* Past RAM, a device read voids an idle proof.  GPIO is exempt: its reads
+     * are pure (a const model) and its inputs change only when MAIN writes
+     * the boot phase, which cannot happen while the DSP runs.  The NXS idle
+     * loop polls those boot-phase inputs. */
+    if (address < 0x01e26000u || address >= 0x01e27000u) s->idle_dirty = true;
     if (cdj_c6747_syscfg_read(&s->syscfg, address, value)) return true;
     if (cdj_c6747_syscfg_priority_read(&s->syscfg_priority, address, value))
         return true;
@@ -682,8 +698,10 @@ static bool service_mcasp_axevt(CdjC6747Edma *edma,
 static void deliver_edma_notifications(NxsHpi *s)
 {
     /* C6747 system event 8 is the EDMA3CC region-1 completion pulse. */
-    if (cdj_c6747_edma_take_irq_notification(&s->edma, 1))
+    if (cdj_c6747_edma_take_irq_notification(&s->edma, 1)) {
         cdj_c6747_intc_deliver_event(&s->intc, &s->intc_delivery, 8);
+        s->idle_dirty = true;
+    }
 }
 
 static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
@@ -871,10 +889,120 @@ slot_fault:
     return false;
 }
 
+/*
+ * Idle-loop yield.  In the legacy scheduler a DSP activation runs until HINT
+ * or its packet budget, synchronously inside the SH-4's MMIO write, so while
+ * the DSP firmware sits in its polling loop MAIN is frozen for the rest of the
+ * budget.  Nothing outside the DSP can run during that time.  So if the DSP
+ * returns to an earlier PC with the same registers and the same memory (every
+ * RAM word it wrote since then holds its earlier value again), having made no
+ * device access other than pure GPIO reads, and no tick-driven peripheral can
+ * raise an event or change visible state, then the whole system state has
+ * repeated and the DSP provably loops until the next host event.  Ending the
+ * activation there only stops the DSP's cycle counters (in this mode already
+ * a budget artifact) from advancing through the spin.
+ */
+#define DSP_IDLE_WINDOW 65536u
+
+static bool dsp_idle_clean(const NxsHpi *s)
+{
+    const CdjC674x *c = &s->cpu;
+    return !c->fault && !c->store_count && !c->load_count && !c->branch_due &&
+           !c->branch_count && !c->loop_active && !c->idle_cycles;
+}
+
+/* Nothing clocked by DSP cycles or steps can raise an event or change state
+ * that firmware could observe. */
+static bool dsp_idle_quiescent(const NxsHpi *s)
+{
+    if (s->functional_audio) return false;
+    for (unsigned i = 0; i < CDJ_C6747_TIMER_COUNT; ++i)
+        if ((s->timers[i].tgcr & 3u) && (s->timers[i].tcr & 0x00c000c0u))
+            return false;
+    if (s->pll.go_remaining || s->pll.lock_wait_remaining ||
+        ((s->pll.config[0] & 0x12b) == 0x100 && s->pll.reset_age < 17))
+        return false;
+    if (!cdj_c674x_loop_functional_timing() &&
+        (s->spi_transfer.phase || s->spi_transfer.queued_valid ||
+         s->spi_transfer.tx_full || s->spi_transfer.fault))
+        return false;
+    for (unsigned b = 0; b < 2; ++b)
+        for (unsigned d = 0; d < 2; ++d)
+            if (s->psc.remaining[b][d]) return false;
+    return true;
+}
+
+static void dsp_idle_anchor(NxsHpi *s, unsigned step)
+{
+    s->idle_anchor_valid = true;
+    s->idle_dirty = false;
+    s->idle_anchor_step = step;
+    s->idle_anchor_pc = s->cpu.pc;
+    s->idle_anchor_cycles = s->cpu.cycles;
+    memcpy(s->idle_anchor_r, s->cpu.r, sizeof(s->idle_anchor_r));
+    memcpy(s->idle_anchor_control, s->cpu.control,
+           sizeof(s->idle_anchor_control));
+    memcpy(s->idle_anchor_ready, s->cpu.control_ready,
+           sizeof(s->idle_anchor_ready));
+    s->idle_log_count = 0;
+}
+
+/* Same architectural state as the anchor.  A control_ready entry is a cycle
+ * at which a delayed control value becomes visible; two already-passed
+ * cycles are equivalent.  Entry 31 holds loop context, not a cycle. */
+static bool dsp_idle_repeat(const NxsHpi *s)
+{
+    if (s->cpu.pc != s->idle_anchor_pc || !dsp_idle_clean(s) ||
+        memcmp(s->cpu.r, s->idle_anchor_r, sizeof(s->idle_anchor_r)) ||
+        memcmp(s->cpu.control, s->idle_anchor_control,
+               sizeof(s->idle_anchor_control)))
+        return false;
+    for (unsigned i = 0; i < 32; ++i) {
+        uint64_t a = s->idle_anchor_ready[i], b = s->cpu.control_ready[i];
+        if (a != b && (i == 31 || a > s->idle_anchor_cycles ||
+                       b > s->cpu.cycles))
+            return false;
+    }
+    for (unsigned i = 0; i < s->idle_log_count; ++i) {
+        const uint8_t *p = dsp_memory_span((NxsHpi *)s, s->idle_log_address[i], 4);
+        if (!p || ldl_le_p(p) != s->idle_log_value[i]) return false;
+    }
+    return true;
+}
+
+/* Called before a committed DSP write lands.  A device write dirties the idle
+ * proof; a RAM write records each touched word's value on first write since
+ * the anchor, so dsp_idle_repeat can require memory to match again.  Too many
+ * distinct words also dirties it. */
+static void dsp_idle_note_write(NxsHpi *s, uint32_t address, uint64_t value,
+                                unsigned size)
+{
+    (void)value;
+    if (!s->idle_anchor_valid || s->idle_dirty) return;
+    if (size > 8 || !dsp_memory_span(s, address, size)) {
+        s->idle_dirty = true;
+        return;
+    }
+    for (uint32_t word = address & ~3u; word < address + size; word += 4) {
+        unsigned i = 0;
+        while (i < s->idle_log_count && s->idle_log_address[i] != word) ++i;
+        if (i < s->idle_log_count) continue;
+        const uint8_t *p = dsp_memory_span(s, word, 4);
+        if (!p || i == 64) {
+            s->idle_dirty = true;
+            return;
+        }
+        s->idle_log_address[i] = word;
+        s->idle_log_value[i] = ldl_le_p(p);
+        s->idle_log_count = i + 1;
+    }
+}
+
 static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     NxsHpi *s = opaque;
+    if (commit && s->idle_yield) dsp_idle_note_write(s, address, value, size);
     if (dsp_l1d_write(s, address, value, size, commit)) return true;
     if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
         cdj_c6747_pll_write_mapped(address, size)) {
@@ -1113,6 +1241,10 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
     const char *reason = s->scheduler.mode ? "deferred slice boundary" :
                                            "phase budget exhausted";
     unsigned steps = 0;
+    /* The host may have changed memory since the last activation. */
+    s->idle_anchor_valid = false;
+    bool idle_yield = s->idle_yield && !s->scheduler.mode &&
+                      !s->virtual_audio_clock;
     while (steps < quota) {
         if (s->fault_history_path) {
             DspFaultHistory *item = &s->fault_history[
@@ -1140,6 +1272,19 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                 s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
                 s->cpu.control[27],
                 1, s->cpu.loop_active};
+        }
+        if (idle_yield) {
+            if (s->idle_anchor_valid && !s->idle_dirty &&
+                steps != s->idle_anchor_step && dsp_idle_repeat(s) &&
+                dsp_idle_quiescent(s)) {
+                reason = "DSP idle loop";
+                ++s->idle_yields;
+                break;
+            }
+            if ((s->idle_dirty || !s->idle_anchor_valid ||
+                 steps - s->idle_anchor_step > DSP_IDLE_WINDOW) &&
+                dsp_idle_clean(s))
+                dsp_idle_anchor(s, steps);
         }
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
@@ -1413,6 +1558,10 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(dsp_read, dsp_fetch_block);
     s->functional_audio = audio && !strcmp(audio, "1");
+    const char *idle_yield = getenv("CDJ_NXS_DSP_IDLE_YIELD");
+    s->idle_yield = idle_yield && !strcmp(idle_yield, "1");
+    if (s->idle_yield)
+        warn_report("nxs-c674x: idle-loop yield enabled; a proven DSP spin ends its legacy activation");
     s->virtual_audio_clock = virtual_audio && !strcmp(virtual_audio, "1");
     s->cycle_audio_clock = cycle_audio && !strcmp(cycle_audio, "1");
     if ((s->virtual_audio_clock || s->cycle_audio_clock) &&

@@ -23,7 +23,7 @@ from tools.cdj_dsp.tx_capture import tx_capture_metadata
 from tools.cdj_main.run_state import write_json
 from tools.cdj_main.nxs_panel import neutral_frame
 from tools.cdj_main import media_readiness, panel_control
-from tools.cdj_main.qmp import connect_chardev
+from tools.cdj_main.qmp import Qmp, connect_chardev
 from tools.paths import BFIN_SIM, QEMU, qemu_environment
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -781,6 +781,16 @@ def main():
     parser.add_argument('--deferred-dsp-scheduling', action='store_true',
                         help='opt into diagnostic 4096-step deferred DSP scheduling (not timing evidence)')
     budget = parser.add_mutually_exclusive_group()
+    parser.add_argument('--gui-head-start', type=float, metavar='SECONDS',
+                        help='hold MAIN at reset while the GUI simulator boots for this many '
+                             'seconds, then resume it over QMP (default 1.5 with '
+                             '--dsp-idle-yield, else 0: start MAIN first, as before). A fast '
+                             'MAIN otherwise reaches the GUI link before the slower simulated '
+                             'GUI is ready and waits for a retry (0.5 s measured too short)')
+    parser.add_argument('--dsp-idle-yield', action='store_true',
+                        help='end a legacy DSP activation once the DSP provably spins in an '
+                             'idle loop (no device access or memory change, quiescent '
+                             'peripherals, repeated state) instead of running out its budget')
     budget.add_argument('--fast-dsp', action='store_true',
                         help='exploratory legacy scheduling with 65536 packets per HPI wake')
     budget.add_argument('--dsp-legacy-budget', type=int,
@@ -833,6 +843,12 @@ def main():
         parser.error('positive duration and port 1024..65531 required')
     if args.debug_paused and not args.debug:
         parser.error('--debug-paused requires --debug')
+    if args.gui_head_start is None:
+        args.gui_head_start = 1.5 if args.dsp_idle_yield and not (args.cosim or args.debug_paused) else 0
+    if not math.isfinite(args.gui_head_start) or not 0 <= args.gui_head_start <= 60:
+        parser.error('--gui-head-start must be 0..60 seconds')
+    if args.gui_head_start and (args.cosim or args.debug_paused):
+        parser.error('--gui-head-start cannot be combined with --cosim or --debug-paused')
     if args.source_key_when_ready and not args.debug:
         parser.error('--source-key-when-ready requires --debug')
     if args.source_key_when_ready and args.source_key_at is not None:
@@ -886,7 +902,7 @@ def main():
         ports = ', '.join(str(port) for port in occupied)
         parser.error(f'localhost port(s) already in use: {ports}; choose another --port')
     qmp_path = os.path.relpath(run / 'qmp.sock', ROOT)
-    if UNIX_CONTROL and args.debug and (',' in qmp_path or len(os.fsencode(qmp_path)) >= 104):
+    if UNIX_CONTROL and (args.debug or args.gui_head_start) and (',' in qmp_path or len(os.fsencode(qmp_path)) >= 104):
         parser.error('debugging requires a shorter run path without commas')
     monitor_path = os.path.relpath(run / 'qemu-monitor.sock', ROOT)
     if UNIX_CONTROL and args.qemu_sync_profile and (',' in monitor_path or
@@ -967,6 +983,11 @@ def main():
                              '-gdb', f'tcp:127.0.0.1:{args.port + 3}']
         if args.debug_paused and not args.cosim:
             main_command += ['-S']
+    if args.gui_head_start:
+        if not args.debug:
+            main_command += ['-qmp', f'unix:{qmp_path},server=on,wait=off' if UNIX_CONTROL
+                             else f'tcp:{qmp_endpoint},server=on,wait=off']
+        main_command += ['-S']
     if args.cosim:
         # MAIN's time is its instruction count, and it waits paused until the
         # GUI connects, so both boards start at guest time 0.
@@ -1048,6 +1069,8 @@ def main():
     # connected host/DSP interleaving and must be an explicit run option.
     main_env['CDJ_NXS_DSP_SCHEDULER'] = dsp_scheduler_mode
     main_env['CDJ_NXS_DSP_LEGACY_BUDGET'] = str(dsp_legacy_budget)
+    if args.dsp_idle_yield:
+        main_env['CDJ_NXS_DSP_IDLE_YIELD'] = '1'
     if args.functional_dsp_timing:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
@@ -1202,6 +1225,10 @@ def main():
             gui = subprocess.Popen(gui_command, cwd=ROOT, env=gui_env, stdin=subprocess.DEVNULL, stdout=guilog, stderr=guilog)
             processes.append(gui)
             session['processes']['gui'] = gui.pid
+            if args.gui_head_start:
+                time.sleep(args.gui_head_start)
+                with Qmp(qmp_endpoint, timeout=10) as qmp:
+                    qmp.command('cont')
             if args.frame_interval:
                 snapshots = FrameSnapshots(run, args.frame_interval, time.monotonic())
             if args.ui:

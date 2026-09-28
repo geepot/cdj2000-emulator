@@ -195,3 +195,52 @@ Replay output byte-identical; replay CPU 2.65–2.72 → 2.05–2.09 s (replay's
 read path probes every peripheral before RAM). Connected alternating 60-second
 boots: 618.1M and 622.1M DSP packets before, 642.1M and 641.1M after (~3.5%),
 identical final screens, no faults, full suite passing.
+
+## Idle-loop yield and GUI head start (opt-in, 2026-09-28)
+
+In the legacy scheduler a DSP activation runs until HINT or its 1,000,000
+packet budget, synchronously inside the SH-4's MMIO write. After the DSP
+acknowledges MAIN's command it sits in its polling loop, so ~95% of
+activations ended by exhausting the budget while MAIN was frozen: 88% of the
+SH-4 thread was DSP execution. (`--fast-dsp` does not help: 65,536 packets
+often end before the DSP's acknowledgement, DSPINT never falls, and the DSP
+is starved.)
+
+`--dsp-idle-yield` (`CDJ_NXS_DSP_IDLE_YIELD=1`) ends an activation only when
+the DSP provably spins: at a clean step the board anchors PC, registers,
+control registers and delayed-control state; any device access other than a
+pure GPIO read (the idle loop polls the boot-phase inputs), any EDMA
+completion, or more than 64 distinct written RAM words voids the anchor; and
+when the DSP returns to the anchor PC with identical state, every RAM word it
+wrote since holds its anchor value again, and no timer, PLL countdown, SPI
+transfer, PSC transition or functional-audio clock can fire, the whole system
+state has repeated. Nothing else runs until the next host event, so only the
+DSP's cycle counters differ: they no longer advance through the spin.
+`tests/test_dsp_idle_yield.py` compiles the board's proof helpers against the
+real peripheral models; removing the memory, timer or delayed-control check
+fails it.
+
+Evidence on stock NXS firmware: the host/DSP event transcript of a full
+60-second default boot (126,385 HPI host and DSP HPIC events) is reproduced
+event for event, with identical addresses and values, within the first 20
+seconds of an idle-yield boot. The DSP boot handshake (boot phases 0/2 to 3)
+takes 0.22 s instead of 2.1 s.
+
+MAIN then reaches its GUI link before the slower simulated GUI has booted and
+waits for a retry, so `--gui-head-start SECONDS` holds MAIN at reset (`-S`)
+while the GUI boots and resumes it over QMP; `--dsp-idle-yield` defaults it
+to 1.5 s (0.5 s measured too short, 1.0-2.0 s equivalent; the head start
+alone gives nothing).
+
+Wall time from launch, `--lightweight`, same binary:
+
+| Milestone | Default | `--dsp-idle-yield` |
+| --- | ---: | ---: |
+| Player screen (60 s boots, from GUI launch) | 9.9 s | 5.3 s |
+| SD browser lists `TESTTONE.WAV` (`--test-track --source-key-when-ready`) | 150.5 s | 37.8 s |
+| Track loaded, duration reply after ENTER, ENTER | 194.3 s | 47.7 s |
+
+The loaded-track screen shows TRACK 01 with REMAIN 00m:10s. The mode is
+opt-in: it changes DSP cycle accounting in checkpoints and event records,
+and it never engages with functional DSP audio, where McASP slots are clocked
+by DSP execution.
