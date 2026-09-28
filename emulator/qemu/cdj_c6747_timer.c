@@ -285,6 +285,11 @@ uint32_t cdj_c6747_timers_tick(CdjC6747Timer timers[CDJ_C6747_TIMER_COUNT])
         /* After reset TGCR is 0, so both halves are held in reset (Table 28-18,
          * printed page 1254) and the common case costs one load and one test. */
         if (!(s->tgcr & 3u)) continue;
+        /* ENAMODE12 and ENAMODE34 both 0: every mode's counter, prescaler and
+         * compare path in tick_one() is gated off, so the tick changes
+         * nothing.  NXS firmware leaves both timers this way for its whole
+         * boot, where this call runs every DSP cycle. */
+        if (!(s->tcr & 0x00c000c0u)) continue;
         unsigned outputs = tick_one(s);
         if (!outputs) continue;
         /* INTCTLSTAT, Table 28-24 printed pages 1258-1259.  PRDINTSTATn

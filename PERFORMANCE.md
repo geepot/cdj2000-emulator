@@ -162,3 +162,19 @@ Replay output is byte-identical (checkpoints 1, 25, 250); replay CPU is
 2.94–2.96 → 2.73–2.78 s. Connected alternating 60-second boots: 563.1M and
 573.1M DSP packets before, 601.1M and 602.1M after (~6%), identical final
 screens, no faults, full suite passing.
+
+## Idle timers, SPI clock and fetch order (2026-09-28)
+
+* `cdj_c6747_timers_tick` skips a timer whose ENAMODE12 and ENAMODE34 are
+  both 0: every mode's counter, prescaler and compare path is gated off then.
+  The NXS firmware configures both timers (TGCR) during boot but never writes
+  TCR in a 60-second boot, so this per-cycle call did nothing.
+* `cdj_spi_core_tick` replaces its per-cycle divide/modulo with subtraction;
+  `cdj_spi_clock_ready` makes numerator equal the denominator, so it loops once.
+* NXS `dsp_read` tests L2 (and its local alias) first. The windows are
+  disjoint, and firmware executes from L2, which previously paid a cross-file
+  L1D call per instruction fetch.
+
+Replay output byte-identical; full suite passes. Connected alternating
+60-second boots: 596.1M and 601.1M DSP packets before, 613.1M and 623.1M
+after (~3%), identical final screens, no faults.

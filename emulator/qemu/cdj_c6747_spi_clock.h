@@ -33,9 +33,14 @@ static inline void cdj_spi_core_tick(CdjC6747Spi spis[2], CdjWm8740 *dac,
     }
     unsigned denominator = cdj_spi_divider(pll->active_dividers[1]);
     unsigned numerator = 2 * cdj_spi_divider(pll->active_dividers[0]);
+    /* cdj_spi_clock_ready() makes numerator == denominator, so this loop
+     * runs once per cycle; it replaces a division and a modulo. */
     transfer->clock_phase += numerator;
-    unsigned ticks = transfer->clock_phase / denominator;
-    transfer->clock_phase %= denominator;
+    unsigned ticks = 0;
+    while (transfer->clock_phase >= denominator) {
+        transfer->clock_phase -= denominator;
+        ++ticks;
+    }
     /* Per-cycle fast path.  An idle transfer with every word field clear and
      * no flags is exactly the idle state cdj_c6747_spi_transfer_valid accepts
      * (phase 0 is SPI_TRANSFER_IDLE, and a zero format is never a valid

@@ -487,6 +487,16 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     /* RAM and its local L2 alias do not overlap any peripheral window.
      * Instruction fetches dominate reads: avoid probing every MMIO device.
      * Keep SDRAM's dynamic enable gate and all alignment checks. */
+    /* The windows below are disjoint, so their order is free: L2 (and its
+     * local alias) goes first because the firmware executes from it and it
+     * needs no call to decide. */
+    uint32_t local_address = address;
+    if (address >= 0x00800000 && address < 0x00840000) local_address += 0x11000000;
+    if (!(local_address & 3) && local_address >= L2_BASE &&
+        local_address <= L2_BASE + L2_SIZE - 4) {
+        *value = ldl_le_p(s->l2 + local_address - L2_BASE);
+        return true;
+    }
     uint32_t l1d_offset;
     if (!(address & 3) && cdj_c6747_l1d_sram_span(
             &s->cache, address, 4, &l1d_offset)) {
@@ -503,13 +513,6 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
         cdj_c6747_emifb_sdram_offset(&s->emifb, address, 4, SDRAM_SIZE,
                                     &sdram_offset)) {
         *value = ldl_le_p(s->sdram + sdram_offset);
-        return true;
-    }
-    uint32_t local_address = address;
-    if (address >= 0x00800000 && address < 0x00840000) local_address += 0x11000000;
-    if (!(local_address & 3) && local_address >= L2_BASE &&
-        local_address <= L2_BASE + L2_SIZE - 4) {
-        *value = ldl_le_p(s->l2 + local_address - L2_BASE);
         return true;
     }
     if (cdj_c6747_syscfg_read(&s->syscfg, address, value)) return true;
