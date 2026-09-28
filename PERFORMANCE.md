@@ -99,12 +99,8 @@ thread's time in the packet-entry state copy (70% of all memmove), the
   of the word (`cdj_c674x_arm_table_predicates_are_word_only`), so a hit
   returns what the scan would.
 * `cdj_c674x_execute` copies the scalar prefix, the live queue entries and
-  `CDJ_C674X_QUEUE_MARGIN` (8) spare slots per queue, not the whole 3,024-byte
-  prefix. A slot appended past the margin is written whole by its
-  compound-literal assignment (clang writes the padding too), so committed
-  bytes match a full copy-in. `tests/test_c674x_transaction.py` now also
-  builds with margin 0, so every append lands past the margin, and it still
-  compares byte-for-byte against the full-copy reference.
+  8 spare slots per queue, not the whole 3,024-byte prefix. (Superseded by
+  in-place execution below.)
 
 Replay of checkpoint 400 (`tools/cdj_dsp/replay.c`, 20 M steps, `-O2`, three
 alternating trials): 3.94–3.97 → 3.33–3.38 user CPU seconds, about 15% less.
@@ -120,3 +116,30 @@ against 482.1M and 490.1M with the change, about 21% more in the same wall
 time. The GUI exited 0 in all four, no run logged a DSP fault, and all four
 final screens are byte-identical. The firmware-free QEMU integration tests
 and the full pytest suite (934 passed, 33 skipped) pass on the new binary.
+
+## In-place packet execution (2026-09-28)
+
+After the change above, the connected profile still spent ~20% of the DSP
+thread in the two per-packet memcpys, the larger of them the commit back into
+the CPU. `cdj_c674x_execute` now backs up the scalar prefix and live queue
+entries, runs the packet (`execute_packet`) directly on the CPU, and restores
+the backup if the packet fails. Queue appends go through `append_load` and
+`append_store`, which first save the slot's old bytes into the backup, so a
+rollback leaves exactly the bytes a discarded scratch copy would. Bus and tick
+callbacks read `cpu.cycles` and `cpu.packets` mid-packet (HPIC event records),
+so those two are still written only when the packet retires. The DSP runs
+under QEMU's global lock, so no other thread observes a half-executed packet.
+
+The original scratch-copy transaction remains behind
+`CDJ_C674X_COPY_TRANSACTIONS` and for an invalid incoming queue count.
+`tests/test_c674x_transaction.py` builds it as the byte-exact reference, with
+two new cases in which a queue append is followed by a rejected parallel
+instruction. Removing either append-time save or the rollback fails the gate.
+
+Replay traces and final checkpoints (checkpoints 1, 25, 250) are
+byte-identical to the previous commit's; replay CPU 3.34–3.41 → 3.05–3.06 s.
+Connected, alternating 60-second NXS boots against the previous commit:
+480.1M and 484.1M DSP packets before, 561.1M and 566.1M after (~17% more;
+~40% more than before the decode memo). The GUI exited 0 in every run, no run
+logged a DSP fault, and every final screen is byte-identical. The full suite
+passes on the new binary.

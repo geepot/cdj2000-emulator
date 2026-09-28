@@ -26,7 +26,7 @@ static void dump(CdjC674x *c, bool ok) {
 }
 int main(void) {
     for (unsigned seed = 1; seed <= 16; ++seed) {
-        for (unsigned scenario = 0; scenario < 12; ++scenario) {
+        for (unsigned scenario = 0; scenario < 14; ++scenario) {
             CdjC674x c;
             cdj_c674x_reset(&c, 0x1000);
             /* Only dead queue storage and the forbidden loop tail are poisoned.
@@ -68,8 +68,17 @@ int main(void) {
                 memset(c.loads,0,sizeof c.loads);
                 for (unsigned j=0;j<40;++j) c.loads[j]=(CdjC674xLoad){.due=100+j,.bank=j%2,.dst=j%32};
             }
+            if (scenario == 12 || scenario == 13) {
+                /* A queue append followed by a rejected parallel instruction:
+                 * the poisoned slot the append overwrote must come back. */
+                p.count=2;
+                p.instructions[0].word = scenario == 12 ? 0x05100264 : 0x051002f6;
+                p.instructions[0].header = 0;
+                p.instructions[1].word=0xffffffff; p.instructions[1].pc=0x1004;
+            }
             bool ok=cdj_c674x_execute(&c,&p,rd,wr,NULL);
-            assert(ok == !(scenario==7 || scenario==8 || scenario==9 || scenario==10 || scenario==11));
+            assert(ok == !(scenario==7 || scenario==8 || scenario==9 || scenario==10 || scenario==11 ||
+                           scenario==12 || scenario==13));
             dump(&c,ok);
             if (scenario==5 || scenario==6) {
                 p.instructions[0].word=0x6000;
