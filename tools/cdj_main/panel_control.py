@@ -3,6 +3,9 @@
     python -m tools.cdj_main.panel_control press sd
     python -m tools.cdj_main.panel_control rotary 4 +8
     python -m tools.cdj_main.panel_control state
+    python -m tools.cdj_main.panel_control press 16.0 --hold-ms 100 --ack
+    python -m tools.cdj_main.panel_control sd eject      (insert, state)
+    python -m tools.cdj_main.panel_control usb detach    (attach, state)
 
 `CDJ_PANEL_KEYS` presses buttons on a schedule fixed before the machine boots,
 at most sixteen of them.  This is the other kind of input: a line-oriented TCP
@@ -85,6 +88,32 @@ ENCODER_FIELD = 7
 # INPUT_MANIFEST.md drove this field with `rotary`.  `analog 6 <value>` is the
 # only verb that can set it, and nothing has ever sent one.
 ANALOG_TOUCH_FIELD = 6
+
+# **The jog ring as far as it is proven** (beat/skips-jog, AGENT-REPORT.md):
+# analogue field 4 (bytes 8/9) is a wrapping ring counter.  MAIN's step getter
+# 0x0428dc36 turns its change into steps of 72 counts (magic 0x38e38e39),
+# keeping the remainder at 0x04fe2ad4, and only while payload byte 15 bit 7
+# is set (decoded into 0x04fe2a3f bit 3; the bit has no name in MAIN's key
+# table).  With the deck PAUSED that moves the position frame by frame: MAIN
+# posts DSP jobs of one half frame each (+0x7ba4 = 1, +0x7ba8 = 1; the DSP's
+# pause state steps by the job count, 0x80015734 / 0x100255e8), 60 of them
+# for 720 counts (jg-2).  What makes a pitch bend while PLAYING is not found:
+# the same input moved nothing then (no job, no rate change).
+JOG_FIELD = 4
+JOG_ENABLE = "15.7"
+JOG_COUNTS_PER_STEP = 72
+
+# **The bend while playing** needs the ring's pulse period as well: analogue
+# field 5 (bytes 10/11), copied to 0x04fdc554.  MAIN's jog handler 0x0426d8f0
+# takes the counter change as a delta (0x0426d718 -> 0x04fddde0, kept only with
+# 15.7 held, 0x0426dad8), and the delta's readers 0x04279c46.. go on only when
+# the period is neither 0 nor 0xffff, with a speed of (0x87a28 / period + 5) / 10
+# above 15.  MAIN then bends the rate word it hands the DSP (+0x7bc0 via deck
+# X+0x694): with period 500 and 96 counts per 10 ms (jb-1) +7.32 % forward,
+# -7.32 % backward, back to 1.0 when 15.7 is released.  Period 3000 bent nothing.
+JOG_PERIOD_FIELD = 5
+JOG_BEND_PERIOD = 500
+JOG_BEND_STEP = 96
 ANALOG_TOUCH_MASK = 0x8000
 ANALOG_POSITION_MASK = 0x01FF
 
@@ -799,8 +828,119 @@ class PanelControl:
     def rotary(self, field: int, delta: int) -> str:
         return self.send(encode_rotary(field, delta))
 
+    def _jog_counter(self) -> tuple[str, str]:
+        """The ring counter's value and target as `state` prints them.  A "-"
+        before the value marks a field nothing drives; `analog` and `rotary`
+        leave it driven, so a single "-" is the value's own sign and only an
+        unambiguous "--N" (undriven, negative) loses the marker."""
+        value, _, target = parse_state(self.state()).get(
+            "a%d" % JOG_FIELD, "0/0").partition("/")
+        if value.startswith("--"):
+            value = value[1:]
+        return value, target
+
+    def bend(self, seconds: float, reverse: bool = False,
+             period: int = JOG_BEND_PERIOD, step: int = JOG_BEND_STEP) -> str:
+        """Spin the jog ring for SECONDS of wall clock: a pitch bend while
+        playing (JOG_PERIOD_FIELD).  Field 4 moves by STEP every 10 ms with
+        JOG_ENABLE held and the pulse period in field 5, as a turning ring
+        reports it; both go back to rest afterwards."""
+        value, _ = self._jog_counter()
+        count = int(value or 0)
+        self.hold(JOG_ENABLE, True)
+        try:
+            self.analog(JOG_PERIOD_FIELD, period)
+            end = time.time() + seconds
+            while time.time() < end:
+                count = (count + (-step if reverse else step)) & 0xFFFF
+                self.analog(JOG_FIELD, count)
+                time.sleep(0.01)
+        finally:
+            self.analog(JOG_PERIOD_FIELD, 0)
+            self.hold(JOG_ENABLE, False)
+        return "ok bend"
+
+    def jog(self, steps: int, timeout: float = 120.0) -> str:
+        """Turn the jog ring by STEPS (negative = backwards); see JOG_*.
+
+        Holds JOG_ENABLE, walks the ring counter (analogue field 4) by
+        steps * JOG_COUNTS_PER_STEP one count per panel exchange, waits until
+        the channel has delivered all of it, then releases the bit.
+        """
+        self.hold(JOG_ENABLE, True)
+        try:
+            reply = self.rotary(JOG_FIELD, steps * JOG_COUNTS_PER_STEP)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                value, target = self._jog_counter()
+                if value == target:
+                    break
+                time.sleep(0.2)
+            else:
+                raise OSError("jog: the ring counter did not reach its target")
+            time.sleep(0.5)             # let MAIN read the last counts
+        finally:
+            self.hold(JOG_ENABLE, False)
+        return reply
+
     def clear(self) -> str:
         return self.send(encode("clear"))
+
+    def ack(self, press_id: int) -> str:
+        """Where press `press_id` landed: "ok ack id=N done frames=F-L ..."."""
+        return self.send(encode("ack", press_id))
+
+    def press_acked(self, button: str, hold_ms: int | None = PLAN_HOLD_MS,
+                    timeout: float = 60.0, poll: float = 0.1) -> str:
+        """Press, then wait until the board says which frames carried it.
+
+        Returns the final `ack` reply; raises TimeoutError if the press is
+        still queued or down after `timeout` host seconds.
+        """
+        reply = self.press(button, hold_ms)
+        press_id = press_id_of(reply)
+        if press_id is None:
+            raise ValueError(f"no press id in {reply!r}")
+        deadline = time.monotonic() + timeout
+        while True:
+            answer = self.ack(press_id)
+            if " done " in f"{answer} " or not answer.startswith("ok"):
+                return answer
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"press {press_id} not done: {answer}")
+            time.sleep(poll)
+
+    def medium(self, name: str, action: str) -> str:
+        """`sd eject|insert|state` or `usb detach|attach|state`."""
+        return self.send(encode(name, action))
+
+
+def press_id_of(reply: str) -> int | None:
+    """The id in "ok press id=N" (None for an older board's bare "ok press")."""
+    for token in reply.split():
+        if token.startswith("id="):
+            try:
+                return int(token[3:])
+            except ValueError:
+                return None
+    return None
+
+
+def parse_state(reply: str) -> dict[str, str]:
+    """`state`'s "ok state k=v k=v ..." as a dict; `lamps` stays a string
+    ("CUE:on,PLAY_PAUSE:blink" or "-"), see lamps_of()."""
+    words = reply.split()
+    if words[:2] != ["ok", "state"]:
+        raise ValueError(f"not a state reply: {reply!r}")
+    return dict(word.split("=", 1) for word in words[2:] if "=" in word)
+
+
+def lamps_of(state: dict[str, str]) -> dict[str, str]:
+    """{"CUE": "on", "PLAY_PAUSE": "blink", "SOURCE_SD": "3"} from a state."""
+    text = state.get("lamps", "-")
+    if text in ("", "-"):
+        return {}
+    return dict(item.split(":", 1) for item in text.split(",") if ":" in item)
 
 
 # --------------------------------------------------------------- sessions ---
@@ -1452,10 +1592,36 @@ def main(argv: list[str] | None = None) -> int:
     press.add_argument("--repeat", type=int, default=1)
     press.add_argument("--gap", type=float, default=0.0,
                        help="host-side seconds between repeats")
+    press.add_argument("--ack", action="store_true",
+                       help="wait until the board says which panel frames "
+                            "carried the press, and print that")
+
+    ack = sub.add_parser("ack", help="which panel frames carried press ID")
+    ack.add_argument("id", type=int)
+
+    for name, actions in (("sd", ("eject", "insert", "state")),
+                          ("usb", ("detach", "attach", "state"))):
+        medium = sub.add_parser(name, help=f"{'/'.join(actions[:2])} the "
+                                           f"{name.upper()} medium while the "
+                                           "machine runs")
+        medium.add_argument("action", choices=actions)
 
     for verb in ("down", "up"):
         held = sub.add_parser(verb, help=f"{verb} a bit, without the pulse")
         held.add_argument("button")
+
+    jog = sub.add_parser("jog", help="turn the jog ring by N steps of 72 counts "
+                         "(frame steps while paused)")
+    jog.add_argument("steps", type=int)
+
+    bend = sub.add_parser("bend", help="spin the jog ring for SECONDS (pitch bend "
+                          "while playing)")
+    bend.add_argument("seconds", type=float)
+    bend.add_argument("--reverse", action="store_true", help="spin backwards (slower)")
+    bend.add_argument("--period", type=int, default=JOG_BEND_PERIOD,
+                      help="ring pulse period in field 5 (smaller = faster)")
+    bend.add_argument("--step", type=int, default=JOG_BEND_STEP,
+                      help="counts per 10 ms")
 
     rotary = sub.add_parser("rotary", help="move an analogue field by a delta")
     rotary.add_argument("field", type=int, choices=range(len(ANALOG_FIELDS)))
@@ -1617,17 +1783,33 @@ def main(argv: list[str] | None = None) -> int:
                 for index in range(max(1, args.repeat)):
                     if index and args.gap:
                         time.sleep(args.gap)
-                    print(panel.press(args.button, args.hold_ms))
+                    if args.ack:
+                        print(panel.press_acked(args.button, args.hold_ms))
+                    else:
+                        print(panel.press(args.button, args.hold_ms))
+            elif args.command == "ack":
+                print(panel.ack(args.id))
+            elif args.command in ("sd", "usb"):
+                print(panel.medium(args.command, args.action))
             elif args.command in ("down", "up"):
                 print(panel.hold(args.button, args.command == "down"))
             elif args.command == "rotary":
                 print(panel.rotary(args.field, args.delta))
+            elif args.command == "jog":
+                print(panel.jog(args.steps))
+            elif args.command == "bend":
+                print(panel.bend(args.seconds, args.reverse, args.period, args.step))
             elif args.command == "analog":
                 print(panel.analog(args.field, args.value))
             elif args.command == "step":
                 print(panel.send(encode("step", args.count)))
             elif args.command == "state":
-                print(panel.state())
+                reply = panel.state()
+                print(reply)
+                if reply.startswith("ok state"):
+                    lamps = lamps_of(parse_state(reply))
+                    print("lamps: " + (", ".join(f"{name} {how}" for name, how
+                                                  in lamps.items()) or "all off"))
             elif args.command == "ping":
                 print(panel.ping())
             elif args.command == "clear":
