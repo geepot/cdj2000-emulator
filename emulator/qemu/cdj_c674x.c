@@ -28,6 +28,11 @@
 
 
 #define CDJ_C674X_TSR_SPLX (1u << 14)
+/* Queue slots copied past the live entries at packet entry.  Any value is
+ * correct; tests build with 0 so every append lands past the margin. */
+#ifndef CDJ_C674X_QUEUE_MARGIN
+#define CDJ_C674X_QUEUE_MARGIN 8u
+#endif
 #define CDJ_C674X_LOOP_RETURNING (1u << 3)
 #define CDJ_C674X_LOOP_CONTEXT 31u
 #define CDJ_C674X_LOOP_SETUP_PC UINT64_C(0xffffffff)
@@ -3533,7 +3538,7 @@ bool cdj_c674x_arm_table_row(unsigned index, uint32_t *mask, uint32_t *match,
     return true;
 }
 
-static const CdjC674xArmEntry *cdj_c674x_arm_lookup(const CdjC674xArm *x)
+static const CdjC674xArmEntry *cdj_c674x_arm_scan(const CdjC674xArm *x)
 {
     for (unsigned i = 0; i < sizeof(cdj_c674x_arms) /
                              sizeof(cdj_c674x_arms[0]); ++i) {
@@ -3559,6 +3564,32 @@ static const CdjC674xArmEntry *cdj_c674x_arm_lookup(const CdjC674xArm *x)
     return NULL;
 }
 
+/* Selection is a pure function of the instruction word (every `also`
+ * predicate reads only w and a = w[17:13]; see
+ * cdj_c674x_arm_table_predicates_are_word_only), so memoizing it per word is
+ * exact.  The first-match scan over 114 rows was ~15% of DSP host time.
+ * ponytail: direct-mapped, per-thread; a miss just rescans. */
+#define CDJ_C674X_ARM_MEMO_BITS 12
+static const CdjC674xArmEntry *cdj_c674x_arm_lookup(const CdjC674xArm *x)
+{
+    static _Thread_local struct {
+        uint32_t word;
+        uint16_t index; /* row + 1; 0 = empty, table size + 1 = no row */
+    } memo[1u << CDJ_C674X_ARM_MEMO_BITS];
+    enum { ROWS = sizeof(cdj_c674x_arms) / sizeof(cdj_c674x_arms[0]) };
+    uint32_t w = x->w;
+    unsigned slot = (w ^ (w >> 13) ^ (w >> 23)) &
+                    ((1u << CDJ_C674X_ARM_MEMO_BITS) - 1);
+    if (memo[slot].index && memo[slot].word == w)
+        return memo[slot].index > ROWS ? NULL
+                                       : &cdj_c674x_arms[memo[slot].index - 1];
+    const CdjC674xArmEntry *entry = cdj_c674x_arm_scan(x);
+    memo[slot].word = w;
+    memo[slot].index = entry ? (uint16_t)(entry - cdj_c674x_arms + 1)
+                             : (uint16_t)(ROWS + 1);
+    return entry;
+}
+
 bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
                        CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
@@ -3574,7 +3605,31 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
      * Keep a transactional copy, but do not copy that large immutable tail.
      * No helper called with &out may inspect loop or loop_instructions. */
     CdjC674x out CDJ_C674X_UNINITIALIZED;
-    memcpy(&out, cpu, offsetof(CdjC674x, loop));
+    /* Copy the scalar prefix, the live queue entries and a margin of queue
+     * capacity for this packet's appends; the full prefix was ~23% of DSP
+     * host time, mostly idle queue slots.  A slot appended past the margin
+     * is written whole by its compound-literal assignment (padding included,
+     * as clang emits it), so committed bytes still match a full copy-in.  An
+     * out-of-range incoming count keeps the full copy. */
+    unsigned store_copied = cpu->store_count + CDJ_C674X_QUEUE_MARGIN;
+    unsigned load_copied = cpu->load_count + CDJ_C674X_QUEUE_MARGIN;
+    if (store_copied > 24) store_copied = 24;
+    if (load_copied > 40) load_copied = 40;
+    if (cpu->store_count > 24 || cpu->load_count > 40) {
+        memcpy(&out, cpu, offsetof(CdjC674x, loop));
+        store_copied = 24;
+        load_copied = 40;
+    } else {
+        memcpy(&out, cpu, offsetof(CdjC674x, stores));
+        memcpy(out.stores, cpu->stores, store_copied * sizeof(out.stores[0]));
+        memcpy((char *)&out + offsetof(CdjC674x, store_count),
+               (const char *)cpu + offsetof(CdjC674x, store_count),
+               offsetof(CdjC674x, loads) - offsetof(CdjC674x, store_count));
+        memcpy(out.loads, cpu->loads, load_copied * sizeof(out.loads[0]));
+        memcpy((char *)&out + offsetof(CdjC674x, load_count),
+               (const char *)cpu + offsetof(CdjC674x, load_count),
+               offsetof(CdjC674x, loop) - offsetof(CdjC674x, load_count));
+    }
     bool written[2][32] = {{false}}, controls[32] = {false};
     if (cpu->fault) return false;
     if (packet->count > 8) return stop(cpu, cpu->pc, 0, "execute packet exceeds eight instructions");

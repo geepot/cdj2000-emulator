@@ -87,3 +87,36 @@ stated - several rows constrain no bits in 6:2 (masks 0x0000000c, 0x0000001c,
 0x0000003c, 0x0000010c, 0x0ffffffe, 0x0f830ffe), so they would belong in every
 bucket of a `w & 0x7c` bucketing. Anyone optimising this should re-run
 `tools/cdj_dsp/benchmark_core.c` and the probe sweeps together.
+
+## Decode memo and bounded copy-in (2026-09-28)
+
+A connected profile (`analysis/iterations/15-dsp-lookup`) put the DSP
+thread's time in the packet-entry state copy (70% of all memmove), the
+114-row first-match arm scan (~17%), and fetch. Two exact changes:
+
+* `cdj_c674x_arm_lookup` memoizes row selection per instruction word in a
+  4,096-entry direct-mapped, thread-local table. Selection is a pure function
+  of the word (`cdj_c674x_arm_table_predicates_are_word_only`), so a hit
+  returns what the scan would.
+* `cdj_c674x_execute` copies the scalar prefix, the live queue entries and
+  `CDJ_C674X_QUEUE_MARGIN` (8) spare slots per queue, not the whole 3,024-byte
+  prefix. A slot appended past the margin is written whole by its
+  compound-literal assignment (clang writes the padding too), so committed
+  bytes match a full copy-in. `tests/test_c674x_transaction.py` now also
+  builds with margin 0, so every append lands past the margin, and it still
+  compares byte-for-byte against the full-copy reference.
+
+Replay of checkpoint 400 (`tools/cdj_dsp/replay.c`, 20 M steps, `-O2`, three
+alternating trials): 3.94–3.97 → 3.33–3.38 user CPU seconds, about 15% less.
+Replay includes coverage/trace printing the live board does not do. The arm
+scan fell from 15% of samples to 1.5%, and memmove from 23% to 17%. Traces
+and final checkpoints from checkpoints 1, 25 and 250 (1 M steps each) are
+byte-identical to HEAD's.
+
+Connected: two QEMU builds from one QEMU tree and toolchain (HEAD vs this
+change), four alternating 60-second headless NXS boots (`nxs_vm --seconds 60
+--frame-interval 0.2`). The DSP executed 400.1M and 402.1M packets on HEAD
+against 482.1M and 490.1M with the change, about 21% more in the same wall
+time. The GUI exited 0 in all four, no run logged a DSP fault, and all four
+final screens are byte-identical. The firmware-free QEMU integration tests
+and the full pytest suite (934 passed, 33 skipped) pass on the new binary.
