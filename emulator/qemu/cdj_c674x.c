@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <stddef.h>
+#include <stdatomic.h>
 #include <string.h>
 #include "cdj_c674x.h"
 #include "cdj_c674x_multicycle.h"
@@ -564,8 +565,6 @@ static bool stop(CdjC674x *cpu, uint32_t pc, uint32_t word, const char *why)
     return false;
 }
 
-/* Highest queue extent a packet reached; in-place rollback restores up to it. */
-static _Thread_local unsigned packet_store_peak, packet_load_peak;
 
 /* Every queue append goes through these.  They save the slot's previous bytes
  * into the pre-packet state first, so an in-place packet that later fails can
@@ -575,7 +574,6 @@ static CdjC674xLoad *append_load(CdjC674x *old, CdjC674x *out)
 {
     unsigned j = out->load_count++;
     memcpy(&old->loads[j], &out->loads[j], sizeof(old->loads[j]));
-    if (j >= packet_load_peak) packet_load_peak = j + 1;
     return &out->loads[j];
 }
 
@@ -583,7 +581,6 @@ static CdjC674xStore *append_store(CdjC674x *old, CdjC674x *out)
 {
     unsigned j = out->store_count++;
     memcpy(&old->stores[j], &out->stores[j], sizeof(old->stores[j]));
-    if (j >= packet_store_peak) packet_store_peak = j + 1;
     return &out->stores[j];
 }
 
@@ -3603,26 +3600,29 @@ static const CdjC674xArmEntry *cdj_c674x_arm_scan(const CdjC674xArm *x)
  * predicate reads only w and a = w[17:13]; see
  * cdj_c674x_arm_table_predicates_are_word_only), so memoizing it per word is
  * exact.  The first-match scan over 114 rows was ~15% of DSP host time.
- * ponytail: direct-mapped, per-thread; a miss just rescans. */
+ * Each entry packs word and row into one relaxed 64-bit atomic, so threads
+ * sharing the table can only see whole entries (plain thread-locals cost a
+ * call per access on macOS).  ponytail: direct-mapped; a miss just rescans. */
 #define CDJ_C674X_ARM_MEMO_BITS 12
+static _Atomic uint64_t cdj_c674x_arm_memo[1u << CDJ_C674X_ARM_MEMO_BITS];
+
 static const CdjC674xArmEntry *cdj_c674x_arm_lookup(const CdjC674xArm *x)
 {
-    static _Thread_local struct {
-        uint32_t word;
-        uint16_t index; /* row + 1; 0 = empty, table size + 1 = no row */
-    } memo[1u << CDJ_C674X_ARM_MEMO_BITS];
     enum { ROWS = sizeof(cdj_c674x_arms) / sizeof(cdj_c674x_arms[0]) };
     uint32_t w = x->w;
     unsigned slot = (w ^ (w >> 13) ^ (w >> 23)) &
                     ((1u << CDJ_C674X_ARM_MEMO_BITS) - 1);
-    if (memo[slot].index && memo[slot].word == w)
-        return memo[slot].index > ROWS ? NULL
-                                       : &cdj_c674x_arms[memo[slot].index - 1];
-    const CdjC674xArmEntry *entry = cdj_c674x_arm_scan(x);
-    memo[slot].word = w;
-    memo[slot].index = entry ? (uint16_t)(entry - cdj_c674x_arms + 1)
-                             : (uint16_t)(ROWS + 1);
-    return entry;
+    /* High half: row + 1 (0 = empty, ROWS + 1 = no row); low half: word. */
+    uint64_t entry = atomic_load_explicit(&cdj_c674x_arm_memo[slot],
+                                          memory_order_relaxed);
+    unsigned index = entry >> 32;
+    if (index && (uint32_t)entry == w)
+        return index > ROWS ? NULL : &cdj_c674x_arms[index - 1];
+    const CdjC674xArmEntry *row = cdj_c674x_arm_scan(x);
+    index = row ? (unsigned)(row - cdj_c674x_arms) + 1 : ROWS + 1;
+    atomic_store_explicit(&cdj_c674x_arm_memo[slot],
+                          (uint64_t)index << 32 | w, memory_order_relaxed);
+    return row;
 }
 
 /* One execute packet.  `cpu` holds the pre-packet state: every operand read
@@ -3633,7 +3633,7 @@ static const CdjC674xArmEntry *cdj_c674x_arm_lookup(const CdjC674xArm *x)
  * board's CPU mid-packet.  Queue appends go through append_load/append_store
  * so in-place mode can roll a failed packet back.  No helper called with out
  * may inspect loop or loop_instructions. */
-static bool execute_packet(CdjC674x *cpu, CdjC674x *out,
+static bool execute_packet(CdjC674x *cpu, CdjC674x *out, unsigned peak[2],
                            const CdjC674xPacket *packet, CdjC674xRead read,
                            CdjC674xWrite write, void *opaque)
 {
@@ -4325,6 +4325,10 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out,
             if (dst == 13 || dst == 14) out->control_ready[dst] = cpu->cycles + 4;
         }
     }
+    /* Issue only appends and retirement below only removes, so this is the
+     * queues' high-water mark: the extent a rollback must restore. */
+    peak[0] = out->store_count;
+    peak[1] = out->load_count;
     if (nonaligned_memory && memory_count > 1)
         return stop(cpu, cpu->pc, 0, "parallel access with nonaligned memory instruction");
     /* Same-cycle overlapping RAM reads/writes need bus arbitration that
@@ -4517,17 +4521,22 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     if (cpu->store_count <= 24 && cpu->load_count <= 40) {
         CdjC674x old CDJ_C674X_UNINITIALIZED;
         copy_prefix(&old, cpu, cpu->store_count, cpu->load_count);
-        packet_store_peak = cpu->store_count;
-        packet_load_peak = cpu->load_count;
-        if (execute_packet(&old, cpu, packet, read, write, opaque))
+        /* A failure during issue leaves the counts at their high-water mark;
+         * one during retirement has peak[] from the end of issue. */
+        unsigned peak[2] = {0, 0};
+        if (execute_packet(&old, cpu, peak, packet, read, write, opaque))
             return true;
-        copy_prefix(cpu, &old, packet_store_peak, packet_load_peak);
+        copy_prefix(cpu, &old,
+                    peak[0] > cpu->store_count ? peak[0] : cpu->store_count,
+                    peak[1] > cpu->load_count ? peak[1] : cpu->load_count);
         return false;
     }
 #endif
     CdjC674x out CDJ_C674X_UNINITIALIZED;
     memcpy(&out, cpu, offsetof(CdjC674x, loop));
-    if (!execute_packet(cpu, &out, packet, read, write, opaque)) return false;
+    unsigned peak[2];
+    if (!execute_packet(cpu, &out, peak, packet, read, write, opaque))
+        return false;
     memcpy(cpu, &out, offsetof(CdjC674x, loop));
     return true;
 }

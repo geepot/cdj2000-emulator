@@ -73,6 +73,9 @@ void cdj_wm8740_reset(CdjWm8740 *dac)
     dac->active_attenuation[0] = dac->active_attenuation[1] = 0xff;
 }
 
+/* cdj_spi_core_tick's idle fast path mirrors these checks and relies on
+ * SPI_TRANSFER_IDLE being 0. */
+_Static_assert(SPI_TRANSFER_IDLE == 0, "cdj_c6747_spi_clock.h fast path");
 bool cdj_wm8740_valid(const CdjWm8740 *dac)
 {
     if (!dac || dac->program[0] > 0x1ff || dac->program[1] > 0x1ff ||

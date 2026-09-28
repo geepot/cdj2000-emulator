@@ -21,7 +21,13 @@ typedef struct {
  * cycles so later firmware hardware dependencies can be inventoried while the
  * unresolved epilog timing is investigated separately. */
 void cdj_c674x_loop_set_functional_timing(bool enabled);
-bool cdj_c674x_loop_functional_timing(void);
+/* Read every DSP cycle by the boards' tick paths, so inline, not a call.
+ * Set only through cdj_c674x_loop_set_functional_timing. */
+extern bool cdj_c674x_loop_functional_timing_enabled;
+static inline bool cdj_c674x_loop_functional_timing(void)
+{
+    return cdj_c674x_loop_functional_timing_enabled;
+}
 bool cdj_c674x_loop_init(CdjC674xLoop *, unsigned ii, uint32_t iterations);
 /* Add the current cycle's instructions; finish marks SPKERNEL. delay is the
  * decoded fstg*ii+fcyc. Control marker instructions are not included as tags. */

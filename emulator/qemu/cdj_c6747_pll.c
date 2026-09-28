@@ -110,8 +110,13 @@ void cdj_c6747_pll_tick(CdjC6747Pll *s)
                              ratio(s->active_dividers[0]);
         unsigned denominator = s->config[2] + 1;
         s->oscin_phase += numerator;
-        elapsed = s->oscin_phase / denominator;
-        s->oscin_phase %= denominator;
+        /* Most DSP cycles advance no whole OSCIN period; skip the division. */
+        if (s->oscin_phase < denominator) {
+            elapsed = 0;
+        } else {
+            elapsed = s->oscin_phase / denominator;
+            s->oscin_phase %= denominator;
+        }
     } else {
         elapsed = ratio(s->active_dividers[0]);
         s->oscin_phase = 0;

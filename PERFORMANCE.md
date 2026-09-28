@@ -143,3 +143,22 @@ Connected, alternating 60-second NXS boots against the previous commit:
 ~40% more than before the decode memo). The GUI exited 0 in every run, no run
 logged a DSP fault, and every final screen is byte-identical. The full suite
 passes on the new binary.
+
+## Per-cycle path trims (2026-09-28)
+
+Four exact changes to code that runs every DSP cycle or packet:
+
+* The arm-lookup memo is a relaxed `_Atomic uint64_t` table (word and row in
+  one entry) instead of a thread-local one; on macOS every thread-local access
+  was a `_tlv_get_addr` call. The rollback extent is recorded once at the end
+  of issue and passed as a parameter, instead of per-append thread-locals.
+* `cdj_spi_core_tick` returns early for the valid idle SPI transfer state,
+  which `cdj_c6747_spi_wm8740_advance` would only have validated. Any other
+  state, invalid ones included, takes the full call.
+* `cdj_c674x_loop_functional_timing()` is an inline read of an exported flag.
+* `cdj_c6747_pll_tick` skips the division when no whole OSCIN period elapsed.
+
+Replay output is byte-identical (checkpoints 1, 25, 250); replay CPU is
+2.94–2.96 → 2.73–2.78 s. Connected alternating 60-second boots: 563.1M and
+573.1M DSP packets before, 601.1M and 602.1M after (~6%), identical final
+screens, no faults, full suite passing.
