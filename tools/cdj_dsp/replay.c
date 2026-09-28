@@ -427,6 +427,14 @@ static uint8_t *memory_span(uint32_t address, size_t size)
     return NULL;
 }
 
+/* cdj_c674x_fetch fast path: memory_span covers exactly read_bus's RAM
+ * windows (disjoint from its peripherals), a whole 32-byte block or none. */
+static const uint8_t *fetch_block(void *unused, uint32_t block)
+{
+    (void)unused;
+    return memory_span(block, 32);
+}
+
 /* Optional bounded observer. RAM-only reads: no MMIO side effects, CPU
  * changes, scheduling changes or inferred buffer ownership. */
 static bool observe_pcm;
@@ -1145,6 +1153,7 @@ int main(int argc, char **argv)
     }
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
+    cdj_c674x_set_fetch_block(read_bus, fetch_block);
     functional_audio = audio && !strcmp(audio, "1");
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {

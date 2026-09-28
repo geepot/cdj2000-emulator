@@ -178,3 +178,20 @@ screens, no faults, full suite passing.
 Replay output byte-identical; full suite passes. Connected alternating
 60-second boots: 596.1M and 601.1M DSP packets before, 613.1M and 623.1M
 after (~3%), identical final screens, no faults.
+
+## Fetch-block fast path (2026-09-28)
+
+`cdj_c674x_fetch` made one read callback for the fetch-packet header and one
+per instruction word. Boards may now register `cdj_c674x_set_fetch_block`: a
+side-effect-free hook returning a host pointer to a whole 32-byte-aligned
+fetch block when it is plain memory the paired read callback would return
+word for word, or NULL, which falls back to read. The pointer is used only
+within one fetch call, so nothing is cached and code writes stay visible to
+the next fetch. NXS (`dsp_memory_span`) and the replay board (`memory_span`)
+register it; both helpers cover exactly their read path's RAM windows, which
+are disjoint from every peripheral, and every window is 32-byte aligned.
+
+Replay output byte-identical; replay CPU 2.65–2.72 → 2.05–2.09 s (replay's
+read path probes every peripheral before RAM). Connected alternating 60-second
+boots: 618.1M and 622.1M DSP packets before, 642.1M and 641.1M after (~3.5%),
+identical final screens, no faults, full suite passing.

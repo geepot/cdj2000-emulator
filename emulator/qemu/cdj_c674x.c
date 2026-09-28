@@ -744,9 +744,43 @@ static bool queue_branch(CdjC674x *out, uint64_t due, uint32_t target)
     return true;
 }
 
+static CdjC674xRead fetch_block_read;
+static CdjC674xFetchBlock fetch_block;
+
+void cdj_c674x_set_fetch_block(CdjC674xRead read, CdjC674xFetchBlock block)
+{
+    fetch_block_read = read;
+    fetch_block = block;
+}
+
+/* One aligned instruction-memory word, through the board's fetch block when
+ * it maps the block and through read otherwise.  cached and cached_block
+ * hold the current block for this fetch call only. */
+static bool fetch_word(CdjC674xRead read, void *opaque, uint32_t address,
+                       uint32_t *word, const uint8_t **cached,
+                       uint32_t *cached_block)
+{
+    uint32_t block = address & ~31u;
+    if (read == fetch_block_read && fetch_block) {
+        if (block != *cached_block) {
+            *cached = fetch_block(opaque, block);
+            *cached_block = block;
+        }
+        if (*cached) {
+            const uint8_t *p = *cached + (address & 31u);
+            *word = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+                    (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+            return true;
+        }
+    }
+    return read(opaque, address, word);
+}
+
 bool cdj_c674x_fetch(CdjC674x *cpu, CdjC674xRead read, void *opaque,
                      CdjC674xPacket *packet)
 {
+    const uint8_t *block_memory = NULL;
+    uint32_t block_address = 1; /* never an aligned block */
     CdjC674xPacket result = {0};
     uint32_t next = cpu->pc;
     uint32_t header = 0, header_address = 0;
@@ -762,7 +796,8 @@ bool cdj_c674x_fetch(CdjC674x *cpu, CdjC674xRead read, void *opaque,
         /* Fetch has no clock edges or writes. Reuse the side-effect-free
          * header read within this packet only; the next fetch reads anew. */
         if (!have_header || block_header != header_address) {
-            if (!read(opaque, block_header, &header))
+            if (!fetch_word(read, opaque, block_header, &header,
+                            &block_memory, &block_address))
                 return stop(cpu, next, 0, "unmapped instruction fetch");
             header_address = block_header;
             have_header = true;
@@ -779,7 +814,8 @@ bool cdj_c674x_fetch(CdjC674x *cpu, CdjC674xRead read, void *opaque,
         bool short_word = mixed && ((header >> (21 + slot)) & 1);
         if (!short_word && (next & 3))
             return stop(cpu, next, 0, "unaligned full instruction fetch");
-        if (!read(opaque, next & ~3u, &word))
+        if (!fetch_word(read, opaque, next & ~3u, &word, &block_memory,
+                        &block_address))
             return stop(cpu, next, 0, "unmapped instruction fetch");
         if (count == 8) return stop(cpu, next, word, "execute packet exceeds eight instructions");
         if (short_word) word = (word >> ((next & 2) * 8)) & 0xffff;

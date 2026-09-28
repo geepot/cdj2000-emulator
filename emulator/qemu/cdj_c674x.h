@@ -102,6 +102,15 @@ typedef bool (*CdjC674xWrite)(void *, uint32_t, uint64_t, unsigned, bool commit)
  * fault_pc and fault_word. Observers may supply a scratch CPU with only
  * pc/fault initialized. Registers, pipeline and loop state are not accessed. */
 bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
+/* Optional fetch fast path.  Returns a host pointer to the 32 bytes at the
+ * 32-byte-aligned address `block` when that whole block is plain memory which
+ * the paired read callback would return word for word (little-endian), else
+ * NULL, and then fetch falls back to the read callback.  Must be side-effect
+ * free like read.  The pointer is used only within one fetch call; nothing is
+ * cached across fetches, so code writes stay immediately visible.  Register
+ * once at board setup; the hook applies only when fetch is given `read`. */
+typedef const uint8_t *(*CdjC674xFetchBlock)(void *opaque, uint32_t block);
+void cdj_c674x_set_fetch_block(CdjC674xRead read, CdjC674xFetchBlock block);
 bool cdj_c674x_execute(CdjC674x *, const CdjC674xPacket *, CdjC674xRead,
                       CdjC674xWrite, void *);
 void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry);
