@@ -35,6 +35,24 @@ typedef int QemuMutex;
 static uint32_t ldl_le_p(const uint8_t *p)
 { return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 '''
+    stubs = r'''
+/* The real probe and slot tick drive EDMA/McASP models; scripted here. */
+static unsigned probe_calls, probe_visible_from = ~0u;
+static int functional_slot_probe(NxsHpi *s, CdjC6747Edma *edma,
+                                 CdjC6747McaspControl *mcasp)
+{
+    (void)s; (void)edma; (void)mcasp;
+    return probe_calls++ >= probe_visible_from;
+}
+static uint64_t tick_packets[16];
+static unsigned tick_count;
+static bool functional_audio_tick(NxsHpi *s)
+{
+    assert(tick_count < 16);
+    tick_packets[tick_count++] = s->cpu.packets;
+    return true;
+}
+'''
     checks = r'''
 int main(void)
 {
@@ -51,7 +69,7 @@ int main(void)
     s->cpu.control_ready[5] = 10;
     s->cpu.control_ready[31] = 7;
     assert(dsp_idle_quiescent(s));
-    dsp_idle_anchor(s, 0, true);
+    dsp_idle_anchor(s, 0);
     assert(dsp_idle_repeat(s));
 
     /* Registers, PC and in-flight work must all match. */
@@ -72,25 +90,14 @@ int main(void)
     s->cpu.packets = 7;
     s->idle_anchor_packets = 3;           /* period: 4 packets, 10 cycles */
     s->cpu.control_ready[5] = 20;
-    assert(dsp_idle_periods(s, 41) == 10);
-    /* Dead queue slots: unchanged, or only `due` moved by one period. */
-    assert(dsp_idle_queues_periodic(s));
-    s->cpu.loads[4].due = s->idle_anchor_loads[4].due + 10;
-    assert(dsp_idle_queues_periodic(s));
-    s->cpu.loads[4].value = 1; assert(!dsp_idle_queues_periodic(s));
-    s->cpu.loads[4].value = 0;
-    s->cpu.stores[2].due = s->idle_anchor_stores[2].due + 9;
-    assert(!dsp_idle_queues_periodic(s));
-    s->cpu.stores[2].due = s->idle_anchor_stores[2].due;
+    /* Whole periods that fit, minus one left to execute afterwards. */
+    assert(dsp_idle_periods(s, 41) == 9);
     CdjC6747Pll pll = s->pll;
     for (unsigned i = 0; i < 30; ++i) cdj_c6747_pll_tick(&pll);
     dsp_idle_skip(s, 3);
     assert(s->cpu.packets == 19 && s->cpu.cycles == 60);
     assert(s->cpu.control_ready[5] == 50 && s->cpu.control_ready[31] == 7);
-    assert(s->cpu.loads[4].due == s->idle_anchor_loads[4].due + 40);
-    assert(s->cpu.loads[3].due == s->idle_anchor_loads[3].due);
     assert(!memcmp(&pll, &s->pll, sizeof(pll)));
-    s->cpu.loads[4].due = s->idle_anchor_loads[4].due;
     s->cpu.packets = 7; s->cpu.cycles = 30; s->cpu.control_ready[5] = 10;
 
     /* A running functional McASP transmitter bounds the skip to its next
@@ -98,17 +105,32 @@ int main(void)
      * mcasp_next_cycle. */
     s->functional_audio = true;
     assert(dsp_idle_quiescent(s));
-    assert(dsp_idle_periods(s, 100000) == 25000);  /* transmitter idle */
+    assert(dsp_idle_periods(s, 100000) == 24999);  /* transmitter idle */
     s->mcasp_control.gblctl[2] = 0x1f00;
     s->cpu.packets = 1000; s->idle_anchor_packets = 996;
-    assert(dsp_idle_periods(s, 100000) == 5);      /* 1000 + 5 * 4 < 1024 */
+    s->tx_capture = (FILE *)1;                     /* capture: every slot visible */
+    assert(dsp_idle_periods(s, 100000) == 4);      /* 1000 + 5 * 4 < 1024 */
+    s->tx_capture = NULL;
+    probe_calls = 0; probe_visible_from = 2;       /* slots 1024, 2048 invisible */
+    assert(dsp_idle_periods(s, 100000) == 516);    /* 1000 + 517 * 4 < 3072 */
+    assert(probe_calls == 3);
+    probe_calls = 0; probe_visible_from = 0;
     s->cpu.packets = 1020; s->idle_anchor_packets = 1016;
     assert(dsp_idle_periods(s, 100000) == 0);
+    probe_visible_from = ~0u;
+    /* A skip from 1000 to 3100 replays the slots at 1024, 2048 and 3072. */
+    s->cpu.packets = 3100; tick_count = 0;
+    assert(dsp_idle_skip_slots(s, 1000));
+    assert(tick_count == 3 && tick_packets[0] == 1024 &&
+           tick_packets[1] == 2048 && tick_packets[2] == 3072);
+    assert(s->cpu.packets == 3100);
+    s->cpu.packets = 3100; tick_count = 0;
+    assert(dsp_idle_skip_slots(s, 3072) && tick_count == 0);
     s->mcasp_control.gblctl[2] = 0;
     s->cycle_audio_clock = true;
     s->mcasp_control.gblctl[1] = 0x1f00;
     s->mcasp_next_cycle = 0; assert(dsp_idle_periods(s, 100000) == 0);
-    s->mcasp_next_cycle = 101; assert(dsp_idle_periods(s, 100000) == 7);
+    s->mcasp_next_cycle = 101; assert(dsp_idle_periods(s, 100000) == 6);
     s->mcasp_control.gblctl[1] = 0; s->cycle_audio_clock = false;
     s->functional_audio = false;
     s->cpu.packets = 7; s->idle_anchor_packets = 3;
@@ -127,7 +149,7 @@ int main(void)
     /* Device writes and an overflowing write log void the proof. */
     dsp_idle_note_write(s, CDJ_C6747_TIMER0_BASE + 0x10, 1, 4);
     assert(s->idle_dirty);
-    dsp_idle_anchor(s, 0, true);
+    dsp_idle_anchor(s, 0);
     assert(!s->idle_dirty && !s->idle_log_count);
     for (uint32_t i = 0; i < 64; ++i)
         dsp_idle_note_write(s, L2_BASE + 0x1000 + 4 * i, 1, 4);
@@ -151,7 +173,7 @@ int main(void)
 }
 '''
     fixture = tmp_path / 'idle.c'
-    fixture.write_text(harness + prefix + span + idle + checks)
+    fixture.write_text(harness + prefix + span + stubs + idle + checks)
     binary = tmp_path / 'idle-test'
     models = sorted(directory.glob('cdj_c6747_*.c'))
     subprocess.run([cc, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',

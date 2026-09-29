@@ -132,11 +132,7 @@ typedef struct {
     uint32_t idle_anchor_r[2][32], idle_anchor_control[32];
     uint64_t idle_anchor_ready[32], idle_anchor_cycles, idle_anchor_packets;
     uint64_t idle_skipped_packets;
-    /* A confirmed anchor is one taken at a proven repeat; it also keeps the
-     * dead queue storage, which checkpoints carry byte for byte. */
-    bool idle_confirmed;
-    CdjC674xStore idle_anchor_stores[24];
-    CdjC674xLoad idle_anchor_loads[40];
+
     /* RAM words written since the anchor, with their anchor-time values. */
     unsigned idle_log_count;
     uint32_t idle_log_address[64], idle_log_value[64];
@@ -610,6 +606,9 @@ typedef struct {
     CdjC6747McaspControl *mcasp;
     EdmaStagedWrite *writes;
     size_t write_count, write_capacity;
+    /* Set when an EDMA read touched a RAM word the DSP has rewritten since
+     * its idle anchor (its value mid-period is not the anchor value). */
+    bool idle_log_hit;
 } EdmaBusContext;
 
 static bool edma_stage_write(EdmaBusContext *context, uint8_t *target,
@@ -647,6 +646,12 @@ static bool edma_read_bytes(void *opaque, uint32_t address, uint8_t *bytes,
     uint8_t *source = dsp_memory_span(context->owner, address, size);
     if (!source) return false;
     memcpy(bytes, source, size);
+    const NxsHpi *owner = context->owner;
+    if (owner->idle_skip && owner->idle_anchor_valid)
+        for (unsigned i = 0; i < owner->idle_log_count; ++i)
+            if (owner->idle_log_address[i] < address + size &&
+                address < owner->idle_log_address[i] + 4)
+                context->idle_log_hit = true;
     uintptr_t read_start = (uintptr_t)source;
     uintptr_t read_end = read_start + size;
     for (size_t i = 0; i < context->write_count; ++i) {
@@ -768,7 +773,11 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         }
         s->edma = trial_edma;
         s->mcasp_control = trial_mcasp;
-        s->idle_dirty = true;
+        /* A slot the DSP cannot observe keeps an idle proof: it staged no
+         * RAM write and read no transiently rewritten word (an EDMA
+         * completion dirties it in deliver_edma_notifications). */
+        if (trial_context.write_count || trial_context.idle_log_hit)
+            s->idle_dirty = true;
         deliver_edma_notifications(s);
         if (s->tx_capture || s->audio_voice || s->pcm_wav) {
             for (unsigned instance = 1; instance <= 2; ++instance) {
@@ -834,6 +843,32 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
     }
     edma_free_staged_writes(&trial_context);
     return ok;
+}
+
+/* advance_functional_mcasp_slots on caller-owned EDMA/McASP copies, with no
+ * commit and no output: 1 if the slot would be visible to the DSP (a staged
+ * RAM write, an EDMA completion, or a read of a word rewritten since the idle
+ * anchor), 0 if not, -1 if it would fail. */
+static int functional_slot_probe(NxsHpi *s, CdjC6747Edma *edma,
+                                 CdjC6747McaspControl *mcasp)
+{
+    EdmaBusContext context = {.owner = s, .mcasp = mcasp};
+    uint32_t notifications = edma->irq_notifications;
+    bool advanced = false;
+    int result = 0;
+    for (unsigned instance = 1; instance <= 2 && result >= 0; ++instance) {
+        if ((mcasp->gblctl[instance] & 0x1f00u) != 0x1f00u) continue;
+        bool axevt;
+        if (!cdj_c6747_mcasp_tx_slot(mcasp, instance, &axevt)) result = -1;
+        advanced = true;
+    }
+    if (result >= 0 && advanced && !service_mcasp_axevt(edma, mcasp, &context))
+        result = -1;
+    if (result >= 0 && (context.write_count || context.idle_log_hit ||
+                        (edma->irq_notifications & ~notifications & 2u)))
+        result = 1;
+    edma_free_staged_writes(&context);
+    return result;
 }
 
 static bool functional_audio_tick(NxsHpi *s)
@@ -909,9 +944,13 @@ slot_fault:
  * += kP, cycles += kC, the PLL's input-period counter advanced by kC edges,
  * and each delayed-control cycle written once per period moved by kC.  The
  * load/store queues are empty at the anchor, but their dead slots still hold
- * the last retired entries and checkpoints store them verbatim, so a skip
- * waits for a second, confirmed repeat whose anchor snapshots those slots,
- * and moves the `due` of each slot rewritten once per period by kC as well.
+ * the last retired entries and checkpoints store them verbatim.  A skip
+ * therefore always leaves at least one whole period to execute before the
+ * activation budget ends or the next visible McASP slot: that period repeats
+ * every append of the loop at the same phase, so every dead slot the loop
+ * uses is rewritten with exactly the bytes full execution leaves, and only a
+ * checkpoint (at the end of an activation, or between activations) ever
+ * reads dead slots.
  * dsp_idle_skip applies that for as many whole periods as fit before the end
  * of the activation budget and before the next functional McASP slot edge,
  * so every checkpoint, event record and report stays what full execution
@@ -946,13 +985,8 @@ static bool dsp_idle_quiescent(const NxsHpi *s)
     return true;
 }
 
-static void dsp_idle_anchor(NxsHpi *s, unsigned step, bool confirmed)
+static void dsp_idle_anchor(NxsHpi *s, unsigned step)
 {
-    s->idle_confirmed = confirmed;
-    if (confirmed) {
-        memcpy(s->idle_anchor_stores, s->cpu.stores, sizeof(s->idle_anchor_stores));
-        memcpy(s->idle_anchor_loads, s->cpu.loads, sizeof(s->idle_anchor_loads));
-    }
     s->idle_anchor_valid = true;
     s->idle_dirty = false;
     s->idle_anchor_step = step;
@@ -992,33 +1026,6 @@ static bool dsp_idle_repeat(const NxsHpi *s)
     return true;
 }
 
-/* Dead queue slots since a confirmed anchor: each unchanged, or changed only
- * in `due`, by exactly one period.  (`due` is each entry's first field.) */
-static bool dsp_idle_slot_shift(const void *now, const void *then, size_t size,
-                                uint64_t period)
-{
-    uint64_t a, b;
-    if (!memcmp(now, then, size)) return true;
-    memcpy(&b, now, sizeof(b));
-    memcpy(&a, then, sizeof(a));
-    return b - a == period &&
-           !memcmp((const char *)now + 8, (const char *)then + 8, size - 8);
-}
-
-static bool dsp_idle_queues_periodic(const NxsHpi *s)
-{
-    uint64_t period = s->cpu.cycles - s->idle_anchor_cycles;
-    for (unsigned j = 0; j < 24; ++j)
-        if (!dsp_idle_slot_shift(&s->cpu.stores[j], &s->idle_anchor_stores[j],
-                                 sizeof(s->cpu.stores[j]), period))
-            return false;
-    for (unsigned j = 0; j < 40; ++j)
-        if (!dsp_idle_slot_shift(&s->cpu.loads[j], &s->idle_anchor_loads[j],
-                                 sizeof(s->cpu.loads[j]), period))
-            return false;
-    return true;
-}
-
 /* Whole repeat periods that can be skipped with `remaining` activation steps
  * left: none may cross a functional McASP slot edge while a transmitter runs
  * (packet-interval mode fires when packets reach a multiple of the interval,
@@ -1038,11 +1045,24 @@ static uint64_t dsp_idle_periods(const NxsHpi *s, uint64_t remaining)
     } else if (s->functional_audio &&
                ((s->mcasp_control.gblctl[1] & 0x1f00u) == 0x1f00u ||
                 (s->mcasp_control.gblctl[2] & 0x1f00u) == 0x1f00u)) {
-        uint64_t edge = (s->cpu.packets / CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL + 1) *
-                        CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL;
-        k = MIN(k, (edge - 1 - s->cpu.packets) / packets);
+        /* Slots the DSP cannot observe may fall inside the skip (they are
+         * then applied in order by dsp_idle_skip_slots); stop before the
+         * first visible one.  TX capture records carry per-slot DSP
+         * counters, so with it every slot is treated as visible. */
+        const uint64_t interval = CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL;
+        uint64_t limit = s->cpu.packets + k * packets;
+        uint64_t edge = (s->cpu.packets / interval + 1) * interval;
+        if (!s->tx_capture) {
+            CdjC6747Edma edma = s->edma;
+            CdjC6747McaspControl mcasp = s->mcasp_control;
+            while (edge <= limit &&
+                   functional_slot_probe((NxsHpi *)s, &edma, &mcasp) == 0)
+                edge += interval;
+        }
+        if (edge <= limit) k = (edge - 1 - s->cpu.packets) / packets;
     }
-    return k;
+    /* Keep one whole period to execute afterwards (see "Idle-loop skip"). */
+    return k ? k - 1 : 0;
 }
 
 /* Advance the proven-repeating system by k periods; see "Idle-loop skip". */
@@ -1053,16 +1073,29 @@ static void dsp_idle_skip(NxsHpi *s, uint64_t k)
     for (unsigned i = 0; i < 31; ++i)
         if (s->cpu.control_ready[i] != s->idle_anchor_ready[i])
             s->cpu.control_ready[i] += k * cycles;
-    for (unsigned j = 0; j < 24; ++j)
-        if (s->cpu.stores[j].due != s->idle_anchor_stores[j].due)
-            s->cpu.stores[j].due += k * cycles;
-    for (unsigned j = 0; j < 40; ++j)
-        if (s->cpu.loads[j].due != s->idle_anchor_loads[j].due)
-            s->cpu.loads[j].due += k * cycles;
     s->cpu.packets += k * packets;
     s->cpu.cycles += k * cycles;
     cdj_c6747_pll_ticks(&s->pll, k * cycles);
     s->idle_skipped_packets += k * packets;
+}
+
+/* Run the functional McASP slots whose edges (packet counts that are
+ * multiples of the interval) a skip from `from` to cpu.packets passed over,
+ * in order, exactly as functional_audio_tick would have after each of those
+ * steps.  dsp_idle_periods proved each of them invisible to the DSP. */
+static bool dsp_idle_skip_slots(NxsHpi *s, uint64_t from)
+{
+    if (!s->functional_audio || s->cycle_audio_clock) return true;
+    const uint64_t interval = CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL;
+    uint64_t now = s->cpu.packets;
+    bool ok = true;
+    for (uint64_t edge = (from / interval + 1) * interval; ok && edge <= now;
+         edge += interval) {
+        s->cpu.packets = edge;
+        ok = functional_audio_tick(s);
+    }
+    s->cpu.packets = now;
+    return ok;
 }
 
 /* Called before a committed DSP write lands.  A device write dirties the idle
@@ -1372,20 +1405,25 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
             if (s->idle_anchor_valid && !s->idle_dirty &&
                 steps != s->idle_anchor_step && dsp_idle_repeat(s) &&
                 dsp_idle_quiescent(s)) {
-                uint64_t k = s->idle_confirmed && dsp_idle_queues_periodic(s) ?
-                             dsp_idle_periods(s, quota - steps) : 0;
+                uint64_t k = dsp_idle_periods(s, quota - steps);
                 if (k) {
                     uint64_t period = s->cpu.packets - s->idle_anchor_packets;
+                    uint64_t from = s->cpu.packets;
                     dsp_idle_skip(s, k);
                     steps += k * period;
+                    if (!dsp_idle_skip_slots(s, from)) {
+                        reason = s->cpu.fault;
+                        s->dsp_halted = true;
+                        break;
+                    }
                 }
-                dsp_idle_anchor(s, steps, true);
+                dsp_idle_anchor(s, steps);
                 if (steps >= quota) break;
             }
             if ((s->idle_dirty || !s->idle_anchor_valid ||
                  steps - s->idle_anchor_step > DSP_IDLE_WINDOW) &&
                 dsp_idle_clean(s))
-                dsp_idle_anchor(s, steps, false);
+                dsp_idle_anchor(s, steps);
         }
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";

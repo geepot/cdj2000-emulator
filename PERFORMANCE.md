@@ -215,14 +215,20 @@ slot tick that moved data, or more than 64 distinct written RAM words voids
 the anchor. When the DSP returns to the anchor PC with identical state, every
 RAM word it wrote since holds its anchor value again, and no timer, PLL
 countdown, SPI transfer or PSC transition can fire, the whole system state
-has repeated with a period of P packets and C cycles. A second, confirmed
-repeat also snapshots the dead load/store queue slots, which checkpoints
-store verbatim. Running k more periods is then exactly: packets += kP,
-cycles += kC, `cdj_c6747_pll_ticks(kC)` (closed form, checked against k*C
-single ticks in `tests/cstub/c6747-pll.c`), and a kC shift of each
-delayed-control cycle and dead-slot `due` that the loop rewrites once per
-period. The skip takes as many periods as fit before the end of the
-activation budget and before the next functional McASP slot edge.
+has repeated with a period of P packets and C cycles. Running k more
+periods is then exactly: packets += kP, cycles += kC,
+`cdj_c6747_pll_ticks(kC)` (closed form, checked against k*C single ticks in
+`tests/cstub/c6747-pll.c`), and a kC shift of each delayed-control cycle the
+loop rewrites once per period. Dead load/store queue slots, which checkpoints
+store verbatim, are handled by always leaving one whole period to execute
+after a skip: it repeats every append of the loop at the same phase, and only
+a checkpoint reads dead slots. The skip takes as many periods as fit before
+the end of the activation budget and before the next McASP slot the DSP can
+observe. With functional audio a slot is invisible when, probed on scratch
+EDMA/McASP copies, it stages no RAM write, raises no EDMA completion and reads
+no RAM word the loop transiently rewrites; invisible slots inside a skip are
+then run in order at their exact packet counts (with TX capture, whose
+records carry per-slot counters, every slot counts as visible).
 `tests/test_dsp_idle_skip.py` compiles the board's helpers against the real
 peripheral models; removing the memory, timer or delayed-control check fails
 it.
@@ -249,7 +255,9 @@ Wall time from launch, `--lightweight`, same binary:
 
 The loaded-track screen shows TRACK 01 with REMAIN 00m:10s. With
 `--functional-dsp-audio` the DSP streams McASP slots continuously from early
-boot, so the skip rarely engages (listing ~185 s either way), and playback
+boot and takes an EDMA completion interrupt every 32 slots (~32K packets);
+each window still executes the handler plus two idle-loop periods, so the SD
+listing improves less, 185 s to 152 s, and playback
 advances at ~0.05-0.07x real time: replaying a mid-playback snapshot shows
 only ~30% of packets in the idle loop, the rest in 3,197 distinct PCs of
 audio work, and the functional model clocks one slot per 1,024 packets, so
