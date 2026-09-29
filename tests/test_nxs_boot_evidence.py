@@ -288,7 +288,8 @@ def test_run_manifest_records_launched_inputs_and_optional_observations(
         path.write_bytes(name.encode())
     original_simulator = nxs_vm.sha256(tmp_path / paths[0])
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
-    argv = ['nxs_vm', 'run', '--seconds', '2', '--frame-interval', str(interval)]
+    argv = ['nxs_vm', 'run', '--seconds', '2', '--frame-interval', str(interval),
+            '--gui-head-start', '0']
     disc = tmp_path / 'AmbiX demo.iso'
     if disc_attached:
         disc.write_bytes(b'ISO fixture'.ljust(4096, b'\0'))

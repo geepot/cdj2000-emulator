@@ -301,7 +301,7 @@ def test_nxs_window_attaches_and_closing_it_stops_owned_boards(tmp_path, monkeyp
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
-    argv = ['nxs_vm', 'run', '--ui']
+    argv = ['nxs_vm', 'run', '--ui', '--gui-head-start', '0']
     if media:
         media_path = tmp_path / 'track.img'
         media_path.write_bytes(bytes(2048 if media == 'disc' else 512))

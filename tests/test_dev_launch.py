@@ -58,8 +58,9 @@ def test_gui_board_override_points_cfi_at_selected_flash(tmp_path):
     assert f'/core/bfin_ebiu_amc/cfi@0/file "{flash.resolve().as_posix()}"' == output.read_text().strip()
 
 
+@pytest.mark.parametrize('idle_skip', [True, False])
 def test_gui_firmware_override_launches_with_generated_board_and_records_it(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, idle_skip):
     for name in ('bin/cdj-run', 'build/qemu/build/qemu-system-sh4',
                  'firmware/nxs/main-firmware.bin'):
         path = tmp_path / name
@@ -76,7 +77,10 @@ def test_gui_firmware_override_launches_with_generated_board_and_records_it(
     monkeypatch.setattr(nxs_vm, 'occupied_local_ports', lambda base, debug: [])
     monkeypatch.setattr(nxs_vm.sys, 'argv', [
         'nxs_vm', 'run', '--seconds', '1', '--lightweight',
-        '--gui-firmware', str(gui)])
+        '--gui-firmware', str(gui),
+        *([] if idle_skip else ['--no-dsp-idle-skip'])])
+    sleeps = []
+    monkeypatch.setattr(nxs_vm.time, 'sleep', sleeps.append)
 
     class Process:
         def __init__(self, is_gui):
@@ -115,7 +119,13 @@ def test_gui_firmware_override_launches_with_generated_board_and_records_it(
     assert manifest['dsp_event_capture_enabled'] is False
     assert manifest['dsp_checkpoint_policy'] == 'fault'
     assert manifest['architectural_validation_eligible'] is False
-    main_env = environments[0]
+    # The idle skip (default) starts the GUI 1.5 s ahead of MAIN; without it
+    # MAIN starts first, as before.
+    gui_first = '--model' in commands[0]
+    assert gui_first is idle_skip
+    assert sleeps[0] == (1.5 if idle_skip else 1)
+    main_env = environments[1 if gui_first else 0]
+    assert main_env.get('CDJ_NXS_DSP_IDLE_SKIP') == ('1' if idle_skip else None)
     assert main_env['CDJ_NXS_DSP_CHECKPOINT_POLICY'] == 'fault'
     assert main_env['CDJ_NXS_DSP_CHECKPOINT_DIR'] == str(tmp_path / 'run/dsp-checkpoints')
     assert 'CDJ_NXS_DSP_EVENTS' not in main_env
@@ -132,7 +142,8 @@ def test_stop_request_cleanly_stops_owned_processes(tmp_path, monkeypatch):
     monkeypatch.setattr(nxs_vm, 'ROOT', tmp_path)
     monkeypatch.setattr(nxs_vm, 'occupied_local_ports', lambda base, debug: [])
     monkeypatch.setattr(nxs_vm.sys, 'argv', [
-        'nxs_vm', 'run', '--seconds', '60', '--lightweight', '--debug'])
+        'nxs_vm', 'run', '--seconds', '60', '--lightweight', '--debug',
+        '--gui-head-start', '0'])
     sleep_count = [0]
     def sleep(duration):
         sleep_count[0] += 1

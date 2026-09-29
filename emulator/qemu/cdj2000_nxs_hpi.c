@@ -124,14 +124,19 @@ typedef struct {
     DspFaultHistory fault_history[DSP_FAULT_HISTORY_COUNT];
     uint32_t fault_history_next;
     char *fault_history_path;
-    /* Opt-in idle-loop yield (CDJ_NXS_DSP_IDLE_YIELD=1); see dsp_idle_repeat.
-     * Host-side scheduling state only: never checkpointed. */
-    bool idle_yield, idle_dirty, idle_anchor_valid;
+    /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
+     * Host-side bookkeeping only: never checkpointed. */
+    bool idle_skip, idle_dirty, idle_anchor_valid;
     unsigned idle_anchor_step;
     uint32_t idle_anchor_pc;
     uint32_t idle_anchor_r[2][32], idle_anchor_control[32];
-    uint64_t idle_anchor_ready[32], idle_anchor_cycles;
-    uint64_t idle_yields;
+    uint64_t idle_anchor_ready[32], idle_anchor_cycles, idle_anchor_packets;
+    uint64_t idle_skipped_packets;
+    /* A confirmed anchor is one taken at a proven repeat; it also keeps the
+     * dead queue storage, which checkpoints carry byte for byte. */
+    bool idle_confirmed;
+    CdjC674xStore idle_anchor_stores[24];
+    CdjC674xLoad idle_anchor_loads[40];
     /* RAM words written since the anchor, with their anchor-time values. */
     unsigned idle_log_count;
     uint32_t idle_log_address[64], idle_log_value[64];
@@ -763,6 +768,7 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         }
         s->edma = trial_edma;
         s->mcasp_control = trial_mcasp;
+        s->idle_dirty = true;
         deliver_edma_notifications(s);
         if (s->tx_capture || s->audio_voice || s->pcm_wav) {
             for (unsigned instance = 1; instance <= 2; ++instance) {
@@ -890,17 +896,26 @@ slot_fault:
 }
 
 /*
- * Idle-loop yield.  In the legacy scheduler a DSP activation runs until HINT
- * or its packet budget, synchronously inside the SH-4's MMIO write, so while
- * the DSP firmware sits in its polling loop MAIN is frozen for the rest of the
+ * Idle-loop skip.  In the legacy scheduler a DSP activation runs until HINT or
+ * its packet budget, synchronously inside the SH-4's MMIO write, so while the
+ * DSP firmware sits in its polling loop MAIN is frozen for the rest of the
  * budget.  Nothing outside the DSP can run during that time.  So if the DSP
  * returns to an earlier PC with the same registers and the same memory (every
  * RAM word it wrote since then holds its earlier value again), having made no
- * device access other than pure GPIO reads, and no tick-driven peripheral can
- * raise an event or change visible state, then the whole system state has
- * repeated and the DSP provably loops until the next host event.  Ending the
- * activation there only stops the DSP's cycle counters (in this mode already
- * a budget artifact) from advancing through the spin.
+ * device access other than pure GPIO reads, no McASP slot tick or EDMA
+ * completion happened, and no tick-driven peripheral can raise an event, then
+ * the whole system state has repeated with a period of P packets and C cycles
+ * and will keep repeating.  Running k more periods is then exactly: packets
+ * += kP, cycles += kC, the PLL's input-period counter advanced by kC edges,
+ * and each delayed-control cycle written once per period moved by kC.  The
+ * load/store queues are empty at the anchor, but their dead slots still hold
+ * the last retired entries and checkpoints store them verbatim, so a skip
+ * waits for a second, confirmed repeat whose anchor snapshots those slots,
+ * and moves the `due` of each slot rewritten once per period by kC as well.
+ * dsp_idle_skip applies that for as many whole periods as fit before the end
+ * of the activation budget and before the next functional McASP slot edge,
+ * so every checkpoint, event record and report stays what full execution
+ * would have produced.
  */
 #define DSP_IDLE_WINDOW 65536u
 
@@ -915,7 +930,6 @@ static bool dsp_idle_clean(const NxsHpi *s)
  * that firmware could observe. */
 static bool dsp_idle_quiescent(const NxsHpi *s)
 {
-    if (s->functional_audio) return false;
     for (unsigned i = 0; i < CDJ_C6747_TIMER_COUNT; ++i)
         if ((s->timers[i].tgcr & 3u) && (s->timers[i].tcr & 0x00c000c0u))
             return false;
@@ -932,13 +946,19 @@ static bool dsp_idle_quiescent(const NxsHpi *s)
     return true;
 }
 
-static void dsp_idle_anchor(NxsHpi *s, unsigned step)
+static void dsp_idle_anchor(NxsHpi *s, unsigned step, bool confirmed)
 {
+    s->idle_confirmed = confirmed;
+    if (confirmed) {
+        memcpy(s->idle_anchor_stores, s->cpu.stores, sizeof(s->idle_anchor_stores));
+        memcpy(s->idle_anchor_loads, s->cpu.loads, sizeof(s->idle_anchor_loads));
+    }
     s->idle_anchor_valid = true;
     s->idle_dirty = false;
     s->idle_anchor_step = step;
     s->idle_anchor_pc = s->cpu.pc;
     s->idle_anchor_cycles = s->cpu.cycles;
+    s->idle_anchor_packets = s->cpu.packets;
     memcpy(s->idle_anchor_r, s->cpu.r, sizeof(s->idle_anchor_r));
     memcpy(s->idle_anchor_control, s->cpu.control,
            sizeof(s->idle_anchor_control));
@@ -948,8 +968,10 @@ static void dsp_idle_anchor(NxsHpi *s, unsigned step)
 }
 
 /* Same architectural state as the anchor.  A control_ready entry is a cycle
- * at which a delayed control value becomes visible; two already-passed
- * cycles are equivalent.  Entry 31 holds loop context, not a cycle. */
+ * at which a delayed control value becomes visible: it must be unchanged or,
+ * if rewritten once per period, have moved by exactly the period's cycles
+ * (and be already passed, so it is not pending).  Entry 31 holds loop
+ * context, not a cycle. */
 static bool dsp_idle_repeat(const NxsHpi *s)
 {
     if (s->cpu.pc != s->idle_anchor_pc || !dsp_idle_clean(s) ||
@@ -957,10 +979,10 @@ static bool dsp_idle_repeat(const NxsHpi *s)
         memcmp(s->cpu.control, s->idle_anchor_control,
                sizeof(s->idle_anchor_control)))
         return false;
+    uint64_t period = s->cpu.cycles - s->idle_anchor_cycles;
     for (unsigned i = 0; i < 32; ++i) {
         uint64_t a = s->idle_anchor_ready[i], b = s->cpu.control_ready[i];
-        if (a != b && (i == 31 || a > s->idle_anchor_cycles ||
-                       b > s->cpu.cycles))
+        if (a != b && (i == 31 || b - a != period || b > s->cpu.cycles))
             return false;
     }
     for (unsigned i = 0; i < s->idle_log_count; ++i) {
@@ -968,6 +990,79 @@ static bool dsp_idle_repeat(const NxsHpi *s)
         if (!p || ldl_le_p(p) != s->idle_log_value[i]) return false;
     }
     return true;
+}
+
+/* Dead queue slots since a confirmed anchor: each unchanged, or changed only
+ * in `due`, by exactly one period.  (`due` is each entry's first field.) */
+static bool dsp_idle_slot_shift(const void *now, const void *then, size_t size,
+                                uint64_t period)
+{
+    uint64_t a, b;
+    if (!memcmp(now, then, size)) return true;
+    memcpy(&b, now, sizeof(b));
+    memcpy(&a, then, sizeof(a));
+    return b - a == period &&
+           !memcmp((const char *)now + 8, (const char *)then + 8, size - 8);
+}
+
+static bool dsp_idle_queues_periodic(const NxsHpi *s)
+{
+    uint64_t period = s->cpu.cycles - s->idle_anchor_cycles;
+    for (unsigned j = 0; j < 24; ++j)
+        if (!dsp_idle_slot_shift(&s->cpu.stores[j], &s->idle_anchor_stores[j],
+                                 sizeof(s->cpu.stores[j]), period))
+            return false;
+    for (unsigned j = 0; j < 40; ++j)
+        if (!dsp_idle_slot_shift(&s->cpu.loads[j], &s->idle_anchor_loads[j],
+                                 sizeof(s->cpu.loads[j]), period))
+            return false;
+    return true;
+}
+
+/* Whole repeat periods that can be skipped with `remaining` activation steps
+ * left: none may cross a functional McASP slot edge while a transmitter runs
+ * (packet-interval mode fires when packets reach a multiple of the interval,
+ * the cycle clock when cycles reach mcasp_next_cycle). */
+static uint64_t dsp_idle_periods(const NxsHpi *s, uint64_t remaining)
+{
+    uint64_t packets = s->cpu.packets - s->idle_anchor_packets;
+    uint64_t cycles = s->cpu.cycles - s->idle_anchor_cycles;
+    if (!packets || !cycles) return 0;
+    uint64_t k = remaining / packets;
+    if (s->functional_audio && s->cycle_audio_clock) {
+        if ((s->mcasp_control.gblctl[1] & 0x1f00u) == 0x1f00u) {
+            if (!s->mcasp_next_cycle || s->mcasp_next_cycle <= s->cpu.cycles)
+                return 0;
+            k = MIN(k, (s->mcasp_next_cycle - 1 - s->cpu.cycles) / cycles);
+        }
+    } else if (s->functional_audio &&
+               ((s->mcasp_control.gblctl[1] & 0x1f00u) == 0x1f00u ||
+                (s->mcasp_control.gblctl[2] & 0x1f00u) == 0x1f00u)) {
+        uint64_t edge = (s->cpu.packets / CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL + 1) *
+                        CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL;
+        k = MIN(k, (edge - 1 - s->cpu.packets) / packets);
+    }
+    return k;
+}
+
+/* Advance the proven-repeating system by k periods; see "Idle-loop skip". */
+static void dsp_idle_skip(NxsHpi *s, uint64_t k)
+{
+    uint64_t packets = s->cpu.packets - s->idle_anchor_packets;
+    uint64_t cycles = s->cpu.cycles - s->idle_anchor_cycles;
+    for (unsigned i = 0; i < 31; ++i)
+        if (s->cpu.control_ready[i] != s->idle_anchor_ready[i])
+            s->cpu.control_ready[i] += k * cycles;
+    for (unsigned j = 0; j < 24; ++j)
+        if (s->cpu.stores[j].due != s->idle_anchor_stores[j].due)
+            s->cpu.stores[j].due += k * cycles;
+    for (unsigned j = 0; j < 40; ++j)
+        if (s->cpu.loads[j].due != s->idle_anchor_loads[j].due)
+            s->cpu.loads[j].due += k * cycles;
+    s->cpu.packets += k * packets;
+    s->cpu.cycles += k * cycles;
+    cdj_c6747_pll_ticks(&s->pll, k * cycles);
+    s->idle_skipped_packets += k * packets;
 }
 
 /* Called before a committed DSP write lands.  A device write dirties the idle
@@ -1002,7 +1097,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     NxsHpi *s = opaque;
-    if (commit && s->idle_yield) dsp_idle_note_write(s, address, value, size);
+    if (commit && s->idle_skip) dsp_idle_note_write(s, address, value, size);
     if (dsp_l1d_write(s, address, value, size, commit)) return true;
     if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
         cdj_c6747_pll_write_mapped(address, size)) {
@@ -1243,8 +1338,8 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
     unsigned steps = 0;
     /* The host may have changed memory since the last activation. */
     s->idle_anchor_valid = false;
-    bool idle_yield = s->idle_yield && !s->scheduler.mode &&
-                      !s->virtual_audio_clock;
+    bool idle_skip = s->idle_skip && !s->scheduler.mode &&
+                     !s->virtual_audio_clock && !s->fault_history_path;
     while (steps < quota) {
         if (s->fault_history_path) {
             DspFaultHistory *item = &s->fault_history[
@@ -1273,18 +1368,24 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                 s->cpu.control[27],
                 1, s->cpu.loop_active};
         }
-        if (idle_yield) {
+        if (idle_skip) {
             if (s->idle_anchor_valid && !s->idle_dirty &&
                 steps != s->idle_anchor_step && dsp_idle_repeat(s) &&
                 dsp_idle_quiescent(s)) {
-                reason = "DSP idle loop";
-                ++s->idle_yields;
-                break;
+                uint64_t k = s->idle_confirmed && dsp_idle_queues_periodic(s) ?
+                             dsp_idle_periods(s, quota - steps) : 0;
+                if (k) {
+                    uint64_t period = s->cpu.packets - s->idle_anchor_packets;
+                    dsp_idle_skip(s, k);
+                    steps += k * period;
+                }
+                dsp_idle_anchor(s, steps, true);
+                if (steps >= quota) break;
             }
             if ((s->idle_dirty || !s->idle_anchor_valid ||
                  steps - s->idle_anchor_step > DSP_IDLE_WINDOW) &&
                 dsp_idle_clean(s))
-                dsp_idle_anchor(s, steps);
+                dsp_idle_anchor(s, steps, false);
         }
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
@@ -1558,10 +1659,10 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(dsp_read, dsp_fetch_block);
     s->functional_audio = audio && !strcmp(audio, "1");
-    const char *idle_yield = getenv("CDJ_NXS_DSP_IDLE_YIELD");
-    s->idle_yield = idle_yield && !strcmp(idle_yield, "1");
-    if (s->idle_yield)
-        warn_report("nxs-c674x: idle-loop yield enabled; a proven DSP spin ends its legacy activation");
+    const char *idle_skip = getenv("CDJ_NXS_DSP_IDLE_SKIP");
+    s->idle_skip = idle_skip && !strcmp(idle_skip, "1");
+    if (s->idle_skip)
+        info_report("nxs-c674x: idle-loop skip enabled; proven DSP spin periods are advanced without execution");
     s->virtual_audio_clock = virtual_audio && !strcmp(virtual_audio, "1");
     s->cycle_audio_clock = cycle_audio && !strcmp(cycle_audio, "1");
     if ((s->virtual_audio_clock || s->cycle_audio_clock) &&
