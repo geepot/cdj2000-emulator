@@ -288,3 +288,9 @@ Replay of the playback snapshot: identical trace and final checkpoint,
 0.75-0.76 -> 0.71-0.72 s; boot checkpoints 1/25/250 identical; 45-second
 full-capture boots against the previous binary give identical events and
 DSP checkpoints (508, and 452 with functional audio).
+
+The issue loop reuses the pre-scan's per-instruction NOP count and SPMASK
+decode, the load/store overlap check is skipped with no store queued, and the
+retire loop skips a load due more than two cycles out (neither its E3 read nor
+its retirement can fall in the cycle) with one test: about 1.5% on the
+playback replay, identical output.

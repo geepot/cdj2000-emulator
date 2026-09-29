@@ -3685,11 +3685,15 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out, unsigned peak[2],
      * parallel with SPMASK. Check the whole packet before executing any
      * member so the rejection is atomic in either instruction order. */
     bool seen_spmask = false, seen_multicycle_nop = false;
+    /* Kept for the issue loop below, which needs the same two decodes. */
+    unsigned nops[8];
+    bool spmasks[8];
     for (unsigned i = 0; i < packet->count; ++i) {
         const CdjC674xInstruction *insn = &packet->instructions[i];
         unsigned mask;
-        unsigned nop = nop_cycles(insn);
-        bool spmask = spmask_decode(insn, &mask) || spmaskr_decode(insn);
+        unsigned nop = nops[i] = nop_cycles(insn);
+        bool spmask = spmasks[i] =
+            spmask_decode(insn, &mask) || spmaskr_decode(insn);
         if ((spmask && seen_multicycle_nop) ||
             (nop > 1 && nop <= 9 && seen_spmask))
             return stop(cpu, insn->pc, insn->word,
@@ -3701,12 +3705,11 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out, unsigned peak[2],
         const CdjC674xInstruction *insn = &packet->instructions[i];
         uint32_t w = insn->word, pc = insn->pc, value = 0;
         bool compact = insn->compact;
-        unsigned ignored_mask;
-        if (spmask_decode(insn, &ignored_mask) || spmaskr_decode(insn)) {
+        if (spmasks[i]) {
             if (i) return stop(cpu, pc, w, "SPMASK(R) must start packet");
             continue; /* Idle loop buffer: SPMASK(R) is a NOP. */
         }
-        unsigned nop = nop_cycles(insn);
+        unsigned nop = nops[i];
         if (nop) {
             /* SPRUFE8B printed page 274 gives IDLE bits 16-13 = 1111 with
              * every other bit zero except p, which nop_cycles reports as
@@ -4380,7 +4383,7 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out, unsigned peak[2],
      * C6745/C6747 device manual SPRUH91D describes no L1D arbitration for it
      * either.  Settling this needs hardware or a TI statement, not a reading of
      * the CPU manual, so this halts rather than guess read-before-write. */
-    for (unsigned j = 0; j < out->load_count; ++j) {
+    for (unsigned j = 0; out->store_count && j < out->load_count; ++j) {
         if (!queued_memory_load(&out->loads[j])) continue;
         for (unsigned k = 0; k < out->store_count; ++k) {
             if (out->loads[j].due - 2 != out->stores[k].due) continue;
@@ -4433,6 +4436,8 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out, unsigned peak[2],
         }
         for (unsigned j = 0; j < out->load_count;) {
             CdjC674xLoad *load = &out->loads[j];
+            /* Neither its E3 read nor its retirement falls in this cycle. */
+            if (load->due > now + 2) { ++j; continue; }
             if (queued_memory_load(load) && load->due == now + 2) {
                 uint64_t data;
                 if (!read_transfer(read, opaque, load->address, load->size, &data))
