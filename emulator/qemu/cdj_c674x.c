@@ -418,7 +418,7 @@ static unsigned instruction_unit(const CdjC674xInstruction *insn)
     return 0;
 }
 
-typedef struct { CdjC674x *cpu; unsigned mask; bool unknown; } LoopMask;
+typedef struct { const CdjC674x *cpu; unsigned mask; bool unknown; } LoopMask;
 static bool compact_branch(const CdjC674xInstruction *i)
 {
     unsigned w = i->word;
@@ -584,8 +584,9 @@ static CdjC674xStore *append_store(CdjC674x *old, CdjC674x *out)
     return &out->stores[j];
 }
 
-#ifndef CDJ_C674X_COPY_TRANSACTIONS
 /* Copy [0, offsetof(loop)) except queue slots at or past the given extents. */
+static unsigned umax(unsigned a, unsigned b) { return a > b ? a : b; }
+
 static void copy_prefix(CdjC674x *to, const CdjC674x *from, unsigned stores,
                         unsigned loads)
 {
@@ -599,7 +600,6 @@ static void copy_prefix(CdjC674x *to, const CdjC674x *from, unsigned stores,
            (const char *)from + offsetof(CdjC674x, load_count),
            offsetof(CdjC674x, loop) - offsetof(CdjC674x, load_count));
 }
-#endif
 
 bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
 {
@@ -4549,9 +4549,14 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out, unsigned peak[2],
  * if the packet fails, which (with the slots append_* saved) leaves the same
  * bytes a discarded copy would.  Copy mode stays for an invalid incoming
  * queue count and as the test reference (CDJ_C674X_COPY_TRANSACTIONS). */
-bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
-                       CdjC674xRead read, CdjC674xWrite write, void *opaque)
+/* cdj_c674x_execute that also reports, on success, how far into each queue
+ * (stores, loads) the packet wrote: slots at or past these are untouched. */
+static bool execute_transaction(CdjC674x *cpu, const CdjC674xPacket *packet,
+                                CdjC674xRead read, CdjC674xWrite write,
+                                void *opaque, unsigned extent[2])
 {
+    extent[0] = 24;
+    extent[1] = 40;
     if (cpu->fault) return false;
 #ifndef CDJ_C674X_COPY_TRANSACTIONS
     if (cpu->store_count <= 24 && cpu->load_count <= 40) {
@@ -4560,8 +4565,11 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
         /* A failure during issue leaves the counts at their high-water mark;
          * one during retirement has peak[] from the end of issue. */
         unsigned peak[2] = {0, 0};
-        if (execute_packet(&old, cpu, peak, packet, read, write, opaque))
+        if (execute_packet(&old, cpu, peak, packet, read, write, opaque)) {
+            extent[0] = umax(peak[0], old.store_count);
+            extent[1] = umax(peak[1], old.load_count);
             return true;
+        }
         copy_prefix(cpu, &old,
                     peak[0] > cpu->store_count ? peak[0] : cpu->store_count,
                     peak[1] > cpu->load_count ? peak[1] : cpu->load_count);
@@ -4577,14 +4585,45 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
     return true;
 }
 
+bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
+                       CdjC674xRead read, CdjC674xWrite write, void *opaque)
+{
+    unsigned extent[2];
+    return execute_transaction(cpu, packet, read, write, opaque, extent);
+}
+
 static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
-    CdjC674x out = *cpu;
+    /* Transactional copy of what this step can change.  Only an unsealed
+     * (loading) loop writes the schedule's tags/count arrays and, when it
+     * fetches, the 1,792-byte instruction array; a sealed step leaves both
+     * out of the copy and reads the committed ones.  Dead queue slots are
+     * not copied either: execute reports how far it wrote into each queue,
+     * and only that extent is committed. */
+    bool loading_step = !cpu->loop.sealed;
+    bool buffer_writes = loading_step && !cpu->loop_wait;
+    /* An out-of-range incoming queue count keeps the whole-struct copy. */
+    bool whole = cpu->store_count > 24 || cpu->load_count > 40;
+    CdjC674x out CDJ_C674X_UNINITIALIZED;
+    if (whole) {
+        memcpy(&out, cpu, sizeof(*cpu));
+    } else {
+        copy_prefix(&out, cpu, cpu->store_count, cpu->load_count);
+        size_t loop_start = offsetof(CdjC674x, loop) +
+            (loading_step ? 0 : offsetof(CdjC674xLoop, ii));
+        memcpy((char *)&out + loop_start, (const char *)cpu + loop_start,
+               offsetof(CdjC674x, loop_instructions) - loop_start);
+        if (buffer_writes)
+            memcpy(out.loop_instructions, cpu->loop_instructions,
+                   sizeof(out.loop_instructions));
+    }
+    const CdjC674x *buffer = buffer_writes || whole ? &out : cpu;
+    const CdjC674xLoop *schedule = loading_step || whole ? &out.loop : &cpu->loop;
     /* Also reconciles legacy checkpoints written before SPLX tracking. */
     out.control[26] |= CDJ_C674X_TSR_SPLX;
     CdjC674xPacket combined = {.next_pc = cpu->pc, .single_cycle = true};
     CdjC674xPacket direct = {0};
-    LoopMask masking = {.cpu = &out};
+    LoopMask masking = {.cpu = buffer};
     bool loading = !out.loop.sealed;
     bool reload = loop_immediate_reload(&out);
     bool post = out.loop.sealed && out.loop.cycle >= out.loop.post_cycle &&
@@ -4812,20 +4851,21 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     if (out.loop_pred_history & CDJ_C674X_LOOP_RETURNING)
         masking.mask = 0;
     bool issued = reload && out.loop.sealed ?
-        cdj_c674x_loop_issue_reload(
-            &out.loop, out.control_ready[CDJ_C674X_RELOAD_CURRENT_START],
+        cdj_c674x_loop_issue_reload_from(
+            &out.loop, schedule, out.control_ready[CDJ_C674X_RELOAD_CURRENT_START],
             out.control_ready[CDJ_C674X_RELOAD_OLD_START],
             out.control_ready[CDJ_C674X_RELOAD_OLD_END],
             out.control_ready[CDJ_C674X_RELOAD_POST_END],
             tags, &count, &scheduler_post, &drained, loop_allow, &masking) :
-        cdj_c674x_loop_issue_filtered(&out.loop, tags, &count, &scheduler_post,
-                                     &drained, loop_allow, &masking);
+        cdj_c674x_loop_issue_filtered_from(&out.loop, schedule, tags, &count,
+                                           &scheduler_post, &drained,
+                                           loop_allow, &masking);
     if (!issued)
         return stop(cpu, cpu->pc, 0, "loop issue capacity exceeded");
     if (masking.unknown) return stop(cpu, cpu->pc, 0, "buffered SPMASK unit not implemented");
     if (count + direct.count > 8) return stop(cpu, cpu->pc, 0, "loop/direct packet capacity exceeded");
     for (unsigned i = 0; i < count; ++i)
-        combined.instructions[combined.count++] = out.loop_instructions[tags[i]];
+        combined.instructions[combined.count++] = buffer->loop_instructions[tags[i]];
     for (unsigned i = 0; i < direct.count; ++i)
         combined.instructions[combined.count++] = direct.instructions[i];
     /* SPRUFE8B 7.10: sample the selected condition each cycle. At the end
@@ -4875,7 +4915,8 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     }
     bool branch_matures = reload && cpu->branch_due &&
         cpu->branch_due == cpu->cycles + 1;
-    if (!cdj_c674x_execute(&out, &combined, read, write, opaque))
+    unsigned written[2];
+    if (!execute_transaction(&out, &combined, read, write, opaque, written))
         return stop(cpu, out.fault_pc, out.fault_word, out.fault);
     if (branch_matures && reload) {
         /* Section 7.9.6.3: a taken branch ends program fetch after its last
@@ -4944,7 +4985,19 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     if (drained && (reload ? !reload_taken : scheduler_post) &&
         (!interrupt_draining || (!out.load_count && !out.store_count)))
         loop_set_active(&out, false);
-    *cpu = out;
+    if (whole) {
+        memcpy(cpu, &out, sizeof(*cpu));
+        return true;
+    }
+    copy_prefix(cpu, &out, umax(written[0], cpu->store_count),
+                umax(written[1], cpu->load_count));
+    size_t loop_start = offsetof(CdjC674x, loop) +
+        (loading_step ? 0 : offsetof(CdjC674xLoop, ii));
+    memcpy((char *)cpu + loop_start, (const char *)&out + loop_start,
+           offsetof(CdjC674x, loop_instructions) - loop_start);
+    if (buffer_writes)
+        memcpy(cpu->loop_instructions, out.loop_instructions,
+               sizeof(out.loop_instructions));
     return true;
 }
 
@@ -4956,14 +5009,17 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
     if (cpu->fault) return false;
     if (cpu->loop_active) return loop_step(cpu, read, write, opaque);
     if (cpu->idle_cycles) {
-        CdjC674x out = *cpu;
         CdjC674xPacket idle = {.next_pc = cpu->pc, .single_cycle = true};
         /* The IDLE sentinel never counts down; only an interrupt or a branch
-         * ends it (SPRUFE8B printed page 274). */
-        if (out.idle_cycles != CDJ_C674X_IDLE_FOREVER) --out.idle_cycles;
-        if (!cdj_c674x_execute(&out, &idle, read, write, opaque))
-            return stop(cpu, out.fault_pc, out.fault_word, out.fault);
-        *cpu = out;
+         * ends it (SPRUFE8B printed page 274).  Execute is transactional:
+         * on failure it restores the CPU, fault recorded, and only the
+         * count taken here needs putting back. */
+        unsigned idle_cycles = cpu->idle_cycles;
+        if (idle_cycles != CDJ_C674X_IDLE_FOREVER) --cpu->idle_cycles;
+        if (!cdj_c674x_execute(cpu, &idle, read, write, opaque)) {
+            cpu->idle_cycles = idle_cycles;
+            return false;
+        }
         return true;
     }
     CdjC674xPacket packet;
@@ -5030,7 +5086,10 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
         if (reload_setup && cpu->branch_due)
             return stop(cpu, cpu->pc, w,
                         "SPKERNELR setup with pending branch unsupported");
-        CdjC674x out = *cpu;
+        /* Setup never writes the loop buffer's instruction array (loading
+         * steps fill it), so the transaction stops short of it. */
+        CdjC674x out CDJ_C674X_UNINITIALIZED;
+        memcpy(&out, cpu, offsetof(CdjC674x, loop_instructions));
         /* SPRUFE8B Figure H-5 scatters compact ii-1 across bits 9:7 and
          * bit 14. GNU binutils format nfu_uspl independently agrees. */
         unsigned ii = first.compact ? (((w >> 7) & 7) | ((w >> 11) & 8)) + 1
@@ -5113,7 +5172,7 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
         out.loop_tags = loop_retained_valid(&out) ?
             loop_retained_tags(&out) : 0;
         if (!while_loop && !delayed_loop && out.control[13]) --out.control[13];
-        *cpu = out;
+        memcpy(cpu, &out, offsetof(CdjC674x, loop_instructions));
         return true;
     }
     return cdj_c674x_execute(cpu, &packet, read, write, opaque);

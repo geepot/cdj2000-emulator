@@ -59,6 +59,17 @@ bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *loop, uint32_t tags[8], unsigne
                                   bool *post_fetch, bool *drained,
                                   bool (*allow)(void *, uint32_t), void *opaque)
 {
+    return cdj_c674x_loop_issue_filtered_from(loop, loop, tags, count,
+                                              post_fetch, drained, allow, opaque);
+}
+
+bool cdj_c674x_loop_issue_filtered_from(CdjC674xLoop *loop,
+                                        const CdjC674xLoop *schedule,
+                                        uint32_t tags[8], unsigned *count,
+                                        bool *post_fetch, bool *drained,
+                                        bool (*allow)(void *, uint32_t),
+                                        void *opaque)
+{
     uint32_t result[8];
     unsigned n = 0;
     if (!loop->ii || (!loop->sealed && loop->cycle >= 48)) return false;
@@ -74,8 +85,8 @@ bool cdj_c674x_loop_issue_filtered(CdjC674xLoop *loop, uint32_t tags[8], unsigne
         /* Predicate loops become finite when interrupt draining begins. */
         if (finite && age / loop->ii >= loop->iterations)
             continue;
-        for (unsigned j = 0; j < loop->count[origin]; ++j) {
-            uint32_t tag = loop->tags[origin][j];
+        for (unsigned j = 0; j < schedule->count[origin]; ++j) {
+            uint32_t tag = schedule->tags[origin][j];
             if (allow && !allow(opaque, tag)) continue;
             if (n == 8) return false;
             result[n++] = tag;
@@ -96,6 +107,22 @@ bool cdj_c674x_loop_issue_reload(CdjC674xLoop *loop, uint64_t current_start,
                                  bool *drained,
                                  bool (*allow)(void *, uint32_t), void *opaque)
 {
+    return cdj_c674x_loop_issue_reload_from(loop, loop, current_start,
+                                            old_start, old_end, post_end, tags,
+                                            count, post_fetch, drained, allow,
+                                            opaque);
+}
+
+bool cdj_c674x_loop_issue_reload_from(CdjC674xLoop *loop,
+                                      const CdjC674xLoop *schedule,
+                                      uint64_t current_start,
+                                      uint64_t old_start, uint64_t old_end,
+                                      uint64_t post_end, uint32_t tags[8],
+                                      unsigned *count, bool *post_fetch,
+                                      bool *drained,
+                                      bool (*allow)(void *, uint32_t),
+                                      void *opaque)
+{
     uint32_t result[8];
     unsigned n = 0;
     if (!loop->sealed || !loop->ii || !loop->length ||
@@ -114,8 +141,8 @@ bool cdj_c674x_loop_issue_reload(CdjC674xLoop *loop, uint64_t current_start,
         for (uint64_t origin = local % loop->ii;
              origin < loop->length && origin <= local; origin += loop->ii) {
             if ((local - origin) / loop->ii >= iterations) continue;
-            for (unsigned j = 0; j < loop->count[origin]; ++j) {
-                uint32_t tag = loop->tags[origin][j];
+            for (unsigned j = 0; j < schedule->count[origin]; ++j) {
+                uint32_t tag = schedule->tags[origin][j];
                 if (allow && !allow(opaque, tag)) continue;
                 if (n == 8) return false;
                 result[n++] = tag;

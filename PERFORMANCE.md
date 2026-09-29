@@ -263,3 +263,28 @@ only ~30% of packets in the idle loop, the rest in 3,197 distinct PCs of
 audio work, and the functional model clocks one slot per 1,024 packets, so
 real time needs ~90M packets/s against ~10M today. Playback is bound by raw
 DSP execution speed.
+
+## Loop-buffer transactions (2026-09-28)
+
+Counting copies over 5M steps of a mid-playback snapshot (functional audio)
+found `loop_step` moving 5.2 KB in and 5.2 KB out on every one of 571K
+loop-buffer cycles, 5.9 GB against 4.2 GB for all per-packet backups
+together, and SPLOOP setup and the IDLE/padding path copying the whole
+6.5 KB CPU twice. Now:
+
+* `loop_step` copies the scalar prefix and live queue entries, the loop
+  schedule's scalar fields, and only for an unsealed (loading) loop its
+  tags/count arrays and, when it fetches, the instruction buffer; a sealed
+  step reads the committed schedule through `cdj_c674x_loop_issue_*_from`,
+  which take the tags/count arrays from a separate struct. It commits queue
+  slots up to the extent execute reports having written
+  (`execute_transaction`), so untouched dead slots keep their bytes.
+* SPLOOP setup copies and commits up to the instruction buffer, which it
+  never writes.
+* The IDLE/padding path executes in place (execute is transactional) and
+  restores its idle count on failure.
+
+Replay of the playback snapshot: identical trace and final checkpoint,
+0.75-0.76 -> 0.71-0.72 s; boot checkpoints 1/25/250 identical; 45-second
+full-capture boots against the previous binary give identical events and
+DSP checkpoints (508, and 452 with functional audio).
