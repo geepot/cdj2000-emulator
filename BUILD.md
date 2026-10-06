@@ -333,6 +333,93 @@ cost of a run. `--march=nocona` gives a binary that runs on any x86-64,
 first -- configure only runs when there is no `config.status`, so a change of
 flags does nothing without it. `CDJ_SIM_CFLAGS` replaces the flags outright.
 
+## The GUI board, fast -- `cdj-gui-run` (GUI-only)
+
+```sh
+sh scripts/build-cdj-gui-run.sh            # installs bin/cdj-gui-run
+python -m tools.cdj_gui.gui_run --seconds 60   # runs/gui-run/screen.ppm
+```
+
+`emulator/bfin/` is the plain-C BF531 interpreter from Stijn Jacobs'
+cdj-nxs2-qemu (commit `08d5cb1`, GPL-2.0-or-later; see THIRD_PARTY.md) with our
+board additions, and `cdj_gui_run.c` a runner for it. No GDB and no MAIN: it
+boots the GUI exactly as `bin/cdj-run` does with no MAIN link, to
+`E-8709: COMMUNICATION ERROR`.
+
+* **Input.** `firmware/nxs/gui-flash-image.bin` (the default; the image
+  `emulator/cdj2000-gui-nxs.hw` maps, whose boot stream `gui-boot-memory.elf`
+  was built from), a `C2KGUI.UPD`, an update body such as the mods repo's
+  `build/merged-gui/gui-body.bin`, or a bare LDR with `-f FLASH` for the
+  resources. A body or UPD is placed at flash 0x10000 as the GUI's updater
+  programs it.
+* **Output.** The frame file `bin/cdj-run` writes for `BFIN_GUI_OUTPUT`: P6,
+  the PPI's 480x255 capture, rgb555le expanded `(v << 3) | (v >> 2)`, through a
+  `.tmp` and a rename, unchanged frames not rewritten. Viewers crop to 480x234.
+* **Time.** `-s` is virtual seconds (400 MHz core cycles); the run is unpaced.
+  `BF531_CCLK_HZ` is the core timer's 400,000-cycle millisecond.
+* **Board.** PF0 READY toggles on every flag-register read
+  (`BFIN_GPIO5_READY_TOGGLE=1`, `-g 0` to disable); async bank 3
+  (`0x20300000`, written 0 and 2 at boot) is a latch.
+* **Exit status** 0, or 1 on an unimplemented instruction (PC and words on
+  stderr, never silently wrong); `-x lo:hi` reports how many 256-byte code lines
+  in a range ran, e.g. a mod's extension.
+
+`tests/test_cdj_gui_run.py` builds it and boots the stock GUI to E-8709;
+`CDJ_GUI_RUN_AB=1` adds the A/B against `bin/cdj-run`: gdb's frame on
+`BFIN_TIME_BASE=virtual` at 20 s equals one of ours sampled through the cursor's
+0.6 s blink, pixel for pixel (the two boot paths put the blink about 0.2 s out
+of phase), and the speed at equal virtual time, in CPU seconds. Measured
+2026-10-05 on Apple silicon: 20 s virtual in 0.41 s against 4.4 s for
+`BFIN_TIME_BASE=virtual` (about 10x; both execute about 178 M instructions and
+skip the idle loop) and 1 s of boot in 0.13 s against 38 s for
+`BFIN_TIME_BASE=insn` (about 280x; insn pays a display event per tick). The
+wall-clock base (`nxs_vm`'s default) is capped at real time; this runs at
+35-50x real time.
+
+### What connecting it to MAIN needs (the next slice)
+
+Nothing of the link is here yet. To replace `bin/cdj-run` under `nxs_vm` and
+`twoboard` it needs, against `emulator/bfin/bf531.c`:
+
+1. **The SPORT1 socket link** (patch 02, `bfin_sport_link_*` in
+   `dv-bfin_ppi.c`): `BFIN_MAIN_LINK=host:port` connects lazily, retrying, to
+   two sockets -- requests out on `port`, records in on `port+2` (QEMU's two
+   chardevs). Records arrive framed `"CDJL"` + LE32 length + body (max 4096,
+   resync on bad magic or length; an unframed peer falls back to a flat
+   stream), are split into per-length slots (64-byte status, 224-byte payload,
+   longer announced payloads) and handed to the RX DMA whose byte count matches.
+   `bf531.c` today takes one standing packet per DMA3 arm
+   (`bf531_sport1_rx`) and truncates TX to 128 bytes (`sport1_tx_start`); both
+   must become the slot model, with SPORT1 RCR/TCR (0xFFC00900-0x924, logged as
+   unmodelled now) and a real SIC mask rather than the forced
+   `SIC_IMASK` bit in `sport1_rx_complete`.
+2. **Delivery semantics**: patch 05 `BFIN_LINK_FRESH_ONLY` (a cached record is
+   never delivered twice; required for `--fresh-link`/`--cosim`), patch 13 (no
+   canned bootstrap record once MAIN has spoken -- the double fault at
+   0x00b99196 otherwise), the bootstrap/zero-200 housekeeping record
+   (`BFIN_SPORT_RX_ZERO_200`), `BFIN_LINK_ANNOUNCE_STICKY` (possibly unneeded:
+   it exists because gdb was slow enough to overflow the exception stack), and
+   the native partial-DMA patches 32/33 (`BFIN_LINK_NATIVE_PARTIAL_DMA`: a fresh
+   `DLNK` burst is delivered once into an oversized RX descriptor with only its
+   real length, oldest first across all length slots).
+3. **Captures**: `BFIN_MAIN_LINK_DUMP` and `BFIN_SPORT_TX_OUTPUT`, kept open and
+   flushed per record (patches 10/11), in the existing formats the
+   `tools/cdj_main` readers parse.
+4. **Co-simulation** (patch 14, `emulator/qemu/cdj2000_cosim.c` has the wire
+   format): `BFIN_COSIM=host:port` on one connection, messages TIME, RECORD,
+   REQUEST, HELLO with a 20-byte header; records due at MAIN's stamp plus the
+   quantum (`BFIN_COSIM_QUANTUM_US`), requests stamped with this board's time,
+   never running past MAIN's promise. `bf531_run` is already virtual-time and
+   unpaced, so this is a budget passed to it; `BFIN_CCLK_HZ`/`BFIN_PPI_FPS`
+   pacing for the A/B method becomes a sleep against a wall clock.
+5. **Launcher**: `nxs_vm --gui-sim fast|gdb` mapping its `BFIN_*` overrides
+   (`BFIN_GPIO_STRAP` for `--panel-rev2`, `BFIN_STATS`, `BFIN_EXIT_AFTER_WALL`,
+   `BFIN_EXCEPTION_TRACE`) to runner options, and `--gui-firmware` directories,
+   which hold an ELF this runner does not load (it boots LDR streams).
+6. Frame publication is done; `BFIN_GUI_RAW_OUTPUT`, the jog extraction and the
+   probe knobs (`BFIN_PEEK_WATCH`, `BFIN_PROF`, PC sampling) have no
+   equivalent yet.
+
 ## The MAIN board -- SH-4, from QEMU
 
 QEMU is not vendored here. Clone it wherever you like:
