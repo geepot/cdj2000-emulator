@@ -887,3 +887,71 @@ What real time would still need, in order of size:
 exactness gate above passes, and it is a 1.3-1.5x on playback replay and
 2-2.5x on loop-buffer code with no measurable cost elsewhere.
 `CDJ_C674X_JIT=0` / `--no-dsp-jit` keeps the interpreter for A/B.
+
+## Virtual time held while MAIN waits for the DSP (`--dsp-thread`, 2026-10-06)
+
+**Symptom.** Stock NXS, the confirmed rekordbox USB, `--functional-dsp-audio
+--dsp-thread`, load Obey, PLAY: the remain counter advanced about 150 half
+frames (07:11 02 to 07:10 33) and froze while the transport still reported
+play requested. Five of five runs (`runs/loadfix` stock-long/stock-late in the main checkout,
+`runs/ps` base1, usb1, smp1).
+
+**Mechanism** (DSP event transcripts, `CDJ_USBH_TRACE=scsi`, MAIN PC samples).
+MAIN streams the track to the DSP in 0x28-frame stream buffers (header
+0x11838140 = 0x1010100 for a new stream, 0x1020100 to continue, data blocks
+handed over with 0x118381c4). Before play it buffers 0x78 frames; the DSP then
+counts 0x11837cd0 (frames ahead) down to 0 while its position 0x11837c10
+counts up to 0x77, and MAIN delivered only four blocks of the next buffer in
+the following 150 s (one per ~290M DSP cycles against one per ~3M before
+play). USB reads of the file slowed to one 4 KB read per 0.7-1.5 s: nothing in
+the USB, EDMA, McASP or interrupt models was waiting, MAIN simply had no time.
+Every HPI access on the DSP thread waits until the DSP has run 256 packets
+(`--dsp-thread-access-packets`); the interpreter delivers 6-15 M packets/s
+against a 150 Mpps clock, so the wait is ~20-40 us of host time per word, and
+QEMU_CLOCK_VIRTUAL kept running through it. After PLAY MAIN's tick-driven
+status polls read ~100 HPI words every few ms: MAIN spent 80-85% of each
+virtual second in the per-access wait (`main-wait` 8.0 s per 10 s), PC
+samples were almost all in `dspregif_read32_arg`/`sub_041c77b8_hpi`, and the
+file task feeding the stream starved. Without a PLAY press (the firmware
+auto-plays a loaded track) the same old binary still fed slowly enough to play
+(one 0x28-frame buffer per ~130M cycles); the press's extra MAIN work tipped it
+into the stall. No REQ 3 (pause) was written in any of these runs.
+
+**Fix** (`cdj2000_nxs_hpi.c`, `main_lock`). On the real board an HPI access
+stalls the SH7764 bus well under a microsecond while the C674x runs on in
+parallel; the host time the interpreter needs to catch up is not board time.
+MAIN now stops the virtual clock (`cpu_disable_ticks`, as a VM stop does) for
+the duration of its wait for the DSP thread, and restarts it with the BQL held
+only if the VM is still running. Lockstep, access_packets and the DSP's
+slip-to-virtual-time pacing are unchanged. `CDJ_NXS_DSP_HOST_TIME=1` restores
+the old charging for A/B. `tests/test_dsp_thread.py` checks the clock is held
+while MAIN waits (seen from another thread with the BQL free), restarted after,
+and left stopped when the VM was stopped meanwhile.
+
+**Result** (same scenario, shared host, `runs/ps`):
+
+| | old (`CDJ_NXS_DSP_HOST_TIME=1` / develop) | held clock |
+| --- | --- | --- |
+| PLAY pressed after load | frozen after ~150 half frames (5 of 5) | 07:11 34 → 07:06 01 in 90 s, still advancing (fix1, fix2) |
+| no PLAY press (auto-play) | 07:11 02 → 07:04 59 in 90 s (np-old) | not needed |
+| stream buffers after play | 4 blocks in 150 s | one 0x28-frame buffer per ~20M DSP cycles, steady |
+| launch to `Not Loaded.` / USB list / duration reply | 8.2 / 1.2 / 1.15 s | unchanged |
+
+Playback stays DSP-bound (~0.06x real time) and MAIN's virtual time now runs
+slower than the wall clock while it waits on the DSP (about 55 virtual s in
+150 s after PLAY); the wall-clock GUI board tolerated it in these runs.
+
+**Not changed: the synchronous modes.** Holding the clock while the DSP runs
+inside MAIN's DSPINT write (free, or charged at 150 Mpps) slowed MAIN's
+virtual time 7-14x against the GUI board and Enter on [TRACK] never opened the
+track list (sync1, sync2), so `--no-dsp-thread` keeps host-time charging. Its
+"stall" in `runs/loadfix/stock-sync` was not one: the load took until the
+end of the run (NOW LOADING on the screenshot before the last), and the DSP
+transcript shows the position still advancing (0x90) when the run stopped.
+Full-capture 45 s `--no-dsp-thread --functional-dsp-audio` boots, develop
+binary against this one: all 125,638 common events and 646 checkpoints
+byte-identical, same final screen.
+
+**`--audio-clock virtual`** still ends in E-8302 CANNOT PLAY TRACK (3184):
+92% of the McASP slots fire short of their packets, the known DSP-speed limit
+of that mode (previous section), not this stall.

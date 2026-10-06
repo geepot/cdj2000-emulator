@@ -25,6 +25,9 @@ SHIM = r'''
 typedef int QemuMutex, QemuCond, QemuThread, QEMUBH;
 typedef struct Notifier { int unused; } Notifier;
 static void info_report(const char *format, ...) { (void)format; }
+static void cpu_disable_ticks(void) {}
+static void cpu_enable_ticks(void) {}
+static bool runstate_is_running(void) { return true; }
 typedef struct {
     struct { uint64_t packets; uint32_t pc, fault_pc; const char *fault; } cpu;
     struct { uint32_t gblctl[3], afsxctl[3]; } mcasp_control;

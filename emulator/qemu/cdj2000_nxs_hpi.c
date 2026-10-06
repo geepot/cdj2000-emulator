@@ -16,6 +16,7 @@
 #include "qemu/thread.h"
 #include "qapi/error.h"
 #include "system/runstate.h"
+#include "system/cpu-timers.h"
 #include "cdj2000_nxs_hpi.h"
 #include "cdj_c674x.h"
 #include "cdj_c6747_syscfg.h"
@@ -244,6 +245,39 @@ typedef struct {
     Notifier shutdown;
 } NxsDspThread;
 static NxsDspThread dsp_thread;
+
+/*
+ * Host time spent making the C674x catch up is not board time.  An HPI access
+ * on the real board stalls the SH7764 bus for well under a microsecond while
+ * the DSP runs on at 456 MHz; here MAIN instead waits, with the BQL dropped,
+ * for the interpreted DSP thread to execute access_packets.
+ * QEMU_CLOCK_VIRTUAL kept running through that wait, so an
+ * interpreter 10-30x slower than the C674x charged MAIN for it: after PLAY
+ * MAIN's tick-driven status polls (~100 HPI words every few ms) waited ~80%
+ * of every virtual second, its file task starved, and the stream to the DSP
+ * stopped after the frames buffered before PLAY (PERFORMANCE.md, "Virtual
+ * time held while MAIN waits for the DSP").  The clock stops for the wait as
+ * it does while the VM is stopped (cpu_disable_ticks), and restarts with the
+ * BQL held only if the VM still runs, so a stop or start meanwhile keeps the
+ * run state's clock.  CDJ_NXS_DSP_HOST_TIME=1 restores the old charging.
+ * The synchronous modes are left alone: holding the clock while the DSP runs
+ * inside MAIN's DSPINT write (zero cost, or the packets at 150 Mpps) slowed
+ * MAIN's virtual time 7-14x against the wall-clock GUI board, and Enter on
+ * [TRACK] then never opened the track list (runs/ps sync1, sync2).
+ */
+static bool dsp_host_time;
+
+static bool hold_virtual_clock(void)
+{
+    if (dsp_host_time) return false;
+    cpu_disable_ticks();
+    return true;
+}
+
+static void release_virtual_clock(bool held)
+{
+    if (held && runstate_is_running()) cpu_enable_ticks();
+}
 
 static void run_dsp(NxsHpi *s);
 static void main_lock(void);
@@ -2422,10 +2456,11 @@ static void main_lock(void)
     NxsDspThread *t = &dsp_thread;
     NxsHpi *s = nxs_hpi;
     if (!t->on) return;
-    bool bql = bql_locked(), dropped = false;
+    bool bql = bql_locked(), dropped = false, held = false;
     if (qemu_mutex_trylock(&t->lock)) {
         qatomic_inc(&t->host_waiting);
         if (bql) {
+            held = hold_virtual_clock();
             bql_unlock();
             dropped = true;
         }
@@ -2436,6 +2471,7 @@ static void main_lock(void)
         uint64_t target = t->main_last + t->access_packets;
         if (s->cpu.packets < target) {
             if (bql && !dropped) {
+                held = hold_virtual_clock();
                 bql_unlock();
                 dropped = true;
             }
@@ -2453,6 +2489,7 @@ static void main_lock(void)
     /* Holding @lock while waiting for the BQL is safe: no BQL holder ever
      * blocks on @lock (it tries, then drops the BQL as above). */
     if (dropped) bql_lock();
+    release_virtual_clock(held);
 }
 
 static void main_unlock(void)
@@ -2670,6 +2707,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     s->sdram = g_malloc0(SDRAM_SIZE);
     s->hint = hint;
     s->opaque = opaque;
+    dsp_host_time = !g_strcmp0(getenv("CDJ_NXS_DSP_HOST_TIME"), "1");
     const char *threaded = getenv("CDJ_NXS_DSP_THREAD");
     if (threaded && !strcmp(threaded, "1")) {
         NxsDspThread *t = &dsp_thread;
