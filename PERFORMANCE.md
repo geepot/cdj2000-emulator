@@ -1340,3 +1340,12 @@ slot instead of two (all 142,177 events and 1,093 DSP checkpoints of a 45 s
 full-capture `--functional-dsp-audio` boot identical to develop's).  RAM
 window lookups compare an offset against the window's span and load and
 store whole little-endian words.
+
+### 8. The steady kernels' model, one record per entry
+
+`benchmark_core` step-kernel ran at either ~35 M or ~19.6 M cycles/s from
+run to run of one binary.  The slow runs had the JIT model page-aligned:
+its address, value and size arrays kept each entry's three fields exactly
+4 KB (or 8 KB, 12 KB) apart, which Apple silicon punishes in a loop that
+stores one and loads another.  The model now keeps one record per
+(operation, age); step-kernel runs at 34-35 M every time.

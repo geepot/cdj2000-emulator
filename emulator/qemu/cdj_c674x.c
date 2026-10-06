@@ -7067,9 +7067,10 @@ struct JitKernel {
 typedef struct {
     const CdjC674x *cpu;                  /* steady execution owner, or NULL */
     const JitKernel *k;
-    uint32_t address[JK_OPS][JK_AGES];
-    uint64_t value[JK_OPS][JK_AGES];
-    unsigned size[JK_OPS][JK_AGES];
+    /* One record per (operation, age): its fields share a cache line.
+     * (Separate arrays put them 4 KB apart, which costs the steady loop
+     * 40% on Apple silicon when the allocation is page-aligned.) */
+    struct { uint64_t value; uint32_t address; unsigned size; } e[JK_OPS][JK_AGES];
 } JitModel;
 
 static _Thread_local JitModel *jit_model;
@@ -7082,9 +7083,9 @@ static void jk_load(const JitKernel *k, const JitModel *m, unsigned o,
     const JitOp *op = &k->op[o];
     unsigned s = (c - a) % JK_AGES;
     *out = (CdjC674xLoad){
-        .due = t - a + k->lat[o], .value = m->value[o][s],
-        .address = m->address[o][s], .bank = op->side, .dst = op->dst,
-        .size = m->size[o][s],
+        .due = t - a + k->lat[o], .value = m->e[o][s].value,
+        .address = m->e[o][s].address, .bank = op->side, .dst = op->dst,
+        .size = m->e[o][s].size,
         .sign_extend = op->kind == JOP_SP ? op->multiply : op->sign_extend
     };
 }
@@ -7094,8 +7095,8 @@ static void jk_store(const JitKernel *k, const JitModel *m, unsigned o,
 {
     unsigned s = (c - a) % JK_AGES;
     *out = (CdjC674xStore){
-        .due = t - a + k->lat[o], .address = m->address[o][s],
-        .value = m->value[o][s], .size = m->size[o][s]
+        .due = t - a + k->lat[o], .address = m->e[o][s].address,
+        .value = m->e[o][s].value, .size = m->e[o][s].size
     };
 }
 
@@ -7317,15 +7318,15 @@ static bool jk_enter(CdjC674x *cpu, const JitKernel *k, unsigned p,
     JitModel *m = jit_model;
     for (unsigned j = 0; j < ph->stores; ++j) {
         unsigned o = ph->store[j].op, s = (c - ph->store[j].age) % JK_AGES;
-        m->address[o][s] = cpu->stores[j].address;
-        m->value[o][s] = cpu->stores[j].value;
-        m->size[o][s] = cpu->stores[j].size;
+        m->e[o][s].address = cpu->stores[j].address;
+        m->e[o][s].value = cpu->stores[j].value;
+        m->e[o][s].size = cpu->stores[j].size;
     }
     for (unsigned j = 0; j < ph->loads; ++j) {
         unsigned o = ph->load[j].op, s = (c - ph->load[j].age) % JK_AGES;
-        m->address[o][s] = cpu->loads[j].address;
-        m->value[o][s] = cpu->loads[j].value;
-        m->size[o][s] = cpu->loads[j].size;
+        m->e[o][s].address = cpu->loads[j].address;
+        m->e[o][s].value = cpu->loads[j].value;
+        m->e[o][s].size = cpu->loads[j].size;
     }
     m->cpu = cpu;
     m->k = k;
@@ -7370,9 +7371,9 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
                 result = cdj_c674x_add_sub_sp(source1, source2, op->operation,
                                               rmode);
             }
-            m->value[o][slot] = result.value;
-            m->address[o][slot] = result.status << shift;
-            m->size[o][slot] = 0;
+            m->e[o][slot].value = result.value;
+            m->e[o][slot].address = result.status << shift;
+            m->e[o][slot].size = 0;
             continue;
         }
         unsigned bank = op->bank, b = op->b, size = op->size;
@@ -7403,9 +7404,9 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
                 !read_transfer(read, opaque, address, encoded, &dummy))
                 goto decline;
         }
-        m->address[o][slot] = address;
-        m->value[o][slot] = value;
-        m->size[o][slot] = encoded;
+        m->e[o][slot].address = address;
+        m->e[o][slot].value = value;
+        m->e[o][slot].size = encoded;
         if (op->mode & 8) {
             base[bases].bank = bank;
             base[bases].reg = b;
@@ -7416,8 +7417,8 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
      * only pairs it can find new in a steady cycle). */
     for (unsigned i = 0; i < ph->pairs; ++i) {
         unsigned lo = ph->pair[i][0], so = ph->pair[i][1];
-        uint32_t la = m->address[lo][slot], sa = m->address[so][slot];
-        unsigned lsize = m->size[lo][slot], ssize = m->size[so][slot];
+        uint32_t la = m->e[lo][slot].address, sa = m->e[so][slot].address;
+        unsigned lsize = m->e[lo][slot].size, ssize = m->e[so][slot].size;
         for (unsigned x = 0; x < (lsize & 255); ++x)
             for (unsigned y = 0; y < (ssize & 255); ++y)
                 if (circular_address(la, la + x, lsize >> 8) ==
@@ -7430,8 +7431,8 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
     for (unsigned i = 0; i < ph->commits; ++i) {
         const JitRef *r = &ph->store[ph->commit[i]];
         unsigned s = (c - r->age) % JK_AGES;
-        if (!ram_write_transfer(write, opaque, m->address[r->op][s],
-                            m->value[r->op][s], m->size[r->op][s], true)) {
+        if (!ram_write_transfer(write, opaque, m->e[r->op][s].address,
+                            m->e[r->op][s].value, m->e[r->op][s].size, true)) {
             broke = "RAM store callback broke commit guarantee";
             goto fault;
         }
@@ -7439,8 +7440,8 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
     for (unsigned i = 0; i < ph->reads; ++i) {
         const JitRef *r = &ph->load[ph->read[i]];
         unsigned s = (c - r->age) % JK_AGES;
-        uint32_t address = m->address[r->op][s];
-        unsigned size = m->size[r->op][s];
+        uint32_t address = m->e[r->op][s].address;
+        unsigned size = m->e[r->op][s].size;
         uint64_t *v = &data[i];
         if (!jit_read_span(read, opaque, address, size, v) &&
             !read_transfer(read, opaque, address, size, v)) {
@@ -7468,16 +7469,16 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
         cpu->r[base[i].bank][base[i].reg] = base[i].value;
     for (unsigned i = 0; i < ph->reads; ++i) {
         const JitRef *r = &ph->load[ph->read[i]];
-        m->value[r->op][(c - r->age) % JK_AGES] = data[i];
+        m->e[r->op][(c - r->age) % JK_AGES].value = data[i];
     }
     for (unsigned i = 0; i < ph->retires; ++i) {
         const JitRef *r = &ph->load[ph->retire[i]];
         const JitOp *op = &k->op[r->op];
         unsigned s = (c - r->age) % JK_AGES;
-        uint64_t value = m->value[r->op][s];
+        uint64_t value = m->e[r->op][s].value;
         cpu->r[op->side][op->dst] = value;
         if (op->kind == JOP_SP)
-            cpu->control[op->multiply ? 20 : 18] |= m->address[r->op][s];
+            cpu->control[op->multiply ? 20 : 18] |= m->e[r->op][s].address;
         else if (op->pair)
             cpu->r[op->side][op->dst + 1] = value >> 32;
     }
