@@ -624,6 +624,14 @@ bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
      * one is live. False conditional branches do not yet have pipeline state.
      */
     if (cpu->branch_due || cpu->branch_count) return true;
+    /* The only idle SPLX state is the B IRP/NRP return window (7.7.3.2).
+     * Its next target packet starts SPLOOP; 5.4.2 forbids recognition in
+     * that packet. Do not take a pending interrupt between the interpreter's
+     * branch redirect and the return setup, losing the restart SPLX state.
+     * IFR was latched above and remains pending for a legal loop boundary.
+     */
+    if (!cpu->loop_active &&
+        (cpu->control[26] & CDJ_C674X_TSR_SPLX)) return true;
     if (cpu->loop_active) {
         /* Hardware may interrupt a reload in specific PC/branch states;
          * that restart path is outside this implementation. */
