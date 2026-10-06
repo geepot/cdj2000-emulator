@@ -686,6 +686,9 @@ def main():
     parser.add_argument('--panel-rev2', action='store_true',
                         help='the GUI board reads PF3 = 1, the late "/2" panel revision '
                              '(BFIN_GPIO_STRAP=0x8:0x8)')
+    parser.add_argument('--dsp-model', action='store_true',
+                        help='behavioural DSP: answer MAIN without executing the C674x '
+                             '(fast; no audio or playback position, so not playback evidence)')
     parser.add_argument('--lightweight', action='store_true',
                         help='capture DSP checkpoints only on faults; omit the event transcript')
     parser.add_argument('--sd', type=Path,
@@ -804,6 +807,9 @@ def main():
         parser.error('--test-track cannot be combined with --sd')
     if args.timestamp_run and args.run is not None:
         parser.error('--timestamp-run cannot be combined with a positional run directory')
+    if args.dsp_model and (args.functional_dsp_audio or args.functional_dsp_timing or
+                           args.deferred_dsp_scheduling):
+        parser.error('--dsp-model executes no DSP code; drop the functional/deferred DSP options')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if args.virtual_mcasp_clock and not args.functional_dsp_audio:
@@ -1071,6 +1077,9 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
+    main_env.pop('CDJ_NXS_DSP_MODEL', None)
+    if args.dsp_model:
+        main_env['CDJ_NXS_DSP_MODEL'] = '1'
     main_env.pop('CDJ_NXS_DSP_VIRTUAL_MCASP', None)
     if args.virtual_mcasp_clock:
         main_env['CDJ_NXS_DSP_VIRTUAL_MCASP'] = '1'
@@ -1150,6 +1159,7 @@ def main():
                    writes='temporary QEMU snapshot overlays; discarded at exit',
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
+        dsp_model=args.dsp_model,
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
                          'dsp-sysclk1-cycle' if args.dsp_cycle_mcasp_clock else
                          'coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
@@ -1168,7 +1178,7 @@ def main():
             observer_overhead='Lock profiling and monitor collection add host overhead; '
                               'timings are diagnostic observations, not uninstrumented performance'),
         architectural_validation_eligible=not (
-            args.lightweight or args.functional_dsp_timing or
+            args.lightweight or args.functional_dsp_timing or args.dsp_model or
             args.functional_dsp_audio or args.deferred_dsp_scheduling or
             dsp_legacy_budget != 1000000),
         scheduling_provenance=(
