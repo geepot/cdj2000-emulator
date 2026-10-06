@@ -1852,6 +1852,14 @@ static void *dsp_thread_run(void *opaque)
                         t->lag_max_ns / 1e9, t->slipped_ns / 1e9,
                         t->main_waits, t->main_wait_ns / 1e9, t->chunks,
                         t->host_breaks, t->waits, s->cpu.pc);
+            if (cdj_c674x_jit_enabled()) {
+                CdjC674xJitStats jit;
+                cdj_c674x_jit_stats(&jit);
+                info_report("nxs-c674x-jit: runs=%" PRIu64 " steady=%" PRIu64
+                            " native=%" PRIu64 " generic=%" PRIu64
+                            " compiles=%" PRIu64, jit.runs, jit.steady,
+                            jit.native, jit.generic, jit.compiles);
+            }
             if (s->thread_audio_clock)
                 info_report("nxs-c674x-audio-clock: virtual=%.3fs slots=%" PRIu64
                             " underruns=%" PRIu64 " (slots fired after a slip,"

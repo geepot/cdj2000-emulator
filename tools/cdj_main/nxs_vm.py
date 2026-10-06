@@ -903,6 +903,11 @@ def main():
                              'registers and memory, no device access, quiescent peripherals) '
                              'by whole loop periods without executing them; events and '
                              'checkpoints are those of full execution (default: on)')
+    dsp.add_argument('--dsp-jit', action=argparse.BooleanOptionalAction, default=False,
+                        help='run the C674x\'s software-pipelined loops from compiled form '
+                             '(CDJ_C674X_JIT=1; PERFORMANCE.md "Compiled SPLOOP kernels"); '
+                             'events and checkpoints are those of the interpreter '
+                             '(default: off)')
     dsp.add_argument('--dsp-legacy-budget', type=int,
                         help='legacy packets per HPI wake (4096..1000000; default: 1000000)')
     removed = removed_option(sys.argv[1:])
@@ -1213,6 +1218,9 @@ def main():
     main_env['CDJ_NXS_DSP_LEGACY_BUDGET'] = str(dsp_legacy_budget)
     if args.dsp_idle_skip:
         main_env['CDJ_NXS_DSP_IDLE_SKIP'] = '1'
+    main_env.pop('CDJ_C674X_JIT', None)
+    if args.dsp_jit:
+        main_env['CDJ_C674X_JIT'] = '1'
     if args.functional_dsp_timing:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
@@ -1313,6 +1321,7 @@ def main():
         dsp_model=args.dsp_model,
         dsp_thread=args.dsp_thread,
         dsp_thread_choice=dsp_thread_choice,
+        dsp_jit=args.dsp_jit,
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
                          'dsp-thread-virtual' if args.audio_clock == 'virtual' else
                          'dsp-sysclk1-cycle' if args.dsp_cycle_mcasp_clock else
