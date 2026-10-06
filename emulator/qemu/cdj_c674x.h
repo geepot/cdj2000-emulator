@@ -119,6 +119,21 @@ void cdj_c674x_set_fetch_block(CdjC674xRead read, CdjC674xFetchBlock block);
  * bytes at the host pointers fetch_block returned before, without calling
  * it again (the content check itself is unchanged). */
 void cdj_c674x_set_fetch_epoch(const uint64_t *epoch);
+/* Optional: the board's plain-RAM windows, for compiled execution's data
+ * accesses.  window(opaque, address, &lo, &hi, &host) returns true when
+ * address lies in a window [lo, hi) of memory that the read callback (the
+ * one registered with the fetch-block hook) returns byte for byte from
+ * host (host[0] is lo's byte) and whose layout changes only where the
+ * fetch epoch moves; false otherwise.  While *direct is true, the write
+ * callback `write` would do nothing for an aligned 1/2/4/8-byte store into
+ * a window but check (commit=false: succeed) or store the bytes
+ * little-endian (commit=true), so compiled paths do that themselves.  The
+ * board updates *direct from the thread that runs the DSP.  Needs the
+ * fetch epoch (cdj_c674x_set_fetch_epoch). */
+typedef bool (*CdjC674xRamWindow)(void *opaque, uint32_t address,
+                                  uint32_t *lo, uint32_t *hi, uint8_t **host);
+void cdj_c674x_set_ram_window(CdjC674xWrite write, CdjC674xRamWindow window,
+                              const bool *direct);
 /* Direct steps keep a per-thread cache of fetched and decoded packets, valid
  * only while the bytes it was built from are unchanged: every hit re-reads
  * them through the fetch-block hook, so code writes by anyone are seen at the

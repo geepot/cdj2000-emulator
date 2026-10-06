@@ -30,11 +30,17 @@ typedef struct {
     bool hide;               /* fetch-block hook refuses 0x1100..0x11ff */
     bool swap;               /* 0x1100..0x11ff maps to alt[] instead */
     uint8_t alt[0x100];
+    /* Committed RAM writes while test_direct is off: the side effect a
+     * board's write callback may have only while it says so (the idle
+     * skip's write log on the NXS board). */
+    uint32_t write_log;
 } System;
 
 /* The fetch epoch (cdj_c674x_set_fetch_epoch): moved whenever hide or swap
  * changes what a fetch block maps to. */
 static uint64_t test_epoch;
+
+static bool test_direct;
 
 static uint8_t *sys_at(System *s, uint32_t address)
 {
@@ -61,6 +67,7 @@ static bool sys_write(void *opaque, uint32_t address, uint64_t value,
         return false;
     if (commit) {
         if (address == BAD_COMMIT) return false;
+        if (!test_direct) s->write_log = s->write_log * 31 + address;
         if (s->swap && address < 0x1200 && address + size > 0x1100 &&
             (address < 0x1100 || address + size > 0x1200)) {
             for (unsigned i = 0; i < size; ++i)
@@ -78,6 +85,31 @@ static const uint8_t *sys_block(void *opaque, uint32_t block)
     /* Not plain memory: the read callback refuses it now and then. */
     if (block == (FLAKY_READ & ~31u)) return NULL;
     return sys_at(s, block);
+}
+
+/* The RAM windows (cdj_c674x_set_ram_window): plain memory except the
+ * flaky and failing-commit block at the top; 0x1100..0x11ff follows the
+ * swap.  test_direct: stores may bypass sys_write (toggled per seed and
+ * at random during runs). */
+
+static bool sys_window(void *opaque, uint32_t address, uint32_t *lo,
+                       uint32_t *hi, uint8_t **host)
+{
+    System *s = opaque;
+    if (address >= 0x1100 && address < 0x1200) {
+        *lo = 0x1100; *hi = 0x1200;
+        *host = s->swap ? s->alt : s->ram + 0x100;
+        return true;
+    }
+    if (address >= BASE && address < 0x1100) {
+        *lo = BASE; *hi = 0x1100; *host = s->ram;
+        return true;
+    }
+    if (address >= 0x1200 && address < (FLAKY_READ & ~31u)) {
+        *lo = 0x1200; *hi = FLAKY_READ & ~31u; *host = s->ram + 0x200;
+        return true;
+    }
+    return false;
 }
 
 static void sys_tick(void *opaque)
@@ -532,6 +564,7 @@ static void present(JitPair *p)
 {
     /* Interrupt recognition never reads the queues while a loop is active,
      * which is the only time steady execution lasts across between(). */
+    if (rnd() % 97 == 0) test_direct = !test_direct;
     uint32_t pending = rnd() % 23 == 0 ? (1u << (4 + rnd() % 12)) : 0;
     pending |= horizon_event(p->a);
     uint64_t armed = UINT64_C(1) << 62;     /* loop interrupt armed */
@@ -1019,6 +1052,7 @@ int main(void)
 {
     cdj_c674x_set_fetch_block(sys_read, sys_block);
     cdj_c674x_set_fetch_epoch(&test_epoch);
+    cdj_c674x_set_ram_window(sys_write, sys_window, &test_direct);
     self_modifying();
     for (unsigned seed = 1; seed <= 3000; ++seed) lockstep(seed, false);
     printf("packet cache lockstep: 3000 programs, %u packets, %u faults\n",
@@ -1035,6 +1069,7 @@ int main(void)
         cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
         assert(!test_horizon.skipped);
         test_horizon.until = 0;
+        test_direct = seed % 3 != 0;
         jit_lockstep(seed);
     }
     CdjC674xJitStats stats;
@@ -1069,6 +1104,7 @@ int main(void)
         cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
         assert(!test_horizon.skipped);
         test_horizon.until = 0;
+        test_direct = seed % 3 != 0;
         dt_lockstep(seed);
     }
     cdj_c674x_set_horizon(NULL);

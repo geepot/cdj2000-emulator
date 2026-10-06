@@ -154,6 +154,10 @@ typedef struct {
      * models dsp_memory_span depends on (the cache controller's L1D
      * partition, EMIFB's SDRAM enable) and by reset. */
     uint64_t fetch_epoch;
+    /* cdj_c674x_set_ram_window: dsp_write's RAM path would only store the
+     * bytes (no CDJ_NXS_DSP_RAM_FAST=0, no idle-skip write log running).
+     * Set at each horizon open, cleared when an idle anchor is taken. */
+    bool ram_direct;
     uint64_t edma_writes, mcasp_control_writes;   /* see log_sample */
     uint64_t hpic_writes, wm8740_latches;
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
@@ -1231,6 +1235,7 @@ static inline bool functional_audio_idle(const NxsHpi *s)
  * would have produced.
  */
 #define DSP_IDLE_WINDOW 65536u
+#define DSP_IDLE_REANCHOR 4096u
 
 static bool dsp_idle_clean(const NxsHpi *s)
 {
@@ -1261,6 +1266,7 @@ static bool dsp_idle_quiescent(const NxsHpi *s)
 
 static void dsp_idle_anchor(NxsHpi *s, unsigned step)
 {
+    s->ram_direct = false;              /* RAM writes are logged now */
     s->idle_anchor_valid = true;
     s->idle_dirty = false;
     s->idle_anchor_step = step;
@@ -1599,6 +1605,42 @@ static const uint8_t *dsp_fetch_block(void *opaque, uint32_t block)
     return dsp_memory_span(opaque, block, 32);
 }
 
+/* The plain-RAM window holding address, as dsp_memory_span maps it (whose
+ * windows are disjoint): L2 and its local alias, the L1D SRAM partition,
+ * shared RAM and enabled SDRAM with its 32 MB mirrors. */
+static bool dsp_ram_window(void *opaque, uint32_t address, uint32_t *lo,
+                           uint32_t *hi, uint8_t **host)
+{
+    NxsHpi *s = opaque;
+    uint32_t offset;
+    if (address >= L2_BASE && address - L2_BASE < L2_SIZE) {
+        *lo = L2_BASE;
+        *host = s->l2;
+    } else if (cdj_c6747_l1d_sram_span(&s->cache, address, 1, &offset)) {
+        *lo = address - offset;
+        *hi = *lo + cdj_c6747_l1d_sram_bytes(&s->cache);
+        *host = s->l1d;
+        return true;
+    } else if (address >= 0x00800000u && address - 0x00800000u < L2_SIZE) {
+        *lo = 0x00800000u;
+        *host = s->l2;
+    } else if (address >= SHARED_RAM_BASE &&
+               address - SHARED_RAM_BASE < SHARED_RAM_SIZE) {
+        *lo = SHARED_RAM_BASE;
+        *hi = SHARED_RAM_BASE + SHARED_RAM_SIZE;
+        *host = s->shared_ram;
+        return true;
+    } else if (address >= 0xc0000000u && address < 0xe0000000u &&
+               cdj_c6747_emifb_sdram_enabled(&s->emifb)) {
+        *lo = 0xc0000000u + (address - 0xc0000000u) / SDRAM_SIZE * SDRAM_SIZE;
+        *hi = *lo + SDRAM_SIZE;
+        *host = s->sdram;
+        return true;
+    } else return false;
+    *hi = *lo + L2_SIZE;
+    return true;
+}
+
 /* Apply the ticks dsp_cycle_tick only counted; see cdj_dsp_ticks.h.  Before
  * every non-RAM bus access and at the end of each activation. */
 static void dsp_ticks_flush(NxsHpi *s)
@@ -1736,6 +1778,8 @@ static void dsp_horizon_open(NxsHpi *s, const DspActivation *a)
     CdjC674xHorizon *h = &s->horizon;
     uint64_t packets = s->cpu.packets, until = UINT64_MAX;
     h->break_pc = 0;
+    s->ram_direct = !s->ram_slow &&
+        !(s->idle_skip && s->idle_anchor_valid && !s->idle_dirty);
     if (!s->horizon_on || s->fault_history_path || !s->ticks.steady ||
         s->spi_transfer.fault || s->intc_delivery.cpu_request ||
         (s->edma.irq_notifications & 2u) ||
@@ -1828,7 +1872,12 @@ static bool dsp_pre_step(DspActivation *a)
             dsp_idle_anchor(s, a->steps);
             if (a->steps >= a->quota) return false;
         }
-        if ((s->idle_dirty || !s->idle_anchor_valid ||
+        /* A broken proof is re-anchored at most every
+         * DSP_IDLE_REANCHOR steps: busy code breaks every anchor, and each
+         * one costs a state copy and the logging of up to 64 RAM words. */
+        if (((s->idle_dirty &&
+              a->steps - s->idle_anchor_step >= DSP_IDLE_REANCHOR) ||
+             !s->idle_anchor_valid ||
              a->steps - s->idle_anchor_step > DSP_IDLE_WINDOW) &&
             dsp_idle_clean(s))
             dsp_idle_anchor(s, a->steps);
@@ -2805,6 +2854,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(dsp_read, dsp_fetch_block);
     cdj_c674x_set_fetch_epoch(&s->fetch_epoch);
+    cdj_c674x_set_ram_window(dsp_write, dsp_ram_window, &s->ram_direct);
     s->functional_audio = audio && !strcmp(audio, "1");
     const char *ram_fast = getenv("CDJ_NXS_DSP_RAM_FAST");
     s->ram_slow = ram_fast && !strcmp(ram_fast, "0");

@@ -5241,6 +5241,7 @@ typedef struct {
     /* The shape execute_single leaves from an empty one when it queues a
      * branch (an interned shape: never freed), NULL until first needed. */
     const struct DtsShape *single_out;
+    const struct DtsVariant *last_variant;  /* dts_lean_find's last (lean) */
 } CdjC674xCacheEntry;
 
 static _Thread_local CdjC674xCacheEntry *packet_cache;
@@ -5519,6 +5520,7 @@ static bool fetch_cached(CdjC674x *cpu, CdjC674xRead read, void *opaque,
     e->dt = 0;
     dts_drop(e);
     e->single_out = NULL;
+    e->last_variant = NULL;
     *entry = e;
     return true;
 }
@@ -6329,6 +6331,81 @@ static bool jit_native(const CdjC674xDecoded *d)
  * same bytes word for word, so the access needs no callback (reads are
  * side-effect free).  Copies the little-endian value when `value` is given.
  * False means "use the callback", never "unmapped". */
+/* ---- RAM windows (cdj_c674x_set_ram_window) ----------------------------
+ * A board may describe its plain-RAM windows: ram_ptr then finds a range's
+ * host bytes in a four-entry per-thread cache of them, valid while the
+ * fetch epoch stands still (the windows move only where fetch blocks could:
+ * a remap).  Compiled paths read memory there and, while the board's
+ * `direct` flag says its write callback would only store the bytes, write
+ * and check stores there too, aligned ones only. */
+static CdjC674xWrite ram_write_callback;
+static CdjC674xRamWindow ram_window;
+static const bool *ram_writes_direct;
+
+void cdj_c674x_set_ram_window(CdjC674xWrite write, CdjC674xRamWindow window,
+                              const bool *direct)
+{
+    ram_write_callback = write;
+    ram_window = window;
+    ram_writes_direct = direct;
+}
+
+static _Thread_local struct {
+    void *opaque;
+    uint64_t epoch;
+    uint32_t lo, hi;                    /* [lo, hi) */
+    uint8_t *host;                      /* the byte at lo */
+    bool valid;
+} ram_tlb[4];
+static _Thread_local unsigned ram_tlb_next;
+
+static inline uint8_t *ram_ptr(void *opaque, uint32_t address, unsigned size)
+{
+    if (!ram_window || !fetch_epoch) return NULL;
+    uint64_t end = (uint64_t)address + size;
+    for (unsigned i = 0; i < 4; ++i)
+        if (ram_tlb[i].valid && ram_tlb[i].opaque == opaque &&
+            ram_tlb[i].epoch == *fetch_epoch && address >= ram_tlb[i].lo &&
+            end <= ram_tlb[i].hi)
+            return ram_tlb[i].host + (address - ram_tlb[i].lo);
+    uint32_t lo, hi;
+    uint8_t *host;
+    if (!ram_window(opaque, address, &lo, &hi, &host) || address < lo ||
+        end > hi)
+        return NULL;
+    unsigned i = ram_tlb_next++ & 3;
+    ram_tlb[i].opaque = opaque;
+    ram_tlb[i].epoch = *fetch_epoch;
+    ram_tlb[i].lo = lo;
+    ram_tlb[i].hi = hi;
+    ram_tlb[i].host = host;
+    ram_tlb[i].valid = true;
+    return host + (address - lo);
+}
+
+/* write_transfer for the compiled paths: an aligned 1/2/4/8-byte linear
+ * store into a RAM window while the board allows it, without the
+ * callback (what the callback would do: check, or store the bytes). */
+static bool ram_write_transfer(CdjC674xWrite write, void *opaque,
+                               uint32_t address, uint64_t value,
+                               unsigned encoded_size, bool commit)
+{
+    unsigned size = encoded_size & 255;
+    if (write == ram_write_callback && ram_writes_direct &&
+        *ram_writes_direct && !(encoded_size >> 8) &&
+        (size == 1 || size == 2 || size == 4 || size == 8) &&
+        !(address & (size - 1))) {
+        uint8_t *p = ram_ptr(opaque, address, size);
+        if (p) {
+            if (commit)
+                for (unsigned i = 0; i < size; ++i) p[i] = value >> (8 * i);
+            return true;
+        }
+    }
+    return write_transfer(write, opaque, address, value, encoded_size,
+                          commit);
+}
+
 static bool jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
                           unsigned encoded_size, uint64_t *value)
 {
@@ -6336,6 +6413,15 @@ static bool jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
     if (read != fetch_block_read || !fetch_block || (encoded_size >> 8) ||
         (uint64_t)address + size > UINT64_C(0x100000000))
         return false;
+    const uint8_t *r = ram_ptr(opaque, address, size);
+    if (r) {
+        if (value) {
+            uint64_t v = 0;
+            for (unsigned i = 0; i < size; ++i) v |= (uint64_t)r[i] << (8 * i);
+            *value = v;
+        }
+        return true;
+    }
     uint32_t first = address & ~31u, last = (address + size - 1) & ~31u;
     const uint8_t *p = fetch_block(opaque, first);
     const uint8_t *q = last == first ? p : fetch_block(opaque, last);
@@ -6494,7 +6580,7 @@ static bool jit_memory(CdjC674x *cpu, const JitOp *op, bool enabled,
     if (op->is_store) {
         uint64_t value = cpu->r[op->side][op->dst];
         if (op->pair) value |= (uint64_t)cpu->r[op->side][op->dst + 1] << 32;
-        if (!write_transfer(write, opaque, address, value, encoded_size,
+        if (!ram_write_transfer(write, opaque, address, value, encoded_size,
                             false) || cpu->store_count == 24)
             return false;
         *jit_append_store(cpu, undo) = (CdjC674xStore){
@@ -6829,7 +6915,7 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, bool all_pairs,
     for (unsigned j = 0; acting && j < undo.stores; ++j) {
         const CdjC674xStore *store = &cpu->stores[j];
         if (store->due > now) continue;
-        if (!write_transfer(write, opaque, store->address, store->value,
+        if (!ram_write_transfer(write, opaque, store->address, store->value,
                             store->size, true)) {
             broke = "RAM store callback broke commit guarantee";
             break;
@@ -7253,7 +7339,7 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
             value = cpu->r[op->side][op->dst];
             if (op->pair)
                 value |= (uint64_t)cpu->r[op->side][op->dst + 1] << 32;
-            if (!write_transfer(write, opaque, address, value, encoded, false))
+            if (!ram_write_transfer(write, opaque, address, value, encoded, false))
                 goto decline;
         } else {
             uint64_t dummy;
@@ -7288,7 +7374,7 @@ static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
     for (unsigned i = 0; i < ph->commits; ++i) {
         const JitRef *r = &ph->store[ph->commit[i]];
         unsigned s = (c - r->age) % JK_AGES;
-        if (!write_transfer(write, opaque, m->address[r->op][s],
+        if (!ram_write_transfer(write, opaque, m->address[r->op][s],
                             m->value[r->op][s], m->size[r->op][s], true)) {
             broke = "RAM store callback broke commit guarantee";
             goto fault;
@@ -7907,13 +7993,20 @@ static bool dts_program(const DtsVariant *v, const CdjC674x *cpu, uint64_t t,
         memcpy(prog + n, bytes_, sizeof(bytes_));                           \
         n += sizeof(bytes_);                                                \
     } while (0)
+    /* Ticks are batched up to each cycle with a bus operation: every
+     * callback still sees all of its cycle's ticks before it. */
+    unsigned ticks = 0;
     for (unsigned c = 1; c <= v->last; ++c) {
-        DTS_EMIT(P_TICK);
+        ++ticks;
+        if (!((v->commits | v->e3s) >> c & 1)) continue;
+        DTS_EMIT(P_TICK, ticks);
+        ticks = 0;
         for (unsigned j = 0; (v->commits >> c) & 1 && j < cpu->store_count; ++j)
             if (v->commit_at[j] == c) DTS_EMIT(P_COMMIT, j);
         for (unsigned j = 0; (v->e3s >> c) & 1 && j < cpu->load_count; ++j)
             if (v->e3_at[j] == c) DTS_EMIT(P_E3, j);
     }
+    if (ticks) DTS_EMIT(P_TICK, ticks);
     DTS_EMIT(P_END);
     *bus_len = n;
     /* Positions: which post-issue entry sits at each index. */
@@ -8297,7 +8390,7 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
         for (unsigned j = 0; (commits >> c) & 1 && j < cpu->store_count; ++j) {
             const CdjC674xStore *store = &cpu->stores[j];
             if (commit_at[j] != c) continue;
-            if (!write_transfer(write, opaque, store->address, store->value,
+            if (!ram_write_transfer(write, opaque, store->address, store->value,
                                 store->size, true)) {
                 broke = "RAM store callback broke commit guarantee";
                 break;
@@ -8633,7 +8726,7 @@ static int dts_lean(CdjC674x *cpu, const CdjC674xCacheEntry *e,
             if (op->is_store) {
                 uint64_t value = cpu->r[op->side][op->dst];
                 if (op->pair) value |= (uint64_t)cpu->r[op->side][op->dst + 1] << 32;
-                if (!write_transfer(write, opaque, address, value,
+                if (!ram_write_transfer(write, opaque, address, value,
                                     encoded_size, false)) { ok = false; break; }
                 *jit_append_store(cpu, &undo) = (CdjC674xStore){
                     .due = start + 3, .address = address,
@@ -8831,11 +8924,11 @@ static int dts_lean(CdjC674x *cpu, const CdjC674xCacheEntry *e,
     for (const uint8_t *pc = v->prog; !broke; ) {
         switch (*pc++) {
         case P_TICK:
-            core_tick(cpu);
+            for (unsigned k = *pc++; k; --k) core_tick(cpu);
             continue;
         case P_COMMIT: {
             const CdjC674xStore *store = &cpu->stores[*pc++];
-            if (!write_transfer(write, opaque, store->address, store->value,
+            if (!ram_write_transfer(write, opaque, store->address, store->value,
                                 store->size, true))
                 broke = "RAM store callback broke commit guarantee";
             continue;
@@ -8873,7 +8966,7 @@ static int dts_lean(CdjC674x *cpu, const CdjC674xCacheEntry *e,
     reads = 0;
     CdjC674xStore stail CDJ_C674X_UNINITIALIZED;
     CdjC674xLoad ltail CDJ_C674X_UNINITIALIZED;
-    for (const uint8_t *pc = v->prog + v->bus_len;;) {
+    for (const uint8_t *pc = v->prog + v->bus_len; v->retire_len > 1;) {
         switch (*pc++) {
         case P_STAIL: stail = cpu->stores[*pc++]; continue;
         case P_SMOVE: cpu->stores[pc[0]] = cpu->stores[pc[1]]; pc += 2; continue;
@@ -8941,13 +9034,19 @@ static inline uint8_t dts_preds(const CdjC674x *cpu, const DtPlan *plan,
     return preds;
 }
 
-/* The lean variant for the entry shape and these predicates, or NULL. */
-static const DtsVariant *dts_lean_find(const CdjC674xCacheEntry *e,
+/* The lean variant for the entry shape and these predicates, or NULL;
+ * the one found last first. */
+static const DtsVariant *dts_lean_find(CdjC674xCacheEntry *e,
                                        const DtsShape *in, uint8_t preds)
 {
     uint8_t key = preds & e->plan->pmask;
-    for (const DtsVariant *v = e->variants; v; v = v->next)
-        if (v->in == in && v->lean && v->outcome == key) return v;
+    const DtsVariant *v = e->last_variant;
+    if (v && v->in == in && v->outcome == key) return v;
+    for (v = e->variants; v; v = v->next)
+        if (v->in == in && v->lean && v->outcome == key) {
+            e->last_variant = v;
+            return v;
+        }
     return NULL;
 }
 

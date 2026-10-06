@@ -1298,3 +1298,27 @@ ones, the event-transcript path looked up once.
 host at load ~10; E-8302 on screen in every run.)  step-alu is a loop of
 one-instruction ALU packets and a branch, where `execute_single` was
 already lean; the static path costs it the branch's packets.
+
+### 6. RAM windows, tick batches in schedules, idle re-anchoring
+
+`cdj_c674x_set_ram_window` lets a board describe its plain-RAM windows
+(the QEMU board: L2 and its alias, the L1D SRAM partition, shared RAM,
+enabled SDRAM and its mirrors, exactly `dsp_memory_span`'s); compiled
+paths then read E3 values and check and commit stores in host memory
+through a four-entry per-thread window cache (valid while the fetch epoch
+stands), instead of the board's callbacks - stores only aligned, and only
+while the board's `ram_direct` says its RAM write path would just store
+the bytes (`CDJ_NXS_DSP_RAM_FAST=0` and a running idle-skip write log turn
+it off).  The replay offers the windows for reads; direct stores only under
+`CDJ_DSP_REPLAY_RAM_DIRECT=1`, since they leave out the write records its
+trace prints.  The lockstep test's system gets windows (and a write log
+its callback keeps only while stores may not bypass it); dropping the
+epoch, the direct flag, the alignment test or the commit each fails it, as
+does widening a window.  Static schedules' bus programs batch the ticks up
+to each cycle with a bus operation, and an empty retirement program is
+skipped; the lean path keeps the last variant per cache entry.  The idle
+skip re-anchors a broken proof at most every 4,096 steps (each anchor
+copies the CPU's registers and logs up to 64 RAM writes; in busy code
+every horizon end used to take one).  Synchronous 45 s boots are faster
+for it: 404,618 events in 45 s against develop's 298,354, the common
+prefix byte-identical as before.

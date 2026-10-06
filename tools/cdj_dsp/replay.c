@@ -474,6 +474,45 @@ static uint8_t *memory_span(uint32_t address, size_t size)
     return NULL;
 }
 
+/* cdj_c674x_set_ram_window: the window of memory_span holding address.
+ * Direct stores (ram_direct) only under CDJ_DSP_REPLAY_RAM_DIRECT=1: they
+ * leave out the write records the trace prints, so they are for timing
+ * builds without trace output, never for compared traces. */
+static bool ram_direct;
+
+static bool ram_window_hook(void *unused, uint32_t a, uint32_t *lo,
+                            uint32_t *hi, uint8_t **host)
+{
+    (void)unused;
+    uint32_t offset;
+    if (a >= 0x00800000u && a < 0x00840000u) {
+        *lo = 0x00800000u; *hi = 0x00840000u; *host = ram;
+        return true;
+    }
+    if (cdj_c6747_l1d_sram_span(&cache, a, 1, &offset)) {
+        *lo = a - offset;
+        *hi = *lo + cdj_c6747_l1d_sram_bytes(&cache);
+        *host = l1d;
+        return true;
+    }
+    if (a >= 0x11800000u && a < 0x11840000u) {
+        *lo = 0x11800000u; *hi = 0x11840000u; *host = ram;
+        return true;
+    }
+    if (a >= 0x80000000u && a < 0x80020000u) {
+        *lo = 0x80000000u; *hi = 0x80020000u; *host = shared_ram;
+        return true;
+    }
+    if (a >= 0xc0000000u && a < 0xe0000000u &&
+        cdj_c6747_emifb_sdram_enabled(&emifb)) {
+        *lo = 0xc0000000u + (a - 0xc0000000u) / sizeof(sdram) * sizeof(sdram);
+        *hi = *lo + sizeof(sdram);
+        *host = sdram;
+        return true;
+    }
+    return false;
+}
+
 /* cdj_c674x_fetch fast path: memory_span covers exactly read_bus's RAM
  * windows (disjoint from its peripherals), a whole 32-byte block or none. */
 static const uint8_t *fetch_block(void *unused, uint32_t block)
@@ -1338,6 +1377,9 @@ int main(int argc, char **argv)
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(read_bus, fetch_block);
     cdj_c674x_set_fetch_epoch(&fetch_epoch);
+    ram_direct = getenv("CDJ_DSP_REPLAY_RAM_DIRECT") &&
+                 !strcmp(getenv("CDJ_DSP_REPLAY_RAM_DIRECT"), "1");
+    cdj_c674x_set_ram_window(write_bus, ram_window_hook, &ram_direct);
     functional_audio = audio && !strcmp(audio, "1");
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {
