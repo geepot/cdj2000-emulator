@@ -65,7 +65,16 @@ QEMU 11.x or newer is required: the board includes `hw/core/boards.h` and
 | what | `hw/cdj/bfin/` `bfin_core.c`, `bfin_exec.c`, `bfin_dsp.c`, `bfin_dsp.h`, `bfin_priv.h`, `bfin.h`, `bf531.c`, `bf531.h`; `emulator/bfin/cdj_gui_run.c` is based on its `bfinrun.c` |
 | where from | Stijn Jacobs, `https://github.com/Stijn-Jacobs/cdj-nxs2-qemu`, commit `08d5cb1` (2026-10-03) |
 | licence | GPL-2.0-or-later (SPDX line in every file, kept), used with the author's permission |
-| our changes | dated notice at the top of each file; `bf531.c`/`bf531.h` (LDR boot split from the update loader, flash accessor, PF ready toggle, async bank 3 latch, IRQ-less GP timers no longer end a step), `bfin.h`/`bfin_core.c` (`bfin_code_lines_run`); the other four files are unchanged |
+| our changes | dated notice at the top of each file; `bf531.c`/`bf531.h` (LDR boot split from the update loader, flash accessor, PF ready toggle, async bank 3 latch, IRQ-less GP timers no longer end a step), `bfin.h`/`bfin_core.c` (`bfin_code_lines_run`, GNU sim's accumulator words); `bfin_priv.h`/`bfin_exec.c` (GNU sim's bundle order and store queue, flags, reserved forms); `bfin_dsp.c` replaced, see below |
+
+### GNU sim's semantics in `emulator/bfin/bfin_dsp.c`
+
+| | |
+|---|---|
+| what | the DSP32 ALU/shift/MAC groups, ALU2op, CCflag and their helpers from `sim/bfin/bfin-sim.c`, and field layouts from `include/opcode/bfin.h`, of GDB 17.2 as built here (patches 01-14), verbatim under a shim onto the fast core's state |
+| where from | GDB 17.2, Copyright (C) 2005-2025 Free Software Foundation, Inc., contributed by Analog Devices, Inc. |
+| licence | GPL-3.0-or-later (SPDX line in the file); the combined `cdj-gui-run` is therefore GPL-3.0-or-later |
+| why | `bin/cdj-run` is the reference the fast core must match bit for bit (`tools/cdj_gui/bfin_diff.py`) |
 
 None of the binutils-derived C66x decoder tables of that repository are
 included; the Blackfin files have no third-party tables.

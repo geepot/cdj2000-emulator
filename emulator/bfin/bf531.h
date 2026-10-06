@@ -3,7 +3,9 @@
  * From hw/cdj/bfin/bf531.h of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
  * Changed 2026-10-05: declares bf531_boot_ldr, bf531_flash and
- * bf531_set_ready_toggle.
+ * bf531_set_ready_toggle; for the MAIN link (bfin-link): the SPORT1 receive
+ * as a pull from the host (sport1_rx), bf531_boot_elf, bf531_set_strap,
+ * bf531_set_timing, bf531_read/bf531_write, bf531_cycles.
  */
 /*
  * ADSP-BF531 SoC around the Blackfin core, as the CDJ-2000/CDJ-2000NXS
@@ -23,8 +25,16 @@ typedef struct bf531_host {
     void *opaque;
     /* One PPI frame, RGB565 pixels, row after row. */
     void (*frame)(void *opaque, const uint16_t *px, unsigned w, unsigned h);
-    /* One SPORT1 TX packet for MAIN, as the firmware armed DMA4 with it. */
+    /* One SPORT1 TX packet for MAIN: the whole unit the firmware armed DMA4
+     * with. */
     void (*sport1_tx)(void *opaque, const uint8_t *data, size_t len);
+    /* One pump of the SPORT1 receive DMA (DMA3): up to cap bytes for the
+     * buffer at addr, the channel's current address. Returns the bytes put
+     * in dst, a whole number of DMA elements; 0 retries after the SPORT retry
+     * time. Fewer than cap lands them and leaves the channel running for the
+     * rest, as a native byte burst does (DMA3_CURR_X_COUNT tells the
+     * firmware how much came). */
+    unsigned (*sport1_rx)(void *opaque, uint8_t *dst, unsigned cap, uint32_t addr);
 } bf531_host;
 
 /* The core clock the firmware assumes: its core timer period of 400,000 is
@@ -53,12 +63,22 @@ uint8_t *bf531_flash(bf531 *s, uint32_t *size);
  * 0, the default, leaves them as the firmware drove them. */
 void bf531_set_ready_toggle(bf531 *s, uint16_t mask);
 
-/* Hands the SoC one SPORT1 RX packet from MAIN: it lands the next time the
- * firmware arms DMA3, wherever it points and however many halfwords it asks
- * for (extra bytes are dropped, a short packet is zero-padded by the DMA's
- * own byte count). When DMA3 is already armed the packet lands at once.
- * NULL clears a standing packet without delivering it. */
-void bf531_sport1_rx(bf531 *s, const uint8_t *data, size_t len);
+/* Boots an ELF32 (gui-boot-memory.elf: the boot stream's blocks as PT_LOAD
+ * segments) at its entry, as bin/cdj-run loads it: 0, or -1 when it is not
+ * one or a segment has no memory behind it. */
+int bf531_boot_elf(bf531 *s, const uint8_t *elf, size_t len);
+
+/* Board straps on the PF port (BFIN_GPIO_STRAP=mask:value): the masked bits
+ * of the flag registers read as value. */
+void bf531_set_strap(bf531 *s, uint16_t mask, uint16_t value);
+
+/* The display frame period and the SPORT receive retry, in core cycles
+ * (defaults: a 60 Hz frame and 1 ms, at BF531_CCLK_HZ). */
+void bf531_set_timing(bf531 *s, uint64_t ppi_frame, uint64_t sport_retry);
+
+/* The bus as the core sees it, MMRs included (tests, host probes). */
+uint32_t bf531_read(bf531 *s, uint32_t addr, unsigned size);
+void     bf531_write(bf531 *s, uint32_t addr, uint32_t val, unsigned size);
 
 /* The PF pins the firmware drives as outputs, bit n for PFn; inputs read 0. */
 uint16_t bf531_flags(const bf531 *s);
@@ -68,6 +88,7 @@ uint16_t bf531_flags(const bf531 *s);
 bfin_stop bf531_run(bf531 *s, uint64_t n);
 
 bfin_core *bf531_core(bf531 *s);
+uint64_t   bf531_cycles(const bf531 *s);
 uint64_t   bf531_frames(const bf531 *s);
 const uint8_t *bf531_sdram(const bf531 *s, uint32_t *size);
 

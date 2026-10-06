@@ -2,13 +2,16 @@
 /*
  * From hw/cdj/bfin/bfin_priv.h of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
- * Unchanged from upstream.
+ * Changed 2026-10-05 (bfin-link): GNU sim's state where its semantics run
+ * (bfin_dsp.c): R and P as one array, the accumulators as GNU sim's X and W
+ * words, its hidden V, the parallel group and the deferred store queue.
  */
 /* Blackfin core internals, shared by bfin_core.c and bfin_exec.c. */
 #ifndef BFIN_PRIV_H
 #define BFIN_PRIV_H
 
 #include "bfin.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* ASTAT bits. CC is kept apart in bfin_core.cc and merged on read. */
@@ -73,10 +76,16 @@ typedef struct bfin_block {
 
 struct bfin_core {
     uint32_t pc;
-    uint32_t r[8];
-    uint32_t p[8];              /* P0-P5, SP, FP */
+    union {
+        struct {
+            uint32_t r[8];
+            uint32_t p[8];      /* P0-P5, SP, FP */
+        };
+        uint32_t dp[16];        /* GNU sim's DREG(8 + n) is P[n] */
+    };
     uint32_t i[4], m[4], b[4], l[4];
-    int64_t  a[2];              /* 40-bit accumulators, kept sign-extended */
+    uint32_t ax[2], aw[2];      /* A0/A1 as GNU sim keeps them: X, W */
+    uint32_t v_internal;        /* GNU sim's hidden V of vector ops */
     uint32_t lc[2], lt[2], lb[2];
     uint32_t astat;
     int      cc;
@@ -117,9 +126,13 @@ struct bfin_core {
 
     /* Execution of the current instruction. */
     uint32_t npc;
-    int      in_bundle;
-    int      nload;             /* loads a bundle holds back until its end */
-    struct { uint8_t grp, reg; uint32_t val; } load[2];
+    /* GNU sim's parallel group (0 alone, 1 a bundle's 32-bit slot, 2 and 3
+     * its 16-bit slots) and its store queue: the writes an instruction or
+     * bundle defers to its end. */
+    int      group;
+    int      nstores;
+    struct { uint32_t *addr; uint32_t val; } stores[20];
+    uint32_t cycle_delay, dis_algn_expt;
 
     bfin_ram ram[BFIN_MAX_RAM];
     int      nram;
@@ -225,6 +238,46 @@ static inline uint16_t bfin_fetch16(bfin_core *c, uint32_t addr)
 static inline int bfin_user_mode(const bfin_core *c)
 {
     return !(c->ipend & ~(1u << EV_GLOBAL));
+}
+
+static inline void bfin_queue_store(bfin_core *c, uint32_t *addr, uint32_t val)
+{
+    if (c->nstores == 20) {
+        abort();
+    }
+    c->stores[c->nstores].addr = addr;
+    c->stores[c->nstores++].val = val;
+}
+
+static inline void bfin_flush_stores(bfin_core *c)
+{
+    for (int n = 0; n < c->nstores; n++) {
+        *c->stores[n].addr = c->stores[n].val;
+    }
+    c->nstores = 0;
+}
+
+/* A write GNU sim queues: inside a bundle it waits for the bundle's end. */
+static inline void bfin_store_q(bfin_core *c, uint32_t *addr, uint32_t val)
+{
+    if (c->group) {
+        bfin_queue_store(c, addr, val);
+    } else {
+        *addr = val;
+    }
+}
+
+/* GNU sim's get_extended_acc. */
+static inline uint64_t bfin_acc(const bfin_core *c, int n)
+{
+    uint64_t acc = c->ax[n];
+
+    if (acc & 0x80) {
+        acc |= -0x80;
+    } else {
+        acc &= 0xFF;
+    }
+    return acc << 32 | c->aw[n];
 }
 
 uint32_t bfin_reg(bfin_core *c, unsigned grp, unsigned reg);

@@ -2,7 +2,8 @@
 /*
  * From hw/cdj/bfin/bfin_core.c of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
- * Changed 2026-10-05: adds bfin_code_lines_run.
+ * Changed 2026-10-05: adds bfin_code_lines_run; (bfin-link) the accumulators
+ * read and write as GNU sim's X and W words.
  */
 /*
  * Blackfin core: registers, the event controller, the core timer and the
@@ -123,10 +124,11 @@ uint32_t bfin_reg(bfin_core *c, unsigned grp, unsigned reg)
     case 3: return reg < 4 ? c->b[reg] : c->l[reg - 4];
     case 4:
         switch (reg) {
-        case 0: return (int32_t)(int8_t)(c->a[0] >> 32);
-        case 1: return (uint32_t)c->a[0];
-        case 2: return (int32_t)(int8_t)(c->a[1] >> 32);
-        case 3: return (uint32_t)c->a[1];
+        /* GNU sim's reg_read: A.X is sign-filled from its bit 7. */
+        case 0: return c->ax[0] & 0x80 ? c->ax[0] | 0xFFFFFF00 : c->ax[0];
+        case 1: return c->aw[0];
+        case 2: return c->ax[1] & 0x80 ? c->ax[1] | 0xFFFFFF00 : c->ax[1];
+        case 3: return c->aw[1];
         case 6: return bfin_astat(c);
         case 7: return c->rets;
         }
@@ -159,11 +161,6 @@ uint32_t bfin_reg(bfin_core *c, unsigned grp, unsigned reg)
     return 0;
 }
 
-static void set_acc_x(bfin_core *c, int n, uint32_t v)
-{
-    c->a[n] = (int64_t)((uint64_t)(int8_t)v << 32 | (uint32_t)c->a[n]);
-}
-
 void bfin_set_reg(bfin_core *c, unsigned grp, unsigned reg, uint32_t v)
 {
     switch (grp) {
@@ -173,10 +170,10 @@ void bfin_set_reg(bfin_core *c, unsigned grp, unsigned reg, uint32_t v)
     case 3: if (reg < 4) c->b[reg] = v; else c->l[reg - 4] = v; return;
     case 4:
         switch (reg) {
-        case 0: set_acc_x(c, 0, v); return;
-        case 1: c->a[0] = (c->a[0] & ~0xFFFFFFFFll) | v; return;
-        case 2: set_acc_x(c, 1, v); return;
-        case 3: c->a[1] = (c->a[1] & ~0xFFFFFFFFll) | v; return;
+        case 0: c->ax[0] = v & 0xFF; return;
+        case 1: c->aw[0] = v; return;
+        case 2: c->ax[1] = v & 0xFF; return;
+        case 3: c->aw[1] = v; return;
         case 6: bfin_set_astat(c, v); return;
         case 7: c->rets = v; return;
         }

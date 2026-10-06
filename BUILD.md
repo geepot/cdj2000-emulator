@@ -333,7 +333,7 @@ cost of a run. `--march=nocona` gives a binary that runs on any x86-64,
 first -- configure only runs when there is no `config.status`, so a change of
 flags does nothing without it. `CDJ_SIM_CFLAGS` replaces the flags outright.
 
-## The GUI board, fast -- `cdj-gui-run` (GUI-only)
+## The GUI board, fast -- `cdj-gui-run`
 
 ```sh
 sh scripts/build-cdj-gui-run.sh            # installs bin/cdj-gui-run
@@ -376,49 +376,56 @@ skip the idle loop) and 1 s of boot in 0.13 s against 38 s for
 wall-clock base (`nxs_vm`'s default) is capped at real time; this runs at
 35-50x real time.
 
-### What connecting it to MAIN needs (the next slice)
+### Linked to MAIN -- `nxs_vm --gui-sim fast`
 
-Nothing of the link is here yet. To replace `bin/cdj-run` under `nxs_vm` and
-`twoboard` it needs, against `emulator/bfin/bf531.c`:
+`nxs_vm --gui-sim fast` (default `gdb` until qualified) runs this in place of
+`bin/cdj-run` on the same inputs: the `--gui-firmware` ELF is loaded as
+`bin/cdj-run` loads it (PT_LOAD segments, entry), the flash image is mapped
+beside it, and the `BFIN_*` environment nxs_vm builds is read unchanged.
+`emulator/bfin/cdj_link.c` is the link (patches 02, 05, 10, 11, 13, 14, 32,
+33): `BFIN_MAIN_LINK` (requests on port, records on port+2, lazy connect,
+`CDJL` framing with resync, flat fallback, per-length rings, `BFIN_LINK_DEPTH`),
+`BFIN_LINK_FRESH_ONLY`, no canned `BFIN_MAIN_PEER_STATUS` record once MAIN has
+spoken, `BFIN_SPORT_RX_ZERO_200` / `BFIN_LINK_NO_ZERO200`,
+`BFIN_LINK_NATIVE_PARTIAL_DMA` (fresh `DLNK` bursts once, oldest first, short),
+`BFIN_MAIN_LINK_DUMP` / `BFIN_SPORT_TX_OUTPUT` (flushed per record) and
+`BFIN_COSIM` (the co-simulation client; its time promise is always "now", no
+parked lookahead). `bf531.c` pumps SPORT1 DMA3/DMA4 with live `CURR_ADDR` /
+`CURR_X_COUNT`, retries every `BFIN_SPORT_RETRY_US`, the real SIC mask,
+`BFIN_GPIO_STRAP`, and the flash's AMD program/erase (in memory only). Time:
+with a link the run is paced to the wall clock at `BFIN_CCLK_HZ` (400 MHz;
+`BFIN_PPI_FPS`, `BFIN_WALL_LAG_MS`), under `BFIN_COSIM` virtual. Probes
+`bin/cdj-run` has (`BFIN_CALL_WATCH`, `BFIN_PROF`, `BFIN_PEEK_WATCH`, ...) are
+not here; the runner names each one it ignores.
 
-1. **The SPORT1 socket link** (patch 02, `bfin_sport_link_*` in
-   `dv-bfin_ppi.c`): `BFIN_MAIN_LINK=host:port` connects lazily, retrying, to
-   two sockets -- requests out on `port`, records in on `port+2` (QEMU's two
-   chardevs). Records arrive framed `"CDJL"` + LE32 length + body (max 4096,
-   resync on bad magic or length; an unframed peer falls back to a flat
-   stream), are split into per-length slots (64-byte status, 224-byte payload,
-   longer announced payloads) and handed to the RX DMA whose byte count matches.
-   `bf531.c` today takes one standing packet per DMA3 arm
-   (`bf531_sport1_rx`) and truncates TX to 128 bytes (`sport1_tx_start`); both
-   must become the slot model, with SPORT1 RCR/TCR (0xFFC00900-0x924, logged as
-   unmodelled now) and a real SIC mask rather than the forced
-   `SIC_IMASK` bit in `sport1_rx_complete`.
-2. **Delivery semantics**: patch 05 `BFIN_LINK_FRESH_ONLY` (a cached record is
-   never delivered twice; required for `--fresh-link`/`--cosim`), patch 13 (no
-   canned bootstrap record once MAIN has spoken -- the double fault at
-   0x00b99196 otherwise), the bootstrap/zero-200 housekeeping record
-   (`BFIN_SPORT_RX_ZERO_200`), `BFIN_LINK_ANNOUNCE_STICKY` (possibly unneeded:
-   it exists because gdb was slow enough to overflow the exception stack), and
-   the native partial-DMA patches 32/33 (`BFIN_LINK_NATIVE_PARTIAL_DMA`: a fresh
-   `DLNK` burst is delivered once into an oversized RX descriptor with only its
-   real length, oldest first across all length slots).
-3. **Captures**: `BFIN_MAIN_LINK_DUMP` and `BFIN_SPORT_TX_OUTPUT`, kept open and
-   flushed per record (patches 10/11), in the existing formats the
-   `tools/cdj_main` readers parse.
-4. **Co-simulation** (patch 14, `emulator/qemu/cdj2000_cosim.c` has the wire
-   format): `BFIN_COSIM=host:port` on one connection, messages TIME, RECORD,
-   REQUEST, HELLO with a 20-byte header; records due at MAIN's stamp plus the
-   quantum (`BFIN_COSIM_QUANTUM_US`), requests stamped with this board's time,
-   never running past MAIN's promise. `bf531_run` is already virtual-time and
-   unpaced, so this is a budget passed to it; `BFIN_CCLK_HZ`/`BFIN_PPI_FPS`
-   pacing for the A/B method becomes a sleep against a wall clock.
-5. **Launcher**: `nxs_vm --gui-sim fast|gdb` mapping its `BFIN_*` overrides
-   (`BFIN_GPIO_STRAP` for `--panel-rev2`, `BFIN_STATS`, `BFIN_EXIT_AFTER_WALL`,
-   `BFIN_EXCEPTION_TRACE`) to runner options, and `--gui-firmware` directories,
-   which hold an ELF this runner does not load (it boots LDR streams).
-6. Frame publication is done; `BFIN_GUI_RAW_OUTPUT`, the jog extraction and the
-   probe knobs (`BFIN_PEEK_WATCH`, `BFIN_PROF`, PC sampling) have no
-   equivalent yet.
+`tests/test_cdj_gui_link.py` checks the link against a fake MAIN on loopback
+and the DMA/flash/DSP additions.
+
+**Parity with `bin/cdj-run`.** The DSP32 groups, ALU2op and CCflag run GNU
+sim's own code (`bfin_dsp.c`, see THIRD_PARTY.md); bundles run in its order
+(32-bit slot first with its data-register writes queued, LDST loads landing at
+once, dspLDST/pmod loads and I updates queued, a byte op's implicit
+DISALGNEXCPT aligning 32-bit dspLDST loads); reserved forms stop as
+unimplemented where GNU sim faults. The differential tester
+
+```sh
+python -m tools.cdj_gui.bfin_diff runs/bfin-diff --elf firmware/nxs/gui-boot-memory.elf \
+    [--elf MODS.elf]   # needs bfin-elf binutils and bin/cdj-run; exit 1 on a divergence
+```
+
+runs every encoding in the ELFs from random states, random runs of 2-8
+instructions and random encodings beyond them, and compares every register,
+accumulator, ASTAT and the memory touched. 2026-10-05, stock + mods ELFs:
+598,416 firmware-encoding cases, 100,000 sequences, 63,882 random encodings and
+every runnable 16-bit encoding -- no divergence, accept/reject identical.
+`tests/test_bfin_gnu_parity.py` replays one GNU-sim-verified case per class of
+divergence fixed (no toolchain needed). On the stock browse with the real USB
+image the boot, mounted, browse and list screens -- artwork thumbnails
+included -- equal gdb's pixel for pixel; the loaded screen differs only in
+playback position. The mods candidate's boot/browse/list screens equal gdb's
+(it needs `--gui-env BFIN_LINK_NATIVE_PARTIAL_DMA=1`, as its launcher sets).
+Cost: 20 s virtual 0.46 s CPU (was 0.41; 9.2x faster than gdb virtual);
+linked stock run 18% of a core at real time against gdb's 83% while starved.
 
 ## The MAIN board -- SH-4, from QEMU
 

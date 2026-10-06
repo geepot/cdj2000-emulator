@@ -2,7 +2,8 @@
 /*
  * From hw/cdj/bfin/bfin_dsp.h of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
- * Unchanged from upstream.
+ * Changed 2026-10-05 (bfin-link): the DSP32 groups, ALU2op and CCflag are
+ * GNU sim's (bfin_dsp.c); bfin_dsp32mult is its own entry.
  */
 /* The DSP32 groups and the arithmetic flag helpers they share with
  * bfin_exec.c. */
@@ -59,13 +60,12 @@ static inline uint32_t bfin_add32(bfin_core *c, uint32_t a, uint32_t b,
     return r;
 }
 
-void bfin_divs(bfin_core *c, unsigned dst, unsigned src);
-void bfin_divq(bfin_core *c, unsigned dst, unsigned src);
-
-void bfin_dsp32mac(bfin_core *c, uint16_t iw0, uint16_t iw1, int mult);
+void bfin_dsp32mac(bfin_core *c, uint16_t iw0, uint16_t iw1);
+void bfin_dsp32mult(bfin_core *c, uint16_t iw0, uint16_t iw1);
 void bfin_dsp32alu(bfin_core *c, uint16_t iw0, uint16_t iw1);
 void bfin_dsp32shift(bfin_core *c, uint16_t iw0, uint16_t iw1);
 void bfin_dsp32shiftimm(bfin_core *c, uint16_t iw0, uint16_t iw1);
-void bfin_dsp32shiftimm32(bfin_core *c, uint16_t iw0, uint16_t iw1);
+void bfin_alu2op(bfin_core *c, uint16_t iw0, uint16_t pad);
+void bfin_ccflag(bfin_core *c, uint16_t iw0, uint16_t pad);
 
 #endif

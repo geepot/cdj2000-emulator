@@ -2,7 +2,18 @@
 /*
  * From hw/cdj/bfin/bfin_exec.c of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
- * Unchanged from upstream.
+ * Changed 2026-10-05 (bfin-link): circular DAG post-modify is GNU sim's
+ * dagadd/dagsub (it wraps whatever side of the buffer I starts on), and a
+ * bundle's two 16-bit slots both read the I registers from before either
+ * modifies one (I0 += 4 || R6.H = W[I0] loads from the old I0).
+ * Changed 2026-10-05 (bfin-link, GNU sim parity): a bundle runs as GNU sim
+ * runs it (bin/cdj-run with BFIN_PARALLEL_WRITEBACK=1, the reference): the
+ * 32-bit slot first, its data-register writes queued; the 16-bit slots after
+ * it, LDST/LDSTii/LDSTiiFP loads landing at once, dspLDST and LDSTpmod loads
+ * and every I register update queued to the bundle's end, and a 32-bit
+ * dspLDST load aligned down under a byte op's implicit DISALGNEXCPT.
+ * ALU2op, CCflag and the DSP32 groups are GNU sim's code (bfin_dsp.c).
+ * R = [P ++ P] with the same register does not post-modify (GNU sim).
  */
 /*
  * Blackfin instruction semantics: the 16- and 32-bit control, load/store,
@@ -20,36 +31,59 @@ static inline int32_t sext(uint32_t v, unsigned bits)
     return (int32_t)(v << (32 - bits)) >> (32 - bits);
 }
 
-/* Loads inside a bundle write back at its end, after every slot has read its
- * operands. */
+/* A load's register write: at once, as GNU sim's SET_DREG/SET_PREG from a
+ * 16-bit slot (only the 32-bit slot's writes wait for the bundle's end). */
 static void load_reg(bfin_core *c, unsigned grp, unsigned reg, uint32_t v)
 {
-    if (c->in_bundle) {
-        c->load[c->nload].grp = grp;
-        c->load[c->nload].reg = reg;
-        c->load[c->nload].val = v;
-        c->nload++;
-    } else if (grp < 2) {
+    if (grp < 2) {
         (grp ? c->p : c->r)[reg] = v;
     } else {
         bfin_set_reg(c, grp, reg, v);
     }
 }
 
-/* DAG post-modify with the circular buffer of I[n]: B[n] base, L[n] length. */
-static uint32_t dag_add(bfin_core *c, unsigned n, int32_t m)
+/* DAG post-modify with the circular buffer of I[n]: B[n] base, L[n] length.
+ * I += M (sub = 0) or I -= M (sub = 1), ported from GNU sim's dagadd and
+ * dagsub, which model the hardware's carry-based wrap. */
+static uint32_t dag_mod(bfin_core *c, unsigned n, uint32_t m, int sub)
 {
-    uint32_t i = c->i[n], l = c->l[n], b = c->b[n];
-    uint32_t r = i + m;
+    uint64_t i = c->i[n], l = c->l[n], b = c->b[n];
+    uint64_t msb = 1ull << 31, car = 1ull << 32, lb = l + b, im;
+    uint32_t im32, iml32, lb32 = (uint32_t)lb;
+    int neg = (int32_t)m < 0;
 
-    if (l) {
-        if (m >= 0 && r >= b + l && i < b + l) {
-            r -= l;
-        } else if (m < 0 && r < b && i >= b) {
-            r += l;
+    if (!sub) {
+        im = i + m;
+        im32 = (uint32_t)im;
+        if (neg) {
+            iml32 = (uint32_t)(i + m + l);
+            if ((i & msb) || (im & car)) {
+                return im32 < b ? iml32 : im32;
+            }
+            return im32 < b ? im32 : iml32;
         }
+        iml32 = (uint32_t)(i + m - l);
+        if ((im & car) == (lb & car)) {
+            return im32 < lb32 ? im32 : iml32;
+        }
+        return im32 < lb32 ? iml32 : im32;
     }
-    return r;
+    uint64_t mbar = (uint32_t)(~m + 1);
+
+    im = i + mbar;
+    im32 = (uint32_t)im;
+    if (neg) {
+        iml32 = (uint32_t)(i + mbar - l);
+        if (!!((i & msb) && (im & car)) == !!(lb & car)) {
+            return im32 < lb32 ? im32 : iml32;
+        }
+        return im32 < lb32 ? iml32 : im32;
+    }
+    iml32 = (uint32_t)(i + mbar + l);
+    if (m == 0 || (im & car)) {
+        return im32 < (uint32_t)b ? iml32 : im32;
+    }
+    return im32 < (uint32_t)b ? im32 : iml32;
 }
 
 static uint32_t brev_add(uint32_t a, uint32_t b)
@@ -193,10 +227,15 @@ static inline void cc_operands(bfin_core *c, uint16_t iw, int sign,
     *b = iw & 0x400 ? (sign ? (uint32_t)sext(y, 3) : y) : preg ? c->p[y] : c->r[y];
 }
 
+/* GNU sim's decode_CCflag_0: register compares set AZ, AN (signed or
+ * unsigned less-than) and AC0; pointer compares only CC. */
 static inline void cc_flags(bfin_core *c, uint16_t iw, uint32_t a, uint32_t b)
 {
     if (!(iw & 0x40)) {
-        bfin_flags_nz(c, a - b);
+        int lt = ((iw >> 7) & 7) < 3 ? (int32_t)a < (int32_t)b : a < b;
+
+        c->astat &= ~(AS_AZ | AS_AN);
+        c->astat |= (a == b ? AS_AZ : 0) | (lt ? AS_AN : 0);
         bfin_flags_ac0(c, b <= a);
     }
 }
@@ -249,9 +288,16 @@ static void cc_leu(bfin_core *c, uint16_t iw, uint16_t pad)
 static void cc_acc(bfin_core *c, uint16_t iw, uint16_t pad)
 {
     unsigned opc = (iw >> 7) & 7;
-    int64_t a0 = c->a[0], a1 = c->a[1];
+    int64_t a0 = bfin_acc(c, 0), a1 = bfin_acc(c, 1), diff = a0 - a1;
 
+    if (iw & 0x47F) {                           /* GNU sim: I, G, x, y zero */
+        c->undef = 1;
+        return;
+    }
     c->cc = opc == 5 ? a0 == a1 : opc == 6 ? a0 < a1 : a0 <= a1;
+    c->astat &= ~(AS_AZ | AS_AN);
+    c->astat |= (diff == 0 ? AS_AZ : 0) | (diff < 0 ? AS_AN : 0);
+    bfin_flags_ac0(c, (uint64_t)a1 <= (uint64_t)a0);
 }
 
 static bfin_op *const cc_flag[8] = {
@@ -290,30 +336,6 @@ static uint32_t shift_reg(bfin_core *c, unsigned kind, uint32_t v, uint32_t n)
     bfin_flags_nz(c, r);
     bfin_flags_v(c, 0);
     return r;
-}
-
-static void alu2op(bfin_core *c, uint16_t iw, uint16_t pad)
-{
-    unsigned dst = iw & 7, src = (iw >> 3) & 7, opc = (iw >> 6) & 0xF;
-    uint32_t *d = &c->r[dst], s = c->r[src];
-
-    switch (opc) {
-    case 0: *d = shift_reg(c, 0, *d, s); return;
-    case 1: *d = shift_reg(c, 1, *d, s); return;
-    case 2: *d = shift_reg(c, 2, *d, s); return;
-    case 3: *d *= s; return;
-    case 4: *d = (*d + s) << 1; bfin_flags_nz(c, *d); return;
-    case 5: *d = (*d + s) << 2; bfin_flags_nz(c, *d); return;
-    case 8: bfin_divq(c, dst, src); return;
-    case 9: bfin_divs(c, dst, src); return;
-    case 10: *d = (uint32_t)(int16_t)s; bfin_flags_nz(c, *d); return;
-    case 11: *d = (uint16_t)s; bfin_flags_nz(c, *d); return;
-    case 12: *d = (uint32_t)(int8_t)s; bfin_flags_nz(c, *d); return;
-    case 13: *d = (uint8_t)s; bfin_flags_nz(c, *d); return;
-    case 14: *d = bfin_add32(c, 0, s, 1, 0); return;
-    case 15: *d = ~s; bfin_flags_nz(c, *d); return;
-    }
-    c->undef = 1;
 }
 
 static void ptr2op(bfin_core *c, uint16_t iw, uint16_t pad)
@@ -535,6 +557,10 @@ static bfin_op *ldst_form(uint16_t iw)
     if (((iw >> 7) & 3) == 3 || sz == 3 || (w && sz && (iw & 0x40))) {
         return ldst;
     }
+    if (!w && !sz && (iw & 0x40) && ((iw >> 7) & 3) < 2 &&
+        ((iw >> 3) & 7) == (iw & 7)) {
+        return undef16;                         /* P = [P++]: GNU sim's illegal */
+    }
     return form[w][sz];
 }
 
@@ -556,10 +582,11 @@ static void ldst_pmod(bfin_core *c, uint16_t iw, uint16_t pad)
     unsigned aop = (iw >> 9) & 3;
     int w = iw & 0x800;
     uint32_t a = c->p[ptr], d = c->r[reg];
-    int post = !(aop == 1 || aop == 2) || idx != ptr;
 
+    /* GNU sim queues both writes (STORE) and never post-modifies a pointer
+     * by itself. */
     if (aop == 3) {
-        load_reg(c, 0, reg, ld_ext(bfin_load(c, a, 2), 1, w));
+        bfin_store_q(c, &c->r[reg], ld_ext(bfin_load(c, a, 2), 1, w));
     } else if (w) {
         if (aop == 0) {
             bfin_store(c, a, d, 4);
@@ -567,14 +594,14 @@ static void ldst_pmod(bfin_core *c, uint16_t iw, uint16_t pad)
             bfin_store(c, a, aop == 1 ? d : d >> 16, 2);
         }
     } else if (aop == 0) {
-        load_reg(c, 0, reg, bfin_load(c, a, 4));
+        bfin_store_q(c, &c->r[reg], bfin_load(c, a, 4));
     } else {
         uint32_t h = bfin_load(c, a, 2);
 
-        load_reg(c, 0, reg, aop == 1 ? (d & 0xFFFF0000) | h : (d & 0xFFFF) | h << 16);
+        bfin_store_q(c, &c->r[reg], aop == 1 ? (d & 0xFFFF0000) | h : (d & 0xFFFF) | h << 16);
     }
-    if (post) {
-        c->p[ptr] = a + c->p[idx];
+    if (idx != ptr) {
+        bfin_store_q(c, &c->p[ptr], a + c->p[idx]);
     }
 }
 
@@ -590,19 +617,23 @@ static void dsp_ldst(bfin_core *c, uint16_t iw, uint16_t pad)
         c->undef = 1;
         return;
     }
+    /* GNU sim post-modifies first (queued) and queues the load. */
+    switch (aop) {
+    case 0: bfin_store_q(c, &c->i[n], dag_mod(c, n, bytes, 0)); break;
+    case 1: bfin_store_q(c, &c->i[n], dag_mod(c, n, bytes, 1)); break;
+    case 3: bfin_store_q(c, &c->i[n], dag_mod(c, n, c->m[m], 0)); break;
+    }
     if (w) {
         bfin_store(c, a, m == 2 && aop != 3 ? d >> 16 : d, bytes);
     } else if (bytes == 4) {
-        load_reg(c, 0, reg, bfin_load(c, a, 4));
+        if (c->dis_algn_expt & 1) {
+            a &= ~3u;
+        }
+        bfin_store_q(c, &c->r[reg], bfin_load(c, a, 4));
     } else {
         uint32_t h = bfin_load(c, a, 2);
 
-        load_reg(c, 0, reg, m == 1 ? (d & 0xFFFF0000) | h : (d & 0xFFFF) | h << 16);
-    }
-    switch (aop) {
-    case 0: c->i[n] = dag_add(c, n, bytes); break;
-    case 1: c->i[n] = dag_add(c, n, -(int32_t)bytes); break;
-    case 3: c->i[n] = dag_add(c, n, c->m[m]); break;
+        bfin_store_q(c, &c->r[reg], m == 1 ? (d & 0xFFFF0000) | h : (d & 0xFFFF) | h << 16);
     }
 }
 
@@ -685,17 +716,17 @@ static void dag_modify(bfin_core *c, uint16_t iw, uint16_t pad)
     unsigned n = iw & 3, m = (iw >> 2) & 3;
 
     if (iw & 0x80) {
-        c->i[n] = brev_add(c->i[n], c->m[m]);
+        c->i[n] = brev_add(c->i[n], c->m[m]);   /* SET_IREG: at once */
     } else {
-        c->i[n] = dag_add(c, n, iw & 0x10 ? -(int32_t)c->m[m] : (int32_t)c->m[m]);
+        bfin_store_q(c, &c->i[n], dag_mod(c, n, c->m[m], (iw >> 4) & 1));
     }
 }
 
 static void dag_step(bfin_core *c, uint16_t iw, uint16_t pad)
 {
-    static const int8_t step[4] = { 2, -2, 4, -4 };
+    unsigned op = (iw >> 2) & 3;                /* += 2, -= 2, += 4, -= 4 */
 
-    c->i[iw & 3] = dag_add(c, iw & 3, step[(iw >> 2) & 3]);
+    bfin_store_q(c, &c->i[iw & 3], dag_mod(c, iw & 3, op & 2 ? 4 : 2, op & 1));
 }
 
 static void undef16(bfin_core *c, uint16_t iw, uint16_t pad)
@@ -707,9 +738,55 @@ static void nop(bfin_core *c, uint16_t iw, uint16_t pad)
 {
 }
 
+/* Encodings GNU sim rejects as illegal in groups the handlers otherwise run
+ * whole: reserved registers, invalid register-move pairs and the reserved
+ * forms of the push/pop, CC and DAG-modify groups. */
+static int gnu_illegal16(uint16_t iw)
+{
+    if ((iw & 0xFF80) == 0x0100) {              /* PushPopReg */
+        unsigned grp = (iw >> 3) & 7, reg = iw & 7;
+
+        return (grp == 4 && (reg == 4 || reg == 5)) || grp == 5 ||
+               (!(iw & 0x40) && grp < 2);
+    }
+    if ((iw & 0xFE00) == 0x0400) {              /* PushPopMultiple */
+        unsigned pr = iw & 7, dr = (iw >> 3) & 7;
+        int d = iw & 0x100, p = iw & 0x80;
+
+        return (!d && !p) || (p && pr > 5) || (d && !p && pr) || (p && !d && dr);
+    }
+    if ((iw & 0xFFE0) == 0x0200) {              /* CC2dreg */
+        return ((iw >> 3) & 3) == 2 || (((iw >> 3) & 3) == 3 && (iw & 7));
+    }
+    if ((iw & 0xFF00) == 0x0300) {              /* CC2stat: CC = CC */
+        return (iw & 0x1F) == 5;
+    }
+    if ((iw & 0xF000) == 0x3000) {              /* REGMV */
+        unsigned gd = (iw >> 9) & 7, gs = (iw >> 6) & 7;
+        unsigned dst = (iw >> 3) & 7, src = iw & 7;
+
+        if ((gs == 4 && (src == 4 || src == 5)) || gs == 5 ||
+            (gd == 4 && (dst == 4 || dst == 5)) || gd == 5) {
+            return 1;
+        }
+        return !(gs < 2 || gd < 2 || (gs == 4 && src < 4) ||
+                 (gd == 4 && dst < 4 && gs < 4) ||
+                 (gs == 7 && src == 7 && !(gd == 4 && dst < 4)) ||
+                 (gd == 7 && dst == 7) || (gs < 4 && gd < 4) ||
+                 (gs == 7 && src == 0 && gd >= 4) ||
+                 (gd == 7 && dst == 0 && gs == 4 && src < 4));
+    }
+    if ((iw & 0xFF60) == 0x9E60) {              /* dagMODim: I -= M (BREV) */
+        return (iw & 0x10) && (iw & 0x80);
+    }
+    return 0;
+}
+
 static bfin_op *decode16(uint16_t iw)
 {
-    if (iw == 0x0000) {
+    if (gnu_illegal16(iw)) {
+        return undef16;
+    } else if (iw == 0x0000) {
         return nop;
     } else if ((iw & 0xFF00) == 0x0000) {
         return prog_ctrl;
@@ -736,7 +813,7 @@ static bfin_op *decode16(uint16_t iw)
     } else if ((iw & 0xF000) == 0x3000) {
         return reg_move;
     } else if ((iw & 0xFC00) == 0x4000) {
-        return alu2op;
+        return bfin_alu2op;
     } else if ((iw & 0xFE00) == 0x4400) {
         return ptr2op;
     } else if ((iw & 0xF800) == 0x4800) {
@@ -880,19 +957,6 @@ static void jump_long(bfin_core *c, uint16_t iw0, uint16_t iw1)
     c->npc = c->pc + off;
 }
 
-static void mac(bfin_core *c, uint16_t iw0, uint16_t iw1)
-{
-    if ((iw0 & 0xF7FF) == 0xC003 && iw1 == 0x1800) {
-        return;                                 /* MNOP */
-    }
-    bfin_dsp32mac(c, iw0, iw1, 0);
-}
-
-static void mult(bfin_core *c, uint16_t iw0, uint16_t iw1)
-{
-    bfin_dsp32mac(c, iw0, iw1, 1);
-}
-
 static void undef32(bfin_core *c, uint16_t iw0, uint16_t iw1)
 {
     c->undef = 1;
@@ -914,15 +978,13 @@ static bfin_op *decode32(uint16_t iw0)
     } else if ((iw0 & 0xFFFE) == 0xE800) {
         return linkage;
     } else if ((iw0 & 0xF600) == 0xC000) {
-        return mac;
+        return bfin_dsp32mac;
     } else if ((iw0 & 0xF600) == 0xC200) {
-        return mult;
+        return bfin_dsp32mult;
     } else if ((iw0 & 0xF600) == 0xC400) {
         return bfin_dsp32alu;
     } else if ((iw0 & 0xF780) == 0xC600) {
         return bfin_dsp32shift;
-    } else if ((iw0 & 0xF79F) == 0xC682) {
-        return bfin_dsp32shiftimm32;
     } else if ((iw0 & 0xF780) == 0xC680) {
         return bfin_dsp32shiftimm;
     }
@@ -931,47 +993,25 @@ static bfin_op *decode32(uint16_t iw0)
 
 /* ---- threaded execution ------------------------------------------------- */
 
-/* Loads inside a bundle write back at its end, after every slot has read its
- * operands: the slots' loads are held back (load_reg) and the 16-bit slots
- * run first, so their stores see the registers the 32-bit slot is about to
- * change. */
+/* A bundle, as GNU sim's interp_insn_bfin runs it: the 32-bit slot (group
+ * 1 here), then the two 16-bit slots, then the writes they queued, in
+ * order. A byte op's implicit DISALGNEXCPT lasts until the bundle ends. */
 static int x_bundle(bfin_core *c, const bfin_insn *i)
 {
     BFIN_SYNC(c, i);
-    c->in_bundle = 1;
-    c->nload = 0;
+    c->group = 1;
+    i->op(c, i->iw0, i->iw1);
     if (i->slot[0]) {
+        c->group = 2;
         i->slot[0](c, i->sw[0], 0);
     }
     if (i->slot[1]) {
+        c->group = 3;
         i->slot[1](c, i->sw[1], 0);
     }
-    c->in_bundle = 0;
-    i->op(c, i->iw0, i->iw1);
-    for (int n = 0; n < c->nload; n++) {
-        if (c->load[n].grp < 2) {
-            (c->load[n].grp ? c->p : c->r)[c->load[n].reg] = c->load[n].val;
-        } else {
-            bfin_set_reg(c, c->load[n].grp, c->load[n].reg, c->load[n].val);
-        }
-    }
-    BFIN_NEXT_CHECKED(c, i);
-}
-
-/* A bundle whose slots only load whole data registers can run its 32-bit
- * slot first, which touches nothing but the data registers, the
- * accumulators and ASTAT: it reads the registers before the loads change
- * them, and the loads still have the last word. */
-static int x_bundle_loads(bfin_core *c, const bfin_insn *i)
-{
-    BFIN_SYNC(c, i);
-    i->op(c, i->iw0, i->iw1);
-    if (i->slot[0]) {
-        i->slot[0](c, i->sw[0], 0);
-    }
-    if (i->slot[1]) {
-        i->slot[1](c, i->sw[1], 0);
-    }
+    c->group = 0;
+    c->dis_algn_expt = 0;
+    bfin_flush_stores(c);
     BFIN_NEXT_CHECKED(c, i);
 }
 
@@ -1025,18 +1065,18 @@ static int x_any(bfin_core *c, const bfin_insn *i)
 
 #define STRAIGHT_OPS(X)                                                 \
     X(nop) X(cache_ctrl) X(cc_move) X(cc_eq) X(cc_lt) X(cc_le) X(cc_ltu)  \
-    X(cc_leu) X(cc_acc) X(cc2stat) X(reg_move_dp) X(logi2op)             \
+    X(cc_leu) X(cc2stat) X(reg_move_dp) X(logi2op)             \
     X(comp3_add) X(comp3_sub) X(comp3_and) X(comp3_or) X(comp3_xor)      \
     X(comp3_padd) X(comp3_padd1) X(comp3_padd2) X(dreg_imm_set)          \
     X(dreg_imm_add) X(preg_imm) X(dag_modify) X(dag_step)                \
     X(ldimm_dp_h) X(ldimm_dp_s) X(ldimm_dp_z) X(ldimm_dp_l)
 #define CHECKED_OPS(X)                                                  \
-    X(push_pop_multiple) X(cc_dreg) X(alu2op) X(ptr2op) X(ldst)          \
+    X(push_pop_multiple) X(cc_dreg) X(bfin_alu2op) X(cc_acc) X(ptr2op) X(ldst)          \
     X(ld_ii_r32) X(ld_ii_r16z) X(ld_ii_r16x) X(ld_ii_p32) X(st_ii_r32)   \
     X(st_ii_r16) X(st_ii_p32) X(ld32) X(ld16) X(ld8) X(st32) X(st16)     \
     X(st8) X(ldst_ii_fp) X(ldst_pmod) X(dsp_ldst) X(ldimm_half)          \
-    X(ldst_idx) X(linkage) X(mac) X(mult) X(bfin_dsp32alu)               \
-    X(bfin_dsp32shift) X(bfin_dsp32shiftimm) X(bfin_dsp32shiftimm32)     \
+    X(ldst_idx) X(linkage) X(bfin_dsp32mac) X(bfin_dsp32mult)            \
+    X(bfin_dsp32alu) X(bfin_dsp32shift) X(bfin_dsp32shiftimm)            \
     X(undef16) X(undef32)
 #define SEQUENCED_OPS(X) X(branch_cc) X(jump_short)
 
@@ -1080,19 +1120,22 @@ void bfin_decode_init(void)
     }
 }
 
-/* A bundle's 16-bit slot: a load or store, or a NOP left out. */
-static bfin_op *slot(uint16_t iw)
+/* A bundle's 16-bit slot: a load or store, or a NOP left out. GNU sim
+ * takes only dspLDST in the last slot, and loads, stores and DAG modifies in
+ * the one before it. */
+static bfin_op *slot(uint16_t iw, int last)
 {
-    return !iw ? NULL : iw >= 0xC000 ? undef16 : op_table[iw];
-}
+    int dsp = (iw & 0xFC00) == 0x9C00 && (iw & 0xFF60) != 0x9E60 &&
+              (iw & 0xFFF0) != 0x9F60;
 
-/* Whether a slot is a NOP or a load that writes a whole data register. */
-static int loads_dreg(bfin_op *op, uint16_t iw)
-{
-    return !op || op == ld_ii_r32 || op == ld_ii_r16z || op == ld_ii_r16x ||
-           op == ld16 || op == ld8 || (op == ld32 && !(iw & 0x40)) ||
-           (op == dsp_ldst && !(iw & 0x200) &&
-            (((iw >> 7) & 3) == 3 || !((iw >> 5) & 3)));
+    if (!iw) {
+        return NULL;
+    }
+    if (last ? !dsp : !(dsp || (iw & 0xF000) == 0x8000 || (iw & 0xF000) == 0x9000 ||
+                        (iw & 0xE000) == 0xA000)) {
+        return undef16;
+    }
+    return op_table[iw];
 }
 
 int bfin_decode(bfin_core *c, bfin_insn *in, uint32_t pc, uint16_t iw0,
@@ -1109,12 +1152,8 @@ int bfin_decode(bfin_core *c, bfin_insn *in, uint32_t pc, uint16_t iw0,
     if (in->fn == x_bundle) {
         in->sw[0] = bfin_fetch16(c, pc + 4);
         in->sw[1] = bfin_fetch16(c, pc + 6);
-        in->slot[0] = slot(in->sw[0]);
-        in->slot[1] = slot(in->sw[1]);
-        if (loads_dreg(in->slot[0], in->sw[0]) &&
-            loads_dreg(in->slot[1], in->sw[1])) {
-            in->fn = x_bundle_loads;
-        }
+        in->slot[0] = slot(in->sw[0], 0);
+        in->slot[1] = slot(in->sw[1], 1);
     }
     return op == loop_setup ||
            (op == reg_move && ((iw0 >> 9) & 7) == 6) ||
