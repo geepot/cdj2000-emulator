@@ -126,6 +126,8 @@ typedef struct {
     char *fault_history_path;
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
+    /* CDJ_NXS_DSP_MODEL=1: answer MAIN without executing the C674x. */
+    bool model;
     bool idle_skip, idle_dirty, idle_anchor_valid;
     unsigned idle_anchor_step;
     uint32_t idle_anchor_pc;
@@ -139,6 +141,8 @@ typedef struct {
 } NxsHpi;
 static NxsHpi *nxs_hpi;
 static void run_dsp(NxsHpi *s);
+static void model_boot_phase(NxsHpi *s, unsigned phase);
+static void model_service(NxsHpi *s);
 static void virtual_audio_tick(void *opaque);
 
 static void record_event(NxsHpi *s, const char *type, uint64_t offset,
@@ -305,6 +309,7 @@ static void nxs_pcm_shutdown(Notifier *notifier, void *opaque)
 
 static bool capture_checkpoint(NxsHpi *s, const char *reason)
 {
+    if (s->model) return false;  /* no interpreter state to capture */
     const char *policy = getenv("CDJ_NXS_DSP_CHECKPOINT_POLICY");
     if (policy && !strcmp(policy, "fault") && !s->dsp_halted &&
         strcmp(reason, "debug request")) return false;
@@ -462,7 +467,9 @@ void cdj_nxs_hpi_boot_phase(unsigned phase)
     /* A phase-budget yield is a cooperative scheduling boundary, not a DSP
      * halt.  Resume when the genuine MAIN firmware changes the sideband that
      * the DSP is polling. */
-    if (changed) {
+    if (changed && s->model) {
+        model_boot_phase(s, phase);
+    } else if (changed) {
         if (s->dsp_started && !s->dsp_halted)
             capture_checkpoint(s, "boot-phase boundary");
         run_dsp(s);
@@ -1490,6 +1497,7 @@ static void deferred_dsp_tick(void *opaque)
 
 static void run_dsp(NxsHpi *s)
 {
+    if (s->model) return;       /* nothing executes; see model_service */
     if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
     if (!s->scheduler.mode) {
         execute_dsp(s, s->virtual_audio_clock ?
@@ -1559,8 +1567,92 @@ static void virtual_audio_tick(void *opaque)
     timer_mod(s->mcasp_timer, now + MCASP_VIRTUAL_BATCH_NS);
 }
 
+/*
+ * Behavioural DSP (CDJ_NXS_DSP_MODEL=1). The uploaded C674x code never runs;
+ * this reproduces only what MAIN can observe of it, measured from a stock
+ * real-DSP transcript (runs/fork-stock-obey-1, CDJ_NXS_DSP_EVENTS) and the
+ * re-docs main-dsp pages. MAIN reads 31 words of DSP memory in boot, mount,
+ * browse and load; everything else in L2 is only written by MAIN. No audio,
+ * no decoder, and no playback position: a run on this model is fast, not
+ * evidence about playback or audio timing.
+ */
+#define MODEL_WINDOW 0x11837ba0u        /* runtime window base (re-docs) */
+#define MODEL_WINDOW_END 0x1183fb60u    /* end of the two stream records */
+#define MODEL_CMD 0x11838100u           /* stream command; 2..4 accepted */
+
+static uint32_t model_get(NxsHpi *s, uint32_t address)
+{
+    return ldl_le_p(s->l2 + address - L2_BASE);
+}
+
+static void model_put(NxsHpi *s, uint32_t address, uint32_t value)
+{
+    stl_le_p(s->l2 + address - L2_BASE, value);
+}
+
+/* A DSP-side HPIC store, with the same effects and transcript record. */
+static void model_hpic(NxsHpi *s, uint32_t value)
+{
+    bool old_hint = s->hpi.hint;
+    cdj_c6747_hpi_cpu_write(&s->hpi, CDJ_C6747_HPIC, value, 4, true);
+    record_event(s, "dsp_hpic_write", 0, CDJ_C6747_HPIC, value, 4);
+    if (!old_hint && s->hpi.hint && s->hint) s->hint(s->opaque, false);
+}
+
+static void model_start(NxsHpi *s)
+{
+    s->dsp_started = true;
+    record_event(s, "dsp_start", 0, ldl_le_p(s->l2), 0, 0);
+    /* Stage 1 acks DSPINT (0x14a, then 0x149/0x148 as transcribed), clears
+     * the handshake pair and writes ready=1 (0x1180304c); MAIN tests for 1. */
+    model_hpic(s, 0x14a);
+    model_hpic(s, 0x149);
+    model_hpic(s, 0x148);
+    model_put(s, 0x1183fff0, 0);
+    model_put(s, 0x1183fff4, 1);
+    info_report("nxs-hpi: behavioural DSP model; C674x code is not executed");
+}
+
+static void model_boot_phase(NxsHpi *s, unsigned phase)
+{
+    if (!s->dsp_started || !phase) return;
+    /* Each nonzero CPU_PH value is answered with HINT (HPIC 0x14c). */
+    model_hpic(s, 0x14c);
+    if (phase != 3) return;
+    /* Phase 3 starts the runtime: by MAIN's next read the DSP has cleared
+     * the window MAIN's second record overlapped, set 0x11837bf8=1 (read
+     * every service step) and 0x11837cc8=0x1a24. Values as transcribed. */
+    memset(s->l2 + MODEL_WINDOW - L2_BASE, 0, MODEL_WINDOW_END - MODEL_WINDOW);
+    model_put(s, 0x11837bf8, 1);
+    model_put(s, 0x11837cc8, 0x1a24);
+}
+
+/* One DSPINT: ack it and consume the mailboxes MAIN polls for zero. */
+static void model_service(NxsHpi *s)
+{
+    static const uint32_t cleared[] = {
+        0x11837ba0, 0x11837c9c, 0x11837cb0, 0x118381c4,
+    };
+    model_hpic(s, 0x14a);
+    uint32_t command = model_get(s, MODEL_CMD);
+    if (command >= 2 && command <= 4) {
+        /* Consumer 0xc004834c: clears 0x11838140/0x118381c4, then the
+         * command word. Other values stay put, as on the DSP. */
+        model_put(s, 0x11838140, 0);
+        model_put(s, 0x118381c4, 0);
+        model_put(s, MODEL_CMD, 0);
+    }
+    for (size_t i = 0; i < ARRAY_SIZE(cleared); ++i)
+        if (model_get(s, cleared[i])) model_put(s, cleared[i], 0);
+    record_event(s, "dsp_stop", 0, 0, 0, 0);
+}
+
 static void start_dsp(NxsHpi *s)
 {
+    if (s->model) {
+        model_start(s);
+        return;
+    }
     /* Boot-ROM handoff abstraction: the host supplies the entry in L2[0].
      * No claim to execute the unavailable ROM. The uploaded code is decoded. */
     cdj_c674x_reset(&s->cpu, ldl_le_p(s->l2));
@@ -1634,7 +1726,8 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
         } else if (old_hint && !s->hpi.hint) {
             run_dsp(s);
         } else if (dspint_rising && s->dsp_started) {
-            run_dsp(s);
+            if (s->model) model_service(s);
+            else run_dsp(s);
         }
         return;
     }
@@ -1694,6 +1787,10 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
         warn_report("nxs-c674x: legacy cooperative budget reduced to %u packets; exploratory host-fairness mode",
                     s->legacy_budget);
     nxs_hpi = s;
+    const char *model = getenv("CDJ_NXS_DSP_MODEL");
+    s->model = model && !strcmp(model, "1");
+    if (s->model)
+        warn_report("nxs-c674x: behavioural DSP model; no C674x execution, audio or playback position");
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(dsp_read, dsp_fetch_block);
     s->functional_audio = audio && !strcmp(audio, "1");
