@@ -6,9 +6,9 @@
 O      ?= ../../build/cdj-gui-run
 CC     ?= cc
 CFLAGS ?= -O3 -g -Wall -Wextra -Wno-unused-parameter
-CFLAGS += -std=gnu11 -I.
+CFLAGS += -std=gnu11 -I. -pthread
 
-SRCS = cdj_gui_run.c cdj_link.c bfin_core.c bfin_exec.c bfin_dsp.c bf531.c
+SRCS = cdj_gui_run.c cdj_link.c bfin_core.c bfin_exec.c bfin_dsp.c bf531.c cdj_parent_watch.c
 OBJS = $(patsubst %.c,$(O)/%.o,$(SRCS))
 HDRS = $(wildcard *.h)
 
