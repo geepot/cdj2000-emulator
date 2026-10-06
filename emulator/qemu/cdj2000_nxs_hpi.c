@@ -145,6 +145,7 @@ typedef struct {
      * ticks every cycle again (A/B reference). */
     CdjDspTicks ticks;
     bool tick_batch;
+    uint64_t edma_writes, mcasp_control_writes;   /* see log_sample */
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
     /* CDJ_NXS_DSP_MODEL=1: answer MAIN without executing the C674x. */
@@ -295,6 +296,16 @@ static void main_unlock(void);
 static void model_boot_phase(NxsHpi *s, unsigned phase);
 static void model_service(NxsHpi *s);
 static void virtual_audio_tick(void *opaque);
+
+/* The audio ISRs write EDMA and McASP registers every few hundred
+ * packets: logging each (formatted and flushed to stderr on the DSP
+ * thread) was 3.5% of a playing DSP thread.  Log the first 1,024 of a kind,
+ * then every 65,536th, with its running count. */
+static bool log_sample(uint64_t *count)
+{
+    uint64_t n = ++*count;
+    return n <= 1024 || !(n & 0xffff);
+}
 
 static void record_event(NxsHpi *s, const char *type, uint64_t offset,
                          uint64_t address, uint64_t value, unsigned size)
@@ -1444,8 +1455,9 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         return true;
     }
     if (edma_mcasp_transaction(s, true, address, value, size, commit)) {
-        if (commit) info_report("nxs-edma: write address=%#x value=%#x",
-                                address, (uint32_t)value);
+        if (commit && log_sample(&s->edma_writes))
+            info_report("nxs-edma: write address=%#x value=%#x writes=%" PRIu64,
+                        address, (uint32_t)value, s->edma_writes);
         return true;
     }
     if (cdj_c6747_gpio_write(&s->gpio, address, value, size, commit)) {
@@ -1457,9 +1469,10 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         return true;
     }
     if (edma_mcasp_transaction(s, false, address, value, size, commit)) {
-        if (commit)
-            info_report("nxs-mcasp-control: write address=%#x value=%#x",
-                        address, (uint32_t)value);
+        if (commit && log_sample(&s->mcasp_control_writes))
+            info_report("nxs-mcasp-control: write address=%#x value=%#x"
+                        " writes=%" PRIu64, address, (uint32_t)value,
+                        s->mcasp_control_writes);
         return true;
     }
     if (cdj_c6747_psc_write(&s->psc, address, value, size, commit)) {
