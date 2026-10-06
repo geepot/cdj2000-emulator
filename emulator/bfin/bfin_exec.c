@@ -2,7 +2,8 @@
 /*
  * From hw/cdj/bfin/bfin_exec.c of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
- * Unchanged from upstream.
+ * Changed 2026-10-05 (bfin-link): circular DAG post-modify is GNU sim's
+ * dagadd/dagsub (it wraps whatever side of the buffer I starts on).
  */
 /*
  * Blackfin instruction semantics: the 16- and 32-bit control, load/store,
@@ -36,20 +37,48 @@ static void load_reg(bfin_core *c, unsigned grp, unsigned reg, uint32_t v)
     }
 }
 
-/* DAG post-modify with the circular buffer of I[n]: B[n] base, L[n] length. */
-static uint32_t dag_add(bfin_core *c, unsigned n, int32_t m)
+/* DAG post-modify with the circular buffer of I[n]: B[n] base, L[n] length.
+ * I += M (sub = 0) or I -= M (sub = 1), ported from GNU sim's dagadd and
+ * dagsub, which model the hardware's carry-based wrap. */
+static uint32_t dag_mod(bfin_core *c, unsigned n, uint32_t m, int sub)
 {
-    uint32_t i = c->i[n], l = c->l[n], b = c->b[n];
-    uint32_t r = i + m;
+    uint64_t i = c->i[n], l = c->l[n], b = c->b[n];
+    uint64_t msb = 1ull << 31, car = 1ull << 32, lb = l + b, im;
+    uint32_t im32, iml32, lb32 = (uint32_t)lb;
+    int neg = (int32_t)m < 0;
 
-    if (l) {
-        if (m >= 0 && r >= b + l && i < b + l) {
-            r -= l;
-        } else if (m < 0 && r < b && i >= b) {
-            r += l;
+    if (!sub) {
+        im = i + m;
+        im32 = (uint32_t)im;
+        if (neg) {
+            iml32 = (uint32_t)(i + m + l);
+            if ((i & msb) || (im & car)) {
+                return im32 < b ? iml32 : im32;
+            }
+            return im32 < b ? im32 : iml32;
         }
+        iml32 = (uint32_t)(i + m - l);
+        if ((im & car) == (lb & car)) {
+            return im32 < lb32 ? im32 : iml32;
+        }
+        return im32 < lb32 ? iml32 : im32;
     }
-    return r;
+    uint64_t mbar = (uint32_t)(~m + 1);
+
+    im = i + mbar;
+    im32 = (uint32_t)im;
+    if (neg) {
+        iml32 = (uint32_t)(i + mbar - l);
+        if (!!((i & msb) && (im & car)) == !!(lb & car)) {
+            return im32 < lb32 ? im32 : iml32;
+        }
+        return im32 < lb32 ? iml32 : im32;
+    }
+    iml32 = (uint32_t)(i + mbar + l);
+    if (m == 0 || (im & car)) {
+        return im32 < (uint32_t)b ? iml32 : im32;
+    }
+    return im32 < (uint32_t)b ? im32 : iml32;
 }
 
 static uint32_t brev_add(uint32_t a, uint32_t b)
@@ -600,9 +629,9 @@ static void dsp_ldst(bfin_core *c, uint16_t iw, uint16_t pad)
         load_reg(c, 0, reg, m == 1 ? (d & 0xFFFF0000) | h : (d & 0xFFFF) | h << 16);
     }
     switch (aop) {
-    case 0: c->i[n] = dag_add(c, n, bytes); break;
-    case 1: c->i[n] = dag_add(c, n, -(int32_t)bytes); break;
-    case 3: c->i[n] = dag_add(c, n, c->m[m]); break;
+    case 0: c->i[n] = dag_mod(c, n, bytes, 0); break;
+    case 1: c->i[n] = dag_mod(c, n, bytes, 1); break;
+    case 3: c->i[n] = dag_mod(c, n, c->m[m], 0); break;
     }
 }
 
@@ -687,15 +716,15 @@ static void dag_modify(bfin_core *c, uint16_t iw, uint16_t pad)
     if (iw & 0x80) {
         c->i[n] = brev_add(c->i[n], c->m[m]);
     } else {
-        c->i[n] = dag_add(c, n, iw & 0x10 ? -(int32_t)c->m[m] : (int32_t)c->m[m]);
+        c->i[n] = dag_mod(c, n, c->m[m], (iw >> 4) & 1);
     }
 }
 
 static void dag_step(bfin_core *c, uint16_t iw, uint16_t pad)
 {
-    static const int8_t step[4] = { 2, -2, 4, -4 };
+    unsigned op = (iw >> 2) & 3;                /* += 2, -= 2, += 4, -= 4 */
 
-    c->i[iw & 3] = dag_add(c, iw & 3, step[(iw >> 2) & 3]);
+    c->i[iw & 3] = dag_mod(c, iw & 3, op & 2 ? 4 : 2, op & 1);
 }
 
 static void undef16(bfin_core *c, uint16_t iw, uint16_t pad)

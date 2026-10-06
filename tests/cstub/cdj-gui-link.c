@@ -429,7 +429,8 @@ static void test_dma(void)
     bf531_write(s, MMR(0x900), 1, 2);                       /* TSPEN */
     bf531_run(s, 400000);
     assert(tx_len == 200 && tx_seen[0] == 1 && tx_seen[199] == 200);
-    assert(bf531_read(s, DMA4(0x28), 2) & 1);
+    assert(bf531_read(s, DMA4(0x28), 2) == 1);              /* DONE, RUN clear */
+    assert(bf531_read(s, DMA4(0x30), 2) == 0);              /* CURR_X_COUNT */
 
     /* The flash's AMD program and sector erase. */
     assert(bf531_read(s, 0x201fc000, 2) == 0xFFFF);

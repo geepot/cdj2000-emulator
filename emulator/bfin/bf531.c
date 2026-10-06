@@ -482,6 +482,9 @@ static void sport1_tx_send(bf531 *s)
     if (s->host.sport1_tx) {
         s->host.sport1_tx(s->host.opaque, pkt, len);
     }
+    /* The unit has gone out: firmware polls CURR_X_COUNT reaching 0. */
+    d->reg[D_CURR_ADDR / 4] = d->reg[D_START / 4] + len;
+    d->reg[D_CURR_X / 4] = 0;
     dma_unit_done(s, 4);
 }
 
