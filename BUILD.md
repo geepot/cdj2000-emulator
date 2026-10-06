@@ -399,12 +399,33 @@ with a link the run is paced to the wall clock at `BFIN_CCLK_HZ` (400 MHz;
 not here; the runner names each one it ignores.
 
 `tests/test_cdj_gui_link.py` checks the link against a fake MAIN on loopback
-and the DMA/flash/DSP additions. A differential run of the firmware's DSP32
-encodings against `bin/cdj-run` (GNU sim) put the MAC, DEPOSIT, accumulator
-negate/abs, circular DAG and bundle I-register semantics on GNU sim's; known
-remaining differences: some ASTAT flags (vector-add AC0/AC1, LSHIFT V),
-`R = W[P ++ P]` with the same register, and the browse artwork thumbnails,
-which still show coloured column stripes (decode correct otherwise).
+and the DMA/flash/DSP additions.
+
+**Parity with `bin/cdj-run`.** The DSP32 groups, ALU2op and CCflag run GNU
+sim's own code (`bfin_dsp.c`, see THIRD_PARTY.md); bundles run in its order
+(32-bit slot first with its data-register writes queued, LDST loads landing at
+once, dspLDST/pmod loads and I updates queued, a byte op's implicit
+DISALGNEXCPT aligning 32-bit dspLDST loads); reserved forms stop as
+unimplemented where GNU sim faults. The differential tester
+
+```sh
+python -m tools.cdj_gui.bfin_diff runs/bfin-diff --elf firmware/nxs/gui-boot-memory.elf \
+    [--elf MODS.elf]   # needs bfin-elf binutils and bin/cdj-run; exit 1 on a divergence
+```
+
+runs every encoding in the ELFs from random states, random runs of 2-8
+instructions and random encodings beyond them, and compares every register,
+accumulator, ASTAT and the memory touched. 2026-10-05, stock + mods ELFs:
+598,416 firmware-encoding cases, 100,000 sequences, 63,882 random encodings and
+every runnable 16-bit encoding -- no divergence, accept/reject identical.
+`tests/test_bfin_gnu_parity.py` replays one GNU-sim-verified case per class of
+divergence fixed (no toolchain needed). On the stock browse with the real USB
+image the boot, mounted, browse and list screens -- artwork thumbnails
+included -- equal gdb's pixel for pixel; the loaded screen differs only in
+playback position. The mods candidate's boot/browse/list screens equal gdb's
+(it needs `--gui-env BFIN_LINK_NATIVE_PARTIAL_DMA=1`, as its launcher sets).
+Cost: 20 s virtual 0.46 s CPU (was 0.41; 9.2x faster than gdb virtual);
+linked stock run 18% of a core at real time against gdb's 83% while starved.
 
 ## The MAIN board -- SH-4, from QEMU
 
