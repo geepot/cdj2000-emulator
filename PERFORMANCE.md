@@ -733,3 +733,155 @@ compiled region would also have to call the board's per-cycle tick, stop at
 every interrupt-recognition boundary and McASP slot edge, re-check stores
 against the fetch blocks it was built from, and reproduce the E1/E3/E5
 queues and fault rollback byte for byte to keep the checkpoint evidence.
+
+## Compiled SPLOOP kernels (`CDJ_C674X_JIT=1`, `nxs_vm --dsp-jit`, opt-in, 2026-10-06)
+
+Stage 1 of the compiler the previous section asked for: the loop-buffer
+cycles. All of it is in `emulator/qemu/cdj_c674x.c` ("Compiled SPLOOP
+kernels", "steady-state kernels"); design after Stijn Jacobs'
+cdj-nxs2-qemu region compiler (credit in THIRD_PARTY.md), no code copied.
+
+**Mechanism: in-process, ahead of each loop's first use, no host machine
+code.** A sealed SPLOOP buffer is a complete, self-contained program (it
+issues from the buffer, never from memory), so it is compiled the moment it
+is sealed, from the CPU's own buffer, for any firmware, and identified by a
+byte comparison with that buffer at the start of every run (a restore, a new
+SPLOOP or a reload can never run a stale compile). Offline-generated C (the
+nxs2 route) would need a profile-and-rebuild loop per firmware and a second
+implementation of our semantics in a generator; runtime native code would
+need a backend per host (arm64 macOS with MAP_JIT, x86-64 MSYS2) and W^X
+handling. Instead the compiled form is data plus specialised C: every
+operation runs this core's own arm semantics (`arm_*`, `cdj_c674x_sp.c`), so
+"our semantics win" by construction, and what is compiled away is the
+generic machinery around them.
+
+Three layers, each falling back to the one below for a cycle it does not
+handle (the CPU untouched, so the fallback reproduces any fault itself):
+
+1. **Compiled schedule** (`jit_cycle`). Cycle c issues the origins
+   `o` of its phase with `c - iterations * II < o <= c`, a contiguous run,
+   so each (phase, first, last) has one prebuilt combined packet with its
+   decodes. The cycle is `loop_step_in_place` with that lookup instead of
+   `cdj_c674x_loop_issue_filtered_from`, `loop_decode` and the packet copy.
+2. **Native issue** (`jit_exec`). Loads/stores (every short-offset form),
+   MPYSP and ADDSP/SUBSP from precompiled fields, other reviewed register
+   arms through their own functions; queue appends saved in an 8-entry undo;
+   the cycle's bus operations (tick, due store commits, due E3 reads) run
+   before any register or queue changes, so a failing commit needs no
+   snapshot; retirement compacts each queue in one pass that leaves exactly
+   the bytes of `execute_packet`'s one-at-a-time `memmove`, dead slots
+   included (the vacated slots all hold the pre-cycle last entry).
+3. **Steady-state kernels** (`jk_compile`, `jk_exec`): the pipeline resolved
+   at compile time. For a loop of unpredicated loads/stores and SP
+   arithmetic, a simulation of `execute_packet`'s issue/retire rules gives,
+   per phase, the queue shape (which (operation, age) is at each index),
+   which entries commit, read at E3 and retire, which same-cycle load/store
+   pairs need the overlap check, and the tail that retirement copies into
+   vacated slots; a loop where any data-independent issue check could fire
+   is not compiled. A steady cycle does only the data-dependent work, keeps
+   in-flight entries in a model by (operation, issue cycle), writes only the
+   vacated slots, and rebuilds the live prefix of `stores[]`/`loads[]`
+   (`jk_sync`) when steady execution ends. It starts only from a queue that
+   matches the compiled shape entry by entry.
+
+`cdj_c674x_run` strings cycles together and calls the caller's
+`between()` - the board's whole post-step and pre-step work, split out of
+`execute_dsp` (`dsp_pre_step`/`dsp_post_step`) and of `replay.c`
+(`quota_pre`/`quota_post`) - after every packet, so interrupts, McASP slot
+edges, timers and MAIN's hand-over happen exactly where the step loop put
+them, and the board tick is still called every cycle. The one new rule:
+`between()` must not read the queue arrays while a kernel is steady (their
+counts are exact; interrupt recognition with an active loop never reads
+them, and steady execution ends before an idle loop's interrupt entry).
+
+Tried and dropped: compiling direct (non-loop) packets with the same
+executor (stage 2's simplest form) - 5.3 M of 20 M playback steps ran
+through it, no faster than `execute_fast` (lean replay 2.07 s against
+2.06 s), so it was removed.
+
+### Exactness
+
+* `tests/cstub/c674x-packet-cache.c` gains a JIT phase: 3,000 SPLOOP
+  programs (a third with kernel-shaped bodies, a quarter under functional
+  timing), loop bodies now including MPYSP, every ADDSP/SUBSP encoding and
+  loads/stores of every width and addressing mode through pointers that are
+  circular under a random AMR, random FP rounding modes, random interrupt
+  requests with GIE set, random run limits and `between()` refusals. System
+  B steps the uncached interpreter inside A's `between()`, and A's rebuilt
+  view (`cdj_c674x_view`) and memory must equal B's after every packet:
+  1.29 M compiled packets (452 K steady, 784 K native, 55 K generic) in
+  101 K runs, 375 loop interrupts, 2,220 faults. Clean under ASan/UBSan.
+* Mutations: 23 single-line breaks of the issue range, undo, compaction
+  fill, E3 values, overlap and collision checks, tick, span reads, buffer
+  match, ILC, FP rounding, AMR, and of the kernel's tail copies, sync
+  timing, FP status, pair high word and exits - each fails the test. Three
+  defensive checks are unreachable by it: the all-pairs overlap check on a
+  run's first cycle (every packet path already checked older pairs), the
+  due check on kernel entry, and the sync before `between()` after a loop
+  ends in a full cycle (only SPLOOPW can).
+* Replay (`tools/cdj_dsp/replay.c`), JIT off against on: checkpoints 1,
+  25, 250 (1 M steps), 400 (5 M), the first-play snapshot (5 M, strict and
+  functional audio) and the real-USB playback checkpoint (10 M, strict and
+  functional audio) give identical traces and final checkpoints, which also
+  equal the pre-change core's.
+* 45-second full-capture stock boots, `develop` (ccc0c79) binary against
+  this one with the JIT on: all 262,797 events and 4,353 DSP checkpoints of
+  the common prefix byte-identical; with `--functional-dsp-audio`, 130,522
+  events and 778 checkpoints. JIT off against on in this binary: 262,797 /
+  4,353 and 130,041 / 765. Final screens identical in all.
+
+### Measurements (Apple M4 Max, shared host, load 8-15)
+
+| Workload | JIT off | JIT on |
+| --- | ---: | ---: |
+| `benchmark_core` step-sploop (LDW/ADD/MVK/STW, II 4) | 19.2 M/s | 30.4 M/s |
+| `benchmark_core` step-memcpy (the stage-1 memcpy kernel, ILC 64) | 15.6 M/s | 30.0 M/s |
+| `benchmark_core` step-kernel (same, ILC 30000, steady) | 17.2 M/s | 43.5 M/s |
+| `benchmark_core` step-alu / step-mem (no loops) | 80 / 37 M/s | unchanged |
+| replay real-USB playback, 10 M, functional audio, user s | 1.76-1.78 | 1.32 |
+| same, strict | 2.02-2.03 | 1.34-1.35 |
+| same without `replay.c`'s trace output, 20 M steps | 2.75 | 1.83 |
+| live `--dsp-thread --audio-clock virtual`, packets by 140 virtual s | 929 M | 1,069 M |
+| same, underrun slots | 95.7% | 95.0% |
+
+In the 20 M-step playback replay, 10.5 M steps are loop cycles; 10.1 M of
+them run steady, 0.33 M native, 14 K generic, from 14 compiles. Loop
+cycles went from about half the core's time to 43% of the (smaller)
+total; the direct packets are now the larger half.
+
+**Real time: not reached.** The live run is the virtual-clock scenario of
+the sections above (stock NXS, confirmed rekordbox USB, link_hub, same key
+presses): it loads the track and the counter still does not advance after
+PLAY, in both modes. The DSP gets ~15% more packets per virtual second
+(7.6 M/s), against the ~63 M/s playback needs. In the DSP thread with the
+JIT, waiting for MAIN's HPI hand-over is 23% of samples, the board's
+per-cycle tick and per-step work 15%, and the core 55%, of which the
+compiled loops are now a small part (`jk_exec` 3%, `cdj_c674x_run` 2%) and
+direct packets the bulk (`execute_packet` 13%, `memmove` 8%,
+`cdj_c674x_step_capture_direct` 8%). 80% of the remaining direct packets
+fall in seven code ranges (`dsp_output_cursor_advance` 23%, four pieces of
+`dsp_varispeed_resample` 46%, `dsp_pcm_queue_discard` 7%), mostly
+predicated ALU code with data-dependent branches, where a per-packet
+executor saves nothing over `execute_fast`.
+
+What real time would still need, in order of size:
+
+1. **Compiled direct code** (stage 2 proper): traces/superblocks over those
+   ranges with the pipeline resolved across packets and branches (loads in
+   flight and branch delay slots as static state, side exits on predicate
+   or branch outcomes), i.e. the steady-kernel technique generalised to
+   control flow. The per-packet costs left are the generic issue loop, the
+   fetch-block revalidation and the dispatch, a few ns each.
+2. **Batched board work**: the board tick (PLL, timers, SPI) every cycle and
+   the full between-step work every packet are now about a sixth of the DSP
+   thread. A board horizon - how many cycles/packets until a timer event, a
+   PSC transition, a McASP slot edge, a pending EDMA notification or a MAIN
+   request - would let compiled code run that far with one batched tick,
+   flushing before any non-RAM bus access.
+3. **MAIN/DSP hand-over**: MAIN waits for the DSP 73% of the time and the
+   DSP yields to MAIN 23%; this shrinks only as the DSP gets faster.
+
+**Proposal:** default `CDJ_C674X_JIT` on (and `--dsp-jit` with it): every
+exactness gate above passes, and it is a 1.3-1.5x on playback replay and
+2-2.5x on loop-buffer code with no measurable cost elsewhere.
+`CDJ_C674X_JIT=0` / `--no-dsp-jit` keeps the interpreter for A/B.
