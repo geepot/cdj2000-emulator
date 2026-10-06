@@ -149,7 +149,12 @@ static uint32_t random_instruction(uint32_t pc)
     unsigned x = rnd() & 1;
     static const uint32_t l_ops[] = {0x78, 0xf8, 0xf78, 0xff8, 0xdf8, 0xa78,
                                      0x8f8, 0xaf8, 0x58};
-    switch (rnd() % 14) {
+    switch (rnd() % 15) {
+    case 14: {                            /* CALLP .S1/.S2 into the code */
+        int32_t target = (int32_t)(BASE + (rnd() % ((CODE_END - BASE) / 32)) * 32);
+        int32_t disp = (target - (int32_t)(pc & ~31u)) / 4;
+        return 0x10000010u | ((uint32_t)disp & 0x1fffff) << 7 | s << 1;
+    }
     case 13:                              /* MVK .L scst5 */
         return predicate() | dst << 23 | (rnd() & 31) << 18 | x << 12 |
                0xa358 | s << 1;

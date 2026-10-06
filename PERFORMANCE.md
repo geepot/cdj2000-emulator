@@ -1349,3 +1349,40 @@ its address, value and size arrays kept each entry's three fields exactly
 4 KB (or 8 KB, 12 KB) apart, which Apple silicon punishes in a loop that
 stores one and loads another.  The model now keeps one record per
 (operation, age); step-kernel runs at 34-35 M every time.
+
+### 9. CALLP in traces
+
+CALLP packets (8 K per 3 M steps of the live checkpoint) went to the
+interpreter; `dt_callp` issues them as `execute_packet` does (B3 gets the
+return address, a branch six cycles out, a six-cycle packet; a packet with
+a parallel control instruction stays untraceable, as the interpreter
+stops on it), in `dt_exec` and on the lean path.  The lockstep generator
+now emits CALLP; dropping the pending-branch, multicycle or write-conflict
+check, or moving the return address or the due cycle, each fails it.
+
+### Stage 3 (C-level) exactness and results
+
+- Replays, `dt-jit3` against develop (JIT on, and JIT off against JIT on,
+  and this binary JIT off against JIT on with the horizon): checkpoints 1,
+  25, 250, 400, the real-USB playback checkpoint (10 M, strict and
+  functional audio) and the live checkpoint (3 M, both) identical (the
+  horizon runs omit only the coverage lines).  The real-USB playback
+  checkpoint to 60 M steps: develop and this binary, JIT off and on, give
+  the same traces (28,631,258 and 17,189,136 lines) and final checkpoints;
+  with the horizon the final checkpoints are identical and the traces too
+  once the coverage lines are left out of both.
+- 45 s full-capture stock boots against develop: all 298,354 events and
+  5,314 DSP checkpoints of the common prefix byte-identical (this binary
+  reaches 383,676 events in the 45 s); with `--functional-dsp-audio`,
+  142,177 events and 1,093 checkpoints.  This binary JIT off against on:
+  379,347 events and 7,503 checkpoints.
+- `tests/cstub/c674x-packet-cache.c` clean under ASan/UBSan.
+- Live, same session, alternated (two runs each): **25.1-25.6 M DSP packets
+  per virtual second against develop's 21.0-21.3 M (+20%)**, 16.7-19.9 M
+  per wall second against 15.5 M, underrun slots 83.3-83.5% against
+  86.0-86.1%.  E-8302 on screen in every run: **real time is not reached**;
+  the ~63 M per virtual second playback needs is ~2.5x away.  The DSP
+  thread is now ~92% core (traces, loops, the interpreter at ~11%); the
+  per-packet costs left are spread over issue, the queue programs, the
+  cache checks and thread-local accesses, so the next stage compiles hot
+  regions ahead of time (below).

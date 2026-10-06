@@ -7545,6 +7545,7 @@ typedef enum {
     DT_COMPACT_BNOP,                    /* compact_bnop form */
     DT_COMPACT_MEMORY,                  /* compact_memory form */
     DT_COMPACT_ILC,                     /* compact MVC to ILC (in place) */
+    DT_CALLP,                           /* CALLP (dt_callp) */
 } DtKind;
 
 typedef struct DtPlan {
@@ -7602,9 +7603,26 @@ static bool dt_plan(CdjC674xCacheEntry *e)
         const CdjC674xInstruction *insn = &packet->instructions[i];
         const CdjC674xDecoded *d = &e->decoded[i];
         JitOp *op = &plan.op[i];
-        if (dt_loop_control(insn) || d->spmask || d->callp ||
+        if (dt_loop_control(insn) || d->spmask ||
             d->gate != CDJ_C674X_INTERRUPT_GATE_NONE)
             return false;
+        if (d->callp) {
+            /* execute_packet's parallel-control refusal, a pure function
+             * of the packet: such a packet stays with the interpreter. */
+            for (unsigned j = 0; j < packet->count; ++j) {
+                const CdjC674xInstruction *other = &packet->instructions[j];
+                if (j != i &&
+                    ((!other->compact && ((other->word & 0x7c) == 0x10 ||
+                                          (other->word & 0x1ffe) == 0x162 ||
+                                          (other->word & 0xffe) == 0x362 ||
+                                          (other->word & 0x1ffc) == 0x120)) ||
+                     compact_branch(other)))
+                    return false;
+            }
+            op->kind = DT_CALLP;
+            plan.branches = true;
+            continue;
+        }
         if (d->nop) {
             if (d->nop > 9) return false;   /* IDLE and reserved counts */
             op->kind = DT_NOP;
@@ -7763,6 +7781,27 @@ dt_compact_memory(CdjC674x *cpu, const CdjC674xCacheEntry *e, unsigned i,
         for (unsigned q = 0; q < 32; ++q)
             written[k] |= (uint32_t)marks[k][q] << q;
     return true;
+}
+
+/* CALLP, as execute_packet issues it (its parallel-control check is
+ * dt_plan's): B3 on the instruction's side gets the return address, a
+ * branch is queued six cycles out, and the packet takes six cycles.  False
+ * where execute_packet stops. */
+static bool dt_callp(CdjC674x *cpu, const CdjC674xPacket *packet,
+                     const CdjC674xInstruction *insn,
+                     const CdjC674xDecoded *d, CdjC674xPacketTiming *timing,
+                     CdjC674xDefer *defer, uint32_t written[2])
+{
+    uint32_t w = d->w;
+    unsigned side = d->compact ? w & 1 : (w >> 1) & 1;
+    int32_t offset = d->compact ? sx(w >> 6, 10) * 4
+                                : sx((w >> 7) & 0x1fffff, 21) * 4;
+    if (cpu->branch_due || !cdj_c674x_packet_multicycle(timing, 6) ||
+        !jit_mark(written, side, 3))
+        return false;
+    commit_reg(cpu, defer, side, 3, packet->next_pc);
+    return queue_branch(cpu, cpu->cycles + 6,
+                        (insn->pc & ~31u) + (uint32_t)offset);
 }
 
 /* jit_retire_load for dt_exec, whose E3 values arrive in the order its bus
@@ -8321,6 +8360,9 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
         case DT_COMPACT_ILC:
             ok = compact_mvc_ilc(cpu, cpu, insn, d->w, controls);
             break;
+        case DT_CALLP:
+            ok = dt_callp(cpu, packet, insn, d, &timing, &defer, written);
+            break;
         default: {                      /* DT_VALUE, DT_BRANCH */
             unsigned zero = 0;
             CdjC674xArm arm = {
@@ -8598,6 +8640,7 @@ enum {
     LOP_MEM, LOP_SP, LOP_ADDA, LOP_COMPACT, LOP_COMPACT_BNOP,
     LOP_GENERIC,                        /* any other arm, as dt_arm */
     LOP_CMEM,                           /* compact memory, as dt_exec */
+    LOP_CALLP,                          /* dt_callp */
     /* arms computed in line, each as its arm's own expression */
     LOP_ADD_IMM, LOP_ADD_REG, LOP_SUB_REG, LOP_SUB_IMM, LOP_D_ADD,
     LOP_D_ADDK, LOP_D_SUB, LOP_D_SUBK, LOP_DX_ADD, LOP_DX_ADDK, LOP_DX_SUB,
@@ -8628,6 +8671,7 @@ static void dts_lean_plan(const CdjC674xCacheEntry *e, DtPlan *plan)
         case DT_ARM:
         case DT_CMPSP: lop = LOP_GENERIC; break;
         case DT_COMPACT_MEMORY: lop = LOP_CMEM; break;
+        case DT_CALLP: lop = LOP_CALLP; break;
         case DT_VALUE: {
             bool (*run)(CdjC674xArm *) = d->arm->run;
             lop = LOP_ARM;
@@ -8873,6 +8917,10 @@ static int dts_lean(CdjC674x *cpu, const CdjC674xCacheEntry *e,
         case LOP_CMEM:
             ok = dt_compact_memory(cpu, e, i, &undo, &defer, written,
                                    &memory_count, read, write, opaque);
+            break;
+        case LOP_CALLP:
+            ok = dt_callp(cpu, packet, &packet->instructions[i],
+                          &e->decoded[i], &gtiming, &defer, written);
             break;
         case LOP_ARM:
         case LOP_BRANCH: {
