@@ -145,6 +145,14 @@ typedef struct {
      * ticks every cycle again (A/B reference). */
     CdjDspTicks ticks;
     bool tick_batch;
+    /* The board horizon (cdj_c674x.h, dsp_horizon_open):
+     * CDJ_NXS_DSP_HORIZON=0 calls the between-step work after every compiled
+     * packet again (A/B reference). */
+    CdjC674xHorizon horizon;
+    bool horizon_on;
+    /* cdj_c674x_set_fetch_epoch: moved by every committed device write (any
+     * of them could remap memory: EMIFB, the L1D partition) and by reset. */
+    uint64_t fetch_epoch;
     uint64_t edma_writes, mcasp_control_writes;   /* see log_sample */
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
@@ -472,6 +480,13 @@ static void nxs_pcm_shutdown(Notifier *notifier, void *opaque)
 
 static void dsp_ticks_flush(NxsHpi *s);
 
+/* End the board horizon: between() must run after the current packet.  Any
+ * thread (MAIN, from main_lock). */
+static inline void dsp_horizon_close(NxsHpi *s)
+{
+    qatomic_set(&s->horizon.until, 0);
+}
+
 static bool capture_checkpoint(NxsHpi *s, const char *reason)
 {
     if (s->model) return false;  /* no interpreter state to capture */
@@ -593,6 +608,7 @@ static void reset_line(NxsHpi *s, bool released)
         cdj_c6747_spi_transfer_reset(&s->spi_transfer);
         cdj_wm8740_reset(&s->wm8740);
         cdj_c6747_cache_reset(&s->cache);
+        ++s->fetch_epoch;
         /* SRAM contents are undefined across external reset.  Clear the
          * functional backing store so a later SRAM partition cannot expose
          * bytes retained from the preceding DSP lifetime. */
@@ -699,6 +715,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
         return true;
     }
     dsp_ticks_flush(s);
+    dsp_horizon_close(s);
     /* Past RAM, a device read voids an idle proof.  GPIO is exempt: its reads
      * are pure (a const model) and its inputs change only when MAIN writes
      * the boot phase, which cannot happen while the DSP runs.  The NXS idle
@@ -1410,6 +1427,8 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         }
     }
     dsp_ticks_flush(s);
+    dsp_horizon_close(s);
+    if (commit) ++s->fetch_epoch;
     if (commit && s->idle_skip) dsp_idle_note_write(s, address, value, size);
     if (dsp_l1d_write(s, address, value, size, commit)) return true;
     if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
@@ -1585,6 +1604,8 @@ static void dsp_cycle_tick(void *opaque)
         ++s->ticks.debt;
         return;
     }
+    /* A tick that is not only counted may raise an event. */
+    dsp_horizon_close(s);
     uint64_t transfers = s->wm8740.transfers;
     if (!cdj_c674x_loop_functional_timing())
         cdj_spi_core_tick(s->spis, &s->wm8740, &s->spi_transfer, &s->pll);
@@ -1672,6 +1693,69 @@ typedef struct {
     bool idle_skip;
 } DspActivation;
 
+/*
+ * The board horizon: how far compiled execution may run without the
+ * between-step work, because that work would provably do nothing but count
+ * the step (cdj_c674x.h).  Everything dsp_post_step and dsp_pre_step act on
+ * is either bounded here by a packet count - the activation's quota, the
+ * McASP slot deadline, MAIN's per-access target, the idle-skip window - or can only change through a
+ * callback that closes the horizon: a device read or write (INTC, EDMA,
+ * McASP, SPI, PSC, HPIC/HINT, the memory map), a tick that is not merely
+ * counted (timer events, SPI shifts), and MAIN asking for the lock.  States
+ * that act on every step (an interrupt request in flight, a PSC transition,
+ * an unstarted audio clock, the per-step fault history) open none.  The
+ * core adds its own interrupt check (cdj_c674x_interrupt_quiet) and counts
+ * the skipped steps, which dsp_between and execute_dsp add to a->steps.
+ * With the idle skip, between() still runs at least every
+ * DSP_HORIZON_IDLE_PACKETS (to anchor) and at the anchor PC (to detect the
+ * repeat), so an idle loop is found as before.
+ */
+#define DSP_HORIZON_IDLE_PACKETS 64u
+
+static void dsp_horizon_open(NxsHpi *s, const DspActivation *a)
+{
+    CdjC674xHorizon *h = &s->horizon;
+    uint64_t packets = s->cpu.packets, until = UINT64_MAX;
+    h->break_pc = 0;
+    if (!s->horizon_on || s->fault_history_path || !s->ticks.steady ||
+        s->spi_transfer.fault || s->intc_delivery.cpu_request ||
+        (s->edma.irq_notifications & 2u) ||
+        (s->psc.remaining[0][0] | s->psc.remaining[0][1] |
+         s->psc.remaining[1][0] | s->psc.remaining[1][1])) {
+        dsp_horizon_close(s);
+        return;
+    }
+    if (s->functional_audio && !s->virtual_audio_clock) {
+        if (!s->thread_audio_clock) until = 0;
+        else if ((s->mcasp_control.gblctl[1] & 0x1f00u) != 0x1f00u) {
+            if (s->audio_clock.rate_num) until = 0;
+        } else if (!s->audio_clock.rate_num ||
+                   packets >= s->audio_clock_next_packets) until = 0;
+        else until = MIN(until, s->audio_clock_next_packets);
+    }
+    /* The activation's quota (an idle skip in pre-step moves a->steps on
+     * past what the run was given). */
+    until = MIN(until, packets + (a->quota - a->steps));
+    if (a->idle_skip) {
+        until = MIN(until, packets + DSP_HORIZON_IDLE_PACKETS);
+        if (s->idle_anchor_valid && !s->idle_dirty)
+            h->break_pc = s->idle_anchor_pc;
+    }
+    if (dsp_thread.on) {
+        NxsDspThread *t = &dsp_thread;
+        uint64_t due = t->main_last + t->access_packets;
+        if (packets < due) until = MIN(until, due);
+        uint64_t target = qatomic_read(&t->main_target);
+        if (target) until = MIN(until, target);
+    } else if (s->hpi.hint) until = 0;
+    qatomic_set(&h->until, until);
+    /* MAIN raises host_waiting before closing the horizon (main_lock): if
+     * it did so after the bound above was read, close it here. */
+    smp_mb();
+    if (dsp_thread.on && qatomic_read(&dsp_thread.host_waiting))
+        dsp_horizon_close(s);
+}
+
 static bool dsp_pre_step(DspActivation *a)
 {
     NxsHpi *s = a->s;
@@ -1730,6 +1814,7 @@ static bool dsp_pre_step(DspActivation *a)
             dsp_idle_clean(s))
             dsp_idle_anchor(s, a->steps);
     }
+    dsp_horizon_open(s, a);
     return true;
 }
 
@@ -1766,9 +1851,17 @@ static bool dsp_post_step(DspActivation *a)
     return true;
 }
 
+/* Steps the core ran with the between-step work skipped (the horizon). */
+static void dsp_horizon_steps(DspActivation *a)
+{
+    a->steps += a->s->horizon.skipped;
+    a->s->horizon.skipped = 0;
+}
+
 static bool dsp_between(void *opaque)
 {
     DspActivation *a = opaque;
+    dsp_horizon_steps(a);
     return dsp_post_step(a) && a->steps < a->quota && dsp_pre_step(a);
 }
 
@@ -1795,9 +1888,11 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
         pre_done = false;
         if (compiled) {
             unsigned status;
+            cdj_c674x_set_horizon(&s->horizon);
             unsigned n = cdj_c674x_run(&s->cpu, dsp_read, dsp_write, s,
                                        quota - a.steps, dsp_between, &a,
                                        &status);
+            dsp_horizon_steps(&a);
             if (status == CDJ_C674X_RUN_FAULT) {
                 a.reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
                 s->dsp_halted = true;
@@ -2545,6 +2640,7 @@ static void main_lock(void)
     bool bql = bql_locked(), dropped = false, held = false;
     if (qemu_mutex_trylock(&t->lock)) {
         qatomic_inc(&t->host_waiting);
+        dsp_horizon_close(s);
         if (bql) {
             held = hold_virtual_clock();
             bql_unlock();
@@ -2689,10 +2785,12 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
         warn_report("nxs-c674x: behavioural DSP model; no C674x execution, audio or playback position");
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(dsp_read, dsp_fetch_block);
+    cdj_c674x_set_fetch_epoch(&s->fetch_epoch);
     s->functional_audio = audio && !strcmp(audio, "1");
     const char *ram_fast = getenv("CDJ_NXS_DSP_RAM_FAST");
     s->ram_slow = ram_fast && !strcmp(ram_fast, "0");
     s->tick_batch = g_strcmp0(getenv("CDJ_NXS_DSP_TICK_BATCH"), "0") != 0;
+    s->horizon_on = g_strcmp0(getenv("CDJ_NXS_DSP_HORIZON"), "0") != 0;
     const char *idle_skip = getenv("CDJ_NXS_DSP_IDLE_SKIP");
     s->idle_skip = idle_skip && !strcmp(idle_skip, "1");
     if (s->idle_skip)

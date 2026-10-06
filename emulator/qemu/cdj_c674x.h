@@ -112,6 +112,13 @@ bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
  * only when fetch or step is given `read`. */
 typedef const uint8_t *(*CdjC674xFetchBlock)(void *opaque, uint32_t block);
 void cdj_c674x_set_fetch_block(CdjC674xRead read, CdjC674xFetchBlock block);
+/* Optional: a counter the board moves (from the thread that runs the DSP,
+ * or with it stopped) whenever any fetch block could map to other host
+ * memory or stop mapping - a device write that may remap memory, a reset,
+ * a restore.  While it stands still, the packet cache checks its entries'
+ * bytes at the host pointers fetch_block returned before, without calling
+ * it again (the content check itself is unchanged). */
+void cdj_c674x_set_fetch_epoch(const uint64_t *epoch);
 /* Direct steps keep a per-thread cache of fetched and decoded packets, valid
  * only while the bytes it was built from are unchanged: every hit re-reads
  * them through the fetch-block hook, so code writes by anyone are seen at the
@@ -142,7 +149,8 @@ bool cdj_c674x_step_capture_direct(CdjC674x *, CdjC674xRead, CdjC674xWrite,
 /* Compiled execution (the "JIT"; see "Compiled SPLOOP kernels" in
  * cdj_c674x.c).  cdj_c674x_run executes up to `limit` packets from compiled
  * code, each with exactly the effects cdj_c674x_step would have had, and
- * calls between(between_opaque) after every packet except the limit-th.
+ * calls between(between_opaque) after every packet except the limit-th
+ * (and except where the board horizon below lets it skip one).
  * between must do everything the caller does between two steps - its
  * post-step work for the packet just run and its pre-step work for the next,
  * interrupt presentation through cdj_c674x_interrupt included - and returns
@@ -177,6 +185,22 @@ void cdj_c674x_view(const CdjC674x *cpu, CdjC674x *out);
 unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                        void *opaque, unsigned limit, CdjC674xBetween between,
                        void *between_opaque, unsigned *status);
+/* Board horizon (optional, per thread): a stretch of packets over which the
+ * board has proved its between() a no-op that returns true, apart from
+ * counting the step.  cdj_c674x_run then skips between() after a packet
+ * when cpu->packets < until, cpu->pc != break_pc (0: none) and
+ * cdj_c674x_interrupt_quiet(cpu), and counts each skip in `skipped` for the
+ * board to add to its step count before it next uses it.  The board lowers
+ * `until` (to 0) from any callback after which between() could act - a
+ * device access, a tick that raised or could raise an event - and may do so
+ * from another thread with an atomic store; the core reads it atomically
+ * after every packet. */
+typedef struct {
+    uint64_t until;
+    uint32_t break_pc;
+    uint64_t skipped;
+} CdjC674xHorizon;
+void cdj_c674x_set_horizon(CdjC674xHorizon *horizon);
 void cdj_c674x_set_jit(int enabled);
 bool cdj_c674x_jit_enabled(void);
 /* Counters of the calling thread's compiled execution, for reports and

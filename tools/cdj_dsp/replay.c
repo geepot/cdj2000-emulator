@@ -63,6 +63,10 @@ static FILE *tx_capture;
 static uint64_t tx_capture_sequence;
 static bool tx_capture_failed;
 static bool read_bus(void *unused, uint32_t address, uint32_t *value);
+static bool horizon_on;     /* CDJ_DSP_REPLAY_HORIZON=1, see quota_horizon */
+/* cdj_c674x_set_fetch_epoch: moved by every committed device write and
+ * every state load, as on the QEMU board. */
+static uint64_t fetch_epoch;
 
 /* Compact dynamic coverage is emitted once at the end of a run. Keeping it
  * here avoids millions of per-step JSON records during connected-event replay
@@ -222,6 +226,7 @@ static void coverage_record(const CoverageBefore *before,
 
 static void coverage_emit(void)
 {
+    if (horizon_on) return;
     printf("{\"event\":\"coverage_summary\",\"first_pc\":%" PRIu32
            ",\"last_pc\":%" PRIu32 ",\"unique_pcs\":%u,"
            "\"unique_edges\":%u,\"unique_source_pcs\":%u,"
@@ -294,6 +299,7 @@ static void restore_devices(const CdjDspCheckpointState *state)
     wm8740 = state->wm8740;
     spi_transfer = state->spi_transfer;
     cache = state->cache;
+    ++fetch_epoch;
     edma = state->edma;
     syscfg_priority = state->syscfg_priority;
 }
@@ -328,6 +334,11 @@ static void capture_devices(CdjDspCheckpointState *state, const char *reason)
  * ticks every cycle. */
 static CdjDspTicks ticks;
 static bool tick_batch = true;
+/* CDJ_DSP_REPLAY_HORIZON=1: the board horizon (cdj_c674x.h), as the QEMU
+ * board uses it; see quota_horizon.  Per-step coverage cannot be kept
+ * then, so the coverage summary is left out. */
+static CdjC674xHorizon horizon;
+static void horizon_close(void) { horizon.until = 0; }
 
 static void ticks_flush(void)
 {
@@ -362,6 +373,7 @@ static void cycle_tick(void *unused)
         if (timer_outputs & (1u << bit))
             cdj_c6747_intc_deliver_event(&intc, &intc_delivery,
                                          cdj_c6747_timer_event(bit));
+    horizon_close();
     ticks.steady = tick_batch &&
         cdj_dsp_ticks_quiet(timers, &spi_transfer, &wm8740,
                             cdj_c674x_loop_functional_timing());
@@ -386,7 +398,10 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
 {
     (void)unused;
     /* Only plain RAM may be read with ticks outstanding. */
-    if (ticks.debt && ((a & 3) || !memory_span(a, 4))) ticks_flush();
+    if ((a & 3) || !memory_span(a, 4)) {
+        if (ticks.debt) ticks_flush();
+        horizon_close();
+    }
     if (cdj_c6747_syscfg_read(&syscfg, a, v)) return true;
     if (cdj_c6747_syscfg_priority_read(&syscfg_priority, a, v)) return true;
     if (cdj_c6747_psc_read(&psc, a, v)) return true;
@@ -736,9 +751,12 @@ static bool functional_audio_tick(void)
 static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool commit)
 {
     (void)unused;
-    if (ticks.debt && ((size != 1 && size != 2 && size != 4 && size != 8) ||
-                       !memory_span(a, size)))
-        ticks_flush();
+    if ((size != 1 && size != 2 && size != 4 && size != 8) ||
+        !memory_span(a, size)) {
+        if (ticks.debt) ticks_flush();
+        horizon_close();
+        if (commit) ++fetch_epoch;
+    }
     bool ok = false;
     if (!cdj_c674x_loop_functional_timing()) {
         if (cdj_c6747_spi_wm8740_timed_mapped(a)) {
@@ -892,6 +910,43 @@ typedef struct {
     CdjC674xPacket coverage_packet;
 } Quota;
 
+/* The replay's horizon: everything quota_post and quota_pre act on either
+ * has a packet-count bound (functional McASP slot edges, the packet limit),
+ * a PC bound (the breakpoint) or changes only through a callback that
+ * closes it (device accesses, unbatched ticks). */
+static void quota_horizon(const Quota *q)
+{
+    uint64_t until = UINT64_MAX;
+    horizon.break_pc = q->breakpoint;
+    if (!horizon_on || q->trace || observe_pcm || !ticks.steady ||
+        spi_transfer.fault || intc_delivery.cpu_request || hpi.hint ||
+        (edma.irq_notifications & 2u) || q->limits->cycle_limit ||
+        (psc.remaining[0][0] | psc.remaining[0][1] |
+         psc.remaining[1][0] | psc.remaining[1][1])) {
+        horizon_close();
+        return;
+    }
+    if (functional_audio) {
+        const uint64_t interval = CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL;
+        until = (cpu.packets / interval + 1) * interval;
+    }
+    uint64_t bound = cpu.packets + (q->quota - q->step);
+    if (bound < until) until = bound;
+    bound = cpu.packets + q->limits->steps_remaining;
+    if (bound < until) until = bound;
+    bound = q->limits->initial_packets + q->limits->packet_limit;
+    if (q->limits->packet_limit && bound < until) until = bound;
+    horizon.until = until;
+}
+
+/* Steps the core ran with the between-step work skipped. */
+static void quota_skipped(Quota *q)
+{
+    q->step += horizon.skipped;
+    q->limits->steps_remaining -= horizon.skipped;
+    horizon.skipped = 0;
+}
+
 static bool quota_pre(Quota *q)
 {
     const char *limited = limit_reached(q->limits);
@@ -917,6 +972,7 @@ static bool quota_pre(Quota *q)
     /* Direct packets may run inside cdj_c674x_run, which reports no
      * source packet: fetch it here for every source fetch. */
     q->has_coverage_packet = coverage_capture(&cpu, &q->coverage_packet);
+    quota_horizon(q);
     return true;
 }
 
@@ -948,6 +1004,7 @@ static bool quota_post(Quota *q)
 static bool quota_between(void *opaque)
 {
     Quota *q = opaque;
+    quota_skipped(q);
     return quota_post(q) && q->step < q->quota && quota_pre(q);
 }
 
@@ -964,6 +1021,7 @@ static const char *run_steps_ticked(Quota q)
             unsigned n = cdj_c674x_run(&cpu, read_bus, write_bus, NULL,
                                        quota - q.step, quota_between, &q,
                                        &status);
+            quota_skipped(&q);
             if (status == CDJ_C674X_RUN_FAULT)
                 return q.standalone ? "fault" :
                        cpu.fault ? cpu.fault : "CPU stopped";
@@ -1274,6 +1332,7 @@ int main(int argc, char **argv)
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(read_bus, fetch_block);
+    cdj_c674x_set_fetch_epoch(&fetch_epoch);
     functional_audio = audio && !strcmp(audio, "1");
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {
@@ -1365,6 +1424,7 @@ int main(int argc, char **argv)
         cdj_wm8740_reset(&wm8740);
         cdj_c6747_pll_reset(&pll);
         cdj_c6747_cache_reset(&cache);
+        ++fetch_epoch;
         cdj_c6747_edma_reset(&edma);
         cdj_c6747_hpi_reset(&hpi);
         cdj_c6747_emifb_reset(&emifb);
@@ -1382,6 +1442,9 @@ int main(int argc, char **argv)
         checkpoint_state.reset_released = checkpoint_state.dsp_started = true;
     }
     cpu.cycle_tick = cycle_tick;
+    horizon_on = getenv("CDJ_DSP_REPLAY_HORIZON") &&
+                 !strcmp(getenv("CDJ_DSP_REPLAY_HORIZON"), "1");
+    cdj_c674x_set_horizon(horizon_on ? &horizon : NULL);
     tick_batch = !getenv("CDJ_NXS_DSP_TICK_BATCH") ||
                  strcmp(getenv("CDJ_NXS_DSP_TICK_BATCH"), "0");
     coverage_initial_packets = cpu.packets;

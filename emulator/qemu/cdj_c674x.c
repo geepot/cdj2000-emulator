@@ -815,11 +815,17 @@ static bool queue_branch(CdjC674x *out, uint64_t due, uint32_t target)
 
 static CdjC674xRead fetch_block_read;
 static CdjC674xFetchBlock fetch_block;
+static const uint64_t *fetch_epoch;
 
 void cdj_c674x_set_fetch_block(CdjC674xRead read, CdjC674xFetchBlock block)
 {
     fetch_block_read = read;
     fetch_block = block;
+}
+
+void cdj_c674x_set_fetch_epoch(const uint64_t *epoch)
+{
+    fetch_epoch = epoch;
 }
 
 /* One aligned instruction-memory word, through the board's fetch block when
@@ -5212,10 +5218,17 @@ static int execute_fast(CdjC674x *cpu, const CdjC674xPacket *packet,
  * layout and no checkpointed state: an entry is only ever a memo of what
  * fetch and decode would compute.  CDJ_C674X_PACKET_CACHE=0 disables it
  * (and the fast path); =decode keeps the cache but not the fast path. */
-#define CDJ_C674X_PACKET_CACHE_BITS 14
+#define CDJ_C674X_PACKET_CACHE_BITS 16
 typedef struct {
     uint32_t pc, block[2];
     unsigned blocks;                 /* 0 = empty */
+    /* What fetch_block returned for block[] under this board (opaque) and
+     * fetch epoch (cdj_c674x_set_fetch_epoch): reused, never trusted for
+     * content, while host_valid and both are unchanged. */
+    const uint8_t *host[2];
+    void *host_opaque;
+    uint64_t host_epoch;
+    bool host_valid;
     bool fast, branches;
     uint8_t single;                  /* execute_single shape, 0 = none */
     int8_t dt;                       /* direct-trace plan: 0 none yet,
@@ -5227,6 +5240,34 @@ typedef struct {
 } CdjC674xCacheEntry;
 
 static _Thread_local CdjC674xCacheEntry *packet_cache;
+
+/* Whether the entry's fetch blocks still hold the bytes it was built from:
+ * fetch_cached's content check.  The memory is located through
+ * fetch_block, or, while the board's fetch epoch has not moved since, at
+ * the host pointers fetch_block returned last time (a board that registers
+ * an epoch moves it whenever any block could map elsewhere or stop
+ * mapping). */
+static bool entry_current(CdjC674xCacheEntry *e, void *opaque)
+{
+    if (e->host_valid && e->host_opaque == opaque &&
+        e->host_epoch == *fetch_epoch) {
+        for (unsigned i = 0; i < e->blocks; ++i)
+            if (memcmp(e->host[i], e->bytes[i], 32)) return false;
+        return true;
+    }
+    e->host_valid = false;
+    for (unsigned i = 0; i < e->blocks; ++i) {
+        const uint8_t *memory = fetch_block(opaque, e->block[i]);
+        if (!memory || memcmp(memory, e->bytes[i], 32)) return false;
+        e->host[i] = memory;
+    }
+    if (fetch_epoch) {
+        e->host_opaque = opaque;
+        e->host_epoch = *fetch_epoch;
+        e->host_valid = true;
+    }
+    return true;
+}
 
 /* Direct-mapped on the halfword address, folded so that code more than the
  * table's reach apart (NXS audio code spans ~320 KB) maps elsewhere. */
@@ -5428,12 +5469,7 @@ static bool fetch_cached(CdjC674x *cpu, CdjC674xRead read, void *opaque,
     }
     CdjC674xCacheEntry *e = &packet_cache[packet_cache_index(cpu->pc)];
     if (e->blocks && e->pc == cpu->pc) {
-        bool same = true;
-        for (unsigned i = 0; same && i < e->blocks; ++i) {
-            const uint8_t *memory = fetch_block(opaque, e->block[i]);
-            same = memory && !memcmp(memory, e->bytes[i], 32);
-        }
-        if (same) {
+        if (entry_current(e, opaque)) {
             *entry = e;
             return true;
         }
@@ -5446,6 +5482,7 @@ static bool fetch_cached(CdjC674x *cpu, CdjC674xRead read, void *opaque,
     }
     e->pc = cpu->pc;
     e->blocks = record.blocks;
+    e->host_valid = false;
     for (unsigned i = 0; i < record.blocks; ++i) {
         e->block[i] = record.block[i];
         memcpy(e->bytes[i], record.memory[i], 32);
@@ -7755,6 +7792,27 @@ static int dt_exec(CdjC674x *cpu, const CdjC674xCacheEntry *e, bool all_pairs,
     return 1;
 }
 
+/* The board horizon (cdj_c674x.h): whether between() after this packet is
+ * one the board proved a no-op.  The interrupt check is the core's own: a
+ * request the board presents only appears through a callback (which lowers
+ * `until`), but the CPU's own state can make a latched one eligible. */
+static _Thread_local CdjC674xHorizon *horizon;
+
+void cdj_c674x_set_horizon(CdjC674xHorizon *h)
+{
+    horizon = h;
+}
+
+static inline bool horizon_skip(const CdjC674x *cpu)
+{
+    CdjC674xHorizon *h = horizon;
+    if (!h || cpu->packets >= __atomic_load_n(&h->until, __ATOMIC_ACQUIRE) ||
+        cpu->pc == h->break_pc || !cdj_c674x_interrupt_quiet(cpu))
+        return false;
+    ++h->skipped;
+    return true;
+}
+
 /* cdj_c674x_run for direct code: dt_exec for each packet whose cache entry
  * is current (the same byte check as fetch_cached) and plannable, until one
  * is not, the limit, or between() says stop. */
@@ -7767,11 +7825,8 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
         int done = 0;
         if (!cpu->loop_active && !cpu->idle_cycles && !cpu->fault) {
             CdjC674xCacheEntry *e = &packet_cache[packet_cache_index(cpu->pc)];
-            bool same = e->blocks && e->pc == cpu->pc;
-            for (unsigned i = 0; same && i < e->blocks; ++i) {
-                const uint8_t *memory = fetch_block(opaque, e->block[i]);
-                same = memory && !memcmp(memory, e->bytes[i], 32);
-            }
+            bool same = e->blocks && e->pc == cpu->pc &&
+                        entry_current(e, opaque);
             if (same && !e->dt) {
                 e->dt = dt_plan(e) ? 1 : -1;
                 ++*(e->dt > 0 ? &dt_counts.plans : &dt_counts.untraceable);
@@ -7790,7 +7845,7 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
         ++dt_counts.packets;
         if (!n) ++dt_counts.runs;
         if (++n == limit) return n;
-        if (!between(between_opaque)) {
+        if (!horizon_skip(cpu) && !between(between_opaque)) {
             *status = CDJ_C674X_RUN_STOPPED;
             return n;
         }
@@ -7945,7 +8000,7 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
             jk_sync(cpu);
             return n;
         }
-        if (!between(between_opaque)) {
+        if (!horizon_skip(cpu) && !between(between_opaque)) {
             jk_sync(cpu);
             *status = CDJ_C674X_RUN_STOPPED;
             return n;

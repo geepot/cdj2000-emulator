@@ -1141,3 +1141,78 @@ presentation and McASP slot check are skipped when they cannot act
   PROT timing (no compact packets; the replays run them).
 - Full suite: 947 passed; the two failures are the known TMU test and the
   orphan-watchdog flake.
+
+## C674x JIT stage 3 (`dsp-jit3`, 2026-10-06)
+
+Stage 2's levers in order, each measured on its own.  Benchmarks:
+`build/j2/mkbench.sh`-style lean replays (RAM-first bus, no trace output,
+QEMU's hardening flags) of two checkpoints, user seconds: the real-USB
+playback checkpoint (20 M steps, functional audio) and a new **live**
+checkpoint, `play-live`, taken from a `--dsp-thread --audio-clock virtual`
+playback 8 s after the auto-play with a diagnostic build that allows
+threaded checkpoints (6 M steps; its first ~3 M steps keep the live mix -
+71% direct packets, as the live runs' 78% - before the replay's
+packet-paced audio turns it into the memcpy-heavy mix of the older
+checkpoint, 44% of steps in one 8-byte SPLOOP copy).
+
+### 1. Board horizon (`CdjC674xHorizon`)
+
+Most between-step work does nothing: no interrupt request, no slot edge,
+MAIN not waiting.  `cdj_c674x_set_horizon` lets a board say so for a
+stretch: the core skips `between()` after a packet while `cpu->packets <
+until`, the PC is not `break_pc` and `cdj_c674x_interrupt_quiet` holds (the
+CPU's own state can make a latched request eligible), and counts the skips
+for the board's step count.  The board bounds `until` by everything
+`dsp_post_step`/`dsp_pre_step` act on at a packet count - the activation
+quota, the McASP slot deadline, MAIN's per-access target, 64 packets while
+the idle skip looks for a loop (whose anchor PC becomes `break_pc`) - opens
+none while something acts every step (an INTC request, an EDMA
+notification, a PSC transition, unbatched ticks, the fault history), and
+closes it (`until = 0`) from every callback after which between() could
+act: device reads and writes, an unbatched tick, and MAIN raising
+`host_waiting` (an atomic store from MAIN's thread, re-checked by the DSP
+after it publishes a new bound).  The replay does the same under
+`CDJ_DSP_REPLAY_HORIZON=1` (its per-step coverage summary is then left
+out).  ~92% of between() calls are skipped on the live checkpoint.
+
+### 2. Fetch epoch and a 64 K-entry packet cache
+
+The packet cache checked each entry's fetch blocks through the board's
+fetch-block hook every packet.  `cdj_c674x_set_fetch_epoch` registers a
+counter the board moves on every committed device write and on DSP reset
+(any of those could remap a block: EMIFB, the L1D partition); while it
+stands still the entry's bytes are compared at the host pointers the hook
+returned before.  The content check itself is unchanged.  The cache grows
+from 16 K to 64 K entries (464 bytes each, 30 MB per stepping thread):
+on the live checkpoint 48 K of 78 K misses per 3 M steps were conflicts,
+9.8 K after.
+
+| replay, user s | real-USB 20 M | live 6 M |
+| --- | ---: | ---: |
+| develop (251ed30) | 1.20 | 0.54 |
+| 1. horizon | 1.01 | 0.48 |
+| 2. fetch epoch, 64 K entries | 0.98 | 0.46 |
+
+Exactness: `tests/cstub/c674x-packet-cache.c` runs four fifths of its JIT
+and direct-trace seeds with a horizon: after a request-free presentation,
+half the time a bound of 1-12 packets and sometimes a random break PC,
+with a request the "board" presents exactly at the bound or the break PC;
+system B catches up the skipped steps (each followed by the no-op
+presentation the skip stood for, or by that request where B reaches it).
+2.8 M between() calls are skipped.  Mutations - dropping the quiet check,
+the break PC, or skipping at the bound itself - each fail it.  The fetch
+epoch gets a swappable code window (0x1100-0x11ff maps to other code) the
+direct-trace phase toggles; leaving one toggle's epoch move out, or
+trusting stale host pointers, each fails it.  Replays (develop against
+this, JIT on with the horizon against JIT on without; JIT off against JIT
+off) identical apart from the left-out coverage lines: checkpoints 1, 25,
+250 (1 M steps), 400 (5 M), the real-USB playback checkpoint (10 M, strict
+and functional audio) and the live checkpoint (3 M, both).  The first-play
+snapshot of the earlier stages (`runs/agent-play-checkpoints` in the main
+checkout) was deleted during this work and is no longer in the set.  45 s
+full-capture stock boots (synchronous; the horizon is open there whenever
+functional audio is off), develop against each step: all 298,354 events
+and 5,314 DSP checkpoints of the common prefix byte-identical (each step's
+binary gets further in the 45 s: 304-311 K events).  A first version
+without the quota bound ran an activation 4 packets past its budget after
+an idle skip; the boot comparison caught it.

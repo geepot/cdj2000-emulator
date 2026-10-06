@@ -28,14 +28,27 @@ typedef struct {
     uint8_t ram[SIZE];
     unsigned ticks;
     bool hide;               /* fetch-block hook refuses 0x1100..0x11ff */
+    bool swap;               /* 0x1100..0x11ff maps to alt[] instead */
+    uint8_t alt[0x100];
 } System;
+
+/* The fetch epoch (cdj_c674x_set_fetch_epoch): moved whenever hide or swap
+ * changes what a fetch block maps to. */
+static uint64_t test_epoch;
+
+static uint8_t *sys_at(System *s, uint32_t address)
+{
+    if (s->swap && address >= 0x1100 && address < 0x1200)
+        return s->alt + (address - 0x1100);
+    return s->ram + (address - BASE);
+}
 
 static bool sys_read(void *opaque, uint32_t address, uint32_t *value)
 {
     System *s = opaque;
     if (address < BASE || address > BASE + SIZE - 4 || (address & 3)) return false;
     if (address == FLAKY_READ && s->ticks % 3 == 0) return false;
-    memcpy(value, s->ram + (address - BASE), 4);
+    memcpy(value, sys_at(s, address), 4);
     return true;
 }
 
@@ -48,7 +61,11 @@ static bool sys_write(void *opaque, uint32_t address, uint64_t value,
         return false;
     if (commit) {
         if (address == BAD_COMMIT) return false;
-        memcpy(s->ram + (address - BASE), &value, size);
+        if (s->swap && address < 0x1200 && address + size > 0x1100 &&
+            (address < 0x1100 || address + size > 0x1200)) {
+            for (unsigned i = 0; i < size; ++i)
+                *sys_at(s, address + i) = value >> (8 * i);
+        } else memcpy(sys_at(s, address), &value, size);
     }
     return true;
 }
@@ -60,7 +77,7 @@ static const uint8_t *sys_block(void *opaque, uint32_t block)
     if (s->hide && block >= 0x1100 && block < 0x1200) return NULL;
     /* Not plain memory: the read callback refuses it now and then. */
     if (block == (FLAKY_READ & ~31u)) return NULL;
-    return s->ram + (block - BASE);
+    return sys_at(s, block);
 }
 
 static void sys_tick(void *opaque)
@@ -332,6 +349,7 @@ static void lockstep(unsigned seed, bool loops)
     else build(&sa);
     sa.ticks = 0;
     sa.hide = false;
+    ++test_epoch;
     sb = sa;
     uint32_t state = rng_state;
     /* Half the programs point B10 into their own code: self-modifying code. */
@@ -351,7 +369,10 @@ static void lockstep(unsigned seed, bool loops)
             memcpy(sa.ram + (pc - BASE), &w, 4);
             memcpy(sb.ram + (pc - BASE), &w, 4);
         }
-        if (rnd() % 89 == 0) sa.hide = sb.hide = !sa.hide;
+        if (rnd() % 89 == 0) {
+            sa.hide = sb.hide = !sa.hide;
+            ++test_epoch;
+        }
         cdj_c674x_set_packet_cache(2);
         uint64_t before = a.packets;
         loop_steps += a.loop_active;
@@ -418,11 +439,67 @@ typedef struct {
 static unsigned jit_packets, jit_runs, jit_between_exits, jit_stops,
                 jit_armed, quiet_checks, loud_checks;
 
+/* The board horizon (cdj_c674x.h): after a presentation without a request,
+ * half the time A may skip between() for a few packets (or until a random
+ * break PC); B then catches up those steps, each followed by the no-op
+ * presentation the skip stood for, and the two are compared after the
+ * last.  Seeds with horizon_off run without one. */
+static CdjC674xHorizon test_horizon;
+static unsigned horizon_skips;
+/* What bounded the horizon: a request the board will present when the
+ * packet count reaches the bound, or at the break PC.  B's catch-up
+ * presents it wherever B reaches it, A only where its between() runs, so a
+ * core that skipped past the bound diverges. */
+static uint64_t event_packets;
+static uint32_t event_pc, event_mask;
+
+static uint32_t horizon_event(const CdjC674x *cpu)
+{
+    if (!event_mask ||
+        !(cpu->packets == event_packets || (event_pc && cpu->pc == event_pc)))
+        return 0;
+    uint32_t mask = event_mask;
+    event_mask = 0;
+    return mask;
+}
+
+static void catch_up(JitPair *p)
+{
+    unsigned skipped = test_horizon.skipped;
+    test_horizon.skipped = 0;
+    horizon_skips += skipped;
+    for (unsigned k = 0; k < skipped; ++k) {
+        cdj_c674x_set_packet_cache(0);
+        assert(cdj_c674x_step(p->b, sys_read, sys_write, p->sb));
+        cdj_c674x_set_packet_cache(2);
+        ++p->step;
+        uint32_t mask = horizon_event(p->b);
+        assert(cdj_c674x_interrupt(p->b, mask));
+        if (mask) event_mask = mask;    /* A's turn to look for it */
+    }
+}
+
+static void horizon_open(JitPair *p, uint32_t pending)
+{
+    test_horizon.until = 0;
+    test_horizon.break_pc = 0;
+    event_mask = 0;
+    if (pending || rnd() % 2) return;
+    test_horizon.until = p->a->packets + 1 + rnd() % 12;
+    if (rnd() % 4 == 0) test_horizon.break_pc = BASE + (rnd() % 64) * 4;
+    if (rnd() % 2) {
+        event_packets = test_horizon.until;
+        event_pc = test_horizon.break_pc;
+        event_mask = 1u << (4 + rnd() % 12);
+    }
+}
+
 static void present(JitPair *p)
 {
     /* Interrupt recognition never reads the queues while a loop is active,
      * which is the only time steady execution lasts across between(). */
     uint32_t pending = rnd() % 23 == 0 ? (1u << (4 + rnd() % 12)) : 0;
+    pending |= horizon_event(p->a);
     uint64_t armed = UINT64_C(1) << 62;     /* loop interrupt armed */
     bool was = p->a->control_ready[31] & armed;
     /* cdj_c674x_interrupt_quiet: a no-op presentation, exactly. */
@@ -438,6 +515,7 @@ static void present(JitPair *p)
     bool ra = cdj_c674x_interrupt(p->a, pending);
     bool rb = cdj_c674x_interrupt(p->b, pending);
     assert(ra == rb);
+    horizon_open(p, pending);
     jit_armed += !was && (p->a->control_ready[31] & armed);
     static CdjC674x view;
     cdj_c674x_view(p->a, &view);
@@ -446,6 +524,7 @@ static void present(JitPair *p)
 
 static void step_b(JitPair *p, bool expect)
 {
+    catch_up(p);
     cdj_c674x_set_packet_cache(0);
     bool rb = cdj_c674x_step(p->b, sys_read, sys_write, p->sb);
     cdj_c674x_set_packet_cache(2);
@@ -453,6 +532,17 @@ static void step_b(JitPair *p, bool expect)
     ++p->step;
     /* Inside a run A may be in a steady-state kernel, whose queue arrays
      * are rebuilt only when it ends: compare the rebuilt view. */
+    static CdjC674x view;
+    cdj_c674x_view(p->a, &view);
+    same(&view, p->sa, p->b, p->sb, p->seed, p->step);
+}
+
+/* A run that ends with CDJ_C674X_RUN_BETWEEN after a skipped between()
+ * leaves B behind: the skip stood for that between(). */
+static void catch_up_compare(JitPair *p)
+{
+    if (!test_horizon.skipped) return;
+    catch_up(p);
     static CdjC674x view;
     cdj_c674x_view(p->a, &view);
     same(&view, p->sa, p->b, p->sb, p->seed, p->step);
@@ -481,6 +571,7 @@ static void jit_lockstep(unsigned seed)
     cdj_c674x_loop_set_functional_timing(seed % 4 == 3);
     sa.ticks = 0;
     sa.hide = false;
+    ++test_epoch;
     sb = sa;
     uint32_t b10 = 0x1900;
     uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
@@ -511,6 +602,7 @@ static void jit_lockstep(unsigned seed)
                 return;
             }
             if (status == CDJ_C674X_RUN_BETWEEN) {
+                catch_up_compare(&p);
                 ++jit_between_exits;
                 pre_done = true;
                 continue;
@@ -572,9 +664,16 @@ static void dt_lockstep(unsigned seed)
     static CdjC674x a, b;
     rng_state = seed * 2654435761u + 11;
     build_direct(&sa);
+    /* Other code behind the swappable window. */
+    for (unsigned i = 0; i < sizeof sa.alt; i += 4) {
+        uint32_t w = random_instruction(0x1100 + i) | (rnd() & 1);
+        memcpy(sa.alt + i, &w, 4);
+    }
+    sa.swap = false;
     cdj_c674x_loop_set_functional_timing(seed % 4 == 3);
     sa.ticks = 0;
     sa.hide = false;
+    ++test_epoch;
     sb = sa;
     uint32_t b10 = seed & 1 ? BASE + (rnd() % 0x380) * 4 : 0x1900;
     uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
@@ -599,7 +698,14 @@ static void dt_lockstep(unsigned seed)
                 memcpy(sa.ram + (pc - BASE), &w, 4);
                 memcpy(sb.ram + (pc - BASE), &w, 4);
             }
-            if (rnd() % 89 == 0) sa.hide = sb.hide = !sa.hide;
+            if (rnd() % 89 == 0) {
+                sa.hide = sb.hide = !sa.hide;
+                ++test_epoch;
+            }
+            if (rnd() % 83 == 0) {
+                sa.swap = sb.swap = !sa.swap;
+                ++test_epoch;
+            }
             present(&p);
         }
         pre_done = false;
@@ -614,6 +720,7 @@ static void dt_lockstep(unsigned seed)
                 return;
             }
             if (status == CDJ_C674X_RUN_BETWEEN) {
+                catch_up_compare(&p);
                 pre_done = true;
                 continue;
             }
@@ -745,6 +852,7 @@ static void dt_directed_faucr(void)
 int main(void)
 {
     cdj_c674x_set_fetch_block(sys_read, sys_block);
+    cdj_c674x_set_fetch_epoch(&test_epoch);
     self_modifying();
     for (unsigned seed = 1; seed <= 3000; ++seed) lockstep(seed, false);
     printf("packet cache lockstep: 3000 programs, %u packets, %u faults\n",
@@ -757,7 +865,12 @@ int main(void)
     assert(loop_steps > 300000 && faults_seen > 100);
     faults_seen = 0;
     cdj_c674x_set_jit(1);
-    for (unsigned seed = 1; seed <= 3000; ++seed) jit_lockstep(seed);
+    for (unsigned seed = 1; seed <= 3000; ++seed) {
+        cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
+        assert(!test_horizon.skipped);
+        test_horizon.until = 0;
+        jit_lockstep(seed);
+    }
     CdjC674xJitStats stats;
     cdj_c674x_jit_stats(&stats);
     cdj_c674x_loop_set_functional_timing(false);
@@ -774,7 +887,13 @@ int main(void)
     jit_packets = faults_seen = 0;
     dt_directed();
     dt_directed_faucr();
-    for (unsigned seed = 1; seed <= 24000; ++seed) dt_lockstep(seed);
+    for (unsigned seed = 1; seed <= 24000; ++seed) {
+        cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
+        assert(!test_horizon.skipped);
+        test_horizon.until = 0;
+        dt_lockstep(seed);
+    }
+    cdj_c674x_set_horizon(NULL);
     cdj_c674x_loop_set_functional_timing(false);
     CdjC674xJitStats after;
     cdj_c674x_jit_stats(&after);
@@ -789,5 +908,7 @@ int main(void)
     printf("interrupt presentations: %u quiet (checked no-op), %u not\n",
            quiet_checks, loud_checks);
     assert(quiet_checks > 1000000 && loud_checks > 10000);
+    printf("board horizon: %u between() calls skipped\n", horizon_skips);
+    assert(horizon_skips > 1000000);
     return 0;
 }

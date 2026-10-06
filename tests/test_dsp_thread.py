@@ -83,7 +83,9 @@ typedef struct {
     bool thread_audio_clock;   /* off: tests/test_dsp_audio_clock.py */
     CdjDspAudioClock audio_clock;
     uint64_t audio_clock_next_packets;
+    struct { uint64_t until; } horizon;    /* the board horizon's bound */
 } NxsHpi;
+static void dsp_horizon_close(NxsHpi *s) { qatomic_set(&s->horizon.until, 0); }
 static uint64_t audio_clock_packets(int64_t ns) { (void)ns; return 0; }
 static NxsHpi *nxs_hpi;
 static void execute_dsp(NxsHpi *s, unsigned quota);

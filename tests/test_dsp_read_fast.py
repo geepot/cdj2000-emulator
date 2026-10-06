@@ -120,7 +120,8 @@ int main(void)
 '''
     fixture = tmp_path / 'read.c'
     # Batched ticks (tests/cstub/dsp-ticks.c): nothing ticks here.
-    flush = 'static void dsp_ticks_flush(NxsHpi *s) { (void)s; }\n'
+    flush = ('static void dsp_ticks_flush(NxsHpi *s) { (void)s; }\n'
+             'static void dsp_horizon_close(NxsHpi *s) { (void)s; }\n')
     fixture.write_text(harness + prefix + flush + host + read + span + checks)
     binary = tmp_path / 'read-test'
     models = sorted(directory.glob('cdj_c6747_*.c'))
