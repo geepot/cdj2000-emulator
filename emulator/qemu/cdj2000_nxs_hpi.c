@@ -128,6 +128,13 @@ typedef struct {
      * Host-side bookkeeping only: never checkpointed. */
     /* CDJ_NXS_DSP_MODEL=1: answer MAIN without executing the C674x. */
     bool model;
+    int64_t model_ns;           /* virtual time the position last advanced */
+    uint64_t model_audio_ns;    /* audio time played since the stream started */
+    uint64_t model_samples;     /* the same in 44.1 kHz samples */
+    uint32_t model_received[2]; /* frames announced per stream buffer */
+    uint32_t model_total[2];    /* +0x1c frames of each buffer's stream */
+    uint32_t model_record, model_length; /* the last command, until its first header */
+    bool model_pending;
     bool idle_skip, idle_dirty, idle_anchor_valid;
     unsigned idle_anchor_step;
     uint32_t idle_anchor_pc;
@@ -1571,14 +1578,24 @@ static void virtual_audio_tick(void *opaque)
  * Behavioural DSP (CDJ_NXS_DSP_MODEL=1). The uploaded C674x code never runs;
  * this reproduces only what MAIN can observe of it, measured from a stock
  * real-DSP transcript (runs/fork-stock-obey-1, CDJ_NXS_DSP_EVENTS) and the
- * re-docs main-dsp pages. MAIN reads 31 words of DSP memory in boot, mount,
- * browse and load; everything else in L2 is only written by MAIN. No audio,
- * no decoder, and no playback position: a run on this model is fast, not
- * evidence about playback or audio timing.
+ * re-docs main-dsp pages, and the transport from a fixed-binary real-DSP play
+ * (runs/dsp-model-ref-3), whose vocabulary matches the upstream CDJ-2000
+ * model (cdj2000_dsp_model.c). No audio and no decoder: position follows
+ * QEMU virtual time at MAIN's rate word, so a run on this model is fast and
+ * keeps MAIN's deadlines, but it is not evidence about audio or DSP timing.
  */
 #define MODEL_WINDOW 0x11837ba0u        /* runtime window base (re-docs) */
 #define MODEL_WINDOW_END 0x1183fb60u    /* end of the two stream records */
 #define MODEL_CMD 0x11838100u           /* stream command; 2..4 accepted */
+#define MODEL_REQUEST 0x11837ba0u       /* run request: 1 load, 2 play, 4 cue */
+#define MODEL_RATE 0x11837bc0u          /* 12.20 rate, 0x100000 = 1.0 */
+#define MODEL_SUBFRAME 0x11837bf4u      /* samples left in the frame, both halves */
+#define MODEL_STATE 0x11837bf8u         /* the request last taken */
+#define MODEL_FREE 0x11837cc8u          /* frames the stream buffer can take */
+#define MODEL_BEHIND 0x11837cccu        /* buffered frames already played */
+#define MODEL_AHEAD 0x11837cd0u         /* buffered frames not yet played */
+#define MODEL_HEADER 0x11838140u        /* stream header; +4 = its frames */
+#define MODEL_FRAME_SAMPLES 588u        /* 44.1 kHz / 75 CD frames */
 
 static uint32_t model_get(NxsHpi *s, uint32_t address)
 {
@@ -1602,6 +1619,7 @@ static void model_hpic(NxsHpi *s, uint32_t value)
 static void model_start(NxsHpi *s)
 {
     s->dsp_started = true;
+    s->model_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     record_event(s, "dsp_start", 0, ldl_le_p(s->l2), 0, 0);
     /* Stage 1 acks DSPINT (0x14a, then 0x149/0x148 as transcribed), clears
      * the handshake pair and writes ready=1 (0x1180304c); MAIN tests for 1. */
@@ -1623,21 +1641,120 @@ static void model_boot_phase(NxsHpi *s, unsigned phase)
      * the window MAIN's second record overlapped, set 0x11837bf8=1 (read
      * every service step) and 0x11837cc8=0x1a24. Values as transcribed. */
     memset(s->l2 + MODEL_WINDOW - L2_BASE, 0, MODEL_WINDOW_END - MODEL_WINDOW);
-    model_put(s, 0x11837bf8, 1);
-    model_put(s, 0x11837cc8, 0x1a24);
+    model_put(s, MODEL_STATE, 1);
+    model_put(s, MODEL_FREE, 0x1a24);
+}
+
+/* The CD frame reached, as the DSP publishes it (0x11837c10 and its four
+ * copies), and the samples left before the next one. */
+static void model_publish_position(NxsHpi *s)
+{
+    static const uint32_t copies[] = {
+        0x11837c10, 0x11837c24, 0x11837c30, 0x11837c44, 0x11837c50,
+    };
+    uint32_t frame = s->model_samples / MODEL_FRAME_SAMPLES;
+    uint32_t left = MODEL_FRAME_SAMPLES - s->model_samples % MODEL_FRAME_SAMPLES;
+    for (size_t i = 0; i < ARRAY_SIZE(copies); ++i)
+        model_put(s, copies[i], frame);
+    model_put(s, MODEL_SUBFRAME, left << 16 | left);
+}
+
+/* Play the virtual time since the last service at MAIN's rate, moving whole
+ * frames from ahead to behind; a dry buffer stops the position as an
+ * underrun would. ponytail: the rate word applies over the whole interval;
+ * per-write rate changes would need MAIN's write times. */
+static void model_advance(NxsHpi *s)
+{
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    int64_t elapsed = now - s->model_ns;
+    s->model_ns = now;
+    if (model_get(s, MODEL_STATE) != 2 || elapsed <= 0) return;
+    /* Totals, not per-tick truncation, so the position cannot drift. */
+    s->model_audio_ns += (uint64_t)elapsed * model_get(s, MODEL_RATE) >> 20;
+    uint32_t frame = s->model_samples / MODEL_FRAME_SAMPLES;
+    uint32_t ahead = model_get(s, MODEL_AHEAD);
+    uint64_t limit = (uint64_t)(frame + ahead) * MODEL_FRAME_SAMPLES;
+    s->model_samples = s->model_audio_ns * 44100u / 1000000000u;
+    if (s->model_samples > limit) {
+        s->model_samples = limit;
+        s->model_audio_ns = limit * 1000000000u / 44100u;
+    }
+    uint32_t played = s->model_samples / MODEL_FRAME_SAMPLES - frame;
+    model_put(s, MODEL_AHEAD, ahead - played);
+    model_put(s, MODEL_BEHIND, model_get(s, MODEL_BEHIND) + played);
+    model_publish_position(s);
+}
+
+/* A new stream's first header (byte 2 = 1) names its buffer (byte 1: 1 the
+ * deck's stream, 2 the second one). Its status block takes the record, the
+ * transcribed 0x128 (+0xc; meaning not established) and, for the deck's
+ * stream, -1 in +0x10..+0x18; the deck's stream also restarts the position
+ * blocks, which count from the stream's start (dsp-model-ref-3). */
+static void model_bind(NxsHpi *s, unsigned buffer)
+{
+    uint32_t block = buffer ? 0x11838180 : 0x118381a0;
+    s->model_pending = false;
+    s->model_received[buffer] = 0;
+    s->model_total[buffer] = s->model_length;
+    model_put(s, block + 4, s->model_record);
+    model_put(s, block + 0xc, 0x128);
+    if (buffer) return;
+    model_put(s, 0x11838184, s->model_record);   /* until a second stream */
+    for (uint32_t at = 0x10; at <= 0x18; at += 4)
+        model_put(s, block + at, UINT32_MAX);
+    model_put(s, 0x11837c14, s->model_record);
+    model_put(s, 0x11837c34, s->model_record);
+    model_put(s, 0x11837c1c, 0x128);
+    model_put(s, 0x11837c3c, 0x128);
+    model_put(s, 0x11837c58, 0x10001);
+    s->model_samples = s->model_audio_ns = 0;
+    model_publish_position(s);
 }
 
 /* One DSPINT: ack it and consume the mailboxes MAIN polls for zero. */
 static void model_service(NxsHpi *s)
 {
     static const uint32_t cleared[] = {
-        0x11837ba0, 0x11837c9c, 0x11837cb0, 0x118381c4,
+        0x11837c9c, 0x11837cb0, 0x118381c4,
     };
     model_hpic(s, 0x14a);
+    model_advance(s);
+    uint32_t request = model_get(s, MODEL_REQUEST);
+    if (request && request < 0x100) {
+        /* Taken requests become the published state (2 play, 4 cue). */
+        model_put(s, MODEL_STATE, request);
+        model_put(s, MODEL_REQUEST, 0);
+    }
+    uint32_t header = model_get(s, MODEL_HEADER);
+    if (header) {
+        /* A stream header announces +0x8144 frames into buffer byte 1:
+         * 1 is the track (level 0x7cd0, status 0x81a0), 2 the second
+         * stream (level 0x7ccc, status 0x8180). Status +0 is the last
+         * frame received, as transcribed (0x77 after three 40s). */
+        uint32_t frames = model_get(s, MODEL_HEADER + 4) & 0xffff;
+        unsigned buffer = (header >> 8 & 0xff) == 2;
+        if (s->model_pending && (header >> 16 & 0xff) == 1)
+            model_bind(s, buffer);
+        uint32_t level = buffer ? MODEL_BEHIND : MODEL_AHEAD;
+        model_put(s, level, model_get(s, level) + frames);
+        model_put(s, MODEL_FREE, model_get(s, MODEL_FREE) - frames);
+        s->model_received[buffer] += frames;
+        /* The track counts up from its start; the auxiliary stream down
+         * from its end (0x6d06 = 0x6d9e - 2 x 0x4c in dsp-model-ref-3). */
+        model_put(s, buffer ? 0x11838180 : 0x118381a0, buffer ?
+                  s->model_total[1] - s->model_received[1] : s->model_received[0] - 1);
+        model_put(s, MODEL_HEADER, 0);
+    }
     uint32_t command = model_get(s, MODEL_CMD);
     if (command >= 2 && command <= 4) {
         /* Consumer 0xc004834c: clears 0x11838140/0x118381c4, then the
          * command word. Other values stay put, as on the DSP. */
+        /* The stream's record (+0x20, an instance id MAIN counts down
+         * from 0xff) and length (+0x1c) belong to the buffer its first
+         * header names; see model_bind. */
+        s->model_record = model_get(s, 0x11838120);
+        s->model_length = model_get(s, 0x1183811c);
+        s->model_pending = true;
         model_put(s, 0x11838140, 0);
         model_put(s, 0x118381c4, 0);
         model_put(s, MODEL_CMD, 0);
