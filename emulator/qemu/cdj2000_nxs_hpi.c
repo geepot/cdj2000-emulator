@@ -1548,103 +1548,163 @@ static bool report_dsp(NxsHpi *s, const char *reason)
     return true;
 }
 
+/* One activation's step loop, split at the step: dsp_pre_step is what
+ * precedes a step, dsp_post_step what follows it.  Compiled execution
+ * (cdj_c674x_run) runs a string of steps and calls dsp_between - post-step
+ * then pre-step, exactly as the loop would - between them. */
+typedef struct {
+    NxsHpi *s;
+    unsigned quota, steps;
+    const char *reason;
+    bool idle_skip;
+} DspActivation;
+
+static bool dsp_pre_step(DspActivation *a)
+{
+    NxsHpi *s = a->s;
+    if (s->fault_history_path) {
+        DspFaultHistory *item = &s->fault_history[
+            s->fault_history_next++ % DSP_FAULT_HISTORY_COUNT];
+        *item = (DspFaultHistory){s->cpu.packets, s->cpu.cycles,
+            s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
+            s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
+            s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
+            s->cpu.control[27],
+            0, s->cpu.loop_active};
+    }
+    deliver_edma_notifications(s);
+    if (!cdj_c674x_interrupt(
+            &s->cpu, cdj_c6747_intc_cpu_pending(&s->intc_delivery))) {
+        a->reason = s->cpu.fault ? s->cpu.fault : "CPU interrupt stopped";
+        s->dsp_halted = true;
+        return false;
+    }
+    if (s->fault_history_path) {
+        DspFaultHistory *item = &s->fault_history[
+            s->fault_history_next++ % DSP_FAULT_HISTORY_COUNT];
+        *item = (DspFaultHistory){s->cpu.packets, s->cpu.cycles,
+            s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
+            s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
+            s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
+            s->cpu.control[27],
+            1, s->cpu.loop_active};
+    }
+    if (a->idle_skip) {
+        if (s->idle_anchor_valid && !s->idle_dirty &&
+            a->steps != s->idle_anchor_step && dsp_idle_repeat(s) &&
+            dsp_idle_quiescent(s)) {
+            uint64_t k = dsp_idle_periods(s, a->quota - a->steps);
+            if (k) {
+                uint64_t period = s->cpu.packets - s->idle_anchor_packets;
+                uint64_t from = s->cpu.packets;
+                dsp_idle_skip(s, k);
+                a->steps += k * period;
+                if (!dsp_idle_skip_slots(s, from)) {
+                    a->reason = s->cpu.fault;
+                    s->dsp_halted = true;
+                    return false;
+                }
+            }
+            dsp_idle_anchor(s, a->steps);
+            if (a->steps >= a->quota) return false;
+        }
+        if ((s->idle_dirty || !s->idle_anchor_valid ||
+             a->steps - s->idle_anchor_step > DSP_IDLE_WINDOW) &&
+            dsp_idle_clean(s))
+            dsp_idle_anchor(s, a->steps);
+    }
+    return true;
+}
+
+static bool dsp_post_step(DspActivation *a)
+{
+    NxsHpi *s = a->s;
+    ++a->steps;
+    if (s->spi_transfer.fault) {
+        s->cpu.fault = "unsupported SPI transfer clock or state";
+        s->cpu.fault_pc = s->cpu.pc;
+        a->reason = s->cpu.fault;
+        s->dsp_halted = true;
+        return false;
+    }
+    cdj_c6747_psc_tick(&s->psc);
+    if (!functional_audio_tick(s)) {
+        a->reason = s->cpu.fault;
+        s->dsp_halted = true;
+        return false;
+    }
+    if (dsp_thread.on) {
+        /* The real DSP keeps running after HINT; MAIN only waits for
+         * the chunk to reach a packet boundary. */
+        if (qatomic_read(&dsp_thread.host_waiting) ||
+            qatomic_read(&dsp_thread.quit) ||
+            (dsp_thread.main_target &&
+             s->cpu.packets >= dsp_thread.main_target)) {
+            ++dsp_thread.host_breaks;
+            return false;
+        }
+        return true;
+    }
+    if (s->hpi.hint) { a->reason = "HINT host-event yield"; return false; }
+    return true;
+}
+
+static bool dsp_between(void *opaque)
+{
+    DspActivation *a = opaque;
+    return dsp_post_step(a) && a->steps < a->quota && dsp_pre_step(a);
+}
+
 static void execute_dsp(NxsHpi *s, unsigned quota)
 {
     if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
     int64_t entered_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     s->dsp_running = true;
-    const char *reason = s->scheduler.mode ? "deferred slice boundary" :
-                                           "phase budget exhausted";
-    unsigned steps = 0;
     /* The host may have changed memory since the last activation. */
     s->idle_anchor_valid = false;
-    bool idle_skip = s->idle_skip && !s->scheduler.mode &&
-                     !s->virtual_audio_clock && !s->fault_history_path;
-    while (steps < quota) {
-        if (s->fault_history_path) {
-            DspFaultHistory *item = &s->fault_history[
-                s->fault_history_next++ % DSP_FAULT_HISTORY_COUNT];
-            *item = (DspFaultHistory){s->cpu.packets, s->cpu.cycles,
-                s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
-                s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
-                s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
-                s->cpu.control[27],
-                0, s->cpu.loop_active};
-        }
-        deliver_edma_notifications(s);
-        if (!cdj_c674x_interrupt(
-                &s->cpu, cdj_c6747_intc_cpu_pending(&s->intc_delivery))) {
-            reason = s->cpu.fault ? s->cpu.fault : "CPU interrupt stopped";
-            s->dsp_halted = true;
-            break;
-        }
-        if (s->fault_history_path) {
-            DspFaultHistory *item = &s->fault_history[
-                s->fault_history_next++ % DSP_FAULT_HISTORY_COUNT];
-            *item = (DspFaultHistory){s->cpu.packets, s->cpu.cycles,
-                s->cpu.pc, s->cpu.r[0][8], s->cpu.r[1][5],
-                s->cpu.r[1][15], s->cpu.r[1][3], s->cpu.control[1],
-                s->cpu.control[6], s->cpu.control[13], s->cpu.control[26],
-                s->cpu.control[27],
-                1, s->cpu.loop_active};
-        }
-        if (idle_skip) {
-            if (s->idle_anchor_valid && !s->idle_dirty &&
-                steps != s->idle_anchor_step && dsp_idle_repeat(s) &&
-                dsp_idle_quiescent(s)) {
-                uint64_t k = dsp_idle_periods(s, quota - steps);
-                if (k) {
-                    uint64_t period = s->cpu.packets - s->idle_anchor_packets;
-                    uint64_t from = s->cpu.packets;
-                    dsp_idle_skip(s, k);
-                    steps += k * period;
-                    if (!dsp_idle_skip_slots(s, from)) {
-                        reason = s->cpu.fault;
-                        s->dsp_halted = true;
-                        break;
-                    }
-                }
-                dsp_idle_anchor(s, steps);
-                if (steps >= quota) break;
-            }
-            if ((s->idle_dirty || !s->idle_anchor_valid ||
-                 steps - s->idle_anchor_step > DSP_IDLE_WINDOW) &&
-                dsp_idle_clean(s))
-                dsp_idle_anchor(s, steps);
-        }
-        if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
-            reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
-            s->dsp_halted = true;
-            break;
-        }
-        ++steps;
-        if (s->spi_transfer.fault) {
-            s->cpu.fault = "unsupported SPI transfer clock or state";
-            s->cpu.fault_pc = s->cpu.pc;
-            reason = s->cpu.fault;
-            s->dsp_halted = true;
-            break;
-        }
-        cdj_c6747_psc_tick(&s->psc);
-        if (!functional_audio_tick(s)) {
-            reason = s->cpu.fault;
-            s->dsp_halted = true;
-            break;
-        }
-        if (dsp_thread.on) {
-            /* The real DSP keeps running after HINT; MAIN only waits for
-             * the chunk to reach a packet boundary. */
-            if (qatomic_read(&dsp_thread.host_waiting) ||
-                qatomic_read(&dsp_thread.quit) ||
-                (dsp_thread.main_target &&
-                 s->cpu.packets >= dsp_thread.main_target)) {
-                ++dsp_thread.host_breaks;
+    DspActivation a = {
+        .s = s, .quota = quota,
+        .reason = s->scheduler.mode ? "deferred slice boundary" :
+                                      "phase budget exhausted",
+        .idle_skip = s->idle_skip && !s->scheduler.mode &&
+                     !s->virtual_audio_clock && !s->fault_history_path,
+    };
+    /* Compiled loops (CDJ_C674X_JIT=1); the fault history records every
+     * step itself, so it keeps the plain loop. */
+    bool compiled = !s->fault_history_path;
+    bool pre_done = false;
+    while (a.steps < quota) {
+        if (!pre_done && !dsp_pre_step(&a)) break;
+        pre_done = false;
+        if (compiled && s->cpu.loop_active) {
+            unsigned status;
+            unsigned n = cdj_c674x_run(&s->cpu, dsp_read, dsp_write, s,
+                                       quota - a.steps, dsp_between, &a,
+                                       &status);
+            if (status == CDJ_C674X_RUN_FAULT) {
+                a.reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
+                s->dsp_halted = true;
                 break;
             }
-            continue;
+            if (status == CDJ_C674X_RUN_STOPPED) break;
+            if (status == CDJ_C674X_RUN_BETWEEN) {
+                pre_done = true;
+                continue;
+            }
+            if (n) {
+                if (!dsp_post_step(&a)) break;
+                continue;
+            }
         }
-        if (s->hpi.hint) { reason = "HINT host-event yield"; break; }
+        if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
+            a.reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
+            s->dsp_halted = true;
+            break;
+        }
+        if (!dsp_post_step(&a)) break;
     }
+    const char *reason = a.reason;
+    unsigned steps = a.steps;
     s->dsp_running = false;
     if (s->scheduler.mode) {
         if (!cdj_dsp_scheduler_end(&s->scheduler, steps, s->hpi.hint,

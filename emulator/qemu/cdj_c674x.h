@@ -136,6 +136,37 @@ bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void 
 bool cdj_c674x_step_capture_direct(CdjC674x *, CdjC674xRead, CdjC674xWrite,
                                   void *, CdjC674xPacket *);
 
+/* Compiled execution (the "JIT"; see "Compiled SPLOOP kernels" in
+ * cdj_c674x.c).  cdj_c674x_run executes up to `limit` packets from compiled
+ * code, each with exactly the effects cdj_c674x_step would have had, and
+ * calls between(between_opaque) after every packet except the limit-th.
+ * between must do everything the caller does between two steps - its
+ * post-step work for the packet just run and its pre-step work for the next,
+ * interrupt presentation through cdj_c674x_interrupt included - and returns
+ * false where the caller's own loop would stop.  The return value is the
+ * number of packets executed; *status says what follows the last one:
+ *   0                          nothing: the caller does its post-step work
+ *                              (and steps itself when the return is 0);
+ *   CDJ_C674X_RUN_BETWEEN      between ran and returned true: the caller is
+ *                              positioned just before a step;
+ *   CDJ_C674X_RUN_STOPPED      between returned false: stop as the caller's
+ *                              loop would;
+ *   CDJ_C674X_RUN_FAULT        packet n+1 failed exactly as cdj_c674x_step
+ *                              would have (cpu->fault set).
+ * Off unless CDJ_C674X_JIT=1 (or cdj_c674x_set_jit(1)); needs packet-cache
+ * mode 2.  Process-wide, like the packet cache. */
+typedef bool (*CdjC674xBetween)(void *opaque);
+enum {
+    CDJ_C674X_RUN_BETWEEN = 1,
+    CDJ_C674X_RUN_STOPPED = 2,
+    CDJ_C674X_RUN_FAULT = 3,
+};
+unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
+                       void *opaque, unsigned limit, CdjC674xBetween between,
+                       void *between_opaque, unsigned *status);
+void cdj_c674x_set_jit(int enabled);
+bool cdj_c674x_jit_enabled(void);
+
 /* Introspection of the conditional-instruction dispatch table, for the one
  * test that proves no two rows can claim the same instruction word.
  *

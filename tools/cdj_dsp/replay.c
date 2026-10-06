@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <string.h>
 #include "cdj_c674x.h"
 #include "cdj_c6747_syscfg.h"
@@ -846,40 +847,122 @@ static const char *limit_reached(const ReplayLimits *limits)
     return NULL;
 }
 
+/* One activation's step loop, split at the step so that compiled execution
+ * (cdj_c674x_run) can do the between-step work itself: quota_post is
+ * everything after a step, quota_pre everything before the next. */
+typedef struct {
+    ReplayLimits *limits;
+    uint32_t breakpoint;
+    unsigned quota, step;
+    /* The standalone (no event transcript) loop: its own stop reasons and
+     * the optional per-step trace. */
+    bool standalone, trace;
+    const char *reason;
+    CoverageBefore before;
+    bool has_coverage_packet;
+    CdjC674xPacket coverage_packet;
+} Quota;
+
+static bool quota_pre(Quota *q)
+{
+    const char *limited = limit_reached(q->limits);
+    if (limited) { q->reason = limited; return false; }
+    if (q->breakpoint && cpu.pc == q->breakpoint) {
+        q->reason = "breakpoint";
+        return false;
+    }
+    deliver_edma_notifications();
+    if (!cdj_c674x_interrupt(
+            &cpu, cdj_c6747_intc_cpu_pending(&intc_delivery))) {
+        q->reason = q->standalone ? "fault" :
+                    cpu.fault ? cpu.fault : "CPU interrupt stopped";
+        return false;
+    }
+    if (q->trace)
+        printf("{\"event\":\"step\",\"pc\":%" PRIu32 ",\"cycles\":%" PRIu64
+               ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
+               cpu.pc, cpu.cycles, cpu.loop_active ? "true" : "false",
+               cpu.branch_due);
+    pcm_observe();
+    q->before = coverage_before(&cpu);
+    q->has_coverage_packet = !q->before.direct_fetch &&
+        coverage_capture(&cpu, &q->coverage_packet);
+    return true;
+}
+
+static bool quota_post(Quota *q)
+{
+    coverage_record(&q->before,
+                    (q->before.direct_fetch || q->has_coverage_packet) ?
+                    &q->coverage_packet : NULL);
+    --q->limits->steps_remaining;
+    if (spi_transfer.fault) {
+        cpu.fault = "unsupported SPI transfer clock or state";
+        cpu.fault_pc = cpu.pc;
+        q->reason = q->standalone ? "fault" : cpu.fault;
+        return false;
+    }
+    cdj_c6747_psc_tick(&psc);
+    if (!functional_audio_tick()) {
+        q->reason = q->standalone ? "fault" : cpu.fault;
+        return false;
+    }
+    if (hpi.hint) {
+        q->reason = q->standalone ? "host_event_required" :
+                    "HINT host-event yield";
+        return false;
+    }
+    ++q->step;
+    return true;
+}
+
+static bool quota_between(void *opaque)
+{
+    Quota *q = opaque;
+    return quota_post(q) && q->step < q->quota && quota_pre(q);
+}
+
+static const char *run_steps(Quota q)
+{
+    const char *budget = "phase budget exhausted";
+    unsigned quota = q.quota;
+    bool pre_done = false;
+    while (q.step < quota) {
+        if (!pre_done && !quota_pre(&q)) return q.reason;
+        pre_done = false;
+        if (cpu.loop_active) {
+            unsigned status;
+            unsigned n = cdj_c674x_run(&cpu, read_bus, write_bus, NULL,
+                                       quota - q.step, quota_between, &q,
+                                       &status);
+            if (status == CDJ_C674X_RUN_FAULT)
+                return q.standalone ? "fault" :
+                       cpu.fault ? cpu.fault : "CPU stopped";
+            if (status == CDJ_C674X_RUN_STOPPED)
+                return q.reason ? q.reason : budget;
+            if (status == CDJ_C674X_RUN_BETWEEN) {
+                pre_done = true;
+                continue;
+            }
+            if (n) {
+                if (!quota_post(&q)) return q.reason;
+                continue;
+            }
+        }
+        if (!cdj_c674x_step_capture_direct(&cpu, read_bus, write_bus, NULL,
+                q.before.direct_fetch ? &q.coverage_packet : NULL))
+            return q.standalone ? "fault" :
+                   cpu.fault ? cpu.fault : "CPU stopped";
+        if (!quota_post(&q)) return q.reason;
+    }
+    return budget;
+}
+
 static const char *run_quota(ReplayLimits *limits, uint32_t breakpoint,
                              unsigned quota)
 {
-    const char *reason = "phase budget exhausted";
-    for (unsigned step = 0; step < quota; ++step) {
-        const char *limited = limit_reached(limits);
-        if (limited) return limited;
-        if (breakpoint && cpu.pc == breakpoint) return "breakpoint";
-        deliver_edma_notifications();
-        if (!cdj_c674x_interrupt(
-                &cpu, cdj_c6747_intc_cpu_pending(&intc_delivery)))
-            return cpu.fault ? cpu.fault : "CPU interrupt stopped";
-        pcm_observe();
-        CoverageBefore before = coverage_before(&cpu);
-        CdjC674xPacket coverage_packet;
-        bool has_coverage_packet = !before.direct_fetch &&
-            coverage_capture(&cpu, &coverage_packet);
-        if (!cdj_c674x_step_capture_direct(&cpu, read_bus, write_bus, NULL,
-                before.direct_fetch ? &coverage_packet : NULL))
-            return cpu.fault ? cpu.fault : "CPU stopped";
-        coverage_record(&before, (before.direct_fetch || has_coverage_packet) ?
-                        &coverage_packet : NULL);
-        --limits->steps_remaining;
-        if (spi_transfer.fault) {
-            cpu.fault = "unsupported SPI transfer clock or state";
-            cpu.fault_pc = cpu.pc;
-            return cpu.fault;
-        }
-        cdj_c6747_psc_tick(&psc);
-        if (!functional_audio_tick())
-            return cpu.fault;
-        if (hpi.hint) return "HINT host-event yield";
-    }
-    return reason;
+    return run_steps((Quota){.limits = limits, .breakpoint = breakpoint,
+                             .quota = quota});
 }
 
 static const char *run_budget(ReplayLimits *limits, uint32_t breakpoint)
@@ -1289,39 +1372,10 @@ int main(int argc, char **argv)
             fputs("pending deferred DSP checkpoint requires event transcript\n", stderr);
             return 2;
         }
-        for (;;) {
-            const char *limited = limit_reached(&limits);
-            if (limited) { reason = limited; break; }
-            if (breakpoint && cpu.pc == breakpoint) { reason = "breakpoint"; break; }
-            deliver_edma_notifications();
-            if (!cdj_c674x_interrupt(
-                    &cpu, cdj_c6747_intc_cpu_pending(&intc_delivery))) {
-                reason = "fault";
-                break;
-            }
-            if (trace_steps) printf("{\"event\":\"step\",\"pc\":%" PRIu32 ",\"cycles\":%" PRIu64
-                   ",\"loop_active\":%s,\"branch_due\":%" PRIu64 "}\n",
-                   cpu.pc, cpu.cycles, cpu.loop_active ? "true" : "false", cpu.branch_due);
-            pcm_observe();
-            CoverageBefore before = coverage_before(&cpu);
-            CdjC674xPacket coverage_packet;
-            bool has_coverage_packet = !before.direct_fetch &&
-                coverage_capture(&cpu, &coverage_packet);
-            if (!cdj_c674x_step_capture_direct(&cpu, read_bus, write_bus, NULL,
-                before.direct_fetch ? &coverage_packet : NULL)) { reason = "fault"; break; }
-            coverage_record(&before, (before.direct_fetch || has_coverage_packet) ?
-                        &coverage_packet : NULL);
-            --limits.steps_remaining;
-            if (spi_transfer.fault) {
-                cpu.fault = "unsupported SPI transfer clock or state";
-                cpu.fault_pc = cpu.pc;
-                reason = "fault";
-                break;
-            }
-            cdj_c6747_psc_tick(&psc);
-            if (!functional_audio_tick()) { reason = "fault"; break; }
-            if (hpi.hint) { reason = "host_event_required"; break; }
-        }
+        /* No step quota: only a stop reason ends it. */
+        reason = run_steps((Quota){.limits = &limits, .breakpoint = breakpoint,
+                                   .quota = UINT_MAX, .standalone = true,
+                                   .trace = trace_steps});
     }
     coverage_emit();
     /* Fault strings originate in the interpreter and contain no JSON escapes. */

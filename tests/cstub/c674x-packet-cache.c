@@ -57,6 +57,8 @@ static const uint8_t *sys_block(void *opaque, uint32_t block)
     System *s = opaque;
     if (block < BASE || block >= BASE + SIZE) return NULL;
     if (s->hide && block >= 0x1100 && block < 0x1200) return NULL;
+    /* Not plain memory: the read callback refuses it now and then. */
+    if (block == (FLAKY_READ & ~31u)) return NULL;
     return s->ram + (block - BASE);
 }
 
@@ -153,7 +155,7 @@ static void build_loop(System *s)
 {
     build(s);
     uint32_t code[CODE_END - BASE], *w = code;
-    unsigned n = 1 + rnd() % 12, len = 1 + rnd() % 20;
+    unsigned n = 1 + (rnd() % 4 ? rnd() % 12 : rnd() % 200), len = 1 + rnd() % 20;
     unsigned ii = 1 + rnd() % (len < 14 ? len + 1 : 14);
     *w++ = 3u << 23 | n << 7 | 0x28 | 2;           /* MVK.S2 n,B3 */
     *w++ = 13u << 23 | 3u << 18 | 0x3a2;            /* MVC.S2 B3,ILC */
@@ -295,6 +297,113 @@ static void self_modifying(void)
     assert(cpu.r[0][2] == 0x4321);
 }
 
+/* JIT lockstep: system A runs loop-buffer cycles through cdj_c674x_run
+ * (compiled), system B steps the interpreter with the cache off.  B takes
+ * its step inside A's between callback, right after A's packet, so the two
+ * are compared after every packet; both then get the same random interrupt
+ * request (GIE and IER are set, so loops drain and vector).  Random run
+ * limits and between() refusals cover every cdj_c674x_run exit. */
+typedef struct {
+    CdjC674x *a, *b;
+    System *sa, *sb;
+    unsigned seed, step;
+} JitPair;
+
+static unsigned jit_packets, jit_runs, jit_between_exits, jit_stops,
+                jit_armed;
+
+static void present(JitPair *p)
+{
+    uint32_t pending = rnd() % 23 == 0 ? (1u << (4 + rnd() % 12)) : 0;
+    uint64_t armed = UINT64_C(1) << 62;     /* loop interrupt armed */
+    bool was = p->a->control_ready[31] & armed;
+    bool ra = cdj_c674x_interrupt(p->a, pending);
+    bool rb = cdj_c674x_interrupt(p->b, pending);
+    assert(ra == rb);
+    jit_armed += !was && (p->a->control_ready[31] & armed);
+    same(p->a, p->sa, p->b, p->sb, p->seed, p->step);
+}
+
+static void step_b(JitPair *p, bool expect)
+{
+    cdj_c674x_set_packet_cache(0);
+    bool rb = cdj_c674x_step(p->b, sys_read, sys_write, p->sb);
+    cdj_c674x_set_packet_cache(2);
+    assert(rb == expect);
+    ++p->step;
+    same(p->a, p->sa, p->b, p->sb, p->seed, p->step);
+}
+
+static bool jit_between(void *opaque)
+{
+    JitPair *p = opaque;
+    ++jit_packets;
+    step_b(p, true);
+    if (rnd() % 61 == 0) return false;
+    present(p);
+    return true;
+}
+
+static void jit_lockstep(unsigned seed)
+{
+    static System sa, sb;
+    static CdjC674x a, b;
+    rng_state = seed * 2654435761u + 7;
+    build_loop(&sa);
+    sa.ticks = 0;
+    sa.hide = false;
+    sb = sa;
+    uint32_t b10 = 0x1900;
+    uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
+                   rnd() % 8 == 0 ? BAD_COMMIT - 8 * 4 : 0x1800;
+    uint32_t state = rng_state;
+    init_cpu(&a, &sa, a10, b10);
+    rng_state = state;
+    init_cpu(&b, &sb, a10, b10);
+    if (seed & 1) {                       /* interrupts recognized */
+        a.control[1] |= 1; b.control[1] |= 1;          /* GIE */
+        a.control[4] = b.control[4] = 0xfff3;          /* IER */
+        a.control[5] = b.control[5] = BASE;            /* ISTP */
+    }
+    JitPair p = {&a, &b, &sa, &sb, seed, 0};
+    bool pre_done = false;
+    while (p.step < 4000) {
+        if (!pre_done) present(&p);
+        pre_done = false;
+        if (a.loop_active && a.packets == b.packets) {
+            unsigned status, limit = 1 + rnd() % 64;
+            unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, limit,
+                                       jit_between, &p, &status);
+            jit_runs += n != 0;
+            if (status == CDJ_C674X_RUN_FAULT) {
+                step_b(&p, false);
+                ++faults_seen;
+                return;
+            }
+            if (status == CDJ_C674X_RUN_BETWEEN) {
+                ++jit_between_exits;
+                pre_done = true;
+                continue;
+            }
+            if (status == CDJ_C674X_RUN_STOPPED) {
+                ++jit_stops;
+                continue;
+            }
+            if (n) {
+                ++jit_packets;
+                step_b(&p, true);
+                continue;
+            }
+        }
+        bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+        step_b(&p, ra);
+        if (!ra) {
+            ++faults_seen;
+            return;
+        }
+    }
+}
+
 int main(void)
 {
     cdj_c674x_set_fetch_block(sys_read, sys_block);
@@ -308,5 +417,13 @@ int main(void)
     printf("SPLOOP lockstep: 3000 programs, %u packets, %u loop-buffer steps,"
            " %u faults\n", packets, loop_steps, faults_seen);
     assert(loop_steps > 300000 && faults_seen > 100);
+    faults_seen = 0;
+    cdj_c674x_set_jit(1);
+    for (unsigned seed = 1; seed <= 3000; ++seed) jit_lockstep(seed);
+    printf("JIT lockstep: 3000 programs, %u compiled packets in %u runs "
+           "(%u between exits, %u stops), %u loop interrupts, %u faults\n",
+           jit_packets, jit_runs, jit_between_exits, jit_stops, jit_armed,
+           faults_seen);
+    assert(jit_packets > 300000 && jit_armed > 300 && faults_seen > 100);
     return 0;
 }
