@@ -163,6 +163,17 @@ typedef struct {
 } NxsHpi;
 static NxsHpi *nxs_hpi;
 
+/* The compiled-execution counters of the calling (DSP) thread, when on. */
+static void dsp_jit_report(void)
+{
+    if (!cdj_c674x_jit_enabled()) return;
+    CdjC674xJitStats jit;
+    cdj_c674x_jit_stats(&jit);
+    info_report("nxs-c674x-jit: runs=%" PRIu64 " steady=%" PRIu64
+                " native=%" PRIu64 " generic=%" PRIu64 " compiles=%" PRIu64,
+                jit.runs, jit.steady, jit.native, jit.generic, jit.compiles);
+}
+
 /*
  * CDJ_NXS_DSP_THREAD=1: the C674x runs on its own host thread instead of
  * synchronously inside MAIN's HPI MMIO write.  Its clock is packets at
@@ -1852,14 +1863,7 @@ static void *dsp_thread_run(void *opaque)
                         t->lag_max_ns / 1e9, t->slipped_ns / 1e9,
                         t->main_waits, t->main_wait_ns / 1e9, t->chunks,
                         t->host_breaks, t->waits, s->cpu.pc);
-            if (cdj_c674x_jit_enabled()) {
-                CdjC674xJitStats jit;
-                cdj_c674x_jit_stats(&jit);
-                info_report("nxs-c674x-jit: runs=%" PRIu64 " steady=%" PRIu64
-                            " native=%" PRIu64 " generic=%" PRIu64
-                            " compiles=%" PRIu64, jit.runs, jit.steady,
-                            jit.native, jit.generic, jit.compiles);
-            }
+            dsp_jit_report();
             if (s->thread_audio_clock)
                 info_report("nxs-c674x-audio-clock: virtual=%.3fs slots=%" PRIu64
                             " underruns=%" PRIu64 " (slots fired after a slip,"

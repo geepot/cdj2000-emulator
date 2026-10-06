@@ -67,6 +67,7 @@ static bool bql_locked(void) { return bql_held; }
 static unsigned bh_scheduled;
 static void qemu_bh_schedule(QEMUBH *bh) { (void)bh; qatomic_inc(&bh_scheduled); }
 static void info_report(const char *format, ...) { (void)format; }
+static void dsp_jit_report(void) {}
 
 typedef struct {
     bool dsp_started, dsp_halted;
