@@ -47,7 +47,8 @@ if [ ! -f "$QEMU_SRC/hw/sh4/meson.build" ]; then
     exit 1
 fi
 
-# SH-4 interrupt and timer fixes; see patches/README.md. They form a stack:
+# SH-4 interrupt and timer fixes, then the TCG fast paths; see
+# patches/README.md. They form a stack:
 # the priority-order patch edits lines the IMASK patch wrote, so once it is in,
 # the IMASK patch checks neither forward nor reverse. Find the last patch that
 # is already applied, take everything before it as applied too, and apply the
@@ -55,7 +56,8 @@ fi
 set -- \
     "$REPO/patches/qemu-sh-intc-priority-imask.patch" \
     "$REPO/patches/qemu-sh-intc-priority-order.patch" \
-    "$REPO/patches/qemu-sh-tmu-stop-reset.patch"
+    "$REPO/patches/qemu-sh-tmu-stop-reset.patch" \
+    "$REPO/patches/qemu-sh4-tcg-fast-paths.patch"
 applied=0
 index=0
 for patch in "$@"; do

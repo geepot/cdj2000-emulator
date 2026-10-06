@@ -119,11 +119,11 @@ def test_gui_firmware_override_launches_with_generated_board_and_records_it(
     assert manifest['dsp_event_capture_enabled'] is False
     assert manifest['dsp_checkpoint_policy'] == 'fault'
     assert manifest['architectural_validation_eligible'] is False
-    # The idle skip (default) starts the GUI 1.5 s ahead of MAIN; without it
+    # The idle skip (default) starts the GUI 2.0 s ahead of MAIN; without it
     # MAIN starts first, as before.
     gui_first = '--model' in commands[0]
     assert gui_first is idle_skip
-    assert sleeps[0] == (1.5 if idle_skip else 1)
+    assert sleeps[0] == (2.0 if idle_skip else 1)
     main_env = environments[1 if gui_first else 0]
     assert main_env.get('CDJ_NXS_DSP_IDLE_SKIP') == ('1' if idle_skip else None)
     assert main_env['CDJ_NXS_DSP_CHECKPOINT_POLICY'] == 'fault'
