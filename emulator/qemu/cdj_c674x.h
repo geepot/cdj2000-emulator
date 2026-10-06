@@ -106,11 +106,21 @@ bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
  * 32-byte-aligned address `block` when that whole block is plain memory which
  * the paired read callback would return word for word (little-endian), else
  * NULL, and then fetch falls back to the read callback.  Must be side-effect
- * free like read.  The pointer is used only within one fetch call; nothing is
- * cached across fetches, so code writes stay immediately visible.  Register
- * once at board setup; the hook applies only when fetch is given `read`. */
+ * free like read.  The pointer is used only within one call; the packet
+ * cache below keeps copies of the bytes, never the pointer, so code writes
+ * stay immediately visible.  Register once at board setup; the hook applies
+ * only when fetch or step is given `read`. */
 typedef const uint8_t *(*CdjC674xFetchBlock)(void *opaque, uint32_t block);
 void cdj_c674x_set_fetch_block(CdjC674xRead read, CdjC674xFetchBlock block);
+/* Direct steps keep a per-thread cache of fetched and decoded packets, valid
+ * only while the bytes it was built from are unchanged: every hit re-reads
+ * them through the fetch-block hook, so code writes by anyone are seen at the
+ * next fetch.  Packets that write no control register then run on a fast
+ * path without the transactional prefix copy; results, faults and rollback
+ * are byte-identical to the uncached path.  Mode 0 off, 1 cache only,
+ * 2 cache and fast path (default; CDJ_C674X_PACKET_CACHE=0|decode|... sets it
+ * at first use).  Process-wide; for tests and A/B measurement. */
+void cdj_c674x_set_packet_cache(int mode);
 bool cdj_c674x_execute(CdjC674x *, const CdjC674xPacket *, CdjC674xRead,
                       CdjC674xWrite, void *);
 void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry);
@@ -155,4 +165,12 @@ bool cdj_c674x_arm_table_row(unsigned index, uint32_t *mask, uint32_t *match,
  * for a given word, and must be true for a claims() result to mean anything. */
 bool cdj_c674x_arm_table_row_claims(unsigned index, uint32_t word);
 bool cdj_c674x_arm_table_predicates_are_word_only(uint32_t word);
+/* The semantic family the core routes one instruction to ("ldw" is
+ * "scalar_memory", compact forms are "compact-<form>", rejections name the
+ * rejection), from the decode it executes with.  For decoder cross-checks
+ * against an independent disassembler; returns a static string.  lowered,
+ * when given, receives the word the issue loop executes: a compact
+ * instruction rewritten to its 32-bit equivalent, else the word itself. */
+const char *cdj_c674x_describe(const CdjC674xInstruction *insn,
+                               uint32_t *lowered);
 #endif

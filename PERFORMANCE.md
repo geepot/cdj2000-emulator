@@ -418,3 +418,93 @@ handshake, so the gain shows as throughput, not latency. The Not Loaded and
 USB-browser screens are byte-identical between builds; the loaded screen
 matches outside the blinking NOW LOADING text in every run where it was not
 mid-redraw (one in four for both builds).
+
+## Persistent packet cache and fast paths (2026-10-05)
+
+Slices E, F and I of `analysis/emulator-nxs2-qemu-evaluation.md` (in the
+mods repository), after Stijn Jacobs' cdj-nxs2-qemu (`c66x_step.c` packet
+cache and `fast_cycles`, `make m1`); credit in THIRD_PARTY.md. All of it is in
+`emulator/qemu/cdj_c674x.c`; no board file changed. This supersedes "nothing
+is cached across fetches" above.
+
+* **Decode record.** Everything the issue loop derived from an instruction
+  before touching state (pre-scan NOP/SPMASK, compact lowering, CALLP,
+  DINT/RINT, unconditional class, arm row, and the compact format, now
+  `compact_form()` in the issue loop's test order) is one pure function,
+  `decode_instruction`. Uncached packets decode on the fly with it.
+* **Packet cache.** Per thread, direct-mapped on pc/2 (16K entries), for
+  direct steps: fetched packet, decode records, fast-path eligibility.
+  Invalidation is by content: an entry keeps the raw 32 bytes of every fetch
+  block its fetch read, and each hit re-obtains them through the board's
+  fetch-block hook and compares. DSP stores, HPI uploads, EDMA, L1D/SDRAM
+  remaps are all seen at the next fetch with no hook in any writer; words
+  that came through the read callback are never cached.
+* **Fast path** (`execute_fast`) for cached packets that write no control
+  register during issue: execute in place with no prefix copy. E1 register
+  results are deferred until issue has passed every check
+  (`CdjC674xDefer`), so a failing packet is declined byte-for-byte and the
+  transactional path reproduces the fault. Retirement can fail only on a
+  queue entry, so registers, control registers and live queue entries are
+  snapshotted only when an entry can act within the packet; such a fault is
+  restored as the transactional rollback would leave it (retirement faults
+  now report the packet's entry pc, which is what they always reported).
+* **Single-instruction path** (`execute_single`), ~90% of NXS packets: one
+  register-only arm (MVK/MVKH/ADD/SUB/AND/OR/XOR/CMP/shifts/bit fields/MVC
+  read...), B, B reg or NOP n, when no queue entry acts in its cycles.
+* `CDJ_C674X_PACKET_CACHE=0` disables all of it, `=decode` keeps only the
+  cache; `cdj_c674x_set_packet_cache()` does the same for tests.
+
+Not done: the per-hit fetch-block call (`dsp_memory_span`, ~7% of the DSP
+thread in a profile) could go if the board declared mapping-stable windows; McASP-paced
+batching of NOP runs needs board cooperation (each cycle ticks the board).
+
+### Exactness
+
+* Same QEMU binary, `CDJ_C674X_PACKET_CACHE=0` against default, 45-second
+  full-capture stock NXS boots: all 214,401 events and 3,045 DSP checkpoints
+  of the common prefix byte-identical; with `--functional-dsp-audio`,
+  121,309 events and 529 checkpoints. Final screens identical. Against the
+  pre-change binary: 234,677 events and 3,593 checkpoints identical.
+* Replay (`tools/cdj_dsp/replay.c`): checkpoints 1, 25, 250 (1M steps), 400
+  (5M) and the first-play snapshot (5M, strict and functional audio) give
+  identical traces and final checkpoints against the pre-change core, and
+  cache off against on.
+* `tests/cstub/c674x-packet-cache.c`: 3,000 random programs (self-modifying
+  stores, host code rewrites between steps, fetch-window withdrawal, failing
+  store commits and E3 reads) run in lockstep cached+fast vs uncached;
+  whole CPU and memory compared after every step (3.4M packets, 1,977
+  faults). Removing validation, the register/branch/slot rollback, the
+  deferral, the entry-pc fault, the single path's window or predicate, or
+  its branch break each fails it. Clean under ASan/UBSan.
+
+### Measurements (Apple silicon, loaded shared host)
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| `benchmark_core` step-alu, 30M packets | 21.3 M/s | 77 M/s |
+| `benchmark_core` step-mem (LDW/STW loop) | 19.1 M/s | 37 M/s |
+| replay ckpt 400, 20M steps, user s | 2.20-2.21 | 1.70-1.71 |
+| replay first-play, functional audio, 5M | 0.67-0.68 | 0.56-0.57 |
+| 60 s boot `--no-dsp-idle-skip`, packets | 649M, 648M | 844M, 857M |
+| same, `--functional-dsp-audio` | 585M | 737M |
+| same binary, cache off vs on | 603M | 852M |
+
+Boots ran pairwise at the same time on a host other agents were loading;
+`--lightweight`, so no capture cost. With the core cheaper, the DSP thread
+is now roughly half board work (`dsp_cycle_tick`, timers, PLL, interrupt
+delivery), which bounds further core-only gains.
+
+## Decoder cross-check (2026-10-05)
+
+`tools/cdj_dsp/decode_crosscheck.c` sweeps an address range from a DSP
+checkpoint through `cdj_c674x_fetch` and `cdj_c674x_describe` (the family the
+issue loop executes); `python -m tools.cdj_dsp.decode_crosscheck` compares
+it with GNU objdump (`gobjdump -D -z -EL -b binary -m tic6x`): instruction
+boundaries and sizes, parallel bits, family vs mnemonic, and every compact
+instruction the core rewrites to 32 bits re-disassembled from the rewritten
+word. Over the NXS stage1 (0x11801da0-0x11804d80) and stage2
+(0xc0000000-0xc0058320) images, matching the Ghidra program
+`dsp-stage1-0x11801da0.bin`: 90,273 instructions, 1,582 rewritten compact
+operands, 0 disagreements; the only fetch rejections are 818 blocks of
+0xffffffff fill that objdump also calls undefined. Operands of in-place
+compact forms and of 32-bit arms are outside this check.

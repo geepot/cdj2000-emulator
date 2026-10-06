@@ -1,0 +1,266 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* Differential test of the C674x packet cache and fast path.
+ *
+ * Two identical systems run random programs in lockstep, one with the cache
+ * and fast path (mode 2) and one with neither (mode 0).  After every step the
+ * whole CPU and the whole memory must be byte-identical, faults included.
+ * The programs store into their own code (self-modifying code), the harness
+ * rewrites code between steps (an HPI/EDMA upload), the fetch-block hook
+ * withdraws and restores a code window (a remap), and the bus fails a store
+ * commit or a load's E3 read on chosen addresses (retirement faults after
+ * the fast path has committed).  A few directed cases check the same
+ * properties with known outcomes. */
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "cdj_c674x.h"
+
+#define BASE 0x1000u
+#define SIZE 0x1000u
+#define CODE_END 0x1400u
+#define BAD_COMMIT 0x1ff0u   /* store check passes, commit fails */
+#define FLAKY_READ 0x1fe0u   /* readable only when the tick count % 3 != 0 */
+
+typedef struct {
+    uint8_t ram[SIZE];
+    unsigned ticks;
+    bool hide;               /* fetch-block hook refuses 0x1100..0x11ff */
+} System;
+
+static bool sys_read(void *opaque, uint32_t address, uint32_t *value)
+{
+    System *s = opaque;
+    if (address < BASE || address > BASE + SIZE - 4 || (address & 3)) return false;
+    if (address == FLAKY_READ && s->ticks % 3 == 0) return false;
+    memcpy(value, s->ram + (address - BASE), 4);
+    return true;
+}
+
+static bool sys_write(void *opaque, uint32_t address, uint64_t value,
+                      unsigned size, bool commit)
+{
+    System *s = opaque;
+    if (address < BASE || address + size > BASE + SIZE || (address & (size - 1)))
+        return false;
+    if (commit) {
+        if (address == BAD_COMMIT) return false;
+        memcpy(s->ram + (address - BASE), &value, size);
+    }
+    return true;
+}
+
+static const uint8_t *sys_block(void *opaque, uint32_t block)
+{
+    System *s = opaque;
+    if (block < BASE || block >= BASE + SIZE) return NULL;
+    if (s->hide && block >= 0x1100 && block < 0x1200) return NULL;
+    return s->ram + (block - BASE);
+}
+
+static void sys_tick(void *opaque)
+{
+    System *s = opaque;
+    ++s->ticks;
+    memcpy(s->ram + SIZE - 4, &s->ticks, 4);
+}
+
+static uint32_t rng_state;
+static uint32_t rnd(void)
+{
+    rng_state ^= rng_state << 13;
+    rng_state ^= rng_state >> 17;
+    rng_state ^= rng_state << 5;
+    return rng_state;
+}
+
+static unsigned pick_dst(void)
+{
+    unsigned r;
+    do r = rnd() & 15; while (r == 10);   /* A10/B10 are the data bases */
+    return r;
+}
+
+static uint32_t predicate(void)
+{
+    static const uint32_t creg[] = {1, 2, 3, 4, 5, 6};
+    if (rnd() % 4) return 0;
+    return creg[rnd() % 6] << 29 | (rnd() & 1) << 28;
+}
+
+/* One random 32-bit instruction at pc (parallel bit added by the caller). */
+static uint32_t random_instruction(uint32_t pc)
+{
+    unsigned s = rnd() & 1, dst = pick_dst(), a = rnd() & 15, b = rnd() & 15;
+    unsigned x = rnd() & 1;
+    static const uint32_t l_ops[] = {0x78, 0xf8, 0xf78, 0xff8, 0xdf8, 0xa78,
+                                     0x8f8, 0xaf8, 0x58};
+    switch (rnd() % 12) {
+    case 0: return predicate() | dst << 23 | (rnd() & 0xffff) << 7 | 0x28 | s << 1;
+    case 1: return predicate() | dst << 23 | (rnd() & 0xffff) << 7 | 0x68 | s << 1;
+    case 2: case 3:
+        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
+               l_ops[rnd() % 9] | s << 1;
+    case 4:                               /* SHL .S immediate */
+        return predicate() | dst << 23 | b << 18 | (rnd() & 31) << 13 |
+               0xca0 | s << 1;
+    case 5: case 6: {                     /* LD/ST *+A10/B10[cst] */
+        static const unsigned ops[] = {6, 7, 4, 5, 2, 3};
+        unsigned y = rnd() & 1, op = ops[rnd() % 6];
+        unsigned off = rnd() % 8 == 0 ? 31 : rnd() & 15;
+        return predicate() | dst << 23 | 10u << 18 | off << 13 | 1u << 9 |
+               y << 7 | op << 4 | 4 | s << 1;
+    }
+    case 7: {                             /* B .S1/.S2 into the code */
+        int32_t target = (int32_t)(BASE + (rnd() % ((CODE_END - BASE) / 32)) * 32);
+        int32_t disp = (target - (int32_t)(pc & ~31u)) / 4;
+        return predicate() | ((uint32_t)disp & 0x1fffff) << 7 | 0x10 | s << 1;
+    }
+    case 8: {                             /* BNOP disp,n */
+        int32_t target = (int32_t)(BASE + (rnd() % ((CODE_END - BASE) / 32)) * 32);
+        int32_t disp = (target - (int32_t)(pc & ~31u)) / 4;
+        return predicate() | ((uint32_t)disp & 0xfff) << 16 | (rnd() % 6) << 13 |
+               0x120 | s << 1;
+    }
+    case 9: return (rnd() % 6) << 13;     /* NOP n */
+    case 10: {                            /* MVC to AMR (slow path) or read */
+        if (rnd() & 1) return 0u << 23 | 3u << 18 | 0x3a2;   /* MVC B3,AMR */
+        return dst << 23 | 1u << 18 | 0x3e2;                 /* MVC CSR,Bdst */
+    }
+    default:                              /* ADDK */
+        return predicate() | dst << 23 | (rnd() & 0xffff) << 7 | 0x50 | s << 1;
+    }
+}
+
+static void build(System *s)
+{
+    memset(s->ram, 0, sizeof s->ram);
+    for (uint32_t pc = BASE; pc < CODE_END; pc += 4) {
+        uint32_t w = random_instruction(pc);
+        if ((pc & 31) != 28 && rnd() % 4 == 0) w |= 1;
+        memcpy(s->ram + (pc - BASE), &w, 4);
+    }
+    for (uint32_t i = CODE_END - BASE; i < SIZE - 4; i += 4) {
+        uint32_t v = rnd();
+        memcpy(s->ram + i, &v, 4);
+    }
+}
+
+static void init_cpu(CdjC674x *cpu, System *s, uint32_t a10, uint32_t b10)
+{
+    cdj_c674x_reset(cpu, BASE);
+    for (unsigned side = 0; side < 2; ++side)
+        for (unsigned r = 0; r < 32; ++r) cpu->r[side][r] = rnd();
+    cpu->r[0][10] = a10;
+    cpu->r[1][10] = b10;
+    cpu->r[1][3] = 0;   /* MVC B3,AMR leaves every register linear */
+    cpu->cycle_tick = sys_tick;
+    cpu->cycle_opaque = s;
+}
+
+static void same(const CdjC674x *a, const System *sa, const CdjC674x *b,
+                 const System *sb, unsigned seed, unsigned step)
+{
+    CdjC674x x = *a, y = *b;
+    x.cycle_opaque = y.cycle_opaque = NULL;
+    bool fault = a->fault != b->fault ||
+                 (a->fault && strcmp(a->fault, b->fault));
+    x.fault = y.fault = NULL;
+    if (fault || memcmp(&x, &y, sizeof x) || memcmp(sa, sb, sizeof *sa)) {
+        fprintf(stderr, "seed %u step %u: cached and uncached diverge "
+                "(fault %s / %s, pc %08x / %08x)\n", seed, step,
+                a->fault ? a->fault : "-", b->fault ? b->fault : "-",
+                a->pc, b->pc);
+        abort();
+    }
+}
+
+static unsigned packets, faults_seen;
+
+static void lockstep(unsigned seed)
+{
+    static System sa, sb;
+    static CdjC674x a, b;
+    rng_state = seed * 2654435761u + 1;
+    build(&sa);
+    sa.ticks = 0;
+    sa.hide = false;
+    sb = sa;
+    uint32_t state = rng_state;
+    /* Half the programs point B10 into their own code: self-modifying code. */
+    uint32_t b10 = seed & 1 ? BASE + (rnd() % 0x380) * 4 : 0x1900;
+    uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
+                   rnd() % 8 == 0 ? BAD_COMMIT - 8 * 4 : 0x1800;
+    state = rng_state;
+    init_cpu(&a, &sa, a10, b10);
+    rng_state = state;
+    init_cpu(&b, &sb, a10, b10);
+    same(&a, &sa, &b, &sb, seed, 0);
+    for (unsigned step = 1; step <= 3000; ++step) {
+        if (rnd() % 97 == 0) {            /* host upload into code */
+            uint32_t pc = BASE + (rnd() % ((CODE_END - BASE) / 4)) * 4;
+            uint32_t w = random_instruction(pc);
+            memcpy(sa.ram + (pc - BASE), &w, 4);
+            memcpy(sb.ram + (pc - BASE), &w, 4);
+        }
+        if (rnd() % 89 == 0) sa.hide = sb.hide = !sa.hide;
+        cdj_c674x_set_packet_cache(2);
+        uint64_t before = a.packets;
+        bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+        cdj_c674x_set_packet_cache(0);
+        bool rb = cdj_c674x_step(&b, sys_read, sys_write, &sb);
+        assert(ra == rb);
+        same(&a, &sa, &b, &sb, seed, step);
+        packets += a.packets != before;
+        if (!ra) {
+            ++faults_seen;
+            return;
+        }
+    }
+}
+
+/* Directed: a store into the next packet's code is seen when it executes. */
+static void self_modifying(void)
+{
+    static System s;
+    CdjC674x cpu;
+    memset(&s, 0, sizeof s);
+    uint32_t code[] = {
+        2u << 23 | 0x1234u << 7 | 0x28,                      /* MVK.S1 0x1234,A2 */
+        3u << 23 | 10u << 18 | 3u << 13 | 1u << 9 | 7u << 4 | 4, /* STW A3,*+A10[3] */
+        4u << 13,                                            /* NOP 5 */
+        0x10,                                                /* B.S1 0x1000 */
+        4u << 13,                                            /* NOP 5 */
+    };
+    memcpy(s.ram, code, sizeof code);
+    cdj_c674x_set_packet_cache(2);
+    cdj_c674x_reset(&cpu, BASE);
+    cpu.r[0][10] = BASE;                  /* *+A10[3] is the B at 0x100c */
+    cpu.r[0][3] = code[3];                /* first pass stores the B itself */
+    for (unsigned i = 0; i < 5; ++i)
+        assert(cdj_c674x_step(&cpu, sys_read, sys_write, &s));
+    assert(cpu.pc == BASE);               /* looped: every packet now cached */
+    cpu.r[0][3] = 7u << 23 | 0x55u << 7 | 0x28;   /* MVK.S1 0x55,A7 */
+    for (unsigned i = 0; i < 5; ++i)
+        assert(cdj_c674x_step(&cpu, sys_read, sys_write, &s));
+    /* The cached branch was overwritten by the DSP's own store. */
+    assert(cpu.r[0][7] == 0x55 && cpu.pc == 0x1014);
+    /* Second pass over unchanged code is served from the cache; a host
+     * rewrite of the first word must still be seen. */
+    uint32_t mvk2 = 2u << 23 | 0x4321u << 7 | 0x28;
+    memcpy(s.ram, &mvk2, 4);
+    cpu.pc = BASE;
+    assert(cdj_c674x_step(&cpu, sys_read, sys_write, &s));
+    assert(cpu.r[0][2] == 0x4321);
+}
+
+int main(void)
+{
+    cdj_c674x_set_fetch_block(sys_read, sys_block);
+    self_modifying();
+    for (unsigned seed = 1; seed <= 3000; ++seed) lockstep(seed);
+    printf("packet cache lockstep: 3000 programs, %u packets, %u faults\n",
+           packets, faults_seen);
+    assert(packets > 1000000 && faults_seen > 100);
+    return 0;
+}

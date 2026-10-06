@@ -70,6 +70,14 @@ QEMU 11.x or newer is required: the board includes `hw/core/boards.h` and
 None of the binutils-derived C66x decoder tables of that repository are
 included; the Blackfin files have no third-party tables.
 
+## Credit: cdj-nxs2-qemu (Stijn Jacobs)
+
+| | |
+|---|---|
+| what | ideas from the C66x interpreter of `https://github.com/Stijn-Jacobs/cdj-nxs2-qemu` (commit `08d5cb1`), used with the author's permission |
+| used in | `emulator/qemu/cdj_c674x.c` (persistent per-PC decoded-packet cache and a fast path for common packets, after its `c66x_step.c` packet cache and `fast_cycles`), `tools/cdj_dsp/decode_crosscheck.{c,py}` (decoder-vs-objdump sweep over the whole DSP image, after its `make m1`) |
+| code copied | none: both were written against this core; files carry a courtesy credit line |
+
 ## Nothing else is vendored
 
 No other third-party source is copied into this tree. The only binaries this
