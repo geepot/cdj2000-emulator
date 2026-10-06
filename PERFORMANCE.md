@@ -866,7 +866,8 @@ fall in seven code ranges (`dsp_output_cursor_advance` 23%, four pieces of
 predicated ALU code with data-dependent branches, where a per-packet
 executor saves nothing over `execute_fast`.
 
-What real time would still need, in order of size:
+What real time would still need, in order of size (stage 2 took the
+first three steps; see "C674x JIT stage 2" below):
 
 1. **Compiled direct code** (stage 2 proper): traces/superblocks over those
    ranges with the pipeline resolved across packets and branches (loads in
@@ -955,3 +956,188 @@ byte-identical, same final screen.
 **`--audio-clock virtual`** still ends in E-8302 CANNOT PLAY TRACK (3184):
 92% of the McASP slots fire short of their packets, the known DSP-speed limit
 of that mode (previous section), not this stall.
+
+## C674x JIT stage 2: batched board work, direct traces, MAIN hand-over (`dsp-jit2`, 2026-10-06)
+
+Three steps after the stage-1 roadmap above, each measured on its own,
+plus a boot fix the faster DSP needed.  Benchmarks: `benchmark_core`, and a
+board-like replay - `tools/cdj_dsp/replay.c` with its output compiled out,
+RAM first on both bus callbacks as the QEMU board does, coverage off, and
+QEMU's own hardening flags (`-ftrivial-auto-var-init=zero
+-fzero-call-used-regs=used-gpr -fstack-protector-strong`, which zero every
+uninitialized local) - over 20 M steps of the real-USB playback checkpoint
+with functional audio and the JIT on.  Live: stock NXS, the confirmed
+rekordbox USB, `link_hub`, `--lightweight --dsp-thread --audio-clock
+virtual --no-dsp-idle-skip` (develop needs the last flag to boot, see
+below), no PLAY press (stock auto-plays), DSP packets per wall second from
+the end of the load, from the stamped 10-virtual-second reports; shared
+host, two series an hour apart.
+
+| | replay, user s | live packets/s (series 1 / 2) | per virtual s (2) | underrun slots (2) |
+| --- | ---: | ---: | ---: | ---: |
+| develop (e93d4f1) | 1.56 | boot failed / 10.3 M | 15.1 M | 89.9% |
+| 1. batched ticks | 1.37 | 12.8 M / - | - | - |
+| 2. direct traces (+ boot fix) | 1.20 | 15.4 M / - | - | - |
+| + sampled EDMA/McASP logging | 1.20 | 16.6 M / - | - | - |
+| 3. hand-over at MAIN's target | 1.20 | 16.4 M / 14.9 M | 20.6 M | 86.6% |
+| + no-op per-step work skipped | 1.20 | - / 15.7 M | 21.8 M | 85.8% |
+
+With the idle skip on (nxs_vm's default, which now boots) the final binary
+ran 15.8 M packets/s.  `benchmark_core` (JIT on, develop -> final):
+step-alu 77 -> 112 M packets/s, step-mem 35 -> 50 M, step-sploop,
+step-memcpy and step-kernel unchanged (29, 29, 42-44 M).
+
+**Real time: not reached.**  In every live run, develop's and the final
+binary's alike, the counter advances about 150 half frames (one second of
+track) at ~9 frames per wall second and E-8302 CANNOT PLAY TRACK (3184)
+appears 15-30 s after the auto-play: the DSP still gets ~22 M packets per
+virtual second against the ~63 M playback needs, and 86% of the McASP slots
+fire short of their packets.  The DSP thread is now ~95% execution (the
+hand-over spin was 8-25% of it); what is left is the core itself (direct
+traces and loop kernels ~65%) and per-packet board work (~15%).
+
+### 1. Batched board ticks (`cdj_dsp_ticks.h`)
+
+The core calls the board's `cycle_tick` every DSP cycle; it clocked the
+SPI1/WM8740 shift logic, the PLL's OSCIN counter and both Timer64Ps.  When
+both timers are stopped and the SPI transfer is idle in
+`cdj_spi_core_tick`'s fast path (or functional timing), n ticks are exactly
+one SPI tick (idempotent there) and `cdj_c6747_pll_ticks(n)` (closed form,
+countdowns included), and no tick can raise an event.  The QEMU board and
+the replay then only count ticks and apply them (`dsp_ticks_flush`) before
+any non-RAM bus access, at the end of each activation and before
+checkpoints; they re-test the steady state after each per-cycle tick and
+drop back to per-cycle ticking at every flush.  `CDJ_NXS_DSP_TICK_BATCH=0`
+ticks every cycle.  The board's per-step PSC tick is skipped while no
+power transition is in flight.
+
+`tests/cstub/dsp-ticks.c` checks 200,000 random PLL/timer/SPI states
+(genuine WM8740 transfers among them) state by state, and 3,000 random
+sequences of ticks and register writes in lockstep, a batched system
+against a per-cycle one (337 M ticks, 231 M of them only counted): equal
+state at every flush and the same timer events at the same cycles.
+Mutations - dropping either timer condition or the SPI-idle condition,
+the SPI tick in the flush, one tick of the flush, or treating functional
+timing as non-ticking - each fail it; dropping the replay's flush on a
+register read or on a register write each changes a replay trace.
+
+### Held clock and the DSP's pacing (boot fix)
+
+With the held virtual clock (previous section) a DSP fast enough to reach
+its pacing limit fails the stock boot in `--dsp-thread`.  With
+`--audio-clock virtual`, develop failed its boot with the idle skip and 1
+of 3 without it, step 1's binary both of its boots, and the stage-2 binary
+3 of 4 without the idle skip (the one that passed wrote a full event
+transcript, which slows MAIN).  MAIN's per-access
+lockstep makes the DSP run 256 packets per HPI access while MAIN holds the
+clock, so an 8,192-word firmware upload (2.1 M packets) leaves the DSP clock
+~14 ms ahead of virtual time; the pacing then stops the DSP except for
+those 256 packets per MAIN access, and MAIN's stage-1 handshake, which waits
+~10 ms of virtual time for HINT after setting boot phase 2, gives up and
+restarts the download with DSPINT set - which the DSP's read-modify-write of
+HPIC (OR HINT, write back) then clears: HPIC 0x14e, and the boot never
+leaves stage 1 (control-event traces with virtual timestamps: HINT 11.6 ms
+of virtual time after phase 2, 8,281 DSP packets later).  On the board the
+DSP runs on during an HPI access, so packets run for MAIN with the clock
+held are not the DSP running ahead: `dsp_thread_credit` moves the DSP clock
+by the part past the pacing limit (`credited=` in the thread report; ~17 M
+packets by the end of boot, ~30 M by 100 virtual s of playback).  All ten
+boots since the fix finished stage 1 (13 HINT handshakes, no 0x14e), with
+and without the idle skip.  `tests/test_dsp_thread.py` checks the
+credit; removing the call or the epoch move fails it.
+
+### 2. Direct traces (`cdj_c674x.c`, "direct traces")
+
+`cdj_c674x_run` now runs direct (non-loop) code as it runs loop cycles:
+each packet with the effects `cdj_c674x_step` would have had, `between()`
+after each, and no return to the board's step loop; the board and the
+replay call it for direct code too.  A packet runs from a plan built once
+per packet-cache entry (so per fetched bytes: changed code refills the
+entry and drops the plan), checked against memory with the same byte
+comparison as `fetch_cached`.  `dt_exec`:
+
+- issues in instruction order with this core's own semantics: the stage-1
+  JitOp memory and SP operations, the register-only arms (packet_single's
+  list) and branch arms through a prebuilt arm, every other fast arm in full
+  (`dt_arm`, as `jit_arm`), CMPSP, the long ADDA forms, and the compact
+  value, BNOP, B15/Dpp and MVC-to-ILC forms, which `execute_packet` now
+  shares through `compact_value`, `compact_bnop`, `compact_memory` and
+  `compact_mvc_ilc`; E1 results are deferred, appended queue slots keep their
+  old bytes, branch state and the two control registers written in place
+  (FAUCR, ILC) are saved, so a declined packet leaves the CPU untouched;
+- then runs every bus operation of every cycle of the packet in
+  `execute_packet`'s order - tick, due store commits, due E3 reads - up to
+  the cycle a branch matures in, before any register, queue entry or branch
+  changes: a failing commit or E3 read needs only the issue undone, as
+  `jit_exec` does for one cycle, and no snapshot;
+- then retires cycle by cycle with `execute_packet`'s compaction
+  (`JIT_COMPACT`, dead slots included), only in the cycles where an entry
+  acts.
+
+Between packets the queues are the CPU's own arrays, so an exit (interrupt,
+unsupported packet, code change, limit) is a return.  A one-instruction
+packet in `execute_single`'s shapes takes that path instead.
+`CDJ_C674X_JIT=loops` compiles loop-buffer cycles only.  In the playback
+replay 8.5 M of the ~9.5 M direct packets per 20 M steps run traced, in
+runs of ~50 packets; the rest are SPLOOP setup, control-register writes and
+loop loading.  The packet cache index now folds the high address bits, and
+the hot paths' large scratch locals (`JitUndo`, which grew to whole queues,
+the E3 data, the defer list) skip QEMU's zero-initialization, which had
+cost 9.5% of the DSP thread in `memset`.
+
+What it does not do: resolve the queue shape statically across packets.
+The per-packet floor is now issue, the bus callbacks and the
+byte comparison; a plan per (packet, queue shape) chained across packets,
+and validation skipped while no write can have reached the code, are the
+next levers on this path.
+
+### 3. MAIN hand-over
+
+The DSP thread used to end its chunk as soon as MAIN asked for the lock, so
+MAIN found the DSP short of its 256-packet target, waited on `progress` and
+let the DSP retake the lock - three hand-overs per access.  It now runs on
+to the target first (`dsp_thread_main_due`); MAIN gets the lock at the same
+packet.  On a playing DSP thread the yield spin fell from 8% to 3% of
+samples (25% in stage 1's profile); packets per second within noise.  Also
+board work: the EDMA and McASP write logging the audio ISRs triggered every
+few hundred packets (3.5% of the thread, ~380 K stderr lines in four
+minutes) is sampled (the first 1,024 of each kind, then every 65,536th
+with its count), and the per-packet EDMA notification poll, interrupt
+presentation and McASP slot check are skipped when they cannot act
+(`cdj_c674x_interrupt_quiet`, the core's own no-op test).
+
+### Exactness
+
+- Replays (`replay.c`), develop against each step's commit and JIT off
+  against on: checkpoints 1, 25, 250 (1 M steps), 400 (5 M), the first-play
+  snapshot (5 M, strict and functional audio) and the real-USB playback
+  checkpoint (10 M, strict and functional audio) identical; the playback
+  checkpoint to 60 M steps (28,631,258 and 17,189,136 trace lines) gives
+  identical traces and final checkpoints for develop and dsp-jit2, JIT off
+  and on.
+- 45-second full-capture stock boots (synchronous, JIT on), develop against
+  dsp-jit2: all 266,423 events and 4,451 DSP checkpoints of the common
+  prefix byte-identical; with `--functional-dsp-audio` 130,226 events and
+  770 checkpoints.  dsp-jit2 JIT off against on: 286,292 / 4,988 and
+  134,481 / 885.  (dsp-jit2 reaches 300,722 events in the same 45 s against
+  develop's 266,423.)
+- `tests/cstub/c674x-packet-cache.c` adds 24,000 random direct programs
+  (build()'s mix with MPYSP, ADDSP/SUBSP, every load/store form, CMPSP,
+  16x16 and half-word multiplies, ADDA, the long ADDAW form and ADDKPC)
+  run through `cdj_c674x_run` against the uncached interpreter after every
+  packet, with random interrupts, limits, refusals, code uploads, a
+  withdrawn code window and failing commits and E3 reads (5.4 M traced
+  packets, 22,256 faults), two directed declines after in-place state
+  (a queue append, FAUCR, ILC; a DP compare's delayed FAUCR effect against
+  a CMPSP), and checks `cdj_c674x_interrupt_quiet` against a real
+  presentation at 9.6 M packets.  Clean under ASan/UBSan.
+- Mutations of the direct traces: 18 of 21 fail it (the E1/E5 and FAUCR
+  conflict checks, the overlap pairs, every undo and restore, tick order,
+  the branch stop, E3 sign extension and order, the tail copy, the cycle
+  count, the deferred results, NOP timing, predicates, the generic arm's
+  undo and the code byte check).  Three are conservative checks the test
+  cannot reach: the first packet's all-pairs overlap check (as in stage 1),
+  refusing slow arms (the only one generated, MVC, is declined anyway) and
+  PROT timing (no compact packets; the replays run them).
+- Full suite: 947 passed; the two failures are the known TMU test and the
+  orphan-watchdog flake.
