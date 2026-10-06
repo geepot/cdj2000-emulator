@@ -220,6 +220,7 @@ static unsigned pick_body_dst(void)
 /* Kernel-shaped bodies: only unpredicated SP and memory operations (and
  * NOPs), the shape steady-state kernels compile. */
 static bool kernel_body, direct_extras, loop_extras;
+static bool direct_programs;            /* dt_lockstep is running */
 
 /* Direct-trace extras: CMPSP (FAUCR in place), 16x16 and half-by-word
  * multiplies (delayed results through the generic arm path), ADDA/SUBA
@@ -551,7 +552,8 @@ static void horizon_open(JitPair *p, uint32_t pending)
     test_horizon.break_pc = 0;
     event_mask = 0;
     if (pending || rnd() % 2) return;
-    test_horizon.until = p->a->packets + 1 + rnd() % 12;
+    test_horizon.until = p->a->packets + 1 +
+        (rnd() % 4 ? rnd() % 12 : rnd() % 2000);   /* some long, as a board's */
     if (rnd() % 4 == 0) test_horizon.break_pc = BASE + (rnd() % 64) * 4;
     if (rnd() % 2) {
         event_packets = test_horizon.until;
@@ -621,6 +623,14 @@ static bool jit_between(void *opaque)
     ++jit_packets;
     step_b(p, true);
     if (rnd() % 61 == 0) return false;
+    /* What a board's between-step work may do: write code (an EDMA
+     * transfer into it, say), in direct-trace programs. */
+    if (direct_programs && rnd() % 53 == 0) {
+        uint32_t pc = BASE + (rnd() % ((CODE_END - BASE) / 4)) * 4;
+        uint32_t w = random_instruction(pc);
+        memcpy(sys_at(p->sa, pc), &w, 4);
+        memcpy(sys_at(p->sb, pc), &w, 4);
+    }
     present(p);
     return true;
 }
@@ -1069,7 +1079,7 @@ int main(void)
         cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
         assert(!test_horizon.skipped);
         test_horizon.until = 0;
-        test_direct = seed % 3 != 0;
+        test_direct = seed % 4 < 2;
         jit_lockstep(seed);
     }
     CdjC674xJitStats stats;
@@ -1104,8 +1114,10 @@ int main(void)
         cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
         assert(!test_horizon.skipped);
         test_horizon.until = 0;
-        test_direct = seed % 3 != 0;
+        test_direct = seed % 4 < 2;
+        direct_programs = true;
         dt_lockstep(seed);
+        direct_programs = false;
     }
     cdj_c674x_set_horizon(NULL);
     cdj_c674x_loop_set_functional_timing(false);

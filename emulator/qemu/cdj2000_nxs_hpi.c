@@ -159,6 +159,7 @@ typedef struct {
      * Set at each horizon open, cleared when an idle anchor is taken. */
     bool ram_direct;
     uint64_t edma_writes, mcasp_control_writes;   /* see log_sample */
+    CdjC6747Edma edma_backup;   /* advance_functional_mcasp_slots' undo */
     uint64_t hpic_writes, wm8740_latches;
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
@@ -952,31 +953,35 @@ static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
 
 static bool advance_functional_mcasp_slots(NxsHpi *s)
 {
+    /* In place, with both models put back on a failure exactly as
+     * discarding a trial copy left them: one 4 KB EDMA copy per slot
+     * instead of two (nothing a slot runs reads the board's EDMA or McASP
+     * state other than through these pointers). */
     CdjC6747McaspControl original_mcasp = s->mcasp_control;
-    CdjC6747Edma trial_edma = s->edma;
-    CdjC6747McaspControl trial_mcasp = s->mcasp_control;
-    EdmaBusContext trial_context = {.owner = s, .mcasp = &trial_mcasp};
-    bool advanced = false, ok = true;
+    s->edma_backup = s->edma;
+    CdjC6747McaspControl *const trial_mcasp_p = &s->mcasp_control;
+    CdjC6747Edma *const trial_edma_p = &s->edma;
+    EdmaBusContext trial_context = {.owner = s, .mcasp = trial_mcasp_p};
+    bool advanced = false, ok = true, committed = false;
 
     for (unsigned instance = 1; instance <= 2; ++instance) {
-        if ((trial_mcasp.gblctl[instance] & 0x1f00u) != 0x1f00u)
+        if ((trial_mcasp_p->gblctl[instance] & 0x1f00u) != 0x1f00u)
             continue;
         bool axevt;
-        if (!cdj_c6747_mcasp_tx_slot(&trial_mcasp, instance, &axevt)) {
+        if (!cdj_c6747_mcasp_tx_slot(trial_mcasp_p, instance, &axevt)) {
             ok = false;
             break;
         }
         advanced = true;
     }
     if (ok && advanced)
-        ok = service_mcasp_axevt(&trial_edma, &trial_mcasp, &trial_context);
+        ok = service_mcasp_axevt(trial_edma_p, trial_mcasp_p, &trial_context);
     if (ok && advanced) {
+        committed = true;
         for (size_t i = 0; i < trial_context.write_count; ++i) {
             EdmaStagedWrite *write = &trial_context.writes[i];
             memcpy(write->target, write->bytes, write->size);
         }
-        s->edma = trial_edma;
-        s->mcasp_control = trial_mcasp;
         /* A slot the DSP cannot observe keeps an idle proof: it staged no
          * RAM write and read no transiently rewritten word (an EDMA
          * completion dirties it in deliver_edma_notifications). */
@@ -988,26 +993,26 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                 for (unsigned serializer = 0; serializer < 16; ++serializer) {
                     if ((s->audio_voice || s->pcm_wav) &&
                         instance == 1 && serializer == 0 &&
-                        (trial_mcasp.gblctl[1] & 0x1f00u) == 0x1f00u &&
-                        (trial_mcasp.srctl[1][0] & 3u) == 1u) {
+                        (trial_mcasp_p->gblctl[1] & 0x1f00u) == 0x1f00u &&
+                        (trial_mcasp_p->srctl[1][0] & 3u) == 1u) {
                         if (s->audio_voice)
-                            nxs_audio_word(s, trial_mcasp.xslot[1],
-                                           trial_mcasp.xrsr[1][0]);
+                            nxs_audio_word(s, trial_mcasp_p->xslot[1],
+                                           trial_mcasp_p->xrsr[1][0]);
                         if (s->pcm_wav &&
-                            !nxs_pcm_word(s, trial_mcasp.xslot[1],
-                                          trial_mcasp.xrsr[1][0])) {
+                            !nxs_pcm_word(s, trial_mcasp_p->xslot[1],
+                                          trial_mcasp_p->xrsr[1][0])) {
                             s->pcm_failed = true;
                             ok = false;
                             break;
                         }
                     }
-                    uint64_t sequence = trial_mcasp.xrsr_source_sequence[instance][serializer];
+                    uint64_t sequence = trial_mcasp_p->xrsr_source_sequence[instance][serializer];
                     if (!sequence || sequence ==
                         original_mcasp.xrsr_source_sequence[instance][serializer])
                         continue;
                     if (!s->tx_capture) continue;
                     if (s->tx_capture_nonzero_only &&
-                        !trial_mcasp.xrsr[instance][serializer])
+                        !trial_mcasp_p->xrsr[instance][serializer])
                         continue;
                     if (fprintf(s->tx_capture,
                             "{\"sequence\":%" PRIu64 ",\"instance\":%u,"
@@ -1017,8 +1022,8 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                             "\"source\":\"genuine_xbuf\","
                             "\"clock\":\"%s\"}\n",
                             ++s->tx_capture_sequence, instance,
-                            trial_mcasp.xslot[instance], serializer,
-                            trial_mcasp.xrsr[instance][serializer], sequence,
+                            trial_mcasp_p->xslot[instance], serializer,
+                            trial_mcasp_p->xrsr[instance][serializer], sequence,
                             s->cpu.packets, s->cpu.cycles,
                             qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
                             s->virtual_audio_clock ? "virtual-clock-batch" :
@@ -1045,6 +1050,10 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                 if (!ok || !s->tx_capture) break;
             }
         }
+    }
+    if (!committed && (advanced || !ok)) {
+        s->edma = s->edma_backup;
+        s->mcasp_control = original_mcasp;
     }
     edma_free_staged_writes(&trial_context);
     return ok;

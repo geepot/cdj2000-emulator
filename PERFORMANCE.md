@@ -1322,3 +1322,21 @@ copies the CPU's registers and logs up to 64 RAM writes; in busy code
 every horizon end used to take one).  Synchronous 45 s boots are faster
 for it: 404,618 events in 45 s against develop's 298,354, the common
 prefix byte-identical as before.
+
+### 7. Code checks skipped between code-reaching writes; McASP slots in place
+
+Inside `cdj_c674x_run` a packet-cache entry checked since the last write
+that could have reached code is not compared again: a per-thread code
+generation moves at every run's start, every `between()` a run calls,
+every store committed through the board's callback and every store
+committed directly into a host page holding a checked fetch block (a
+hashed bit per 4 KB host page, set when a block is checked).  The
+lockstep test gets a `between()` that sometimes writes code, as an EDMA
+transfer could, and some long horizons (up to 2,000 packets, as on the
+board); dropping any of the four moves or the page marking fails it.  The
+QEMU board's functional McASP slot now runs on the board's own EDMA and
+McASP state with a backup put back on failure, one 4 KB EDMA copy per
+slot instead of two (all 142,177 events and 1,093 DSP checkpoints of a 45 s
+full-capture `--functional-dsp-audio` boot identical to develop's).  RAM
+window lookups compare an offset against the window's span and load and
+store whole little-endian words.

@@ -5229,6 +5229,7 @@ typedef struct {
     void *host_opaque;
     uint64_t host_epoch;
     bool host_valid;
+    uint64_t code_gen;               /* see entry_current */
     bool fast, branches;
     uint8_t single;                  /* execute_single shape, 0 = none */
     int8_t dt;                       /* direct-trace plan: 0 none yet,
@@ -5252,12 +5253,36 @@ static _Thread_local CdjC674xCacheEntry *packet_cache;
  * the host pointers fetch_block returned last time (a board that registers
  * an epoch moves it whenever any block could map elsewhere or stop
  * mapping). */
-static bool entry_current(CdjC674xCacheEntry *e, void *opaque)
+/* Inside cdj_c674x_run the content check is skipped for an entry checked
+ * since the last write that could have reached code: code_gen moves at
+ * every run's start, every between() the run calls (whatever the board did
+ * there), every store committed through a callback, and every store
+ * committed directly into a host page holding a checked fetch block
+ * (code_pages: a hashed bit per 4 KB host page, set when a block is checked
+ * and never cleared). */
+static _Thread_local uint64_t code_gen = 1;
+static _Thread_local uint64_t code_pages[64];
+
+static inline bool code_page(const void *host)
+{
+    uintptr_t page = (uintptr_t)host >> 12;
+    return (code_pages[(page >> 6) & 63] >> (page & 63)) & 1;
+}
+
+static inline void code_page_mark(const void *host)
+{
+    uintptr_t page = (uintptr_t)host >> 12;
+    code_pages[(page >> 6) & 63] |= 1ull << (page & 63);
+}
+
+static bool entry_current(CdjC674xCacheEntry *e, void *opaque, bool in_run)
 {
     if (e->host_valid && e->host_opaque == opaque &&
         e->host_epoch == *fetch_epoch) {
+        if (in_run && e->code_gen == code_gen) return true;
         for (unsigned i = 0; i < e->blocks; ++i)
             if (memcmp(e->host[i], e->bytes[i], 32)) return false;
+        e->code_gen = code_gen;
         return true;
     }
     e->host_valid = false;
@@ -5270,6 +5295,8 @@ static bool entry_current(CdjC674xCacheEntry *e, void *opaque)
         e->host_opaque = opaque;
         e->host_epoch = *fetch_epoch;
         e->host_valid = true;
+        for (unsigned i = 0; i < e->blocks; ++i) code_page_mark(e->host[i]);
+        e->code_gen = code_gen;
     }
     return true;
 }
@@ -5494,7 +5521,7 @@ static bool fetch_cached(CdjC674x *cpu, CdjC674xRead read, void *opaque,
     }
     CdjC674xCacheEntry *e = &packet_cache[packet_cache_index(cpu->pc)];
     if (e->blocks && e->pc == cpu->pc) {
-        if (entry_current(e, opaque)) {
+        if (entry_current(e, opaque, false)) {
             *entry = e;
             return true;
         }
@@ -6350,37 +6377,67 @@ void cdj_c674x_set_ram_window(CdjC674xWrite write, CdjC674xRamWindow window,
     ram_writes_direct = direct;
 }
 
-static _Thread_local struct {
+typedef struct {
+    uint32_t lo, span;                  /* [lo, lo + span); span 0: empty */
+    uint8_t *host;                      /* the byte at lo */
     void *opaque;
     uint64_t epoch;
-    uint32_t lo, hi;                    /* [lo, hi) */
-    uint8_t *host;                      /* the byte at lo */
-    bool valid;
-} ram_tlb[4];
-static _Thread_local unsigned ram_tlb_next;
+} RamTlb;
+static _Thread_local struct {
+    RamTlb entry[4];
+    unsigned next;
+} ram_tlb;
 
 static inline uint8_t *ram_ptr(void *opaque, uint32_t address, unsigned size)
 {
     if (!ram_window || !fetch_epoch) return NULL;
-    uint64_t end = (uint64_t)address + size;
-    for (unsigned i = 0; i < 4; ++i)
-        if (ram_tlb[i].valid && ram_tlb[i].opaque == opaque &&
-            ram_tlb[i].epoch == *fetch_epoch && address >= ram_tlb[i].lo &&
-            end <= ram_tlb[i].hi)
-            return ram_tlb[i].host + (address - ram_tlb[i].lo);
+    uint64_t epoch = *fetch_epoch;
+    RamTlb *t = ram_tlb.entry;
+    for (unsigned i = 0; i < 4; ++i, ++t) {
+        uint32_t off = address - t->lo;
+        if (off < t->span && size <= t->span - off && t->epoch == epoch &&
+            t->opaque == opaque)
+            return t->host + off;
+    }
     uint32_t lo, hi;
     uint8_t *host;
     if (!ram_window(opaque, address, &lo, &hi, &host) || address < lo ||
-        end > hi)
+        (uint64_t)address + size > hi || hi <= lo)
         return NULL;
-    unsigned i = ram_tlb_next++ & 3;
-    ram_tlb[i].opaque = opaque;
-    ram_tlb[i].epoch = *fetch_epoch;
-    ram_tlb[i].lo = lo;
-    ram_tlb[i].hi = hi;
-    ram_tlb[i].host = host;
-    ram_tlb[i].valid = true;
+    t = &ram_tlb.entry[ram_tlb.next++ & 3];
+    *t = (RamTlb){lo, hi - lo, host, opaque, epoch};
     return host + (address - lo);
+}
+
+/* Little-endian loads and stores of 1-8 bytes at host memory. */
+static inline uint64_t ram_load(const uint8_t *p, unsigned size)
+{
+    uint64_t v = 0;
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    switch (size) {
+    case 1: v = *p; break;
+    case 2: { uint16_t x; memcpy(&x, p, 2); v = x; break; }
+    case 4: { uint32_t x; memcpy(&x, p, 4); v = x; break; }
+    case 8: memcpy(&v, p, 8); break;
+    default: for (unsigned i = 0; i < size; ++i) v |= (uint64_t)p[i] << (8 * i);
+    }
+#else
+    for (unsigned i = 0; i < size; ++i) v |= (uint64_t)p[i] << (8 * i);
+#endif
+    return v;
+}
+
+static inline void ram_store(uint8_t *p, uint64_t value, unsigned size)
+{
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    switch (size) {
+    case 1: *p = value; return;
+    case 2: { uint16_t x = value; memcpy(p, &x, 2); return; }
+    case 4: { uint32_t x = value; memcpy(p, &x, 4); return; }
+    case 8: memcpy(p, &value, 8); return;
+    }
+#endif
+    for (unsigned i = 0; i < size; ++i) p[i] = value >> (8 * i);
 }
 
 /* write_transfer for the compiled paths: an aligned 1/2/4/8-byte linear
@@ -6397,11 +6454,14 @@ static bool ram_write_transfer(CdjC674xWrite write, void *opaque,
         !(address & (size - 1))) {
         uint8_t *p = ram_ptr(opaque, address, size);
         if (p) {
-            if (commit)
-                for (unsigned i = 0; i < size; ++i) p[i] = value >> (8 * i);
+            if (commit) {
+                if (code_page(p)) ++code_gen;
+                ram_store(p, value, size);
+            }
             return true;
         }
     }
+    if (commit) ++code_gen;
     return write_transfer(write, opaque, address, value, encoded_size,
                           commit);
 }
@@ -6415,11 +6475,7 @@ static bool jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
         return false;
     const uint8_t *r = ram_ptr(opaque, address, size);
     if (r) {
-        if (value) {
-            uint64_t v = 0;
-            for (unsigned i = 0; i < size; ++i) v |= (uint64_t)r[i] << (8 * i);
-            *value = v;
-        }
+        if (value) *value = ram_load(r, size);
         return true;
     }
     uint32_t first = address & ~31u, last = (address + size - 1) & ~31u;
@@ -9067,7 +9123,7 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
         if (!cpu->loop_active && !cpu->idle_cycles && !cpu->fault) {
             CdjC674xCacheEntry *e = &packet_cache[packet_cache_index(cpu->pc)];
             bool same = e->blocks && e->pc == cpu->pc &&
-                        entry_current(e, opaque);
+                        entry_current(e, opaque, true);
             if (same && !e->dt) {
                 e->dt = dt_plan(e) ? 1 : -1;
                 ++*(e->dt > 0 ? &dt_counts.plans : &dt_counts.untraceable);
@@ -9122,8 +9178,10 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
         if (!n) ++dt_counts.runs;
         if (++n == limit) return n;
         if (horizon_skip(cpu)) continue;
-        /* between() may change anything: the next shape is scanned. */
+        /* between() may change anything: the next shape is scanned, the
+         * code checked. */
         chained = false;
+        ++code_gen;
         if (!between(between_opaque)) {
             *status = CDJ_C674X_RUN_STOPPED;
             return n;
@@ -9236,6 +9294,7 @@ static int jit_cycle(CdjC674x *cpu, JitLoop *l, bool all_pairs,
     if (!fast) {
         fast = execute_fast(cpu, packet, decoded, branches, read, write,
                             opaque, extent);
+        ++code_gen;                     /* its stores use the callback */
         if (fast > 0) ++jit_counts.generic;
     }
     if (fast <= 0) {
@@ -9263,6 +9322,7 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
     *status = 0;
     if (!limit || !cdj_c674x_jit_enabled() || packet_cache_setting() != 2)
         return 0;
+    ++code_gen;                         /* anyone may have written code */
     if (!cpu->loop_active)
         return !dt_enabled() ? 0 : dt_run(cpu, read, write, opaque, limit, between,
                       between_opaque, status);
@@ -9286,7 +9346,7 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
             jk_sync(cpu);
             return n;
         }
-        if (!horizon_skip(cpu) && !between(between_opaque)) {
+        if (!horizon_skip(cpu) && (++code_gen, !between(between_opaque))) {
             jk_sync(cpu);
             *status = CDJ_C674X_RUN_STOPPED;
             return n;
