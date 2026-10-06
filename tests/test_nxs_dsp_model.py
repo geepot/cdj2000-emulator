@@ -24,7 +24,8 @@ def test_model_boot_handshake_and_mailboxes():
         endpoint = root / 'qtest.sock'
         environment = dict(os.environ, CDJ_NXS_DSP_MODEL='1')
         process = subprocess.Popen([str(qemu), '-M', 'cdj2000nxs-main', '-S', '-display', 'none',
-            '-nodefaults', '-bios', str(rom), '-qtest', f'unix:{endpoint},server=on,wait=off'],
+            '-nodefaults', '-accel', 'qtest', '-bios', str(rom),
+            '-qtest', f'unix:{endpoint},server=on,wait=off'],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             env=environment)
         try:
@@ -80,12 +81,34 @@ def test_model_boot_handshake_and_mailboxes():
                 for dsp in (0x11837c9c, 0x11837ba0, 0x11837cb0, 0x11838140, 0x11838100):
                     assert get(dsp) == 0, hex(dsp)
                 assert get(0x11837bd0) == 0x3c
+                put(0x11838144, 0x28)                          # 40 frames
                 put(0x11838140, 0x01010100)
                 put(0x11838100, 7)                             # unaccepted command
                 put(0x118381c4, 1)
                 write(CONTROL, 0x014b014b)
-                assert get(0x11838100) == 7 and get(0x11838140) == 0x01010100
-                assert get(0x118381c4) == 0
+                assert get(0x11838100) == 7 and get(0x118381c4) == 0
+                assert get(0x11838140) == 0
+                assert get(0x11837cd0) == 40 and get(0x11837cc8) == 0x1a24 - 40
+                # Play at 1.0: the position follows virtual time, ahead
+                # frames become behind ones, and it stops at the buffer end.
+                put(0x11837bc0, 0x100000)
+                put(0x11837ba0, 2)
+                write(CONTROL, 0x014b014b)
+                assert get(0x11837ba0) == 0 and get(0x11837bf8) == 2
+                command('clock_step 200000000')                # 0.2 s = 15 frames
+                write(CONTROL, 0x014b014b)
+                assert get(0x11837c10) == 15 and get(0x11837c50) == 15
+                assert get(0x11837cd0) == 25 and get(0x11837ccc) == 15
+                left = get(0x11837bf4)
+                assert left >> 16 == left & 0xffff and 0 < left & 0xffff <= 588
+                command('clock_step 1000000000')               # past 40 frames
+                write(CONTROL, 0x014b014b)
+                assert get(0x11837c10) == 40 and get(0x11837cd0) == 0
+                put(0x11837ba0, 4)                             # cue: stops
+                write(CONTROL, 0x014b014b)
+                command('clock_step 200000000')
+                write(CONTROL, 0x014b014b)
+                assert get(0x11837bf8) == 4 and get(0x11837c10) == 40
                 stream.close()
         finally:
             process.terminate()
