@@ -2,6 +2,8 @@
  * NXS MAIN-facing TI UHPI transport with a partial C674x execution core.
  * Matches the independently verified NXS upload path: byte-addressed global
  * L2, HWOB=1, HPID auto-increment and fixed-address accesses.
+ * The optional DSP thread (CDJ_NXS_DSP_THREAD) follows the lockstep design of
+ * Stijn Jacobs' cdj-nxs2-qemu (GPL-2.0-or-later); see THIRD_PARTY.md.
  */
 #include "qemu/osdep.h"
 #include "qemu/log.h"
@@ -9,6 +11,9 @@
 #include "qemu/bswap.h"
 #include "qemu/timer.h"
 #include "qemu/audio.h"
+#include "qemu/atomic.h"
+#include "qemu/main-loop.h"
+#include "qemu/thread.h"
 #include "qapi/error.h"
 #include "system/runstate.h"
 #include "cdj2000_nxs_hpi.h"
@@ -147,7 +152,75 @@ typedef struct {
     uint32_t idle_log_address[64], idle_log_value[64];
 } NxsHpi;
 static NxsHpi *nxs_hpi;
+
+/*
+ * CDJ_NXS_DSP_THREAD=1: the C674x runs on its own host thread instead of
+ * synchronously inside MAIN's HPI MMIO write.  Its clock is packets at
+ * CDJ_NXS_DSP_THREAD_MPPS million per virtual second, and it never runs more
+ * than a quantum ahead of QEMU_CLOCK_VIRTUAL (an idle-skipping DSP waits for
+ * MAIN; so does one in a paused VM).  A DSP behind virtual time gives the lag up
+ * ("slip"): the interpreter is several times slower than the C6747, and making
+ * MAIN wait for real-time parity starves it worse than the synchronous mode
+ * (measured: no Not Loaded within 280 s).  Instead MAIN, whenever it touches
+ * the DSP (HPI access, reset, boot phase), first waits with the BQL released
+ * until the DSP has executed CDJ_NXS_DSP_THREAD_ACCESS_PACKETS packets since
+ * MAIN's previous access, so a MAIN poll loop cannot outrun the DSP it polls
+ * (without it MAIN's 3,000-read ready poll saw 13 DSP packets per read and
+ * raised E-7010).  Pattern after
+ * Stijn Jacobs' cdj-nxs2-qemu (github.com/Stijn-Jacobs/cdj-nxs2-qemu @ 08d5cb1,
+ * dsp_host.c and nxs2 dsp_c6x.c CDJ_C6X_THREAD=2), with the author's
+ * permission.
+ *
+ * Synchronisation.  Every NxsHpi field is owned by @lock: the DSP thread holds
+ * it for a whole chunk (packet boundaries only), and MAIN's entry points
+ * (hpi_read/hpi_write/reset_line/boot_phase) hold it for their whole body.  So
+ * MAIN never sees a half-executed packet, a half-committed EDMA transaction or
+ * a torn L2/mailbox word, and the DSP sees each HPI access, DSPINT (INTC event
+ * 34) and GPIO boot-phase change atomically between two packets; the mutex's
+ * acquire/release orders all plain accesses.  Lock order is "never wait for
+ * @lock while holding the BQL": MAIN tries @lock, and only on contention drops
+ * the BQL, waits, and retakes the BQL with @lock held.  The DSP thread never
+ * takes the BQL and nothing else holding the BQL blocks on @lock, so there is
+ * no cycle.  MAIN's catch-up wait is a cond wait on @progress with the BQL
+ * dropped; the DSP stops its chunk exactly at MAIN's target (@main_target) and
+ * yields @lock until MAIN has retaken it.  @host_waiting is only a hint that ends the DSP's chunk at the next
+ * packet.  HINT reaches MAIN's DSP-event latch, a BQL-owned board field: from
+ * MAIN (BQL held) at once, from the DSP thread through @hint_bh, which reads
+ * the latest level from @hint_high (written under @lock; qemu_bh_schedule's
+ * atomic xchg orders it before the BH runs).  Level semantics: a later BH can
+ * only deliver a newer level, never resurrect an older one.
+ *
+ * Checkpoints, deferred-v1 and the virtual-time McASP timer are refused: the
+ * packet at which a MAIN event lands now depends on host scheduling, so the
+ * run is not replay evidence.  The synchronous default is unchanged.
+ */
+typedef struct {
+    bool on, quit;
+    QemuMutex lock;
+    QemuCond wake;      /* to the DSP: an event, or a pacing wait to cut */
+    QemuCond progress;  /* to MAIN: the DSP finished a chunk */
+    QemuThread thread;
+    unsigned host_waiting;
+    uint64_t packets_per_us;
+    int64_t quantum_ns;
+    int64_t epoch_ns, report_ns;    /* DSP clock: epoch + packets / rate */
+    uint64_t epoch_packets;
+    uint64_t main_target;           /* packets MAIN waits for; 0: none */
+    uint64_t main_last;             /* packets when MAIN last let go */
+    uint64_t access_packets;        /* DSP progress owed per MAIN access */
+    uint64_t chunks, host_breaks, waits, main_waits;
+    int64_t lag_max_ns, slipped_ns, main_wait_ns;
+    QEMUBH *hint_bh;
+    bool hint_high;
+    void (*real_hint)(void *, bool);
+    void *real_opaque;
+    Notifier shutdown;
+} NxsDspThread;
+static NxsDspThread dsp_thread;
+
 static void run_dsp(NxsHpi *s);
+static void main_lock(void);
+static void main_unlock(void);
 static void model_boot_phase(NxsHpi *s, unsigned phase);
 static void model_service(NxsHpi *s);
 static void virtual_audio_tick(void *opaque);
@@ -317,6 +390,7 @@ static void nxs_pcm_shutdown(Notifier *notifier, void *opaque)
 static bool capture_checkpoint(NxsHpi *s, const char *reason)
 {
     if (s->model) return false;  /* no interpreter state to capture */
+    if (dsp_thread.on) return false;  /* not replay evidence; see dsp_thread */
     const char *policy = getenv("CDJ_NXS_DSP_CHECKPOINT_POLICY");
     if (policy && !strcmp(policy, "fault") && !s->dsp_halted &&
         strcmp(reason, "debug request")) return false;
@@ -397,11 +471,9 @@ bool cdj_nxs_hpi_port(hwaddr address)
     return nxs_hpi && (address == HPI_BASE + 0x80000 || address == HPI_BASE + 0xc0000);
 }
 
-void cdj_nxs_hpi_reset_line(bool released)
+static void reset_line(NxsHpi *s, bool released)
 {
-    NxsHpi *s = nxs_hpi;
-
-    if (!s || released == s->reset_released) return;
+    if (released == s->reset_released) return;
     s->reset_released = released;
     if (!released) {
         if (s->dsp_timer) timer_del(s->dsp_timer);
@@ -457,11 +529,9 @@ void cdj_nxs_hpi_reset_line(bool released)
     info_report("nxs-hpi: DSP reset released; ROM HPI-ready HINT asserted");
 }
 
-void cdj_nxs_hpi_boot_phase(unsigned phase)
+static void boot_phase(NxsHpi *s, unsigned phase)
 {
-    NxsHpi *s = nxs_hpi;
-
-    if (!s || phase > 7) return;
+    if (phase > 7) return;
     bool changed = phase != s->boot_phase;
     s->boot_phase = phase;
     /* Schematic-confirmed CPU_PH0/1/2 reach GP4[5]/GP4[2]/GP4[3]. */
@@ -1458,6 +1528,18 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
             s->dsp_halted = true;
             break;
         }
+        if (dsp_thread.on) {
+            /* The real DSP keeps running after HINT; MAIN only waits for
+             * the chunk to reach a packet boundary. */
+            if (qatomic_read(&dsp_thread.host_waiting) ||
+                qatomic_read(&dsp_thread.quit) ||
+                (dsp_thread.main_target &&
+                 s->cpu.packets >= dsp_thread.main_target)) {
+                ++dsp_thread.host_breaks;
+                break;
+            }
+            continue;
+        }
         if (s->hpi.hint) { reason = "HINT host-event yield"; break; }
     }
     s->dsp_running = false;
@@ -1473,6 +1555,7 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                      s->scheduler.slice_id, s->scheduler.remaining, steps);
     }
     int64_t executed_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    if (dsp_thread.on && !s->dsp_halted) return;  /* see dsp_thread_run */
     bool reported = report_dsp(s, reason);
     if (reported)
         info_report("nxs-dsp-host-time: execution-ns=%" PRId64
@@ -1505,6 +1588,10 @@ static void deferred_dsp_tick(void *opaque)
 static void run_dsp(NxsHpi *s)
 {
     if (s->model) return;       /* nothing executes; see model_service */
+    if (dsp_thread.on) {        /* it runs anyway; just cut a pacing wait */
+        qemu_cond_signal(&dsp_thread.wake);
+        return;
+    }
     if (!s->dsp_started || s->dsp_halted || s->dsp_running) return;
     if (!s->scheduler.mode) {
         execute_dsp(s, s->virtual_audio_clock ?
@@ -1524,6 +1611,123 @@ static void run_dsp(NxsHpi *s)
                  s->scheduler.pending | (s->scheduler.rearm << 1));
     if (!timer_pending(s->dsp_timer))
         timer_mod(s->dsp_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
+}
+
+/* Packets the DSP should have executed by virtual time @ns. */
+static uint64_t dsp_thread_packets_at(int64_t ns)
+{
+    NxsDspThread *t = &dsp_thread;
+    return t->epoch_packets +
+           (uint64_t)MAX(ns - t->epoch_ns, 0) * t->packets_per_us / 1000;
+}
+
+/* Give up DSP time the DSP is behind virtual time.  Under dsp_thread.lock,
+ * with the DSP started. */
+static void dsp_thread_slip(NxsHpi *s, int64_t virt)
+{
+    NxsDspThread *t = &dsp_thread;
+    uint64_t due = dsp_thread_packets_at(virt);
+    if (due <= s->cpu.packets) return;
+    int64_t lag = (int64_t)((due - s->cpu.packets) * 1000 / t->packets_per_us);
+    t->lag_max_ns = MAX(t->lag_max_ns, lag);
+    t->epoch_ns += lag;
+    t->slipped_ns += lag;
+}
+
+#define DSP_THREAD_CHUNK 65536u
+
+static void *dsp_thread_run(void *opaque)
+{
+    NxsHpi *s = opaque;
+    NxsDspThread *t = &dsp_thread;
+    qemu_mutex_lock(&t->lock);
+    while (!t->quit) {
+        if (!s->dsp_started || s->dsp_halted) {
+            qemu_cond_broadcast(&t->progress);
+            qemu_cond_wait(&t->wake, &t->lock);
+            continue;
+        }
+        int64_t virt = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        dsp_thread_slip(s, virt);
+        uint64_t limit = dsp_thread_packets_at(virt + t->quantum_ns);
+        /* MAIN blocked on the DSP holds virtual time (always under icount):
+         * serve it past the pacing limit, or the two would wait for each
+         * other. */
+        limit = MAX(limit, t->main_target);
+        if (s->cpu.packets >= limit) {
+            /* A quantum ahead: wait for MAIN's clock (or a paused VM). */
+            ++t->waits;
+            qemu_cond_timedwait(&t->wake, &t->lock,
+                                MAX(t->quantum_ns / 1000000, 1));
+            continue;
+        }
+        uint64_t quota = MIN(limit - s->cpu.packets, DSP_THREAD_CHUNK);
+        if (t->main_target > s->cpu.packets)
+            quota = MIN(quota, t->main_target - s->cpu.packets);
+        /* Idle skip stays within the quota, so this never passes @limit. */
+        execute_dsp(s, quota);
+        ++t->chunks;
+        qemu_cond_broadcast(&t->progress);
+        if (virt - t->report_ns >= 10 * NANOSECONDS_PER_SECOND) {
+            info_report("nxs-dsp-thread: virtual=%.3fs packets=%" PRIu64
+                        " idle-skipped=%" PRIu64 " lag-max=%.3fs slipped=%.3fs"
+                        " main-waits=%" PRIu64 " main-wait=%.3fs"
+                        " chunks=%" PRIu64 " host-breaks=%" PRIu64
+                        " pacing-waits=%" PRIu64 " pc=%#x",
+                        virt / 1e9, s->cpu.packets, s->idle_skipped_packets,
+                        t->lag_max_ns / 1e9, t->slipped_ns / 1e9,
+                        t->main_waits, t->main_wait_ns / 1e9, t->chunks,
+                        t->host_breaks, t->waits, s->cpu.pc);
+            t->report_ns = virt;
+        }
+        /* Hand the lock to MAIN before taking the next chunk: one waiting
+         * for it, or one woken from @progress that must retake it. */
+        if (qatomic_read(&t->host_waiting) ||
+            (t->main_target && s->cpu.packets >= t->main_target)) {
+            uint64_t packets = s->cpu.packets;
+            qemu_mutex_unlock(&t->lock);
+            while (!qatomic_read(&t->quit) &&
+                   (qatomic_read(&t->host_waiting) ||
+                    (qatomic_read(&t->main_target) &&
+                     packets >= qatomic_read(&t->main_target))))
+                sched_yield();
+            qemu_mutex_lock(&t->lock);
+        }
+    }
+    qemu_cond_broadcast(&t->progress);
+    qemu_mutex_unlock(&t->lock);
+    return NULL;
+}
+
+static void dsp_thread_deliver_hint(void *opaque)
+{
+    dsp_thread.real_hint(dsp_thread.real_opaque,
+                         qatomic_read(&dsp_thread.hint_high));
+}
+
+/* s->hint in threaded mode; always called with dsp_thread.lock held. */
+static void dsp_thread_hint(void *opaque, bool high)
+{
+    qatomic_set(&dsp_thread.hint_high, high);
+    if (bql_locked()) dsp_thread_deliver_hint(opaque);
+    else qemu_bh_schedule(dsp_thread.hint_bh);
+}
+
+static void dsp_thread_shutdown(Notifier *notifier, void *data)
+{
+    /* Before the WAV/audio notifiers (registered earlier, so run later). */
+    main_lock();
+    qatomic_set(&dsp_thread.quit, true);
+    qemu_cond_signal(&dsp_thread.wake);
+    main_unlock();
+    qemu_thread_join(&dsp_thread.thread);
+    info_report("nxs-dsp-thread: stopped packets=%" PRIu64
+                " lag-max=%.3fs slipped=%.3fs main-waits=%" PRIu64
+                " main-wait=%.3fs chunks=%" PRIu64 " host-breaks=%" PRIu64,
+                nxs_hpi->cpu.packets, dsp_thread.lag_max_ns / 1e9,
+                dsp_thread.slipped_ns / 1e9, dsp_thread.main_waits,
+                dsp_thread.main_wait_ns / 1e9, dsp_thread.chunks,
+                dsp_thread.host_breaks);
 }
 
 /* Experimental independent McASP event source. QEMU virtual time is host
@@ -1776,6 +1980,11 @@ static void start_dsp(NxsHpi *s)
     s->cpu.cycle_tick = dsp_cycle_tick;
     s->cpu.cycle_opaque = s;
     s->dsp_started = true;
+    if (dsp_thread.on) {
+        dsp_thread.epoch_ns = dsp_thread.report_ns =
+            qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        dsp_thread.epoch_packets = dsp_thread.main_last = s->cpu.packets;
+    }
     if (s->mcasp_timer)
         timer_mod(s->mcasp_timer,
                   qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + MCASP_VIRTUAL_BATCH_NS);
@@ -1790,7 +1999,7 @@ static void start_dsp(NxsHpi *s)
                 s->syscfg.cfgchip[3], s->syscfg.amute_clear_pulses);
 }
 
-static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)
+static uint64_t hpi_read_locked(void *opaque, hwaddr offset, unsigned size)
 {
     NxsHpi *s = opaque;
     capture_requested_checkpoint(s);
@@ -1815,7 +2024,8 @@ static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)
     return result;
 }
 
-static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size)
+static void hpi_write_locked(void *opaque, hwaddr offset, uint64_t value,
+                             unsigned size)
 {
     NxsHpi *s = opaque;
     uint32_t address = s->address;
@@ -1863,6 +2073,85 @@ static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size
         qemu_log_mask(LOG_GUEST_ERROR, "nxs-hpi: unsupported write offset=%" HWADDR_PRIx " address=%#x HWOB=%d reset=%d\n",
                       offset, s->address, s->hpi.hwob, s->hpi.hpirst);
     }
+}
+
+/* MAIN side of dsp_thread.lock; a no-op in the synchronous default.  Takes the
+ * lock, then waits (BQL released) until the running DSP has executed
+ * access_packets since MAIN's previous access, and returns with both held. */
+static void main_lock(void)
+{
+    NxsDspThread *t = &dsp_thread;
+    NxsHpi *s = nxs_hpi;
+    if (!t->on) return;
+    bool bql = bql_locked(), dropped = false;
+    if (qemu_mutex_trylock(&t->lock)) {
+        qatomic_inc(&t->host_waiting);
+        if (bql) {
+            bql_unlock();
+            dropped = true;
+        }
+        qemu_mutex_lock(&t->lock);
+        qatomic_dec(&t->host_waiting);
+    }
+    if (s->dsp_started && !s->dsp_halted && !t->quit) {
+        uint64_t target = t->main_last + t->access_packets;
+        if (s->cpu.packets < target) {
+            if (bql && !dropped) {
+                bql_unlock();
+                dropped = true;
+            }
+            int64_t start = get_clock();
+            ++t->main_waits;
+            qatomic_set(&t->main_target, target);
+            qemu_cond_signal(&t->wake);
+            while (s->cpu.packets < target && s->dsp_started &&
+                   !s->dsp_halted && !t->quit)
+                qemu_cond_wait(&t->progress, &t->lock);
+            qatomic_set(&t->main_target, 0);
+            t->main_wait_ns += get_clock() - start;
+        }
+    }
+    /* Holding @lock while waiting for the BQL is safe: no BQL holder ever
+     * blocks on @lock (it tries, then drops the BQL as above). */
+    if (dropped) bql_lock();
+}
+
+static void main_unlock(void)
+{
+    if (!dsp_thread.on) return;
+    dsp_thread.main_last = nxs_hpi->cpu.packets;
+    qemu_mutex_unlock(&dsp_thread.lock);
+}
+
+void cdj_nxs_hpi_reset_line(bool released)
+{
+    if (!nxs_hpi) return;
+    main_lock();
+    reset_line(nxs_hpi, released);
+    main_unlock();
+}
+
+void cdj_nxs_hpi_boot_phase(unsigned phase)
+{
+    if (!nxs_hpi) return;
+    main_lock();
+    boot_phase(nxs_hpi, phase);
+    main_unlock();
+}
+
+static uint64_t hpi_read(void *opaque, hwaddr offset, unsigned size)
+{
+    main_lock();
+    uint64_t value = hpi_read_locked(opaque, offset, size);
+    main_unlock();
+    return value;
+}
+
+static void hpi_write(void *opaque, hwaddr offset, uint64_t value, unsigned size)
+{
+    main_lock();
+    hpi_write_locked(opaque, offset, value, size);
+    main_unlock();
 }
 
 static const MemoryRegionOps hpi_ops = {
@@ -2026,6 +2315,48 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     s->sdram = g_malloc0(SDRAM_SIZE);
     s->hint = hint;
     s->opaque = opaque;
+    const char *threaded = getenv("CDJ_NXS_DSP_THREAD");
+    if (threaded && !strcmp(threaded, "1")) {
+        NxsDspThread *t = &dsp_thread;
+        if (s->model || s->scheduler.mode || s->virtual_audio_clock ||
+            s->audio_voice || !hint) {
+            error_report("nxs-c674x: the DSP thread needs the real C674x with "
+                         "the legacy scheduler and no virtual McASP clock");
+            exit(EXIT_FAILURE);
+        }
+        const char *rate = getenv("CDJ_NXS_DSP_THREAD_MPPS");
+        const char *quantum = getenv("CDJ_NXS_DSP_THREAD_QUANTUM_US");
+        const char *access = getenv("CDJ_NXS_DSP_THREAD_ACCESS_PACKETS");
+        t->access_packets = access && *access ?
+                            g_ascii_strtoull(access, NULL, 10) : 256;
+        t->packets_per_us = rate && *rate ? g_ascii_strtoull(rate, NULL, 10) : 150;
+        t->quantum_ns = (quantum && *quantum ?
+                         g_ascii_strtoull(quantum, NULL, 10) : 1000) * 1000;
+        if (!t->packets_per_us || t->packets_per_us > 100000 ||
+            t->quantum_ns < 10000 || t->quantum_ns > NANOSECONDS_PER_SECOND ||
+            t->access_packets > CDJ_DSP_LEGACY_BUDGET_DEFAULT) {
+            error_report("nxs-c674x: invalid DSP thread rate, quantum or "
+                         "packets per access");
+            exit(EXIT_FAILURE);
+        }
+        t->on = true;
+        t->real_hint = hint;
+        t->real_opaque = opaque;
+        t->hint_bh = qemu_bh_new(dsp_thread_deliver_hint, NULL);
+        s->hint = dsp_thread_hint;
+        qemu_mutex_init(&t->lock);
+        qemu_cond_init(&t->wake);
+        qemu_cond_init(&t->progress);
+        qemu_thread_create(&t->thread, "cdj-nxs-c674x", dsp_thread_run, s,
+                           QEMU_THREAD_JOINABLE);
+        t->shutdown.notify = dsp_thread_shutdown;
+        qemu_register_shutdown_notifier(&t->shutdown);
+        warn_report("nxs-c674x: DSP on its own thread, %" PRIu64 "M packets/s "
+                    "of virtual time, quantum %" PRId64 " us, %" PRIu64
+                    " packets per MAIN access; no checkpoints, not replay "
+                    "evidence", t->packets_per_us, t->quantum_ns / 1000,
+                    t->access_packets);
+    }
     if (s->hint) s->hint(s->opaque, true); /* UHPI_HINT is active low and idle high. */
     memory_region_init_io(&s->registers, NULL, &hpi_ops, s, "nxs.uhpi", 0x100000);
     memory_region_add_subregion(system, HPI_BASE, &s->registers);

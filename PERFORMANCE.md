@@ -508,3 +508,49 @@ word. Over the NXS stage1 (0x11801da0-0x11804d80) and stage2
 operands, 0 disagreements; the only fetch rejections are 818 blocks of
 0xffffffff fill that objdump also calls undefined. Operands of in-place
 compact forms and of 32-bit arms are outside this check.
+
+## DSP on its own thread (`nxs_vm --dsp-thread`, opt-in, 2026-10-05)
+
+`CDJ_NXS_DSP_THREAD=1` runs the C674x on its own host thread instead of inside
+MAIN's HPI MMIO write (pattern after Stijn Jacobs' cdj-nxs2-qemu; see
+THIRD_PARTY.md). The DSP runs at most one quantum (1 ms) ahead of
+`QEMU_CLOCK_VIRTUAL` and gives up lag rather than catching up. MAIN, on every
+HPI access, reset or boot-phase change, waits with the BQL released until the
+DSP has executed `--dsp-thread-access-packets` (default 256) packets since
+MAIN's previous access. The synchronisation argument is the comment above
+`NxsDspThread` in `cdj2000_nxs_hpi.c`; `tests/test_dsp_thread.py` compiles that
+code against a pthread shim and checks pacing, the BQL release, the lock
+hand-over at MAIN's target, torn-mailbox freedom, HINT delivery and shutdown.
+Threaded runs write no checkpoints and are not replay evidence.
+
+The synchronous default is unchanged. Same 45 s boots, `develop` binary versus
+this one: all 233,789 event records and 3,569 checkpoints are byte-identical
+over the common prefix, and 122,123 events and 551 checkpoints with
+`--functional-dsp-audio`.
+
+Stock NXS firmware, the confirmed rekordbox USB, `--functional-dsp-audio
+--lightweight`, Ethernet on an isolated `link_hub`, scenario driven through
+`tools.cdj_main.dev`. Seconds of wall time, single runs, polled at about 1 s.
+The host was shared with other agents' emulators (load average 10-38).
+
+| Milestone | synchronous | `--dsp-thread` |
+| --- | ---: | ---: |
+| Launch to `Not Loaded.` | 13.6 | 8.2 |
+| USB press to the USB root list | 134.8 | 1.2 |
+| Enter on [TRACK] to the track list | 1.8 | 0.7 |
+| Enter on Bang Bang to the duration reply | 19.6 | 1.15 |
+| Play to 150 counter frames (1 s of track) | 45 | 19 |
+| Pro DJ Link keep-alives per minute (largest gap) | 1.1 (77 s) | 23.0 (2.8 s) |
+
+Both loaded the track with its waveform and BPM and played. The threaded run
+logged no DSP fault and its DSP-paced WAV has 128,042 frames, 44,311 of them
+nonzero. Playback stays bound by DSP speed (one McASP slot per 1,024 packets).
+
+Variants that lost:
+
+- MAIN waiting for virtual-time parity with a 150 Mpackets/s DSP clock: MAIN
+  waited 99.5% of the time and had not reached `Not Loaded.` after 280 s.
+- No per-access wait (`--dsp-thread-access-packets 0`): MAIN's 3,000-read
+  ready poll saw about 13 DSP packets per read and the deck showed E-7010.
+- 64 and 512 packets per access also worked: play to 150 frames in 27 s and
+  41 s.

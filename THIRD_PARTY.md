@@ -78,6 +78,15 @@ included; the Blackfin files have no third-party tables.
 | used in | `emulator/qemu/cdj_c674x.c` (persistent per-PC decoded-packet cache and a fast path for common packets, after its `c66x_step.c` packet cache and `fast_cycles`), `tools/cdj_dsp/decode_crosscheck.{c,py}` (decoder-vs-objdump sweep over the whole DSP image, after its `make m1`) |
 | code copied | none: both were written against this core; files carry a courtesy credit line |
 
+## Adapted design: cdj-nxs2-qemu (Stijn Jacobs)
+
+| | |
+|---|---|
+| what | the lockstep DSP-thread pattern (DSP on its own host thread, at most one quantum ahead of QEMU virtual time; MAIN releases the BQL while it waits) |
+| where from | `https://github.com/Stijn-Jacobs/cdj-nxs2-qemu` at `08d5cb1`: `hw/cdj/boards/cdj2000/dsp_host.c`, `hw/cdj/boards/nxs2/dsp_c6x.c` (`CDJ_C6X_THREAD=2`) |
+| licence | GPL-2.0-or-later; used with the author's permission |
+| our use | `emulator/qemu/cdj2000_nxs_hpi.c`, `CDJ_NXS_DSP_THREAD=1` (2026-10-05): the pattern re-implemented for our C674x and HPI model, no code copied verbatim |
+
 ## Nothing else is vendored
 
 No other third-party source is copied into this tree. The only binaries this
