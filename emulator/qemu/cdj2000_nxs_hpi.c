@@ -182,8 +182,12 @@ static void dsp_jit_report(void)
     CdjC674xJitStats jit;
     cdj_c674x_jit_stats(&jit);
     info_report("nxs-c674x-jit: runs=%" PRIu64 " steady=%" PRIu64
-                " native=%" PRIu64 " generic=%" PRIu64 " compiles=%" PRIu64,
-                jit.runs, jit.steady, jit.native, jit.generic, jit.compiles);
+                " native=%" PRIu64 " generic=%" PRIu64 " compiles=%" PRIu64
+                " direct=%" PRIu64 " direct-runs=%" PRIu64
+                " plans=%" PRIu64 " untraceable=%" PRIu64,
+                jit.runs, jit.steady, jit.native, jit.generic, jit.compiles,
+                jit.direct, jit.direct_runs, jit.direct_plans,
+                jit.direct_untraceable);
 }
 
 /*
@@ -1754,14 +1758,14 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
         .idle_skip = s->idle_skip && !s->scheduler.mode &&
                      !s->virtual_audio_clock && !s->fault_history_path,
     };
-    /* Compiled loops (CDJ_C674X_JIT=1); the fault history records every
-     * step itself, so it keeps the plain loop. */
+    /* Compiled loops and direct traces (CDJ_C674X_JIT=1); the fault history
+     * records every step itself, so it keeps the plain loop. */
     bool compiled = !s->fault_history_path;
     bool pre_done = false;
     while (a.steps < quota) {
         if (!pre_done && !dsp_pre_step(&a)) break;
         pre_done = false;
-        if (compiled && s->cpu.loop_active) {
+        if (compiled) {
             unsigned status;
             unsigned n = cdj_c674x_run(&s->cpu, dsp_read, dsp_write, s,
                                        quota - a.steps, dsp_between, &a,

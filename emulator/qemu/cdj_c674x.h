@@ -153,8 +153,8 @@ bool cdj_c674x_step_capture_direct(CdjC674x *, CdjC674xRead, CdjC674xWrite,
  *                              loop would;
  *   CDJ_C674X_RUN_FAULT        packet n+1 failed exactly as cdj_c674x_step
  *                              would have (cpu->fault set).
- * Off unless CDJ_C674X_JIT=1 (or cdj_c674x_set_jit(1)); needs packet-cache
- * mode 2.  Process-wide, like the packet cache. */
+ * Off unless CDJ_C674X_JIT=1 (or cdj_c674x_set_jit(1)); =loops compiles
+ * loop-buffer cycles only.  Needs packet-cache mode 2.  Process-wide, like the packet cache. */
 typedef bool (*CdjC674xBetween)(void *opaque);
 enum {
     CDJ_C674X_RUN_BETWEEN = 1,
@@ -178,9 +178,12 @@ void cdj_c674x_set_jit(int enabled);
 bool cdj_c674x_jit_enabled(void);
 /* Counters of the calling thread's compiled execution, for reports and
  * tests: runs that executed a packet, loop-buffer cycles by path (native
- * jit_exec, execute_fast fallback, steady-state kernel), loop compiles. */
+ * jit_exec, execute_fast fallback, steady-state kernel), loop compiles;
+ * direct packets run from plans, direct runs, plans built and packets
+ * found not traceable. */
 typedef struct {
     uint64_t runs, native, generic, compiles, steady;
+    uint64_t direct, direct_runs, direct_plans, direct_untraceable;
 } CdjC674xJitStats;
 void cdj_c674x_jit_stats(CdjC674xJitStats *stats);
 

@@ -43,7 +43,8 @@ static bool sys_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     System *s = opaque;
-    if (address < BASE || address + size > BASE + SIZE || (address & (size - 1)))
+    if (address < BASE || (uint64_t)address + size > BASE + SIZE ||
+        (address & (size - 1)))
         return false;
     if (commit) {
         if (address == BAD_COMMIT) return false;
@@ -149,10 +150,46 @@ static unsigned pick_body_dst(void)
 
 /* Kernel-shaped bodies: only unpredicated SP and memory operations (and
  * NOPs), the shape steady-state kernels compile. */
-static bool kernel_body;
+static bool kernel_body, direct_extras;
+
+/* Direct-trace extras: CMPSP (FAUCR in place), 16x16 and half-by-word
+ * multiplies (delayed results through the generic arm path), ADDA/SUBA
+ * .D, the long ADDAB/H/W B14/B15 form and ADDKPC (multicycle). */
+static uint32_t random_extra(void)
+{
+    unsigned s = rnd() & 1, x = rnd() & 1, dst = pick_body_dst();
+    unsigned a = rnd() & 15, b = rnd() & 15;
+    switch (rnd() % 6) {
+    case 0:
+        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
+               (0x38 + rnd() % 3) << 6 | 0x20 | s << 1;        /* CMPxxSP */
+    case 1: {
+        static const unsigned ops[] = {0x19, 0x18, 0x01, 0x09, 0x0f, 0x03};
+        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
+               ops[rnd() % 6] << 7 | s << 1;                   /* MPY16 */
+    }
+    case 2: {
+        static const unsigned ops[] = {0x0e, 0x10};
+        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
+               ops[rnd() % 2] << 6 | 0x30 | s << 1;            /* MPYIH/IL */
+    }
+    case 3:
+        return predicate() | dst << 23 | (4 + rnd() % 4) << 18 |
+               (rnd() & 7) << 13 | (0x30 + rnd() % 14) << 7 | 0x40 |
+               s << 1;                                          /* ADDA .D */
+    case 4:
+        return 1u << 28 | dst << 23 | (rnd() & 0x7fff) << 8 |
+               (rnd() & 1) << 7 | (rnd() % 3 == 0 ? 0x3c : 0x7c) |
+               s << 1;                                          /* ADDAW */
+    default:
+        return predicate() | dst << 23 | (rnd() & 127) << 16 |
+               (rnd() % 6) << 13 | 0x162 | 2;                   /* ADDKPC */
+    }
+}
 
 static uint32_t random_body(uint32_t pc)
 {
+    if (direct_extras && rnd() % 4 == 0) return random_extra();
     if (kernel_body) {
         if (rnd() % 4 == 0) return rnd() % 3 ? 0 : (rnd() % 4) << 13;
     } else if (rnd() % 2) return random_instruction(pc);
@@ -487,6 +524,214 @@ static void jit_lockstep(unsigned seed)
     }
 }
 
+/* Direct-trace lockstep: random direct programs (build()'s instruction mix
+ * with half the slots replaced by random_body's MPYSP, ADDSP/SUBSP and
+ * every load/store form through A4-A7/B4-B7) run through cdj_c674x_run
+ * (system A) against the uncached interpreter (B), compared after every
+ * packet, with random interrupts, run limits and between() refusals, host
+ * code uploads, a withdrawn code window and failing bus operations. */
+static void build_direct(System *s)
+{
+    build(s);
+    direct_extras = true;
+    for (uint32_t pc = BASE; pc < CODE_END; pc += 4) {
+        uint32_t w;
+        memcpy(&w, s->ram + (pc - BASE), 4);
+        /* Keep the data pointers A4-A7/B4-B7 mostly intact, so programs
+         * run long enough to matter (a few still clobber them). */
+        unsigned dst = (w >> 23) & 31;
+        if ((w & 0x7c) != 0x10 && (w & 0x1ffc) != 0x120 && dst >= 4 &&
+            dst <= 7 && rnd() % 8)
+            w = (w & ~(31u << 23)) | (8u + (dst & 1)) << 23;
+        memcpy(s->ram + (pc - BASE), &w, 4);
+        if (rnd() % 2) continue;
+        uint32_t body;
+        do body = random_body(pc);
+        while ((body & 0x7c) == 0x10 || (body & 0x1ffc) == 0x120);
+        w = (body & ~1u) | (w & 1);
+        memcpy(s->ram + (pc - BASE), &w, 4);
+    }
+    direct_extras = false;
+}
+
+static unsigned dt_runs;
+
+static void dt_lockstep(unsigned seed)
+{
+    static System sa, sb;
+    static CdjC674x a, b;
+    rng_state = seed * 2654435761u + 11;
+    build_direct(&sa);
+    cdj_c674x_loop_set_functional_timing(seed % 4 == 3);
+    sa.ticks = 0;
+    sa.hide = false;
+    sb = sa;
+    uint32_t b10 = seed & 1 ? BASE + (rnd() % 0x380) * 4 : 0x1900;
+    uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
+                   rnd() % 8 == 0 ? BAD_COMMIT - 8 * 4 : 0x1800;
+    uint32_t state = rng_state;
+    loop_bases = true;
+    init_cpu(&a, &sa, a10, b10);
+    rng_state = state;
+    init_cpu(&b, &sb, a10, b10);
+    if (seed & 2) {                       /* interrupts recognized */
+        a.control[1] |= 1; b.control[1] |= 1;
+        a.control[4] = b.control[4] = 0xfff3;
+        a.control[5] = b.control[5] = BASE;
+    }
+    JitPair p = {&a, &b, &sa, &sb, seed, 0};
+    bool pre_done = false;
+    while (p.step < 3000) {
+        if (!pre_done) {
+            if (rnd() % 97 == 0) {        /* host upload into code */
+                uint32_t pc = BASE + (rnd() % ((CODE_END - BASE) / 4)) * 4;
+                uint32_t w = random_instruction(pc);
+                memcpy(sa.ram + (pc - BASE), &w, 4);
+                memcpy(sb.ram + (pc - BASE), &w, 4);
+            }
+            if (rnd() % 89 == 0) sa.hide = sb.hide = !sa.hide;
+            present(&p);
+        }
+        pre_done = false;
+        if (a.packets == b.packets) {
+            unsigned status, limit = 1 + rnd() % 64;
+            unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, limit,
+                                       jit_between, &p, &status);
+            dt_runs += n != 0;
+            if (status == CDJ_C674X_RUN_FAULT) {
+                step_b(&p, false);
+                ++faults_seen;
+                return;
+            }
+            if (status == CDJ_C674X_RUN_BETWEEN) {
+                pre_done = true;
+                continue;
+            }
+            if (status == CDJ_C674X_RUN_STOPPED) continue;
+            if (n) {
+                ++jit_packets;
+                step_b(&p, true);
+                continue;
+            }
+        }
+        bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+        step_b(&p, ra);
+        if (!ra) {
+            ++faults_seen;
+            return;
+        }
+    }
+}
+
+/* Directed direct-trace declines after state the plan changes in place:
+ * a delayed-result append (MPY), FAUCR (CMPGTSP on NaN) and ILC are each
+ * followed in their packet by a load that faults at issue (unaligned), so
+ * the trace must put everything back before the interpreter faults. */
+/* Fill the stack the next call will use, so a slot restored from an
+ * unrecorded undo entry cannot happen to hold the right bytes. */
+static __attribute__((noinline)) void stack_poison(void)
+{
+    volatile uint8_t junk[64 * 1024];
+    for (size_t i = 0; i < sizeof junk; ++i) junk[i] = 0xa5;
+}
+
+static void dt_directed(void)
+{
+    static System sa, sb;
+    static CdjC674x a, b;
+    const uint32_t nan = 0x7fc00000u;
+    const uint32_t first[] = {
+        8u << 23 | 2u << 18 | 3u << 13 | 0x19u << 7 | 1,          /* MPY .M1 */
+        8u << 23 | 2u << 18 | 3u << 13 | 0x39u << 6 | 0x20 | 1,   /* CMPGTSP */
+    };
+    for (unsigned k = 0; k < 2; ++k) {
+        memset(&sa, 0, sizeof sa);
+        uint32_t code[8] = {
+            first[k],
+            9u << 23 | 10u << 18 | 1u << 13 | 1u << 9 | 6u << 4 | 4,  /* LDW */
+            4u << 13,                                             /* NOP 5 */
+        };
+        memcpy(sa.ram, code, sizeof code);
+        sb = sa;
+        for (unsigned side = 0; side < 2; ++side) {
+            CdjC674x *cpu = side ? &b : &a;
+            cdj_c674x_reset(cpu, BASE);
+            cpu->r[0][2] = cpu->r[0][3] = nan;
+            cpu->r[0][10] = 0x1801;                  /* unaligned base */
+            cpu->control[19] = 0x00000005u;
+            cpu->cycle_tick = sys_tick;
+            cpu->cycle_opaque = side ? &sb : &sa;
+            /* A queued entry in the slot the append will use: its bytes
+             * must survive the decline. */
+            cpu->loads[0] = (CdjC674xLoad){.due = 1000, .dst = 7,
+                                           .address = 0xabcd, .size = 4};
+        }
+        /* Fill the packet cache with this code (the plan comes from it). */
+        static System sc;
+        static CdjC674x c;
+        sc = sa;
+        c = a;
+        c.cycle_opaque = &sc;
+        c.loads[0].address = 0x5555;    /* other bytes on the stack */
+        assert(!cdj_c674x_step(&c, sys_read, sys_write, &sc));
+        CdjC674xJitStats before, after;
+        cdj_c674x_jit_stats(&before);
+        stack_poison();
+        unsigned status;
+        unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, 1, NULL,
+                                   NULL, &status);
+        cdj_c674x_jit_stats(&after);
+        assert(!n && !status && after.direct_plans == before.direct_plans + 1);
+        bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+        cdj_c674x_set_packet_cache(0);
+        bool rb = cdj_c674x_step(&b, sys_read, sys_write, &sb);
+        cdj_c674x_set_packet_cache(2);
+        assert(!ra && !rb);
+        same(&a, &sa, &b, &sb, 0, k);
+    }
+}
+
+static bool always(void *opaque) { (void)opaque; return true; }
+
+/* Directed: a CMPEQDP's delayed FAUCR effect lands in the cycle a CMPGTSP
+ * writes FAUCR status (both on NaN): the interpreter refuses the second
+ * packet, so the trace must decline it. */
+static void dt_directed_faucr(void)
+{
+    static System sa, sb, sc;
+    static CdjC674x a, b, c;
+    memset(&sa, 0, sizeof sa);
+    uint32_t code[8] = {
+        8u << 23 | 4u << 18 | 2u << 13 | 0xa20,                  /* CMPEQDP */
+        9u << 23 | 2u << 18 | 3u << 13 | 0x39u << 6 | 0x20,      /* CMPGTSP */
+        4u << 13,                                                 /* NOP 5 */
+    };
+    memcpy(sa.ram, code, sizeof code);
+    sb = sc = sa;
+    CdjC674x *cpus[3] = {&a, &b, &c};
+    System *systems[3] = {&sa, &sb, &sc};
+    for (unsigned i = 0; i < 3; ++i) {
+        cdj_c674x_reset(cpus[i], BASE);
+        for (unsigned r = 2; r <= 5; ++r) cpus[i]->r[0][r] = 0x7ff80000u;
+        cpus[i]->cycle_tick = sys_tick;
+        cpus[i]->cycle_opaque = systems[i];
+    }
+    /* Fill the packet cache with both packets. */
+    assert(cdj_c674x_step(&c, sys_read, sys_write, &sc));
+    assert(!cdj_c674x_step(&c, sys_read, sys_write, &sc));
+    unsigned status;
+    unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, 2, always, NULL,
+                               &status);
+    assert(n == 1 && status == CDJ_C674X_RUN_BETWEEN);
+    bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+    cdj_c674x_set_packet_cache(0);
+    bool rb = cdj_c674x_step(&b, sys_read, sys_write, &sb) &&
+              cdj_c674x_step(&b, sys_read, sys_write, &sb);
+    cdj_c674x_set_packet_cache(2);
+    assert(!ra && !rb && !strcmp(a.fault, "delayed FP-status write conflict"));
+    same(&a, &sa, &b, &sb, 0, 3);
+}
+
 int main(void)
 {
     cdj_c674x_set_fetch_block(sys_read, sys_block);
@@ -516,5 +761,20 @@ int main(void)
     assert(jit_packets > 300000 && jit_armed > 300 && faults_seen > 100 &&
            stats.native > 300000 && stats.generic > 10000 &&
            stats.steady > 100000);
+    jit_packets = faults_seen = 0;
+    dt_directed();
+    dt_directed_faucr();
+    for (unsigned seed = 1; seed <= 24000; ++seed) dt_lockstep(seed);
+    cdj_c674x_loop_set_functional_timing(false);
+    CdjC674xJitStats after;
+    cdj_c674x_jit_stats(&after);
+    printf("direct-trace lockstep: 24000 programs, %llu traced packets in "
+           "%llu runs (%u with a packet), %llu plans, %llu untraceable, %u faults\n",
+           (unsigned long long)(after.direct - stats.direct),
+           (unsigned long long)(after.direct_runs - stats.direct_runs), dt_runs,
+           (unsigned long long)(after.direct_plans - stats.direct_plans),
+           (unsigned long long)(after.direct_untraceable -
+                                stats.direct_untraceable), faults_seen);
+    assert(after.direct - stats.direct > 3000000 && faults_seen > 1000);
     return 0;
 }

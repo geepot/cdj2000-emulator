@@ -914,16 +914,16 @@ static bool quota_pre(Quota *q)
                cpu.branch_due);
     pcm_observe();
     q->before = coverage_before(&cpu);
-    q->has_coverage_packet = !q->before.direct_fetch &&
-        coverage_capture(&cpu, &q->coverage_packet);
+    /* Direct packets may run inside cdj_c674x_run, which reports no
+     * source packet: fetch it here for every source fetch. */
+    q->has_coverage_packet = coverage_capture(&cpu, &q->coverage_packet);
     return true;
 }
 
 static bool quota_post(Quota *q)
 {
     coverage_record(&q->before,
-                    (q->before.direct_fetch || q->has_coverage_packet) ?
-                    &q->coverage_packet : NULL);
+                    q->has_coverage_packet ? &q->coverage_packet : NULL);
     --q->limits->steps_remaining;
     if (spi_transfer.fault) {
         cpu.fault = "unsupported SPI transfer clock or state";
@@ -959,7 +959,7 @@ static const char *run_steps_ticked(Quota q)
     while (q.step < quota) {
         if (!pre_done && !quota_pre(&q)) return q.reason;
         pre_done = false;
-        if (cpu.loop_active) {
+        {
             unsigned status;
             unsigned n = cdj_c674x_run(&cpu, read_bus, write_bus, NULL,
                                        quota - q.step, quota_between, &q,
@@ -978,8 +978,7 @@ static const char *run_steps_ticked(Quota q)
                 continue;
             }
         }
-        if (!cdj_c674x_step_capture_direct(&cpu, read_bus, write_bus, NULL,
-                q.before.direct_fetch ? &q.coverage_packet : NULL))
+        if (!cdj_c674x_step(&cpu, read_bus, write_bus, NULL))
             return q.standalone ? "fault" :
                    cpu.fault ? cpu.fault : "CPU stopped";
         if (!quota_post(&q)) return q.reason;
