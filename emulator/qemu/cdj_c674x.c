@@ -5229,7 +5229,7 @@ typedef struct {
     void *host_opaque;
     uint64_t host_epoch;
     bool host_valid;
-    uint64_t code_gen;               /* see entry_current */
+    uint64_t checked_gen;            /* code_gen when checked, see entry_current */
     bool fast, branches;
     uint8_t single;                  /* execute_single shape, 0 = none */
     int8_t dt;                       /* direct-trace plan: 0 none yet,
@@ -5239,13 +5239,50 @@ typedef struct {
     CdjC674xDecoded decoded[8];
     struct DtPlan *plan;             /* kept across refills, see dt_plan */
     struct DtsVariant *variants;     /* static schedules; dropped on refill */
+    /* The ahead-of-time packet with these bytes (aot_packet_of), or NULL. */
+    const struct AotPacket *aot;
     /* The shape execute_single leaves from an empty one when it queues a
      * branch (an interned shape: never freed), NULL until first needed. */
     const struct DtsShape *single_out;
     const struct DtsVariant *last_variant;  /* dts_lean_find's last (lean) */
 } CdjC674xCacheEntry;
 
-static _Thread_local CdjC674xCacheEntry *packet_cache;
+typedef struct {
+    uint32_t lo, span;                  /* [lo, lo + span); span 0: empty */
+    uint8_t *host;                      /* the byte at lo */
+    void *opaque;
+    uint64_t epoch;
+} RamTlb;
+typedef struct { uint64_t packets, runs, plans, untraceable; } DtCounts;
+#ifndef CDJ_C674X_TLS
+#  define CDJ_C674X_TLS _Thread_local
+#endif
+typedef struct {
+    uint64_t hits, builds, misses, lean, aot, aot_exit[6];
+} DtsCounts;
+/* The compiled paths' per-thread state in one variable: on Mach-O each
+ * thread-local variable a function touches costs it a call to locate. */
+static CDJ_C674X_TLS struct {
+    uint64_t code_gen;
+    CdjC674xCacheEntry *packet_cache;
+    CdjC674xHorizon *horizon;
+    struct { RamTlb entry[4]; unsigned next; } ram_tlb;
+    uint64_t code_writes_seen, epoch_seen;  /* see code_gen_external */
+    DtCounts dt_counts;
+    DtsCounts dts_counts;
+    CdjC674xJitStats jit_counts;
+    uint64_t code_pages[64];
+} core_tls = { .code_gen = 1 };
+#define packet_cache (core_tls.packet_cache)
+#define code_gen (core_tls.code_gen)
+#define code_pages (core_tls.code_pages)
+#define horizon (core_tls.horizon)
+#define ram_tlb (core_tls.ram_tlb)
+#define dt_counts (core_tls.dt_counts)
+#define dts_counts (core_tls.dts_counts)
+#define jit_counts (core_tls.jit_counts)
+static const struct AotPacket *aot_packet_of(const CdjC674xCacheEntry *e);
+static void aot_refill(const CdjC674xCacheEntry *e);
 
 /* Whether the entry's fetch blocks still hold the bytes it was built from:
  * fetch_cached's content check.  The memory is located through
@@ -5260,8 +5297,6 @@ static _Thread_local CdjC674xCacheEntry *packet_cache;
  * committed directly into a host page holding a checked fetch block
  * (code_pages: a hashed bit per 4 KB host page, set when a block is checked
  * and never cleared). */
-static _Thread_local uint64_t code_gen = 1;
-static _Thread_local uint64_t code_pages[64];
 
 static inline bool code_page(const void *host)
 {
@@ -5269,20 +5304,64 @@ static inline bool code_page(const void *host)
     return (code_pages[(page >> 6) & 63] >> (page & 63)) & 1;
 }
 
+/* The same bits for every thread, for cdj_c674x_may_hold_code. */
+static uint64_t code_pages_any[64];
+
 static inline void code_page_mark(const void *host)
 {
     uintptr_t page = (uintptr_t)host >> 12;
     code_pages[(page >> 6) & 63] |= 1ull << (page & 63);
+    if (!((code_pages_any[(page >> 6) & 63] >> (page & 63)) & 1))
+        __atomic_fetch_or(&code_pages_any[(page >> 6) & 63], 1ull << (page & 63),
+                          __ATOMIC_RELEASE);
+}
+
+bool cdj_c674x_may_hold_code(const void *host, size_t size)
+{
+    if (!size) return false;
+    uintptr_t first = (uintptr_t)host >> 12;
+    uintptr_t last = ((uintptr_t)host + size - 1) >> 12;
+    for (uintptr_t page = first; page <= last; ++page)
+        if ((__atomic_load_n(&code_pages_any[(page >> 6) & 63], __ATOMIC_ACQUIRE) >>
+             (page & 63)) & 1)
+            return true;
+    return false;
+}
+
+/* Where code_gen moves for what others may have done (a run's start,
+ * between()): always, unless the board counts its writes that may reach
+ * code (cdj_c674x_set_code_writes); then only when that count or the
+ * fetch epoch has moved since. */
+static const uint64_t *code_writes;
+
+void cdj_c674x_set_code_writes(const uint64_t *counter)
+{
+    code_writes = counter;
+}
+
+static inline void code_gen_external(void)
+{
+    const uint64_t *w = code_writes;
+    if (!w || !fetch_epoch) {
+        ++code_gen;
+        return;
+    }
+    uint64_t n = __atomic_load_n(w, __ATOMIC_ACQUIRE), epoch = *fetch_epoch;
+    if (n != core_tls.code_writes_seen || epoch != core_tls.epoch_seen) {
+        core_tls.code_writes_seen = n;
+        core_tls.epoch_seen = epoch;
+        ++code_gen;
+    }
 }
 
 static bool entry_current(CdjC674xCacheEntry *e, void *opaque, bool in_run)
 {
     if (e->host_valid && e->host_opaque == opaque &&
         e->host_epoch == *fetch_epoch) {
-        if (in_run && e->code_gen == code_gen) return true;
+        if (in_run && e->checked_gen == code_gen) return true;
         for (unsigned i = 0; i < e->blocks; ++i)
             if (memcmp(e->host[i], e->bytes[i], 32)) return false;
-        e->code_gen = code_gen;
+        e->checked_gen = code_gen;
         return true;
     }
     e->host_valid = false;
@@ -5296,7 +5375,7 @@ static bool entry_current(CdjC674xCacheEntry *e, void *opaque, bool in_run)
         e->host_epoch = *fetch_epoch;
         e->host_valid = true;
         for (unsigned i = 0; i < e->blocks; ++i) code_page_mark(e->host[i]);
-        e->code_gen = code_gen;
+        e->checked_gen = code_gen;
     }
     return true;
 }
@@ -5370,7 +5449,6 @@ static bool packet_fast(const CdjC674xPacket *packet,
 }
 
 /* The board horizon (cdj_c674x.h, horizon_skip below). */
-static _Thread_local CdjC674xHorizon *horizon;
 
 void cdj_c674x_set_horizon(CdjC674xHorizon *h)
 {
@@ -5532,6 +5610,7 @@ static bool fetch_cached(CdjC674x *cpu, CdjC674xRead read, void *opaque,
         e->blocks = 0;
         return true;
     }
+    aot_refill(e);
     e->pc = cpu->pc;
     e->blocks = record.blocks;
     e->host_valid = false;
@@ -5546,6 +5625,7 @@ static bool fetch_cached(CdjC674x *cpu, CdjC674xRead read, void *opaque,
     e->single = e->fast ? packet_single(fetched, e->decoded) : SINGLE_NONE;
     e->dt = 0;
     dts_drop(e);
+    e->aot = aot_packet_of(e);
     e->single_out = NULL;
     e->last_variant = NULL;
     *entry = e;
@@ -6165,13 +6245,10 @@ typedef struct JitKernel JitKernel;
 static bool jit_native(const CdjC674xDecoded *d);
 static void jit_op_compile(const CdjC674xDecoded *d, JitOp *op);
 static int jit_mode = -1;
-static _Thread_local CdjC674xJitStats jit_counts;
 
-static _Thread_local struct {
-    uint64_t packets, runs, plans, untraceable;
-} dt_counts;
+
 /* Static schedules (see "static schedules"). */
-static _Thread_local struct { uint64_t hits, builds, misses, lean; } dts_counts;
+
 
 void cdj_c674x_jit_stats(CdjC674xJitStats *stats)
 {
@@ -6184,6 +6261,8 @@ void cdj_c674x_jit_stats(CdjC674xJitStats *stats)
     stats->static_builds = dts_counts.builds;
     stats->static_misses = dts_counts.misses;
     stats->static_lean = dts_counts.lean;
+    stats->aot = dts_counts.aot;
+    memcpy(stats->aot_exit, dts_counts.aot_exit, sizeof(stats->aot_exit));
 }
 
 void cdj_c674x_set_jit(int enabled)
@@ -6377,16 +6456,6 @@ void cdj_c674x_set_ram_window(CdjC674xWrite write, CdjC674xRamWindow window,
     ram_writes_direct = direct;
 }
 
-typedef struct {
-    uint32_t lo, span;                  /* [lo, lo + span); span 0: empty */
-    uint8_t *host;                      /* the byte at lo */
-    void *opaque;
-    uint64_t epoch;
-} RamTlb;
-static _Thread_local struct {
-    RamTlb entry[4];
-    unsigned next;
-} ram_tlb;
 
 static inline uint8_t *ram_ptr(void *opaque, uint32_t address, unsigned size)
 {
@@ -6461,9 +6530,10 @@ static bool ram_write_transfer(CdjC674xWrite write, void *opaque,
             return true;
         }
     }
-    if (commit) ++code_gen;
-    return write_transfer(write, opaque, address, value, encoded_size,
-                          commit);
+    bool ok = write_transfer(write, opaque, address, value, encoded_size,
+                             commit);
+    if (commit) code_gen_external();    /* the callback may write code */
+    return ok;
 }
 
 static bool jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
@@ -7546,12 +7616,14 @@ typedef enum {
     DT_COMPACT_MEMORY,                  /* compact_memory form */
     DT_COMPACT_ILC,                     /* compact MVC to ILC (in place) */
     DT_CALLP,                           /* CALLP (dt_callp) */
+    DT_MVC_CTL,                         /* MVC to CSR or IER (dt_mvc_ctl) */
 } DtKind;
 
 typedef struct DtPlan {
     JitOp op[8];
     bool branches;                      /* issue can queue a branch */
     bool faucr, ilc;                    /* issue writes FAUCR / ILC in place */
+    bool ctl;                           /* issue writes CSR/IER in place */
     /* The lean path (dts_lean): each instruction's form there, whether
      * every one has one, and which instructions' predicates decide what
      * the issue appends (memory, SP and branch operations). */
@@ -7599,6 +7671,7 @@ static bool dt_plan(CdjC674xCacheEntry *e)
     DtPlan plan;
     memset(&plan, 0, sizeof(plan));
     bool reads_faucr = false, reads_ilc = false;
+    uint32_t reads_ctl = 0, writes_ctl = 0;
     for (unsigned i = 0; i < packet->count; ++i) {
         const CdjC674xInstruction *insn = &packet->instructions[i];
         const CdjC674xDecoded *d = &e->decoded[i];
@@ -7669,6 +7742,20 @@ static bool dt_plan(CdjC674xCacheEntry *e)
             unsigned control = (d->w >> 18) & 31;
             reads_faucr |= control == 19;
             reads_ilc |= control == 13;
+            reads_ctl |= 1u << control;
+        }
+        if (run == arm_mvc_write) {
+            /* MVC to CSR or IER: written in place as execute_packet's
+             * commit does (dt_mvc_ctl); the rest stay with it. */
+            unsigned control = (d->w >> 23) & 31;
+            if ((control != 1 && control != 4) ||
+                (writes_ctl >> control) & 1)
+                return false;
+            writes_ctl |= 1u << control;
+            jit_op_compile(d, op);
+            op->kind = DT_MVC_CTL;
+            plan.ctl = true;
+            continue;
         }
         unsigned kind = insn_fast(d);
         jit_op_compile(d, op);
@@ -7693,6 +7780,10 @@ static bool dt_plan(CdjC674xCacheEntry *e)
      * place this packet would see the new value; the interpreter's issue
      * reads the pre-packet state. */
     if ((plan.faucr && reads_faucr) || (plan.ilc && reads_ilc)) return false;
+    /* CSR also writes TSR.GIE and ITSR.GIE. */
+    if (((writes_ctl >> 1) & 1) && (reads_ctl & (1u << 1 | 1u << 26 | 1u << 27)))
+        return false;
+    if (((writes_ctl >> 4) & 1) && ((reads_ctl >> 4) & 1)) return false;
     dts_lean_plan(e, &plan);
     if (!e->plan && !(e->plan = malloc(sizeof(*e->plan)))) return false;
     *e->plan = plan;
@@ -7783,6 +7874,21 @@ dt_compact_memory(CdjC674x *cpu, const CdjC674xCacheEntry *e, unsigned i,
     return true;
 }
 
+/* MVC to CSR (1) or IER (4), enabled, as execute_packet's commit writes
+ * them; dt_plan refused a packet that also reads what it writes. */
+static inline void dt_mvc_ctl(CdjC674x *cpu, unsigned control, uint32_t value)
+{
+    if (control == 4) {
+        cpu->control[4] = (value & 0xfff0u) | ((cpu->control[4] | value) & 2u) |
+                          1u;
+        return;
+    }
+    cpu->control[1] = (cpu->control[1] & 0xffff0100u) |
+                      (cpu->control[1] & value & 0x200u) | (value & 3u);
+    cpu->control[26] = (cpu->control[26] & ~1u) | (value & 1u);
+    cpu->control[27] = (cpu->control[27] & ~1u) | ((value >> 1) & 1u);
+}
+
 /* CALLP, as execute_packet issues it (its parallel-control check is
  * dt_plan's): B3 on the instruction's side gets the return address, a
  * branch is queued six cycles out, and the packet takes six cycles.  False
@@ -7871,6 +7977,12 @@ typedef struct DtsVariant {
     uint32_t commits, e3s, retires;
     uint8_t commit_at[24], e3_at[40], retire_at[40];
     uint8_t pairs, pair[16][2];        /* (load, store) post-issue indices */
+    /* Profile (cdj_c674x_aot_profile): lean runs and the two commonest
+     * lean successors, as seen; and the compiled form, if any. */
+    uint64_t runs, succ_runs[2];
+    const struct DtsVariant *succ[2];
+    const struct AotNode *aot;
+    bool aot_bound;                     /* aot looked up */
     /* The same schedule as straight-line programs for dts_lean (see
      * dts_program): the bus phase, then retirement. */
     uint16_t bus_len, retire_len;
@@ -8299,6 +8411,8 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
     /* Control registers arms write in place (cmpsp's FAUCR, MVC to ILC). */
     uint32_t faucr = cpu->control[19], ilc = cpu->control[13];
     uint64_t ilc_ready = cpu->control_ready[13];
+    const uint32_t csr = cpu->control[1], ier = cpu->control[4],
+                   tsr = cpu->control[26], itsr = cpu->control[27];
     bool controls[32] = {false}, bdec = false;
     bool ok = true;
     uint8_t outcome = 0;                /* predicate per instruction */
@@ -8362,6 +8476,9 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
             break;
         case DT_CALLP:
             ok = dt_callp(cpu, packet, insn, d, &timing, &defer, written);
+            break;
+        case DT_MVC_CTL:
+            if (enabled) dt_mvc_ctl(cpu, op->dst, cpu->r[op->cross][op->b]);
             break;
         default: {                      /* DT_VALUE, DT_BRANCH */
             unsigned zero = 0;
@@ -8447,6 +8564,10 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
         cpu->control[19] = faucr;
         cpu->control[13] = ilc;
         cpu->control_ready[13] = ilc_ready;
+        cpu->control[1] = csr;
+        cpu->control[4] = ier;
+        cpu->control[26] = tsr;
+        cpu->control[27] = itsr;
         if (plan->branches) {
             memcpy(cpu->branch_queue, branch_queue, sizeof(branch_queue));
             cpu->branch_due = branch_due;
@@ -8517,6 +8638,10 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
         cpu->control[19] = faucr;
         cpu->control[13] = ilc;
         cpu->control_ready[13] = ilc_ready;
+        cpu->control[1] = csr;
+        cpu->control[4] = ier;
+        cpu->control[26] = tsr;
+        cpu->control[27] = itsr;
         if (plan->branches) {
             memcpy(cpu->branch_queue, branch_queue, sizeof(branch_queue));
             cpu->branch_due = branch_due;
@@ -8601,7 +8726,7 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
  * request the board presents only appears through a callback (which lowers
  * `until`), but the CPU's own state can make a latched one eligible. */
 
-static inline bool horizon_skip(const CdjC674x *cpu)
+static inline __attribute__((always_inline)) bool horizon_skip(const CdjC674x *cpu)
 {
     CdjC674xHorizon *h = horizon;
     if (!h || cpu->packets >= __atomic_load_n(&h->until, __ATOMIC_ACQUIRE) ||
@@ -8641,6 +8766,7 @@ enum {
     LOP_GENERIC,                        /* any other arm, as dt_arm */
     LOP_CMEM,                           /* compact memory, as dt_exec */
     LOP_CALLP,                          /* dt_callp */
+    LOP_MVC_CTL,                        /* dt_mvc_ctl */
     /* arms computed in line, each as its arm's own expression */
     LOP_ADD_IMM, LOP_ADD_REG, LOP_SUB_REG, LOP_SUB_IMM, LOP_D_ADD,
     LOP_D_ADDK, LOP_D_SUB, LOP_D_SUBK, LOP_DX_ADD, LOP_DX_ADDK, LOP_DX_SUB,
@@ -8672,6 +8798,7 @@ static void dts_lean_plan(const CdjC674xCacheEntry *e, DtPlan *plan)
         case DT_CMPSP: lop = LOP_GENERIC; break;
         case DT_COMPACT_MEMORY: lop = LOP_CMEM; break;
         case DT_CALLP: lop = LOP_CALLP; break;
+        case DT_MVC_CTL: lop = LOP_MVC_CTL; break;
         case DT_VALUE: {
             bool (*run)(CdjC674xArm *) = d->arm->run;
             lop = LOP_ARM;
@@ -8765,6 +8892,405 @@ static inline uint32_t dts_value(const CdjC674x *cpu, unsigned lop,
 }
 
 
+/* The lean path's pieces, shared by dts_lean (which runs them for any
+ * variant) and the ahead-of-time regions (cdj_c674x_aot.h), which call them
+ * with the variant's constants so the compiler specializes each packet.
+ * One packet is: lean_begin, lean_issue per instruction, lean_check (on
+ * false lean_decline, and the packet goes to dt_exec), the bus program
+ * (lean_tick, lean_commit, lean_e3; on false lean_broke), lean_apply, the
+ * retirement program and lean_end. */
+#define LEAN_INLINE static inline __attribute__((always_inline))
+typedef struct {
+    uint64_t start;
+    unsigned stores, loads;
+    /* The slots the issue appends to, with their bytes. */
+    JitUndo undo;
+    CdjC674xDefer defer;
+    uint32_t written[2];
+    const char *fault;
+    uint32_t fault_pc, fault_word;
+    uint64_t branch_due;
+    uint32_t branch_target;
+    unsigned branch_count;
+    uint8_t branch_queue[sizeof(((CdjC674x *)0)->branch_queue)];
+    /* Generic arms: CMPSP's FAUCR (in place), the control-write and BDEC
+     * bookkeeping dt_exec keeps for them. */
+    uint32_t faucr;
+    uint32_t csr, ier, tsr, itsr;       /* MVC to CSR/IER (ctl) */
+    bool controls[32], bdec;
+    unsigned memory_count;
+    bool nonaligned_memory;
+    CdjC674xPacketTiming gtiming;
+    /* The bus phase's E3 values, and the retirement's tails. */
+    uint64_t data[40];
+    unsigned reads;
+    CdjC674xStore stail;
+    CdjC674xLoad ltail;
+} DtsLean;
+
+LEAN_INLINE void lean_begin(CdjC674x *cpu, DtsLean *L, bool branches,
+                            bool generic, bool ctl)
+{
+    if (ctl) {
+        L->csr = cpu->control[1];
+        L->ier = cpu->control[4];
+        L->tsr = cpu->control[26];
+        L->itsr = cpu->control[27];
+    }
+    L->start = cpu->cycles;
+    L->stores = L->undo.stores = cpu->store_count;
+    L->loads = L->undo.loads = cpu->load_count;
+    L->defer.count = 0;
+    L->written[0] = L->written[1] = 0;
+    L->fault = cpu->fault;
+    L->fault_pc = cpu->fault_pc;
+    L->fault_word = cpu->fault_word;
+    L->branch_due = cpu->branch_due;
+    L->branch_target = cpu->branch_target;
+    L->branch_count = cpu->branch_count;
+    if (branches)
+        memcpy(L->branch_queue, cpu->branch_queue, sizeof(L->branch_queue));
+    L->faucr = cpu->control[19];
+    L->bdec = false;
+    if (generic) memset(L->controls, 0, sizeof(L->controls));
+    L->memory_count = 0;
+    L->nonaligned_memory = false;
+    L->gtiming = (CdjC674xPacketTiming)CDJ_C674X_PACKET_TIMING_INIT;
+    L->reads = 0;
+}
+
+/* Instruction i of e's packet, lean form lop with op's fields, its
+ * predicate `enabled` (dts_preds). */
+LEAN_INLINE bool lean_issue(CdjC674x *cpu, const CdjC674xCacheEntry *e,
+                            unsigned i, unsigned lop, const JitOp *op,
+                            bool enabled, DtsLean *L, CdjC674xRead read,
+                            CdjC674xWrite write, void *opaque)
+{
+    const CdjC674xPacket *packet = &e->packet;
+    const uint64_t start = L->start;
+    bool ok = true;
+    switch (lop) {
+    case LOP_NOP:
+        break;
+    case LOP_MEM: {
+        /* jit_memory, its capacity and write-conflict checks fixed by
+         * the variant. */
+        unsigned size = op->size, bank = op->bank, b = op->b;
+        bool amr = b >= 4 && b <= 7;
+        if (amr && cpu->control_ready[0] > cpu->cycles) return false;
+        if (!enabled) break;
+        unsigned width = 0;
+        if (amr && !address_width(cpu, bank, b, &width)) return false;
+        if (op->nonaligned && width && width < 5) return false;
+        uint32_t offset = ((op->mode & 4) ? cpu->r[bank][op->a] : op->a) *
+                          op->scale;
+        uint32_t base = cpu->r[bank][b];
+        uint32_t updated = circular_address(base,
+            (op->mode & 1) ? base + offset : base - offset, width);
+        uint32_t address = ((op->mode & 10) == 10) ? base : updated;
+        unsigned encoded_size = size | ((op->nonaligned ? width : 0) << 8);
+        if (!op->nonaligned && (address & (size - 1))) return false;
+        if (op->is_store) {
+            uint64_t value = cpu->r[op->side][op->dst];
+            if (op->pair) value |= (uint64_t)cpu->r[op->side][op->dst + 1] << 32;
+            if (!ram_write_transfer(write, opaque, address, value,
+                                    encoded_size, false)) return false;
+            *jit_append_store(cpu, &L->undo) = (CdjC674xStore){
+                .due = start + 3, .address = address,
+                .value = value, .size = encoded_size
+            };
+        } else {
+            uint64_t dummy;
+            if (!jit_read_mapped(read, opaque, address, encoded_size) &&
+                !read_transfer(read, opaque, address, encoded_size, &dummy))
+                return false;
+            *jit_append_load(cpu, &L->undo) = (CdjC674xLoad){
+                .due = start + 5, .address = address, .bank = op->side,
+                .dst = op->dst, .size = encoded_size,
+                .sign_extend = op->sign_extend
+            };
+        }
+        if (op->mode & 8) {
+            ok = jit_mark(L->written, bank, b);
+            if (ok) commit_reg(cpu, &L->defer, bank, b, updated);
+        }
+        break;
+    }
+    case LOP_SP: {
+        /* jit_sp, likewise. */
+        if (!enabled) break;
+        unsigned shift = op->side ? 16 : 0;
+        CdjC674xSpResult result;
+        if (op->multiply) {
+            unsigned rmode = (cpu->control[20] >> (shift + 9)) & 3;
+            result = cdj_c674x_multiply_sp(cpu->r[op->side][op->a],
+                                           cpu->r[op->cross][op->b], rmode);
+        } else {
+            uint32_t source1 = cpu->r[op->side][op->a];
+            uint32_t source2 = cpu->r[op->cross][op->b];
+            if (op->swap) {
+                source1 = cpu->r[op->cross][op->a];
+                source2 = cpu->r[op->side][op->b];
+            }
+            unsigned rmode = (cpu->control[18] >> (shift + 9)) & 3;
+            result = cdj_c674x_add_sub_sp(source1, source2, op->operation,
+                                          rmode);
+        }
+        *jit_append_load(cpu, &L->undo) = (CdjC674xLoad){
+            .due = start + 4, .value = result.value,
+            .address = result.status << shift,
+            .bank = op->side, .dst = op->dst, .size = 0,
+            .sign_extend = op->multiply
+        };
+        break;
+    }
+    case LOP_ADDA: {
+        const CdjC674xDecoded *d = &e->decoded[i];
+        CdjC674xAddaLong adda = cdj_c674x_adda_long(
+            d->uncond, d->w, cpu->r[1][14], cpu->r[1][15]);
+        ok = jit_mark(L->written, adda.side, adda.dst);
+        if (ok) commit_reg(cpu, &L->defer, adda.side, adda.dst, adda.result);
+        break;
+    }
+    case LOP_COMPACT: {
+        const CdjC674xDecoded *d = &e->decoded[i];
+        unsigned side, dst;
+        uint32_t value;
+        int r = compact_value(cpu, &packet->instructions[i], d->w,
+                              d->form, &side, &dst, &value);
+        if (r == 1) {
+            ok = jit_mark(L->written, side, dst);
+            if (ok) commit_reg(cpu, &L->defer, side, dst, value);
+        } else ok = r == 0;
+        break;
+    }
+    case LOP_COMPACT_BNOP: {
+        const CdjC674xDecoded *d = &e->decoded[i];
+        CdjC674xPacketTiming timing = CDJ_C674X_PACKET_TIMING_INIT;
+        ok = compact_bnop(cpu, cpu, &packet->instructions[i], d->w,
+                          d->form, &timing) == 1;
+        break;
+    }
+    case LOP_GENERIC:
+        enabled = !op->creg ||
+            ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z);
+        ok = dt_arm(cpu, e, i, enabled, &L->undo, &L->defer, &L->gtiming,
+                    L->written, L->controls, &L->memory_count,
+                    &L->nonaligned_memory, &L->bdec, read, write, opaque);
+        break;
+    case LOP_CMEM:
+        ok = dt_compact_memory(cpu, e, i, &L->undo, &L->defer, L->written,
+                               &L->memory_count, read, write, opaque);
+        break;
+    case LOP_CALLP:
+        ok = dt_callp(cpu, packet, &packet->instructions[i],
+                      &e->decoded[i], &L->gtiming, &L->defer, L->written);
+        break;
+    case LOP_MVC_CTL:
+        if (!op->creg || ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z))
+            dt_mvc_ctl(cpu, op->dst, cpu->r[op->cross][op->b]);
+        break;
+    case LOP_ARM:
+    case LOP_BRANCH: {
+        const CdjC674xInstruction *insn = &packet->instructions[i];
+        const CdjC674xDecoded *d = &e->decoded[i];
+        /* The arm as dt_exec calls it; the timing it may update is the
+         * variant's (its checks passed when the variant was built). */
+        CdjC674xPacketTiming timing = CDJ_C674X_PACKET_TIMING_INIT;
+        bool controls[32] = {false}, bdec = false, nonaligned = false;
+        unsigned zero = 0;
+        enabled = !op->creg ||
+            ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z);
+        CdjC674xArm arm = {
+            .cpu = cpu, .out = cpu, .defer = &L->defer,
+            .packet = packet, .insn = insn,
+            .read = read, .write = write, .opaque = opaque,
+            .timing = &timing, .controls = controls,
+            .memory_count = &zero, .nonaligned_memory = &nonaligned,
+            .bdec_issued = &bdec, .w = d->w, .pc = insn->pc, .value = 0,
+            .side = op->side, .dst = op->dst, .a = op->a, .b = op->b,
+            .cross = op->cross, .enabled = enabled, .reg_write = true,
+            .control_write = false, .long_offset = (d->w & 0x0c) == 12,
+            .scalar_sat_op = d->w & 0xffc,
+        };
+        ok = d->arm->run(&arm);
+        if (ok && enabled && arm.control_write) ok = false;
+        if (ok && enabled && arm.reg_write) {
+            ok = jit_mark(L->written, arm.side, arm.dst);
+            if (ok) commit_reg(cpu, &L->defer, arm.side, arm.dst, arm.value);
+        }
+        break;
+    }
+    default: {                          /* in line */
+        if (!(!op->creg ||
+              ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z)))
+            break;
+        uint32_t value = dts_value(cpu, lop, op, e->decoded[i].w);
+        ok = jit_mark(L->written, op->side, op->dst);
+        if (ok) commit_reg(cpu, &L->defer, op->side, op->dst, value);
+        break;
+    }
+    }
+    return ok;
+}
+
+/* The checks after the issue: the appends and branches the variant was
+ * built from, the data-dependent ones.  landing: v->in->landing. */
+LEAN_INLINE bool lean_check(const CdjC674x *cpu, bool branches, bool generic,
+                            const DtsVariant *v, uint32_t landing0,
+                            uint32_t landing1, const DtsLean *L)
+{
+    const uint64_t start = L->start;
+    /* The appends and branches the variant was built from (a compact
+     * branch decides its own predicate). */
+    if (cpu->store_count != L->stores + v->new_stores ||
+        cpu->load_count != L->loads + v->new_loads ||
+        v->branches != (cpu->branch_due ? 1 + cpu->branch_count : 0))
+        return false;
+    for (unsigned k = 0; branches && k < v->branches; ++k) {
+        uint64_t due = k ? cpu->branch_queue[k - 1].due : cpu->branch_due;
+        if (due - start != v->branch_rd[k]) return false;
+    }
+    /* Generic arms append what their data says (a saturation, say): every
+     * append checked against the variant's. */
+    if (generic && !dts_matches(v, cpu, L->stores, L->loads, v->cycles))
+        return false;
+    /* dt_exec's checks for the generic arms: a nonaligned access in
+     * parallel with another, a delayed FP-status result landing as a
+     * control register is written. */
+    if (L->nonaligned_memory && L->memory_count > 1) return false;
+    if (generic && (L->controls[18] || L->controls[19] || L->controls[20]))
+        for (unsigned j = 0; j < cpu->load_count; ++j) {
+            const CdjC674xLoad *load = &cpu->loads[j];
+            if (load->due != start + 1) continue;
+            if ((!load->size && load->address &&
+                 L->controls[load->sign_extend ? 20 : 18]) ||
+                (load->size == CDJ_C674X_DELAYED_FAUCR && L->controls[19]))
+                return false;
+        }
+    /* execute_packet's post-issue checks that depend on data. */
+    for (unsigned i = 0; i < v->pairs; ++i) {
+        const CdjC674xLoad *load = &cpu->loads[v->pair[i][0]];
+        const CdjC674xStore *store = &cpu->stores[v->pair[i][1]];
+        for (unsigned l = 0; l < (load->size & 255); ++l)
+        for (unsigned m = 0; m < (store->size & 255); ++m)
+            if (circular_address(load->address, load->address + l, load->size >> 8) ==
+                circular_address(store->address, store->address + m, store->size >> 8))
+                return false;
+    }
+    if ((landing0 & L->written[0]) || (landing1 & L->written[1]))
+        return false;
+    return L->defer.count <= 24;
+}
+
+/* Put back exactly what the issue changed. */
+LEAN_INLINE void lean_restore(CdjC674x *cpu, const DtsLean *L, bool branches,
+                              bool ctl)
+{
+    jit_undo(cpu, &L->undo);
+    cpu->control[19] = L->faucr;
+    if (ctl) {
+        cpu->control[1] = L->csr;
+        cpu->control[4] = L->ier;
+        cpu->control[26] = L->tsr;
+        cpu->control[27] = L->itsr;
+    }
+    if (branches) {
+        memcpy(cpu->branch_queue, L->branch_queue, sizeof(L->branch_queue));
+        cpu->branch_due = L->branch_due;
+        cpu->branch_target = L->branch_target;
+        cpu->branch_count = L->branch_count;
+    }
+}
+LEAN_INLINE void lean_decline(CdjC674x *cpu, const DtsLean *L, bool branches,
+                              bool ctl)
+{
+    lean_restore(cpu, L, branches, ctl);
+    cpu->fault = L->fault;
+    cpu->fault_pc = L->fault_pc;
+    cpu->fault_word = L->fault_word;
+}
+
+/* dt_exec's bus phase, step by step. */
+LEAN_INLINE void lean_tick(CdjC674x *cpu, unsigned n)
+{
+    /* core_tick n times (a counting horizon stays one while it counts). */
+    CdjC674xHorizon *h = horizon;
+    if (h && h->count_ticks) h->ticks += n;
+    else for (unsigned k = n; k; --k) core_tick(cpu);
+}
+LEAN_INLINE const char *lean_commit(const CdjC674x *cpu, unsigned j,
+                                    CdjC674xWrite write, void *opaque)
+{
+    const CdjC674xStore *store = &cpu->stores[j];
+    return ram_write_transfer(write, opaque, store->address, store->value,
+                              store->size, true) ? NULL :
+           "RAM store callback broke commit guarantee";
+}
+LEAN_INLINE const char *lean_e3(const CdjC674x *cpu, unsigned j, DtsLean *L,
+                                CdjC674xRead read, void *opaque)
+{
+    const CdjC674xLoad *load = &cpu->loads[j];
+    uint64_t value;
+    if (!jit_read_span(read, opaque, load->address, load->size, &value) &&
+        !read_transfer(read, opaque, load->address, load->size, &value))
+        return "RAM load mapping changed during execution";
+    L->data[L->reads++] = load->sign_extend ?
+        (uint64_t)(int64_t)sx(value, (load->size & 255) * 8) : value;
+    return NULL;
+}
+LEAN_INLINE int lean_broke(CdjC674x *cpu, const DtsLean *L, bool branches,
+                           bool ctl, const char *broke)
+{
+    lean_restore(cpu, L, branches, ctl);
+    stop(cpu, cpu->pc, 0, broke);
+    return -1;
+}
+/* The issue's register writes, and the next packet. */
+LEAN_INLINE void lean_apply(CdjC674x *cpu, DtsLean *L, uint32_t next_pc)
+{
+    for (unsigned j = 0; j < L->defer.count; ++j)
+        cpu->r[L->defer.write[j].side][L->defer.write[j].reg] =
+            L->defer.write[j].value;
+    cpu->pc = next_pc;
+    L->reads = 0;
+}
+/* Retirement, step by step. */
+LEAN_INLINE void lean_lret(CdjC674x *cpu, unsigned j)
+{
+    /* jit_retire_load's landing, its E3 value already in place. */
+    const CdjC674xLoad *load = &cpu->loads[j];
+    if (load->size == CDJ_C674X_DELAYED_SAT) {
+        cpu->control[1] |= 0x200u;
+        cpu->control[21] |= load->address & 0x3fu;
+    } else if (load->size == CDJ_C674X_DELAYED_FAUCR) {
+        cpu->control[19] |= load->address;
+    } else {
+        cpu->r[load->bank][load->dst] = load->value;
+        if (queued_result_registers(load) == 2)
+            cpu->r[load->bank][load->dst + 1] = load->value >> 32;
+        if (!load->size)
+            cpu->control[load->sign_extend ? 20 : 18] |= load->address;
+    }
+}
+LEAN_INLINE void lean_branch(CdjC674x *cpu)
+{
+    cpu->pc = cpu->branch_target;
+    if (cpu->branch_count) {
+        cpu->branch_due = cpu->branch_queue[0].due;
+        cpu->branch_target = cpu->branch_queue[0].target;
+        memmove(cpu->branch_queue, cpu->branch_queue + 1,
+                --cpu->branch_count * sizeof(cpu->branch_queue[0]));
+    } else cpu->branch_due = 0;
+    cpu->idle_cycles = 0;
+}
+LEAN_INLINE int lean_end(CdjC674x *cpu, const DtsLean *L, unsigned last)
+{
+    cpu->cycles = L->start + last;
+    ++cpu->packets;
+    return 1;
+}
+
 /* One packet on the lean path, for variant v (v->in is the queues' shape,
  * v->outcome the pmask predicates).  Returns as dt_exec. */
 static int dts_lean(CdjC674x *cpu, const CdjC674xCacheEntry *e,
@@ -8773,358 +9299,57 @@ static int dts_lean(CdjC674x *cpu, const CdjC674xCacheEntry *e,
 {
     const CdjC674xPacket *packet = &e->packet;
     const DtPlan *plan = e->plan;
-    const uint64_t start = cpu->cycles;
-    const unsigned stores = cpu->store_count, loads = cpu->load_count;
-    /* The slots the issue appends to, with their bytes. */
-    JitUndo undo CDJ_C674X_UNINITIALIZED;
-    undo.stores = stores;
-    undo.loads = loads;
-    CdjC674xDefer defer CDJ_C674X_UNINITIALIZED;
-    defer.count = 0;
-    uint32_t written[2] = {0, 0};
-    const char *fault = cpu->fault;
-    uint32_t fault_pc = cpu->fault_pc, fault_word = cpu->fault_word;
-    uint64_t branch_due = cpu->branch_due;
-    uint32_t branch_target = cpu->branch_target;
-    unsigned branch_count = cpu->branch_count;
-    uint8_t branch_queue[sizeof(cpu->branch_queue)] CDJ_C674X_UNINITIALIZED;
-    if (plan->branches)
-        memcpy(branch_queue, cpu->branch_queue, sizeof(branch_queue));
-    /* Generic arms: CMPSP's FAUCR (in place), the control-write and BDEC
-     * bookkeeping dt_exec keeps for them. */
-    uint32_t faucr = cpu->control[19];
-    bool controls[32] CDJ_C674X_UNINITIALIZED, bdec = false;
-    if (plan->generic) memset(controls, 0, sizeof(controls));
-    unsigned memory_count = 0;
-    bool nonaligned_memory = false;
-    CdjC674xPacketTiming gtiming = CDJ_C674X_PACKET_TIMING_INIT;
+    DtsLean L CDJ_C674X_UNINITIALIZED;
+    lean_begin(cpu, &L, plan->branches, plan->generic, plan->ctl);
     bool ok = true;
-    for (unsigned i = 0; ok && i < packet->count; ++i) {
-        const JitOp *op = &plan->op[i];
-        unsigned lop = plan->lop[i];
-        bool enabled = (preds >> i) & 1;
-        switch (lop) {
-        case LOP_NOP:
-            break;
-        case LOP_MEM: {
-            /* jit_memory, its capacity and write-conflict checks fixed by
-             * the variant. */
-            unsigned size = op->size, bank = op->bank, b = op->b;
-            bool amr = b >= 4 && b <= 7;
-            if (amr && cpu->control_ready[0] > cpu->cycles) { ok = false; break; }
-            if (!enabled) break;
-            unsigned width = 0;
-            if (amr && !address_width(cpu, bank, b, &width)) { ok = false; break; }
-            if (op->nonaligned && width && width < 5) { ok = false; break; }
-            uint32_t offset = ((op->mode & 4) ? cpu->r[bank][op->a] : op->a) *
-                              op->scale;
-            uint32_t base = cpu->r[bank][b];
-            uint32_t updated = circular_address(base,
-                (op->mode & 1) ? base + offset : base - offset, width);
-            uint32_t address = ((op->mode & 10) == 10) ? base : updated;
-            unsigned encoded_size = size | ((op->nonaligned ? width : 0) << 8);
-            if (!op->nonaligned && (address & (size - 1))) { ok = false; break; }
-            if (op->is_store) {
-                uint64_t value = cpu->r[op->side][op->dst];
-                if (op->pair) value |= (uint64_t)cpu->r[op->side][op->dst + 1] << 32;
-                if (!ram_write_transfer(write, opaque, address, value,
-                                    encoded_size, false)) { ok = false; break; }
-                *jit_append_store(cpu, &undo) = (CdjC674xStore){
-                    .due = start + 3, .address = address,
-                    .value = value, .size = encoded_size
-                };
-            } else {
-                uint64_t dummy;
-                if (!jit_read_mapped(read, opaque, address, encoded_size) &&
-                    !read_transfer(read, opaque, address, encoded_size, &dummy)) {
-                    ok = false;
-                    break;
-                }
-                *jit_append_load(cpu, &undo) = (CdjC674xLoad){
-                    .due = start + 5, .address = address, .bank = op->side,
-                    .dst = op->dst, .size = encoded_size,
-                    .sign_extend = op->sign_extend
-                };
-            }
-            if (op->mode & 8) {
-                ok = jit_mark(written, bank, b);
-                if (ok) commit_reg(cpu, &defer, bank, b, updated);
-            }
-            break;
-        }
-        case LOP_SP: {
-            /* jit_sp, likewise. */
-            if (!enabled) break;
-            unsigned shift = op->side ? 16 : 0;
-            CdjC674xSpResult result;
-            if (op->multiply) {
-                unsigned rmode = (cpu->control[20] >> (shift + 9)) & 3;
-                result = cdj_c674x_multiply_sp(cpu->r[op->side][op->a],
-                                               cpu->r[op->cross][op->b], rmode);
-            } else {
-                uint32_t source1 = cpu->r[op->side][op->a];
-                uint32_t source2 = cpu->r[op->cross][op->b];
-                if (op->swap) {
-                    source1 = cpu->r[op->cross][op->a];
-                    source2 = cpu->r[op->side][op->b];
-                }
-                unsigned rmode = (cpu->control[18] >> (shift + 9)) & 3;
-                result = cdj_c674x_add_sub_sp(source1, source2, op->operation,
-                                              rmode);
-            }
-            *jit_append_load(cpu, &undo) = (CdjC674xLoad){
-                .due = start + 4, .value = result.value,
-                .address = result.status << shift,
-                .bank = op->side, .dst = op->dst, .size = 0,
-                .sign_extend = op->multiply
-            };
-            break;
-        }
-        case LOP_ADDA: {
-            const CdjC674xDecoded *d = &e->decoded[i];
-            CdjC674xAddaLong adda = cdj_c674x_adda_long(
-                d->uncond, d->w, cpu->r[1][14], cpu->r[1][15]);
-            ok = jit_mark(written, adda.side, adda.dst);
-            if (ok) commit_reg(cpu, &defer, adda.side, adda.dst, adda.result);
-            break;
-        }
-        case LOP_COMPACT: {
-            const CdjC674xDecoded *d = &e->decoded[i];
-            unsigned side, dst;
-            uint32_t value;
-            int r = compact_value(cpu, &packet->instructions[i], d->w,
-                                  d->form, &side, &dst, &value);
-            if (r == 1) {
-                ok = jit_mark(written, side, dst);
-                if (ok) commit_reg(cpu, &defer, side, dst, value);
-            } else ok = r == 0;
-            break;
-        }
-        case LOP_COMPACT_BNOP: {
-            const CdjC674xDecoded *d = &e->decoded[i];
-            CdjC674xPacketTiming timing = CDJ_C674X_PACKET_TIMING_INIT;
-            ok = compact_bnop(cpu, cpu, &packet->instructions[i], d->w,
-                              d->form, &timing) == 1;
-            break;
-        }
-        case LOP_GENERIC:
-            enabled = !op->creg ||
-                ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z);
-            ok = dt_arm(cpu, e, i, enabled, &undo, &defer, &gtiming, written,
-                        controls, &memory_count, &nonaligned_memory, &bdec,
-                        read, write, opaque);
-            break;
-        case LOP_CMEM:
-            ok = dt_compact_memory(cpu, e, i, &undo, &defer, written,
-                                   &memory_count, read, write, opaque);
-            break;
-        case LOP_CALLP:
-            ok = dt_callp(cpu, packet, &packet->instructions[i],
-                          &e->decoded[i], &gtiming, &defer, written);
-            break;
-        case LOP_ARM:
-        case LOP_BRANCH: {
-            const CdjC674xInstruction *insn = &packet->instructions[i];
-            const CdjC674xDecoded *d = &e->decoded[i];
-            /* The arm as dt_exec calls it; the timing it may update is the
-             * variant's (its checks passed when the variant was built). */
-            CdjC674xPacketTiming timing = CDJ_C674X_PACKET_TIMING_INIT;
-            bool controls[32] = {false}, bdec = false, nonaligned = false;
-            unsigned zero = 0;
-            enabled = !op->creg ||
-                ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z);
-            CdjC674xArm arm = {
-                .cpu = cpu, .out = cpu, .defer = &defer,
-                .packet = packet, .insn = insn,
-                .read = read, .write = write, .opaque = opaque,
-                .timing = &timing, .controls = controls,
-                .memory_count = &zero, .nonaligned_memory = &nonaligned,
-                .bdec_issued = &bdec, .w = d->w, .pc = insn->pc, .value = 0,
-                .side = op->side, .dst = op->dst, .a = op->a, .b = op->b,
-                .cross = op->cross, .enabled = enabled, .reg_write = true,
-                .control_write = false, .long_offset = (d->w & 0x0c) == 12,
-                .scalar_sat_op = d->w & 0xffc,
-            };
-            ok = d->arm->run(&arm);
-            if (ok && enabled && arm.control_write) ok = false;
-            if (ok && enabled && arm.reg_write) {
-                ok = jit_mark(written, arm.side, arm.dst);
-                if (ok) commit_reg(cpu, &defer, arm.side, arm.dst, arm.value);
-            }
-            break;
-        }
-        default: {                      /* in line */
-            if (!(!op->creg ||
-                  ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z)))
-                break;
-            uint32_t value = dts_value(cpu, lop, op, e->decoded[i].w);
-            ok = jit_mark(written, op->side, op->dst);
-            if (ok) commit_reg(cpu, &defer, op->side, op->dst, value);
-            break;
-        }
-        }
-    }
-    /* The appends and branches the variant was built from (a compact
-     * branch decides its own predicate). */
-    if (ok && (cpu->store_count != stores + v->new_stores ||
-               cpu->load_count != loads + v->new_loads ||
-               v->branches != (cpu->branch_due ? 1 + cpu->branch_count : 0)))
-        ok = false;
-    for (unsigned k = 0; ok && plan->branches && k < v->branches; ++k) {
-        uint64_t due = k ? cpu->branch_queue[k - 1].due : cpu->branch_due;
-        if (due - start != v->branch_rd[k]) ok = false;
-    }
-    /* Generic arms append what their data says (a saturation, say): every
-     * append checked against the variant's. */
-    if (ok && plan->generic &&
-        !dts_matches(v, cpu, stores, loads, v->cycles))
-        ok = false;
-    /* dt_exec's checks for the generic arms: a nonaligned access in
-     * parallel with another, a delayed FP-status result landing as a
-     * control register is written. */
-    if (ok && nonaligned_memory && memory_count > 1) ok = false;
-    for (unsigned j = 0; ok && plan->generic &&
-                         (controls[18] || controls[19] || controls[20]) &&
-                         j < cpu->load_count; ++j) {
-        const CdjC674xLoad *load = &cpu->loads[j];
-        if (load->due != start + 1) continue;
-        if ((!load->size && load->address &&
-             controls[load->sign_extend ? 20 : 18]) ||
-            (load->size == CDJ_C674X_DELAYED_FAUCR && controls[19]))
-            ok = false;
-    }
-    /* execute_packet's post-issue checks that depend on data. */
-    for (unsigned i = 0; ok && i < v->pairs; ++i) {
-        const CdjC674xLoad *load = &cpu->loads[v->pair[i][0]];
-        const CdjC674xStore *store = &cpu->stores[v->pair[i][1]];
-        for (unsigned l = 0; ok && l < (load->size & 255); ++l)
-        for (unsigned m = 0; ok && m < (store->size & 255); ++m)
-            if (circular_address(load->address, load->address + l, load->size >> 8) ==
-                circular_address(store->address, store->address + m, store->size >> 8))
-                ok = false;
-    }
-    if (ok && ((v->in->landing[0] & written[0]) ||
-               (v->in->landing[1] & written[1])))
-        ok = false;
-    if (ok && defer.count > 24) ok = false;
-    if (!ok) {
-        /* Declined: put back exactly what the issue changed. */
-        jit_undo(cpu, &undo);
-        cpu->control[19] = faucr;
-        if (plan->branches) {
-            memcpy(cpu->branch_queue, branch_queue, sizeof(branch_queue));
-            cpu->branch_due = branch_due;
-            cpu->branch_target = branch_target;
-            cpu->branch_count = branch_count;
-        }
-        cpu->fault = fault;
-        cpu->fault_pc = fault_pc;
-        cpu->fault_word = fault_word;
+    for (unsigned i = 0; ok && i < packet->count; ++i)
+        ok = lean_issue(cpu, e, i, plan->lop[i], &plan->op[i],
+                        (preds >> i) & 1, &L, read, write, opaque);
+    if (!ok || !lean_check(cpu, plan->branches, plan->generic, v,
+                           v->in->landing[0], v->in->landing[1], &L)) {
+        lean_decline(cpu, &L, plan->branches, plan->ctl);
         return 0;
     }
     /* dt_exec's bus phase and retirement, as the variant's programs. */
-    uint64_t data[40] CDJ_C674X_UNINITIALIZED;
-    unsigned reads = 0;
     const char *broke = NULL;
     for (const uint8_t *pc = v->prog; !broke; ) {
         switch (*pc++) {
-        case P_TICK:
-            for (unsigned k = *pc++; k; --k) core_tick(cpu);
-            continue;
-        case P_COMMIT: {
-            const CdjC674xStore *store = &cpu->stores[*pc++];
-            if (!ram_write_transfer(write, opaque, store->address, store->value,
-                                store->size, true))
-                broke = "RAM store callback broke commit guarantee";
-            continue;
-        }
-        case P_E3: {
-            const CdjC674xLoad *load = &cpu->loads[*pc++];
-            uint64_t value;
-            if (!jit_read_span(read, opaque, load->address, load->size, &value) &&
-                !read_transfer(read, opaque, load->address, load->size, &value))
-                broke = "RAM load mapping changed during execution";
-            else data[reads++] = load->sign_extend ?
-                (uint64_t)(int64_t)sx(value, (load->size & 255) * 8) : value;
-            continue;
-        }
+        case P_TICK: lean_tick(cpu, *pc++); continue;
+        case P_COMMIT: broke = lean_commit(cpu, *pc++, write, opaque); continue;
+        case P_E3: broke = lean_e3(cpu, *pc++, &L, read, opaque); continue;
         default:                        /* P_END */
             break;
         }
         break;
     }
-    if (broke) {
-        jit_undo(cpu, &undo);
-        cpu->control[19] = faucr;
-        if (plan->branches) {
-            memcpy(cpu->branch_queue, branch_queue, sizeof(branch_queue));
-            cpu->branch_due = branch_due;
-            cpu->branch_target = branch_target;
-            cpu->branch_count = branch_count;
-        }
-        stop(cpu, cpu->pc, 0, broke);
-        return -1;
-    }
-    for (unsigned j = 0; j < defer.count; ++j)
-        cpu->r[defer.write[j].side][defer.write[j].reg] = defer.write[j].value;
-    cpu->pc = packet->next_pc;
-    reads = 0;
-    CdjC674xStore stail CDJ_C674X_UNINITIALIZED;
-    CdjC674xLoad ltail CDJ_C674X_UNINITIALIZED;
+    if (broke) return lean_broke(cpu, &L, plan->branches, plan->ctl, broke);
+    lean_apply(cpu, &L, packet->next_pc);
     for (const uint8_t *pc = v->prog + v->bus_len; v->retire_len > 1;) {
         switch (*pc++) {
-        case P_STAIL: stail = cpu->stores[*pc++]; continue;
+        case P_STAIL: L.stail = cpu->stores[*pc++]; continue;
         case P_SMOVE: cpu->stores[pc[0]] = cpu->stores[pc[1]]; pc += 2; continue;
         case P_SFILL:
-            for (unsigned k = pc[0]; k < pc[1]; ++k) cpu->stores[k] = stail;
+            for (unsigned k = pc[0]; k < pc[1]; ++k) cpu->stores[k] = L.stail;
             pc += 2;
             continue;
         case P_SCOUNT: cpu->store_count = *pc++; continue;
-        case P_LTAIL: ltail = cpu->loads[*pc++]; continue;
+        case P_LTAIL: L.ltail = cpu->loads[*pc++]; continue;
         case P_LMOVE: cpu->loads[pc[0]] = cpu->loads[pc[1]]; pc += 2; continue;
         case P_LFILL:
-            for (unsigned k = pc[0]; k < pc[1]; ++k) cpu->loads[k] = ltail;
+            for (unsigned k = pc[0]; k < pc[1]; ++k) cpu->loads[k] = L.ltail;
             pc += 2;
             continue;
         case P_LCOUNT: cpu->load_count = *pc++; continue;
-        case P_LE3: cpu->loads[*pc++].value = data[reads++]; continue;
-        case P_LRET: {
-            /* jit_retire_load's landing, its E3 value already in place. */
-            const CdjC674xLoad *load = &cpu->loads[*pc++];
-            if (load->size == CDJ_C674X_DELAYED_SAT) {
-                cpu->control[1] |= 0x200u;
-                cpu->control[21] |= load->address & 0x3fu;
-            } else if (load->size == CDJ_C674X_DELAYED_FAUCR) {
-                cpu->control[19] |= load->address;
-            } else {
-                cpu->r[load->bank][load->dst] = load->value;
-                if (queued_result_registers(load) == 2)
-                    cpu->r[load->bank][load->dst + 1] = load->value >> 32;
-                if (!load->size)
-                    cpu->control[load->sign_extend ? 20 : 18] |= load->address;
-            }
-            continue;
-        }
-        case P_BRANCH:
-            cpu->pc = cpu->branch_target;
-            if (cpu->branch_count) {
-                cpu->branch_due = cpu->branch_queue[0].due;
-                cpu->branch_target = cpu->branch_queue[0].target;
-                memmove(cpu->branch_queue, cpu->branch_queue + 1,
-                        --cpu->branch_count * sizeof(cpu->branch_queue[0]));
-            } else cpu->branch_due = 0;
-            cpu->idle_cycles = 0;
-            continue;
+        case P_LE3: cpu->loads[*pc++].value = L.data[L.reads++]; continue;
+        case P_LRET: lean_lret(cpu, *pc++); continue;
+        case P_BRANCH: lean_branch(cpu); continue;
         default:                        /* P_END */
             break;
         }
         break;
     }
-    cpu->cycles = start + v->last;
-    ++cpu->packets;
-    return 1;
+    return lean_end(cpu, &L, v->last);
 }
-
 /* The predicates dts_lean needs (bit i: instruction i enabled), from the
  * pre-packet registers as issue reads them. */
 static inline uint8_t dts_preds(const CdjC674x *cpu, const DtPlan *plan,
@@ -9155,6 +9380,317 @@ static const DtsVariant *dts_lean_find(CdjC674xCacheEntry *e,
     return NULL;
 }
 
+/* ---- ahead-of-time profile (cdj_c674x_aot_profile) --------------------
+ * With profiling on, every lean packet counts a run on its variant and an
+ * edge from the previous lean packet's variant (the two commonest kept);
+ * cdj_c674x_aot_profile_dump writes the calling thread's hot variants with
+ * everything tools/cdj_dsp/aot_gen.py needs to compile them: the cache
+ * entry's fetch blocks (its bytes decide the plan), the entry shape, the
+ * predicates and post-issue signature, the programs and the edges. */
+static bool aot_profiling;
+
+void cdj_c674x_aot_profile(bool on)
+{
+    aot_profiling = on;
+}
+
+static void aot_note(DtsVariant *prev, DtsVariant *v)
+{
+    ++v->runs;
+    if (!prev) return;
+    for (unsigned k = 0; k < 2; ++k)
+        if (prev->succ[k] == v) {
+            ++prev->succ_runs[k];
+            return;
+        }
+    unsigned k = prev->succ_runs[0] <= prev->succ_runs[1] ? 0 : 1;
+    if (prev->succ_runs[k] < 4) {       /* replace a rare one */
+        prev->succ[k] = v;
+        prev->succ_runs[k] = 1;
+    }
+}
+
+static void aot_dump_shape(FILE *f, const char *tag, const DtsShape *s)
+{
+    if (!s) {
+        fprintf(f, "%s none\n", tag);
+        return;
+    }
+    fprintf(f, "%s %u %u %u %#x %#x", tag, s->loads, s->stores, s->branches,
+            s->landing[0], s->landing[1]);
+    for (unsigned j = 0; j < s->loads; ++j)
+        fprintf(f, " %u,%u,%u,%u,%u", s->load[j].rd, s->load[j].size,
+                s->load[j].bank, s->load[j].dst, s->load[j].sign_extend);
+    for (unsigned j = 0; j < s->stores; ++j)
+        fprintf(f, " %u,%u", s->store[j].rd, s->store[j].size);
+    for (unsigned k = 0; k < s->branches; ++k) fprintf(f, " %u", s->branch_rd[k]);
+    fprintf(f, "\n");
+}
+
+static void aot_dump_entry(FILE *f, const CdjC674xCacheEntry *e,
+                           uint64_t min_runs)
+{
+    {
+        if (!e->blocks || e->dt <= 0 || !e->plan || !e->plan->lean) return;
+        for (const DtsVariant *v = e->variants; v; v = v->next) {
+            if (!v->lean || v->runs < min_runs) continue;
+            fprintf(f, "V %p %llu pc %#x next %#x blocks %u", (const void *)v,
+                    (unsigned long long)v->runs, e->pc, e->packet.next_pc,
+                    e->blocks);
+            for (unsigned b = 0; b < e->blocks; ++b) {
+                fprintf(f, " %#x:", e->block[b]);
+                for (unsigned k = 0; k < 32; ++k) fprintf(f, "%02x", e->bytes[b][k]);
+            }
+            fprintf(f, "\n");
+            for (unsigned k = 0; k < e->packet.count; ++k) {
+                const CdjC674xInstruction *in = &e->packet.instructions[k];
+                const CdjC674xDecoded *d = &e->decoded[k];
+                const JitOp *op = &e->plan->op[k];
+                fprintf(f, "I %u lop %u kind %u w %#x pc %#x compact %u "
+                        "creg %u cb %u cr %u z %u side %u dst %u a %u b %u "
+                        "cross %u bank %u mode %u size %u scale %u pair %u "
+                        "nonaligned %u store %u sx %u mul %u swap %u oper %u\n",
+                        k, e->plan->lop[k], op->kind, d->w, in->pc, d->compact,
+                        op->creg, op->creg_bank, op->creg_reg, op->z, op->side,
+                        op->dst, op->a, op->b, op->cross, op->bank, op->mode,
+                        op->size, op->scale, op->pair, op->nonaligned,
+                        op->is_store, op->sign_extend, op->multiply, op->swap,
+                        op->operation);
+            }
+            aot_dump_shape(f, "S", v->in);
+            fprintf(f, "P outcome %u pmask %u branches_plan %u generic %u ctl %u "
+                    "cycles %u last %u ns %u nl %u nb %u", v->outcome,
+                    e->plan->pmask, e->plan->branches, e->plan->generic,
+                    e->plan->ctl, v->cycles, v->last,
+                    v->new_stores, v->new_loads, v->branches);
+            for (unsigned k = 0; k < v->branches; ++k) fprintf(f, " %u", v->branch_rd[k]);
+            fprintf(f, " |");
+            for (unsigned j = 0; j < v->new_loads; ++j)
+                fprintf(f, " %u,%u,%u,%u,%u", v->new_load[j].rd, v->new_load[j].size,
+                        v->new_load[j].bank, v->new_load[j].dst,
+                        v->new_load[j].sign_extend);
+            fprintf(f, " |");
+            for (unsigned j = 0; j < v->new_stores; ++j)
+                fprintf(f, " %u,%u", v->new_store[j].rd, v->new_store[j].size);
+            fprintf(f, " |");
+            for (unsigned j = 0; j < v->pairs; ++j)
+                fprintf(f, " %u,%u", v->pair[j][0], v->pair[j][1]);
+            fprintf(f, "\n");
+            fprintf(f, "G");
+            for (unsigned j = 0; j < v->bus_len + v->retire_len; ++j)
+                fprintf(f, " %u", v->prog[j]);
+            fprintf(f, " bus %u\n", v->bus_len);
+            aot_dump_shape(f, "O", v->out_known ? v->out : NULL);
+            fprintf(f, "E %p %llu %p %llu\n", (const void *)v->succ[0],
+                    (unsigned long long)v->succ_runs[0], (const void *)v->succ[1],
+                    (unsigned long long)v->succ_runs[1]);
+        }
+    }
+}
+
+/* With cdj_c674x_aot_profile_to, an entry's variants go to the file as
+ * the entry is refilled (programs that reuse addresses keep theirs). */
+static FILE *aot_profile_file;
+static uint64_t aot_profile_min;
+
+void cdj_c674x_aot_profile_to(FILE *f, uint64_t min_runs)
+{
+    aot_profile_file = f;
+    aot_profile_min = min_runs;
+}
+
+static void aot_refill(const CdjC674xCacheEntry *e)
+{
+    if (aot_profiling && aot_profile_file && e->blocks)
+        aot_dump_entry(aot_profile_file, e, aot_profile_min);
+}
+
+void cdj_c674x_aot_profile_dump(FILE *f, uint64_t min_runs)
+{
+    if (!packet_cache) return;
+    for (unsigned i = 0; i < 1u << CDJ_C674X_PACKET_CACHE_BITS; ++i)
+        aot_dump_entry(f, &packet_cache[i], min_runs);
+}
+
+/* ---- ahead-of-time regions (tools/cdj_dsp/aot_gen.py) -----------------
+ * The stock DSP image never changes, so its hot lean packets can be
+ * compiled once: aot_gen.py turns a profile (cdj_c674x_aot_profile_dump)
+ * into C that a build includes here as CDJ_C674X_AOT_FILE.  Each node is
+ * one variant (a packet's bytes, entry shape and pmask predicates) as the
+ * lean pieces with its constants, and a node chains to its profiled
+ * successors without coming back here: the successor's entry is checked
+ * current and holding the node's bytes, its predicates select the node,
+ * and the shape is the one the node leaves by construction.  A node runs
+ * exactly what dts_lean runs for its variant and does after each packet
+ * what dt_run does (the limit, the horizon), returning where dt_run must
+ * act: AOT_DECLINED (the first packet declined: nothing changed),
+ * AOT_LIMIT, AOT_BETWEEN (the horizon ended after the last packet),
+ * AOT_CONT (the next packet is not one the region can run: dt_run takes
+ * it, unchained), AOT_REDO (as AOT_CONT, a later packet declined) and
+ * AOT_FAULT.  Packets are bound by their bytes (at a
+ * cache fill), so other code at the same addresses never runs compiled.
+ * CDJ_C674X_AOT=1 turns it on. */
+typedef struct AotPacket {
+    uint32_t pc;
+    uint8_t blocks;
+    uint32_t block[2];
+    uint8_t bytes[2][32];
+    uint16_t first, nodes;              /* its nodes in aot_nodes[] */
+    uint8_t pmask;                      /* the plan's, and its predicates' */
+    uint8_t pred[8][3];                 /* (bank, register, z) */
+} AotPacket;
+typedef struct {
+    CdjC674xRead read;
+    CdjC674xWrite write;
+    void *opaque;
+    unsigned n, limit;                  /* dt_run's */
+    uint64_t packets;                   /* run here */
+    CdjC674xCacheEntry *cache;
+} AotCtx;
+typedef struct AotNode {
+    uint16_t in;                        /* entry shape, as aot_gen numbers them */
+    uint8_t outcome;                    /* the variant's pmask predicates */
+    uint8_t loads, stores, branches;    /* its entry shape */
+    uint8_t branch_rd[6];
+    const DtsLoad *load;
+    const DtsStore *store;
+    int (*run)(CdjC674x *cpu, unsigned node, CdjC674xCacheEntry *e,
+               AotCtx *x);
+    unsigned node;
+} AotNode;
+enum { AOT_DECLINED, AOT_LIMIT, AOT_BETWEEN, AOT_CONT, AOT_FAULT, AOT_REDO };
+/* Tests only (-DCDJ_C674X_AOT_STRESS): decline one packet in 16 after its
+ * issue, so the regions' declines are exercised. */
+#ifdef CDJ_C674X_AOT_STRESS
+__attribute__((unused)) static inline bool aot_stress(void)
+{
+    static _Thread_local uint32_t x = 1;
+    x = x * 1103515245u + 12345u;
+    return (x >> 16) % 16 == 0;
+}
+#else
+__attribute__((unused)) static inline bool aot_stress(void) { return false; }
+#endif
+typedef int AotFn(CdjC674x *cpu, unsigned node, CdjC674xCacheEntry *e,
+                  AotCtx *x);
+static AotFn aot_next;
+
+/* The pmask predicates of packet p's instructions, as dts_preds and
+ * dts_lean_find key a variant (constant-folded where p is). */
+static inline __attribute__((always_inline)) uint8_t
+aot_key(const CdjC674x *cpu, const AotPacket *p)
+{
+    uint8_t key = 0;
+    for (unsigned i = 0; i < 8; ++i)
+        if ((p->pmask >> i) & 1)
+            key |= (uint8_t)(((cpu->r[p->pred[i][0]][p->pred[i][1]] != 0) ^
+                              p->pred[i][2]) << i);
+    return key;
+}
+
+/* The entry is current (entry_current inside a run), the usual case in
+ * line: checked since code_gen last moved.  (The fetch epoch only moves
+ * where code_gen does - a committed device write, between(), a run's
+ * start - and a refill leaves bytes just fetched, so entry_current's
+ * epoch test adds nothing here.) */
+static inline bool aot_current(CdjC674xCacheEntry *f, void *opaque)
+{
+    return f->checked_gen == code_gen || entry_current(f, opaque, true);
+}
+/* An edge into another function: a guaranteed tail call where the
+ * compiler has one (chains are long). */
+#if defined(__has_attribute)
+#  if __has_attribute(musttail)
+#    define AOT_TAIL __attribute__((musttail))
+#  endif
+#endif
+#ifndef AOT_TAIL
+#  define AOT_TAIL
+#endif
+
+#if defined(CDJ_C674X_AOT_FILE)
+#include CDJ_C674X_AOT_FILE
+#elif defined(__has_include) && __has_include("cdj_c674x_aot.inc")
+#include "cdj_c674x_aot.inc"
+#else
+static const AotPacket aot_packets[1];
+static const unsigned aot_npackets = 0;
+static const AotNode aot_nodes[1];
+#endif
+
+static int aot_mode = -1;
+static bool aot_enabled(void)
+{
+    if (aot_mode < 0) {
+        const char *env = getenv("CDJ_C674X_AOT");
+        aot_mode = aot_npackets && env && !strcmp(env, "1");
+    }
+    return aot_mode;
+}
+
+static const AotPacket *aot_packet_of(const CdjC674xCacheEntry *e)
+{
+    if (!aot_enabled()) return NULL;
+    unsigned lo = 0, hi = aot_npackets;
+    while (lo < hi) {                   /* the first with pc >= e->pc */
+        unsigned mid = (lo + hi) / 2;
+        if (aot_packets[mid].pc < e->pc) lo = mid + 1;
+        else hi = mid;
+    }
+    for (; lo < aot_npackets && aot_packets[lo].pc == e->pc; ++lo) {
+        const AotPacket *p = &aot_packets[lo];
+        bool same = p->blocks == e->blocks;
+        for (unsigned i = 0; same && i < e->blocks; ++i)
+            same = p->block[i] == e->block[i] &&
+                   !memcmp(p->bytes[i], e->bytes[i], 32);
+        if (same) return p;
+    }
+    return NULL;
+}
+
+/* v's compiled node, if any: same bytes, predicates and entry shape. */
+static const AotNode *aot_node_of(const CdjC674xCacheEntry *e,
+                                  const DtsVariant *v)
+{
+    if (!e->aot) return NULL;
+    const DtsShape *s = v->in;
+    for (unsigned k = 0; k < e->aot->nodes; ++k) {
+        const AotNode *n = &aot_nodes[e->aot->first + k];
+        if (n->outcome == v->outcome && n->loads == s->loads &&
+            n->stores == s->stores && n->branches == s->branches &&
+            !memcmp(n->branch_rd, s->branch_rd, s->branches) &&
+            (!s->loads ||
+             !memcmp(n->load, s->load, s->loads * sizeof(s->load[0]))) &&
+            (!s->stores ||
+             !memcmp(n->store, s->store, s->stores * sizeof(s->store[0]))))
+            return n;
+    }
+    return NULL;
+}
+
+/* A node's end when the next packet is none of its compiled successors:
+ * any compiled node for the next packet's bytes, the shape the node left
+ * (`shape`, aot_gen's number) and its predicates; AOT_CONT when none. */
+__attribute__((unused))
+static int aot_next(CdjC674x *cpu, unsigned shape, CdjC674xCacheEntry *e,
+                    AotCtx *x)
+{
+    (void)e;
+    if (cpu->loop_active || cpu->idle_cycles || cpu->fault) return AOT_CONT;
+    CdjC674xCacheEntry *f = &x->cache[packet_cache_index(cpu->pc)];
+    const AotPacket *p = f->aot;
+    if (!p || !f->blocks || f->pc != cpu->pc || f->dt <= 0 ||
+        !aot_current(f, x->opaque))
+        return AOT_CONT;
+    const uint8_t key = aot_key(cpu, p);
+    for (unsigned k = 0; k < p->nodes; ++k) {
+        const AotNode *n = &aot_nodes[p->first + k];
+        if (n->in == shape && n->outcome == key)
+            AOT_TAIL return n->run(cpu, n->node, f, x);
+    }
+    return AOT_CONT;
+}
+
 /* cdj_c674x_run for direct code: dt_exec for each packet whose cache entry
  * is current (the same byte check as fetch_cached) and plannable, until one
  * is not, the limit, or between() says stop. */
@@ -9167,8 +9703,10 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
      * packet's static schedule left (see "static schedules"). */
     const DtsShape *shape = NULL;
     bool chained = false;
+    DtsVariant *prev = NULL;            /* the last lean packet's variant */
     for (unsigned n = 0;;) {
         int done = 0;
+        DtsVariant *lean_v = NULL;
         if (!cpu->loop_active && !cpu->idle_cycles && !cpu->fault) {
             CdjC674xCacheEntry *e = &packet_cache[packet_cache_index(cpu->pc)];
             bool same = e->blocks && e->pc == cpu->pc &&
@@ -9184,7 +9722,7 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                 if (!chained) shape = dts_shape_of(cpu);
                 /* execute_single is leaner still with nothing in flight,
                  * and leaves nothing but perhaps a branch. */
-                if (shape && shape == dts_empty && e->single &&
+                if (shape && shape == dts_empty && e->single && !aot_profiling &&
                     (done = execute_single(cpu, &e->packet, e->decoded,
                                            e->single)) > 0) {
                     /* From empty queues it appends nothing and can only
@@ -9196,9 +9734,43 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                 else if (shape && n && e->plan->lean) {
                     uint8_t preds = dts_preds(cpu, e->plan, e->packet.count);
                     DtsVariant *v = (DtsVariant *)dts_lean_find(e, shape, preds);
+                    if (v && e->aot) {
+                        if (!v->aot_bound) {
+                            v->aot = aot_node_of(e, v);
+                            v->aot_bound = true;
+                        }
+                        if (v->aot) {
+                            AotCtx x = {read, write, opaque, n, limit, 0,
+                                        packet_cache};
+                            int r = v->aot->run(cpu, v->aot->node, e, &x);
+                            ++dts_counts.aot_exit[r];
+                            if (r != AOT_DECLINED) {
+                                n = x.n;
+                                dt_counts.packets += x.packets;
+                                dts_counts.lean += x.packets;
+                                dts_counts.aot += x.packets;
+                                if (r == AOT_LIMIT) return n;
+                                if (r == AOT_FAULT) {
+                                    *status = CDJ_C674X_RUN_FAULT;
+                                    return n;
+                                }
+                                chained = false;
+                                prev = NULL;
+                                if (r == AOT_CONT || r == AOT_REDO) continue;
+                                if (!between(between_opaque)) {  /* AOT_BETWEEN */
+                                    *status = CDJ_C674X_RUN_STOPPED;
+                                    return n;
+                                }
+                                code_gen_external();
+                                continue;
+                            }
+                        }
+                    }
                     if (v && (done = dts_lean(cpu, e, v, preds, read, write,
                                               opaque)) > 0) {
                         ++dts_counts.lean;
+                        if (aot_profiling) aot_note(prev, v);
+                        lean_v = v;
                         if (!v->out_known) {
                             v->out = dts_shape_of(cpu);
                             v->out_known = true;
@@ -9223,6 +9795,7 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                       n ? CDJ_C674X_RUN_BETWEEN : 0;
             return n;
         }
+        prev = lean_v;
         ++dt_counts.packets;
         if (!n) ++dt_counts.runs;
         if (++n == limit) return n;
@@ -9230,11 +9803,11 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
         /* between() may change anything: the next shape is scanned, the
          * code checked. */
         chained = false;
-        ++code_gen;
         if (!between(between_opaque)) {
             *status = CDJ_C674X_RUN_STOPPED;
             return n;
         }
+        code_gen_external();
     }
 }
 
@@ -9343,7 +9916,7 @@ static int jit_cycle(CdjC674x *cpu, JitLoop *l, bool all_pairs,
     if (!fast) {
         fast = execute_fast(cpu, packet, decoded, branches, read, write,
                             opaque, extent);
-        ++code_gen;                     /* its stores use the callback */
+        code_gen_external();            /* its stores use the callback */
         if (fast > 0) ++jit_counts.generic;
     }
     if (fast <= 0) {
@@ -9371,7 +9944,7 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
     *status = 0;
     if (!limit || !cdj_c674x_jit_enabled() || packet_cache_setting() != 2)
         return 0;
-    ++code_gen;                         /* anyone may have written code */
+    code_gen_external();                /* anyone may have written code */
     if (!cpu->loop_active)
         return !dt_enabled() ? 0 : dt_run(cpu, read, write, opaque, limit, between,
                       between_opaque, status);
@@ -9395,10 +9968,13 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
             jk_sync(cpu);
             return n;
         }
-        if (!horizon_skip(cpu) && (++code_gen, !between(between_opaque))) {
-            jk_sync(cpu);
-            *status = CDJ_C674X_RUN_STOPPED;
-            return n;
+        if (!horizon_skip(cpu)) {
+            if (!between(between_opaque)) {
+                jk_sync(cpu);
+                *status = CDJ_C674X_RUN_STOPPED;
+                return n;
+            }
+            code_gen_external();
         }
     }
 }

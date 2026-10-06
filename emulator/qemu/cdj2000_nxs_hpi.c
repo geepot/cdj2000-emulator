@@ -154,6 +154,11 @@ typedef struct {
      * models dsp_memory_span depends on (the cache controller's L1D
      * partition, EMIFB's SDRAM enable) and by reset. */
     uint64_t fetch_epoch;
+    /* cdj_c674x_set_code_writes: board writes into DSP memory that may
+     * reach code (dsp_code_write). */
+    uint64_t code_writes;
+    /* Interpreter steps the activation loop took: in a loop buffer, not. */
+    uint64_t steps_loop, steps_direct;
     /* cdj_c674x_set_ram_window: dsp_write's RAM path would only store the
      * bytes (no CDJ_NXS_DSP_RAM_FAST=0, no idle-skip write log running).
      * Set at each horizon open, cleared when an idle anchor is taken. */
@@ -189,6 +194,13 @@ typedef struct {
     unsigned idle_log_count;
     uint32_t idle_log_address[64], idle_log_value[64];
 } NxsHpi;
+/* After the board itself writes `size` bytes of DSP memory at `host`. */
+static inline void dsp_code_write(NxsHpi *s, const void *host, size_t size)
+{
+    if (cdj_c674x_may_hold_code(host, size))
+        __atomic_add_fetch(&s->code_writes, 1, __ATOMIC_RELEASE);
+}
+
 static NxsHpi *nxs_hpi;
 
 /* The compiled-execution counters of the calling (DSP) thread, when on. */
@@ -202,11 +214,19 @@ static void dsp_jit_report(void)
                 " direct=%" PRIu64 " direct-runs=%" PRIu64
                 " plans=%" PRIu64 " untraceable=%" PRIu64
                 " static=%" PRIu64 " static-builds=%" PRIu64
-                " static-misses=%" PRIu64,
+                " static-misses=%" PRIu64 " lean=%" PRIu64 " aot=%" PRIu64 " code-writes=%" PRIu64
+                " steps=%" PRIu64 "/%" PRIu64
+                " aot-exits=%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64
+                "/%" PRIu64,
                 jit.runs, jit.steady, jit.native, jit.generic, jit.compiles,
                 jit.direct, jit.direct_runs, jit.direct_plans,
                 jit.direct_untraceable, jit.static_hits, jit.static_builds,
-                jit.static_misses);
+                jit.static_misses, jit.static_lean, jit.aot,
+                __atomic_load_n(&nxs_hpi->code_writes, __ATOMIC_RELAXED),
+                nxs_hpi->steps_loop, nxs_hpi->steps_direct,
+                jit.aot_exit[0],
+                jit.aot_exit[1], jit.aot_exit[2], jit.aot_exit[3],
+                jit.aot_exit[4]);
 }
 
 /*
@@ -628,6 +648,7 @@ static void reset_line(NxsHpi *s, bool released)
          * functional backing store so a later SRAM partition cannot expose
          * bytes retained from the preceding DSP lifetime. */
         memset(s->l1d, 0, sizeof(s->l1d));
+        __atomic_add_fetch(&s->code_writes, 1, __ATOMIC_RELEASE);
         cdj_c6747_edma_reset(&s->edma);
         cdj_c6747_mcasp_reset(&s->mcasp);
         cdj_c6747_mcasp_control_reset(&s->mcasp_control);
@@ -796,6 +817,7 @@ static bool dsp_l1d_write(NxsHpi *s, uint32_t address, uint64_t value,
         else if (size == 1) *target = value;
         else if (size == 2) stw_le_p(target, value);
         else stl_le_p(target, value);
+        dsp_code_write(s, target, size);
     }
     return true;
 }
@@ -942,6 +964,7 @@ static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
         for (size_t i = 0; i < trial_context.write_count; ++i) {
             EdmaStagedWrite *write = &trial_context.writes[i];
             memcpy(write->target, write->bytes, write->size);
+            dsp_code_write(s, write->target, write->size);
         }
         s->edma = trial_edma;
         s->mcasp_control = trial_mcasp;
@@ -981,6 +1004,7 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         for (size_t i = 0; i < trial_context.write_count; ++i) {
             EdmaStagedWrite *write = &trial_context.writes[i];
             memcpy(write->target, write->bytes, write->size);
+            dsp_code_write(s, write->target, write->size);
         }
         /* A slot the DSP cannot observe keeps an idle proof: it staged no
          * RAM write and read no transiently rewritten word (an EDMA
@@ -1447,6 +1471,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                 else if (size == 8) stq_le_p(target, value);
                 else if (size == 2) stw_le_p(target, value);
                 else *target = value;
+                dsp_code_write(s, target, size);
             }
             return true;
         }
@@ -1578,6 +1603,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
             else if (size == 1) *target = value;
             else if (size == 2) stw_le_p(target, value);
             else stl_le_p(target, value);
+            dsp_code_write(s, target, size);
         }
         return true;
     }
@@ -1590,6 +1616,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
             else if (size == 1) s->sdram[sdram_offset] = value;
             else if (size == 2) stw_le_p(s->sdram + sdram_offset, value);
             else stl_le_p(s->sdram + sdram_offset, value);
+            dsp_code_write(s, s->sdram + sdram_offset, size);
         }
         return true;
     }
@@ -1601,6 +1628,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         else if (size == 1) s->l2[address - L2_BASE] = value;
         else if (size == 2) stw_le_p(s->l2 + (address - L2_BASE), value);
         else stl_le_p(s->l2 + (address - L2_BASE), value);
+        dsp_code_write(s, s->l2 + (address - L2_BASE), size);
     }
     return true;
 }
@@ -1985,6 +2013,7 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
                 continue;
             }
         }
+        ++*(s->cpu.loop_active ? &s->steps_loop : &s->steps_direct);
         if (!cdj_c674x_step(&s->cpu, dsp_read, dsp_write, s)) {
             a.reason = s->cpu.fault ? s->cpu.fault : "CPU stopped";
             s->dsp_halted = true;
@@ -2302,6 +2331,7 @@ static uint32_t model_get(NxsHpi *s, uint32_t address)
 static void model_put(NxsHpi *s, uint32_t address, uint32_t value)
 {
     stl_le_p(s->l2 + (address - L2_BASE), value);
+    dsp_code_write(s, s->l2 + (address - L2_BASE), 4);
 }
 
 /* A DSP-side HPIC store, with the same effects and transcript record. */
@@ -2338,6 +2368,7 @@ static void model_boot_phase(NxsHpi *s, unsigned phase)
      * the window MAIN's second record overlapped, set 0x11837bf8=1 (read
      * every service step) and 0x11837cc8=0x1a24. Values as transcribed. */
     memset(s->l2 + MODEL_WINDOW - L2_BASE, 0, MODEL_WINDOW_END - MODEL_WINDOW);
+    dsp_code_write(s, s->l2 + MODEL_WINDOW - L2_BASE, MODEL_WINDOW_END - MODEL_WINDOW);
     model_put(s, MODEL_STATE, 1);
     model_put(s, MODEL_FREE, MODEL_FRAMES);
     s->model_bound[0] = s->model_bound[1] = 0;
@@ -2694,6 +2725,7 @@ static void hpi_write_locked(void *opaque, hwaddr offset, uint64_t value,
     }
     if ((offset == 0x80000 || offset == 0xc0000) && valid_data(s)) {
         stl_le_p(host_memory(s, s->address), value);
+        dsp_code_write(s, host_memory(s, s->address), 4);
         ++s->words;
         if (offset == 0x80000) s->address += 4;
         record_event(s, offset == 0x80000 ? "hpi_host_data_autoincrement_write" :
@@ -2863,6 +2895,9 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(dsp_read, dsp_fetch_block);
     cdj_c674x_set_fetch_epoch(&s->fetch_epoch);
+    if (getenv("CDJ_NXS_DSP_CODE_WRITES") == NULL ||
+        strcmp(getenv("CDJ_NXS_DSP_CODE_WRITES"), "0"))
+        cdj_c674x_set_code_writes(&s->code_writes);
     cdj_c674x_set_ram_window(dsp_write, dsp_ram_window, &s->ram_direct);
     s->functional_audio = audio && !strcmp(audio, "1");
     const char *ram_fast = getenv("CDJ_NXS_DSP_RAM_FAST");

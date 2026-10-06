@@ -479,6 +479,35 @@ static uint8_t *memory_span(uint32_t address, size_t size)
  * leave out the write records the trace prints, so they are for timing
  * builds without trace output, never for compared traces. */
 static bool ram_direct;
+static const char *aot_profile_path;
+
+static void aot_profile_write(void)
+{
+    FILE *f = fopen(aot_profile_path, "w");
+    if (!f) return;
+    const char *min = getenv("CDJ_DSP_AOT_MIN");
+    cdj_c674x_aot_profile_dump(f, min ? strtoull(min, NULL, 10) : 64);
+    fclose(f);
+}
+
+/* CDJ_DSP_REPLAY_STATS=1: the core's path counters on stderr at exit. */
+static void replay_stats(void)
+{
+    CdjC674xJitStats s;
+    cdj_c674x_jit_stats(&s);
+    fprintf(stderr, "stats: steady %llu native %llu generic %llu direct %llu "
+            "direct_runs %llu static %llu lean %llu aot %llu misses %llu untraceable %llu"
+            " exits %llu/%llu/%llu/%llu/%llu\n",
+            (unsigned long long)s.steady, (unsigned long long)s.native,
+            (unsigned long long)s.generic, (unsigned long long)s.direct,
+            (unsigned long long)s.direct_runs, (unsigned long long)s.static_hits,
+            (unsigned long long)s.static_lean, (unsigned long long)s.aot,
+            (unsigned long long)s.static_misses,
+            (unsigned long long)s.direct_untraceable,
+            (unsigned long long)s.aot_exit[0], (unsigned long long)s.aot_exit[1],
+            (unsigned long long)s.aot_exit[2], (unsigned long long)s.aot_exit[3],
+            (unsigned long long)s.aot_exit[4]);
+}
 
 static bool ram_window_hook(void *unused, uint32_t a, uint32_t *lo,
                             uint32_t *hi, uint8_t **host)
@@ -1380,6 +1409,13 @@ int main(int argc, char **argv)
     ram_direct = getenv("CDJ_DSP_REPLAY_RAM_DIRECT") &&
                  !strcmp(getenv("CDJ_DSP_REPLAY_RAM_DIRECT"), "1");
     cdj_c674x_set_ram_window(write_bus, ram_window_hook, &ram_direct);
+    /* CDJ_DSP_AOT_PROFILE=path: the input of tools/cdj_dsp/aot_gen.py. */
+    if (getenv("CDJ_DSP_REPLAY_STATS")) atexit(replay_stats);
+    aot_profile_path = getenv("CDJ_DSP_AOT_PROFILE");
+    if (aot_profile_path && *aot_profile_path) {
+        cdj_c674x_aot_profile(true);
+        atexit(aot_profile_write);
+    }
     functional_audio = audio && !strcmp(audio, "1");
     const char *tx_path = getenv("CDJ_NXS_DSP_TX_CAPTURE");
     if (tx_path && *tx_path) {

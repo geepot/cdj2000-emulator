@@ -2,7 +2,9 @@
 #ifndef CDJ_C674X_H
 #define CDJ_C674X_H
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "cdj_c674x_loop.h"
 /* Partial interpreter. Encodings and semantics come from TI SPRUFE8B; no
  * third-party decoder code. Coverage is far wider than the seven instructions
@@ -222,6 +224,23 @@ typedef struct {
     uint64_t ticks;
 } CdjC674xHorizon;
 void cdj_c674x_set_horizon(CdjC674xHorizon *horizon);
+/* A board that counts its own writes into DSP memory that may reach code
+ * - every write it makes other than the core's direct stores: its write
+ * callback's commits, DMA, the host port - lets the compiled paths keep
+ * their code checks across runs and between(): it registers the counter
+ * here and increments it (atomically, from any thread) after each write
+ * for which cdj_c674x_may_hold_code(host bytes, size) is true, and after
+ * anything else that rewrites memory wholesale.  Without one, every run
+ * and between() rechecks the code it runs. */
+void cdj_c674x_set_code_writes(const uint64_t *counter);
+bool cdj_c674x_may_hold_code(const void *host, size_t size);
+/* Ahead-of-time compilation input (tools/cdj_dsp/aot_gen.py): count lean
+ * packets and their successors on the calling thread, and write the hot
+ * ones (at least min_runs runs) to f.  Diagnostic; off by default. */
+void cdj_c674x_aot_profile(bool on);
+void cdj_c674x_aot_profile_dump(FILE *f, uint64_t min_runs);
+/* And as cache entries are refilled, while profiling, to f (NULL: off). */
+void cdj_c674x_aot_profile_to(FILE *f, uint64_t min_runs);
 void cdj_c674x_set_jit(int enabled);
 bool cdj_c674x_jit_enabled(void);
 /* Counters of the calling thread's compiled execution, for reports and
@@ -236,6 +255,10 @@ typedef struct {
      * shaped packets that fitted none. */
     uint64_t static_hits, static_builds, static_misses;
     uint64_t static_lean;               /* of those, on the lean path */
+    uint64_t aot;                       /* of those, compiled ahead of time */
+    /* Region calls by how they ended: declined, limit, between, cont,
+     * fault, redo. */
+    uint64_t aot_exit[6];
 } CdjC674xJitStats;
 void cdj_c674x_jit_stats(CdjC674xJitStats *stats);
 

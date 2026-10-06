@@ -42,6 +42,23 @@ static uint64_t test_epoch;
 
 static bool test_direct;
 
+/* cdj_c674x_set_code_writes, as the NXS board keeps it, in half the seeds:
+ * every write the system makes itself that may reach code counts. */
+static uint64_t test_code_writes;
+static void note_write(const void *host, size_t size)
+{
+    if (cdj_c674x_may_hold_code(host, size))
+        __atomic_add_fetch(&test_code_writes, 1, __ATOMIC_RELEASE);
+}
+
+/* Tick counting (CdjC674xHorizon.count_ticks), as the NXS board does it:
+ * in seeds that use it, system A's tick, once it has run, lets the
+ * compiled paths count the ticks that follow instead of calling it, and
+ * every callback, between() and comparison first applies what they
+ * counted (tick_flush).  System B never counts. */
+static System *count_sys;
+static void tick_flush(void);
+
 static uint8_t *sys_at(System *s, uint32_t address)
 {
     if (s->swap && address >= 0x1100 && address < 0x1200)
@@ -52,6 +69,7 @@ static uint8_t *sys_at(System *s, uint32_t address)
 static bool sys_read(void *opaque, uint32_t address, uint32_t *value)
 {
     System *s = opaque;
+    if (s == count_sys) tick_flush();
     if (address < BASE || address > BASE + SIZE - 4 || (address & 3)) return false;
     if (address == FLAKY_READ && s->ticks % 3 == 0) return false;
     memcpy(value, sys_at(s, address), 4);
@@ -62,6 +80,7 @@ static bool sys_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     System *s = opaque;
+    if (s == count_sys) tick_flush();
     if (address < BASE || (uint64_t)address + size > BASE + SIZE ||
         (address & (size - 1)))
         return false;
@@ -70,9 +89,14 @@ static bool sys_write(void *opaque, uint32_t address, uint64_t value,
         if (!test_direct) s->write_log = s->write_log * 31 + address;
         if (s->swap && address < 0x1200 && address + size > 0x1100 &&
             (address < 0x1100 || address + size > 0x1200)) {
-            for (unsigned i = 0; i < size; ++i)
+            for (unsigned i = 0; i < size; ++i) {
                 *sys_at(s, address + i) = value >> (8 * i);
-        } else memcpy(sys_at(s, address), &value, size);
+                note_write(sys_at(s, address + i), 1);
+            }
+        } else {
+            memcpy(sys_at(s, address), &value, size);
+            note_write(sys_at(s, address), size);
+        }
     }
     return true;
 }
@@ -112,11 +136,27 @@ static bool sys_window(void *opaque, uint32_t address, uint32_t *lo,
     return false;
 }
 
+static CdjC674xHorizon test_horizon;
+
 static void sys_tick(void *opaque)
 {
     System *s = opaque;
+    if (s == count_sys) tick_flush();
     ++s->ticks;
     memcpy(s->ram + SIZE - 4, &s->ticks, 4);
+    note_write(s->ram + SIZE - 4, 4);
+    if (s == count_sys) test_horizon.count_ticks = true;
+}
+
+static void tick_flush(void)
+{
+    uint64_t n = test_horizon.ticks;
+    test_horizon.ticks = 0;
+    test_horizon.count_ticks = false;
+    if (!n) return;
+    count_sys->ticks += n;
+    memcpy(count_sys->ram + SIZE - 4, &count_sys->ticks, 4);
+    note_write(count_sys->ram + SIZE - 4, 4);
 }
 
 static uint32_t rng_state;
@@ -234,6 +274,15 @@ static uint32_t random_extra(void)
 {
     unsigned s = rnd() & 1, x = rnd() & 1, dst = pick_body_dst();
     unsigned a = rnd() & 15, b = rnd() & 15;
+    if (rnd() % 7 == 0) {
+        /* MVC to CSR or IER (written in place), or a read of what they
+         * write (CSR, IER, TSR, ITSR): a packet holding both stays with
+         * the interpreter. */
+        static const unsigned reads[] = {1, 4, 26, 27};
+        if (rnd() % 3)
+            return predicate() | (rnd() % 2 ? 4u : 1u) << 23 | b << 18 | 0x3a2;
+        return predicate() | dst << 23 | reads[rnd() % 4] << 18 | 0x3e2;
+    }
     switch (rnd() % 6) {
     case 0:
         return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
@@ -396,6 +445,7 @@ static void init_cpu(CdjC674x *cpu, System *s, uint32_t a10, uint32_t b10)
 static void same(const CdjC674x *a, const System *sa, const CdjC674x *b,
                  const System *sb, unsigned seed, unsigned step)
 {
+    if (count_sys) tick_flush();
     CdjC674x x = *a, y = *b;
     x.cycle_opaque = y.cycle_opaque = NULL;
     bool fault = a->fault != b->fault ||
@@ -414,6 +464,7 @@ static unsigned packets, faults_seen, loop_steps;
 
 static void lockstep(unsigned seed, bool loops)
 {
+    count_sys = NULL;
     static System sa, sb;
     static CdjC674x a, b;
     rng_state = seed * 2654435761u + 1;
@@ -440,6 +491,7 @@ static void lockstep(unsigned seed, bool loops)
             uint32_t w = random_instruction(pc);
             memcpy(sa.ram + (pc - BASE), &w, 4);
             memcpy(sb.ram + (pc - BASE), &w, 4);
+            note_write(sa.ram + (pc - BASE), 4);
         }
         if (rnd() % 89 == 0) {
             sa.hide = sb.hide = !sa.hide;
@@ -516,7 +568,6 @@ static unsigned jit_packets, jit_runs, jit_between_exits, jit_stops,
  * break PC); B then catches up those steps, each followed by the no-op
  * presentation the skip stood for, and the two are compared after the
  * last.  Seeds with horizon_off run without one. */
-static CdjC674xHorizon test_horizon;
 static unsigned horizon_skips;
 /* What bounded the horizon: a request the board will present when the
  * packet count reaches the bound, or at the break PC.  B's catch-up
@@ -535,6 +586,16 @@ static uint32_t horizon_event(const CdjC674x *cpu)
     return mask;
 }
 
+/* B's interpreter step, outside A's horizon. */
+static CdjC674xHorizon *current_horizon;
+static bool b_step(JitPair *p)
+{
+    cdj_c674x_set_horizon(NULL);
+    bool r = cdj_c674x_step(p->b, sys_read, sys_write, p->sb);
+    cdj_c674x_set_horizon(current_horizon);
+    return r;
+}
+
 static void catch_up(JitPair *p)
 {
     unsigned skipped = test_horizon.skipped;
@@ -542,7 +603,7 @@ static void catch_up(JitPair *p)
     horizon_skips += skipped;
     for (unsigned k = 0; k < skipped; ++k) {
         cdj_c674x_set_packet_cache(0);
-        assert(cdj_c674x_step(p->b, sys_read, sys_write, p->sb));
+        assert(b_step(p));
         cdj_c674x_set_packet_cache(2);
         ++p->step;
         uint32_t mask = horizon_event(p->b);
@@ -600,7 +661,7 @@ static void step_b(JitPair *p, bool expect)
 {
     catch_up(p);
     cdj_c674x_set_packet_cache(0);
-    bool rb = cdj_c674x_step(p->b, sys_read, sys_write, p->sb);
+    bool rb = b_step(p);
     cdj_c674x_set_packet_cache(2);
     assert(rb == expect);
     ++p->step;
@@ -635,6 +696,7 @@ static bool jit_between(void *opaque)
         uint32_t w = random_instruction(pc);
         memcpy(sys_at(p->sa, pc), &w, 4);
         memcpy(sys_at(p->sb, pc), &w, 4);
+        note_write(sys_at(p->sa, pc), 4);
     }
     present(p);
     return true;
@@ -675,14 +737,17 @@ static void jit_lockstep(unsigned seed)
         a.control[5] = b.control[5] = BASE;            /* ISTP */
     }
     JitPair p = {&a, &b, &sa, &sb, seed, 0};
+    count_sys = current_horizon && seed % 3 == 0 ? &sa : NULL;
     bool pre_done = false;
     while (p.step < 4000) {
         if (!pre_done) present(&p);
         pre_done = false;
         if (a.loop_active && a.packets == b.packets) {
             unsigned status, limit = 1 + rnd() % 64;
+            uint64_t before = a.packets;
             unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, limit,
                                        jit_between, &p, &status);
+            assert(n <= limit && a.packets == before + n);
             jit_runs += n != 0;
             if (status == CDJ_C674X_RUN_FAULT) {
                 step_b(&p, false);
@@ -777,6 +842,7 @@ static void dt_lockstep(unsigned seed)
         a.control[5] = b.control[5] = BASE;
     }
     JitPair p = {&a, &b, &sa, &sb, seed, 0};
+    count_sys = current_horizon && seed % 3 == 0 ? &sa : NULL;
     bool pre_done = false;
     while (p.step < 3000) {
         if (!pre_done) {
@@ -785,6 +851,7 @@ static void dt_lockstep(unsigned seed)
                 uint32_t w = random_instruction(pc);
                 memcpy(sa.ram + (pc - BASE), &w, 4);
                 memcpy(sb.ram + (pc - BASE), &w, 4);
+                note_write(sa.ram + (pc - BASE), 4);
             }
             if (rnd() % 89 == 0) {
                 sa.hide = sb.hide = !sa.hide;
@@ -799,8 +866,10 @@ static void dt_lockstep(unsigned seed)
         pre_done = false;
         if (a.packets == b.packets) {
             unsigned status, limit = 1 + rnd() % 64;
+            uint64_t before = a.packets;
             unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, limit,
                                        jit_between, &p, &status);
+            assert(n <= limit && a.packets == before + n);
             dt_runs += n != 0;
             if (status == CDJ_C674X_RUN_FAULT) {
                 step_b(&p, false);
@@ -919,6 +988,7 @@ static void dt_program(const uint32_t *code, unsigned n,
         setup(cpu);
     }
     JitPair p = {&a, &b, &sa, &sb, 0, 0};
+    count_sys = NULL;
     bool pre_done = false;
     while (p.step < steps) {
         if (!pre_done) present(&p);
@@ -971,6 +1041,137 @@ static void setup_faucr(CdjC674x *cpu)
     cpu->r[0][16] = 0x3f800000u;               /* 1.0 */
     cpu->r[0][17] = 0x40000000u;               /* 2.0 */
     cpu->r[1][1] = 2;
+}
+
+/* MVC to CSR/IER is traced in place: a packet that also reads what it
+ * writes, or writes one twice (the interpreter's fault), must not be. */
+static void setup_ctl(CdjC674x *cpu)
+{
+    cpu->r[1][4] = 0x30;                /* IER: INT4/INT5 enabled */
+    cpu->r[1][6] = 0x2;                 /* CSR: PGIE (ITSR.GIE) */
+    cpu->r[1][0] = 0;
+    cpu->r[1][1] = 2;                   /* passes before B0 is set */
+}
+
+static void dt_directed_ctl(void)
+{
+    const uint32_t branch_back = (uint32_t)((int32_t)-0 & 0x1fffff) << 7 | 0x10;
+    const uint32_t reads[] = {
+        0,                                              /* NOP: a run starts */
+        4u << 23 | 4u << 18 | 0x3a2 | 1,                /* MVC B4,IER */
+        5u << 23 | 4u << 18 | 0x3e2,                    /* || MVC IER,B5 */
+        1u << 23 | 6u << 18 | 0x3a2 | 1,                /* MVC B6,CSR */
+        7u << 23 | 27u << 18 | 0x3e2,                   /* || MVC ITSR,B7 */
+        1u << 23 | 6u << 18 | 0x3a2 | 1,                /* MVC B6,CSR */
+        8u << 23 | 1u << 18 | 0x3e2,                    /* || MVC CSR,B8 */
+        0x7ffu << 7 | 0x28 | 2 | 1u << 23,              /* MVK 0x7ff,B1 */
+        4u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B4 */
+        6u << 23 | 1u << 7 | 0x50 | 2,                  /* ADDK 1,B6 */
+        (uint32_t)(-8 & 0x1fffff) << 7 | 0x10,          /* B .S1 0x1000 */
+        4u << 13,                                       /* NOP 5 */
+    };
+    dt_program(reads, 12, setup_ctl, 120);
+    /* Writing IER twice faults in the interpreter: the first passes (B0 =
+     * 0) fill the cache and plan the packet, the third must not trace it. */
+    const uint32_t twice[] = {
+        0,
+        1u << 29 | 4u << 23 | 4u << 18 | 0x3a2 | 1,     /* [B0] MVC B4,IER */
+        1u << 29 | 4u << 23 | 6u << 18 | 0x3a2,         /* || [B0] MVC B6,IER */
+        2u << 29 | 1u << 28 | 0u << 23 | 1u << 7 | 0x28 | 2, /* [!B1] MVK 1,B0 */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
+        branch_back,
+        4u << 13,
+    };
+    dt_program(twice, 7, setup_ctl, 200);
+}
+
+/* Self-modifying code through the write callback (no direct stores):
+ * each pass stores the next ADDK constant into an instruction the same pass
+ * then runs, inside horizons that skip between(), so only the code check
+ * after a callback commit keeps the run on the new bytes. */
+static void setup_smc(CdjC674x *cpu)
+{
+    cpu->r[1][5] = 3u << 23 | 1u << 7 | 0x50;  /* the target, k = 1 */
+    cpu->r[1][10] = 0x1040;
+    cpu->r[1][1] = 100;
+}
+
+static bool never_between(void *opaque)
+{
+    (void)opaque;
+    assert(!"between() inside an endless horizon");
+    return false;
+}
+
+static void dt_directed_smc(void)
+{
+    /* The target, alone in its fetch block, is rewritten every other
+     * pass (B2 toggles): a pass that leaves it as it was checks it in the
+     * run, the next rewrites and runs it again in the same run. */
+    const uint32_t code[] = {
+        0, 0, 0, 0, 0, 0, 0, 0,                         /* 1000 */
+        5u << 23 | 10u << 18 | 1u << 9 | 1u << 7 | 7u << 4 | 4 | 2, /* 1020 STW B5,*B10 */
+        3u << 29 | 5u << 23 | 128u << 7 | 0x50 | 2,     /* [B2] ADDK 128,B5 */
+        3u << 29 | 2u << 23 | 0u << 7 | 0x28 | 2 | 1,   /* [B2] MVK 0,B2 */
+        3u << 29 | 1u << 28 | 2u << 23 | 1u << 7 | 0x28 | 2, /* || [!B2] MVK 1,B2 */
+        8u << 7 | 0x10,                                 /* B .S1 0x1040 */
+        4u << 13,                                       /* NOP 5 */
+        0, 0,
+        3u << 23 | 1u << 7 | 0x50,                      /* 1040 ADDK k,A3 (target) */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
+        2u << 29 | (uint32_t)(-8 & 0x1fffff) << 7 | 0x10, /* [B1] B .S1 0x1020 */
+        4u << 13,                                       /* NOP 5 */
+    };
+    static System sa, sb;
+    static CdjC674x a, b;
+    bool direct = test_direct;
+    for (unsigned mode = 0; mode < 4; ++mode) {
+        memset(&sa, 0, sizeof sa);
+        memcpy(sa.ram, code, sizeof code);
+        sb = sa;
+        ++test_epoch;
+        for (unsigned side = 0; side < 2; ++side) {
+            CdjC674x *cpu = side ? &b : &a;
+            cdj_c674x_reset(cpu, BASE);
+            cpu->cycle_tick = sys_tick;
+            cpu->cycle_opaque = side ? &sb : &sa;
+            setup_smc(cpu);
+        }
+        test_direct = mode & 1;
+        cdj_c674x_set_code_writes(mode & 2 ? &test_code_writes : NULL);
+        count_sys = NULL;
+        /* A horizon without end: between() never runs inside a run. */
+        cdj_c674x_set_horizon(current_horizon = &test_horizon);
+        test_horizon.until = UINT64_MAX;
+        test_horizon.break_pc = 0;
+        event_mask = 0;
+        JitPair p = {&a, &b, &sa, &sb, 0, 0};
+        while (p.step < 1500 && !a.fault) {
+            unsigned status;
+            unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, 64,
+                                       never_between, NULL, &status);
+            if (status == CDJ_C674X_RUN_FAULT) {
+                catch_up(&p);
+                step_b(&p, false);
+                break;
+            }
+            if (status == CDJ_C674X_RUN_BETWEEN) {
+                catch_up_compare(&p);
+                continue;
+            }
+            if (n) {                    /* the limit: the last packet's */
+                step_b(&p, true);
+                continue;
+            }
+            bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+            step_b(&p, ra);
+            if (!ra) break;
+        }
+        assert(a.r[0][3] && p.step >= 1500);
+    }
+    test_horizon.until = 0;
+    cdj_c674x_set_horizon(current_horizon = NULL);
+    test_direct = direct;
 }
 
 static void dt_directed_static(void)
@@ -1081,10 +1282,11 @@ int main(void)
     faults_seen = 0;
     cdj_c674x_set_jit(1);
     for (unsigned seed = 1; seed <= 3000; ++seed) {
-        cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
+        cdj_c674x_set_horizon(current_horizon = seed % 5 ? &test_horizon : NULL);
         assert(!test_horizon.skipped);
         test_horizon.until = 0;
         test_direct = seed % 4 < 2;
+        cdj_c674x_set_code_writes(seed % 3 == 1 ? &test_code_writes : NULL);
         jit_lockstep(seed);
     }
     CdjC674xJitStats stats;
@@ -1101,33 +1303,68 @@ int main(void)
            stats.native > 300000 && stats.generic > 10000 &&
            stats.steady > 100000);
     jit_packets = faults_seen = 0;
+    /* PCTEST_AOT_PROFILE=path: these programs' hot lean packets for
+     * tools/cdj_dsp/aot_gen.py; a build with CDJ_C674X_AOT_FILE and
+     * CDJ_C674X_AOT=1 then runs the same programs through them. */
+    const char *aot_profile = getenv("PCTEST_AOT_PROFILE");
+    FILE *aot_file = aot_profile ? fopen(aot_profile, "w") : NULL;
+    if (aot_file) {
+        cdj_c674x_aot_profile(true);
+        cdj_c674x_aot_profile_to(aot_file, 8);
+    }
     dt_directed();
     dt_directed_faucr();
+    dt_directed_ctl();
+    dt_directed_smc();
     {
         CdjC674xJitStats s0, s1;
         cdj_c674x_jit_stats(&s0);
-        for (unsigned h = 0; h < 2; ++h) {
-            cdj_c674x_set_horizon(h ? &test_horizon : NULL);
+        /* Repeated, so their packets are hot enough to compile ahead of
+         * time (PCTEST_AOT_PROFILE). */
+        for (unsigned h = 0; h < 80; ++h) {
+            cdj_c674x_set_horizon(current_horizon = h % 2 ? &test_horizon : NULL);
             test_horizon.until = 0;
             dt_directed_static();
         }
-        cdj_c674x_set_horizon(NULL);
+        cdj_c674x_set_horizon(current_horizon = NULL);
         cdj_c674x_jit_stats(&s1);
         assert(s1.static_lean > s0.static_lean);
     }
     for (unsigned seed = 1; seed <= 24000; ++seed) {
-        cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
+        cdj_c674x_set_horizon(current_horizon = seed % 5 ? &test_horizon : NULL);
         assert(!test_horizon.skipped);
         test_horizon.until = 0;
         test_direct = seed % 4 < 2;
+        cdj_c674x_set_code_writes(seed % 3 == 1 ? &test_code_writes : NULL);
         direct_programs = true;
         dt_lockstep(seed);
         direct_programs = false;
     }
-    cdj_c674x_set_horizon(NULL);
+    cdj_c674x_set_horizon(current_horizon = NULL);
     cdj_c674x_loop_set_functional_timing(false);
     CdjC674xJitStats after;
     cdj_c674x_jit_stats(&after);
+    if (aot_file) {
+        cdj_c674x_aot_profile_dump(aot_file, 8);
+        cdj_c674x_aot_profile_to(NULL, 0);
+        cdj_c674x_aot_profile(false);
+        fclose(aot_file);
+    }
+    if (after.aot) {
+        printf("ahead-of-time regions: %llu packets; exits %llu declined, "
+               "%llu limit, %llu between, %llu cont, %llu fault, %llu redo\n",
+               (unsigned long long)after.aot,
+               (unsigned long long)after.aot_exit[0],
+               (unsigned long long)after.aot_exit[1],
+               (unsigned long long)after.aot_exit[2],
+               (unsigned long long)after.aot_exit[3],
+               (unsigned long long)after.aot_exit[4],
+               (unsigned long long)after.aot_exit[5]);
+        assert(after.aot > 2000000 && after.aot_exit[0] > 20 &&
+               after.aot_exit[1] > 10000 && after.aot_exit[2] > 100000 &&
+               after.aot_exit[3] > 10000 && after.aot_exit[4] > 0 &&
+               after.aot_exit[5] > 20);
+    }
     printf("direct-trace lockstep: 24000 programs, %llu traced packets in "
            "%llu runs (%u with a packet), %llu plans, %llu untraceable, %u faults\n",
            (unsigned long long)(after.direct - stats.direct),

@@ -1386,3 +1386,91 @@ check, or moving the return address or the due cycle, each fails it.
   per-packet costs left are spread over issue, the queue programs, the
   cache checks and thread-local accesses, so the next stage compiles hot
   regions ahead of time (below).
+
+## C674x stage 4: ahead-of-time regions (2026-10-06)
+
+The stock DSP image is fixed, so its hot code can be compiled once, ahead
+of time, instead of interpreted (or replayed from static schedules) on
+every pass.  The approach follows Stijn Jacobs' `c14_jitgen.py` /
+`c66x_jit.c` for cdj-nxs2-qemu (THIRD_PARTY.md): profile, generate C for
+the hot code with the pipeline state fixed at generation time, key every
+compiled piece by its code bytes, fall back to the existing paths where
+the static state does not hold.  It is written against this core: the
+generated code is the lean path's own pieces with constants.
+
+### Design
+
+- **Unit: a lean variant.**  A static schedule (stage 3) already fixes
+  everything about a packet except its data for one (code bytes, entry
+  queue shape, pmask predicates) triple.  `dts_lean` was split into
+  always-inline pieces (`lean_begin`, `lean_issue`, `lean_check`,
+  `lean_decline`, `lean_tick`/`lean_commit`/`lean_e3`, `lean_apply`,
+  `lean_lret`, `lean_branch`, `lean_end`); `dts_lean` runs them for any
+  variant, a generated node calls them with the variant's constants (op
+  fields, predicates, append slots, landing masks, the bus and retirement
+  programs unrolled), so the compiler specializes each packet and both
+  paths share one implementation.
+- **Profile.**  `cdj_c674x_aot_profile` counts lean runs per variant and
+  the two commonest lean successors; `cdj_c674x_aot_profile_dump` writes
+  the hot ones (fetch blocks and bytes, plan ops, shapes, programs,
+  edges).  Replay: `CDJ_DSP_AOT_PROFILE=path`; the lockstep test:
+  `PCTEST_AOT_PROFILE=path` (entries are dumped as they are refilled, so
+  programs reusing addresses keep theirs).
+- **Generator.**  `tools/cdj_dsp/aot_gen.py OUT.c PROFILE...` merges
+  profiles, numbers the queue shapes, and emits one C function per group
+  of up to 256 connected nodes: a node is its packet's code, then dt_run's
+  post-packet steps (the run limit, the horizon), then its successors -
+  profiled ones in line (next pc, the cache entry current and holding the
+  successor's bytes, the predicates select the node, whose entry shape is
+  this node's exit shape by construction; `goto` within a function, a
+  guaranteed tail call across), any other compiled node through
+  `aot_next` (the same checks against the node table).
+- **Binding.**  A cache fill looks its bytes up (`aot_packet_of`: pc and
+  every byte of its fetch blocks), a variant its node (`aot_node_of`:
+  outcome and entry shape), so code other than the profiled image never
+  runs compiled.  `dt_run` enters a region where it would run `dts_lean`;
+  the region returns where dt_run must act (declined first packet, the
+  limit, the horizon's end, a packet it cannot run, a fault).
+- **Build.**  The generated file derives from the firmware, so it stays
+  with the build (as nxs2 keeps its cache), not in the repository:
+  `CDJ_C674X_AOT_SOURCE=file scripts/build-qemu-sh4.sh` copies it into
+  the QEMU tree as `cdj_c674x_aot.inc` (and removes it when unset), the
+  replay and test builds take `-DCDJ_C674X_AOT_FILE=...`.  Without a file
+  the core builds as before; with one, `CDJ_C674X_AOT=1` turns it on
+  (default off).
+
+Rebuilding for a new profile: replay the checkpoints with
+`CDJ_DSP_AOT_PROFILE`, run `aot_gen.py`, rebuild.  The profile used here
+merged five replays (boot checkpoint 400 for 5 M steps; the real-USB
+playback checkpoint and the live playback checkpoint, 20 M / 6 M steps,
+strict and functional audio): 4,398 nodes, compiled with the QEMU build
+in about a minute.
+
+### Alongside
+
+- **Code checks across runs.**  Every run start and every between()
+  moved `code_gen`, so every packet's cache entry compared its 32-64 bytes
+  again after each one (96% of the 1.25 G entry checks of a live run did,
+  `entry_current` 6-7% of the DSP thread).  The board now counts its own
+  writes into DSP memory that may reach code (`cdj_c674x_set_code_writes`
+  / `cdj_c674x_may_hold_code`: its write callback's RAM commits, EDMA,
+  the host port, the model window, the L1D clear at reset; a page holds
+  code once a fetch block there was checked), and the core moves
+  `code_gen` only when that count or the fetch epoch moved - after a run's
+  start, after between(), and after a compiled store committed through the
+  callback.  Without a counter (the replay tool, other boards) it moves
+  as before.  `CDJ_NXS_DSP_CODE_WRITES=0` turns it off.
+- **MVC to CSR and IER in traces.**  A live census of the interpreter
+  steps the activation loop took found 112 M direct steps in 140 s, 94 M
+  of them three packets of one routine writing IER/CSR (the
+  `MVC CSR,B4 / AND / MVC B4,CSR` pattern).  `dt_plan` now traces MVC to
+  CSR and IER (`dt_mvc_ctl`, written in place exactly as
+  `execute_packet`'s commit writes them, restored on a decline), refusing
+  a packet that also reads what it writes or writes one twice (the
+  interpreter's fault); interrupt recognition stays where it was (the
+  horizon's interrupt check after the packet, then between()).  Direct
+  interpreter steps fell to 16 M, direct runs from 103 M to 9 M.
+- **Thread-local state in one variable.**  The compiled paths' per-thread
+  state (`code_gen`, the packet cache, the horizon, the RAM TLB, the
+  counters) is one `_Thread_local` struct (`CDJ_C674X_TLS`), so a
+  function locates it once; `horizon_skip` is always inlined.
