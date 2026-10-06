@@ -683,6 +683,8 @@ def main():
                         help='--cosim link latency and lookahead in microseconds (100)')
     parser.add_argument('--cosim-shift', type=int, default=2,
                         help='--cosim: MAIN runs 2^N ns per instruction (-icount shift=N)')
+    parser.add_argument('--gui-env', action='append', default=[], metavar='NAME=VALUE',
+                        help='extra GUI simulator environment variable (e.g. BFIN_PROF=...); may be repeated')
     parser.add_argument('--panel-rev2', action='store_true',
                         help='the GUI board reads PF3 = 1, the late "/2" panel revision '
                              '(BFIN_GPIO_STRAP=0x8:0x8)')
@@ -1027,6 +1029,11 @@ def main():
         overrides['BFIN_COSIM_QUANTUM_US'] = str(args.cosim_quantum_us)
     if args.trace_link_tx:
         overrides['BFIN_SPORT_TX_OUTPUT'] = str(run / 'gui-link-tx.bin')
+    for item in args.gui_env:
+        name, sep, value = item.partition('=')
+        if not sep or not name.startswith('BFIN_'):
+            raise SystemExit(f'--gui-env wants BFIN_NAME=VALUE, got {item!r}')
+        overrides[name] = value
     # Do not inherit replay/proxy data or a firmware shortcut from the shell.
     gui_env = {k:v for k,v in os.environ.items() if not k.startswith('BFIN_')}
     gui_env.update(overrides)
