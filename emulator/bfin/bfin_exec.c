@@ -3,7 +3,9 @@
  * From hw/cdj/bfin/bfin_exec.c of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
  * Changed 2026-10-05 (bfin-link): circular DAG post-modify is GNU sim's
- * dagadd/dagsub (it wraps whatever side of the buffer I starts on).
+ * dagadd/dagsub (it wraps whatever side of the buffer I starts on), and a
+ * bundle's two 16-bit slots both read the I registers from before either
+ * modifies one (I0 += 4 || R6.H = W[I0] loads from the old I0).
  */
 /*
  * Blackfin instruction semantics: the 16- and 32-bit control, load/store,
@@ -964,17 +966,34 @@ static bfin_op *decode32(uint16_t iw0)
  * operands: the slots' loads are held back (load_reg) and the 16-bit slots
  * run first, so their stores see the registers the 32-bit slot is about to
  * change. */
+/* Both 16-bit slots, each seeing the I registers as the bundle found them;
+ * their post-modifies land together afterwards. */
+static void run_slots(bfin_core *c, const bfin_insn *i)
+{
+    uint32_t before[4], after[4];
+
+    memcpy(before, c->i, sizeof(before));
+    if (i->slot[0]) {
+        i->slot[0](c, i->sw[0], 0);
+    }
+    if (i->slot[1]) {
+        memcpy(after, c->i, sizeof(after));
+        memcpy(c->i, before, sizeof(before));
+        i->slot[1](c, i->sw[1], 0);
+        for (int n = 0; n < 4; n++) {
+            if (c->i[n] == before[n]) {
+                c->i[n] = after[n];
+            }
+        }
+    }
+}
+
 static int x_bundle(bfin_core *c, const bfin_insn *i)
 {
     BFIN_SYNC(c, i);
     c->in_bundle = 1;
     c->nload = 0;
-    if (i->slot[0]) {
-        i->slot[0](c, i->sw[0], 0);
-    }
-    if (i->slot[1]) {
-        i->slot[1](c, i->sw[1], 0);
-    }
+    run_slots(c, i);
     c->in_bundle = 0;
     i->op(c, i->iw0, i->iw1);
     for (int n = 0; n < c->nload; n++) {
@@ -995,12 +1014,7 @@ static int x_bundle_loads(bfin_core *c, const bfin_insn *i)
 {
     BFIN_SYNC(c, i);
     i->op(c, i->iw0, i->iw1);
-    if (i->slot[0]) {
-        i->slot[0](c, i->sw[0], 0);
-    }
-    if (i->slot[1]) {
-        i->slot[1](c, i->sw[1], 0);
-    }
+    run_slots(c, i);
     BFIN_NEXT_CHECKED(c, i);
 }
 

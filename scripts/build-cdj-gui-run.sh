@@ -19,5 +19,7 @@ BIN=${CDJ_BIN_DIR:-$REPO/bin}
 make -C "$REPO/emulator/bfin" O="$WORK/cdj-gui-run" ${CC:+CC="$CC"} \
     ${CFLAGS:+CFLAGS="$CFLAGS"}
 mkdir -p "$BIN"
+# A new file, not an overwrite: macOS kills a signed binary rewritten in place.
+rm -f "$BIN/cdj-gui-run"
 cp "$WORK/cdj-gui-run/cdj-gui-run" "$BIN/cdj-gui-run"
 echo "installed $BIN/cdj-gui-run"
