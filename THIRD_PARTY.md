@@ -51,7 +51,15 @@ there, so nothing in this repository is a modified QEMU file.
 QEMU 11.x or newer is required: the board includes `hw/core/boards.h` and
 `system/address-spaces.h`, which are the post-reorganisation header paths.
 
-## Nothing else is vendored
+## Credit: cdj-nxs2-qemu (Stijn Jacobs)
+
+| | |
+|---|---|
+| what | ideas from the C66x interpreter of `https://github.com/Stijn-Jacobs/cdj-nxs2-qemu` (commit `08d5cb1`), used with the author's permission |
+| used in | `emulator/qemu/cdj_c674x.c` (persistent per-PC decoded-packet cache and a fast path for common packets, after its `c66x_step.c` packet cache and `fast_cycles`), `tools/cdj_dsp/decode_crosscheck.{c,py}` (decoder-vs-objdump sweep over the whole DSP image, after its `make m1`) |
+| code copied | none: both were written against this core; files carry a courtesy credit line |
+
+
 
 No third-party source is copied into this tree. The only binaries this
 repository will ever hold are none.
