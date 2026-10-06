@@ -554,3 +554,63 @@ Variants that lost:
   ready poll saw about 13 DSP packets per read and the deck showed E-7010.
 - 64 and 512 packets per access also worked: play to 150 frames in 27 s and
   41 s.
+
+## McASP slots on the DSP thread's virtual clock (`--audio-clock virtual`, opt-in, 2026-10-05)
+
+Slice G of `analysis/emulator-nxs2-qemu-evaluation.md` (mods repository), after
+Stijn Jacobs' cdj-nxs2-qemu `CDJ_C6X_MHZ` (peripherals on virtual time, a
+configurable DSP clock); credit in THIRD_PARTY.md.
+`nxs_vm --functional-dsp-audio --dsp-thread --audio-clock virtual`
+(`CDJ_NXS_DSP_AUDIO_CLOCK=virtual`) replaces "one slot per 1,024 packets" with
+slot deadlines at the configured McASP1 rate (88,200 slots/s for 44.1 kHz
+stereo) on the DSP thread's clock, `epoch + packets / rate`
+(`--dsp-clock-mpps`, default 150, i.e. 1,700.7 packets per slot). The DSP runs
+at most a quantum ahead; when it is behind, the thread gives the lag up as
+before, and the slots the slip jumped fire at once (chunks are 2,048 packets in
+this mode, so a burst is a few dozen slots) and are counted as underruns: time
+is never stalled. `cdj_dsp_audio_clock.h` holds the exact deadline arithmetic;
+`tests/test_dsp_audio_clock.py` drives the board's `thread_audio_tick` and
+`dsp_thread_slip` with a host faster and ten times slower than the clock
+(every slot gets 1,700-1,701 packets and none is late; slots still follow
+virtual time with >= 85% underruns; stop/restart; 48 kHz reconfiguration).
+The idle skip stops before each slot edge. Host audio (`--host-dsp-audio-wav`)
+is allowed with it.
+
+Exactness: the synchronous modes do not reach the new code. Same 45 s
+full-capture stock boots, `develop` (6d7b58a) binary against this one: all
+257,469 events and 4,209 DSP checkpoints of the common prefix byte-identical;
+with `--functional-dsp-audio`, 125,453 events and 641 checkpoints.
+
+**Result: the clock works, real-time playback does not.** Stock NXS, the
+confirmed rekordbox USB, `--lightweight`, `link_hub`, same scenario as above,
+shared host:
+
+| | packets (default) | `--audio-clock virtual` |
+| --- | ---: | ---: |
+| USB press to the USB root list | 1.2 s | 35.6 s |
+| Enter on Bang Bang to the duration reply | 0.9 s | 1.9 s |
+| After PLAY | 150 frames in 17 s, then 1.15 frames/s (0.008x) | E-8302 CANNOT PLAY TRACK (300A) |
+| McASP slots per virtual second | ~5,000 | 88,200.5 |
+| DSP packets/s | ~5.0 M | ~3.4 M |
+| slots short of their budget (underruns) | n/a | 97.8% (39 of 1,700.7 packets per slot) |
+| MAIN blocked in the per-access DSP wait (whole run) | 80% | 78% |
+| QEMU CPU | 113% | 117% |
+| DSP-paced WAV | 415,566 frames, 69,309 nonzero | 18,373,237 frames (416.6 s), all zero |
+
+The slot clock tracks virtual time exactly (8,820,051 slots in 100.000
+virtual s), but from the moment McASP1 starts in boot the DSP never gets
+ahead of it again: no pacing wait, no idle skip, 391 of 400 s slipped. The
+firmware's real-time audio duty (an EDMA completion ISR every 32 slots, plus
+decode once a track plays) needs more packets per second than the interpreter
+delivers on that code (3.4-5 M/s; the playback-snapshot replay above put
+playback demand near 63 M packets/s), so the ISRs starve the background
+tasks, MAIN's stream and command traffic waits on the DSP, and the load fails.
+Fewer packets per MAIN access (`--dsp-thread-access-packets 32`) gives E-7010
+in boot; a 4 Mpps DSP clock (what the host sustains) gives E-7010 before
+McASP even starts.
+
+So the mode stays opt-in and is not proposed as the `--dsp-thread` default:
+real time needs a DSP roughly 15-20x faster on audio code. The profile of the
+starved DSP thread points at the first levers: 59% of step samples in the
+transactional (non-fast) packet path, and every RAM store walking the full peripheral
+probe chain in `dsp_write` before reaching L2/SDRAM (twice: check and commit).

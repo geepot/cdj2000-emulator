@@ -95,6 +95,7 @@ included; the Blackfin files have no third-party tables.
 | where from | `https://github.com/Stijn-Jacobs/cdj-nxs2-qemu` at `08d5cb1`: `hw/cdj/boards/cdj2000/dsp_host.c`, `hw/cdj/boards/nxs2/dsp_c6x.c` (`CDJ_C6X_THREAD=2`) |
 | licence | GPL-2.0-or-later; used with the author's permission |
 | our use | `emulator/qemu/cdj2000_nxs_hpi.c`, `CDJ_NXS_DSP_THREAD=1` (2026-10-05): the pattern re-implemented for our C674x and HPI model, no code copied verbatim |
+| also | the virtual-time peripheral clock with a configurable DSP clock (`CDJ_C6X_MHZ` in `nxs2/dsp_c6x.c`): `emulator/qemu/cdj_dsp_audio_clock.h`, `CDJ_NXS_DSP_AUDIO_CLOCK=virtual` (2026-10-05), McASP slots on the DSP thread's clock; re-implemented, no code copied |
 
 ## Nothing else is vendored
 

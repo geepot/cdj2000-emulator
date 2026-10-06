@@ -705,6 +705,16 @@ def main():
     parser.add_argument('--dsp-thread-access-packets', type=int, default=256,
                         help='--dsp-thread: DSP packets MAIN waits for per HPI access '
                              '(0..1000000, default 256)')
+    parser.add_argument('--dsp-clock-mpps', type=int, default=150,
+                        help='--dsp-thread: DSP clock in million packets per virtual second '
+                             '(1..100000, default 150). With --audio-clock virtual this is '
+                             'the DSP budget per McASP slot (150 -> ~1700 packets per slot)')
+    parser.add_argument('--audio-clock', choices=('packets', 'virtual'), default='packets',
+                        help='--functional-dsp-audio McASP slot clock: packets, one slot per '
+                             '1024 executed DSP packets (default), or virtual (needs '
+                             '--dsp-thread): slots at the configured McASP1 rate on the DSP '
+                             'thread\'s virtual clock, so playback runs at virtual (real) time '
+                             'and a DSP short of its packet budget counts underruns')
     parser.add_argument('--lightweight', action='store_true',
                         help='capture DSP checkpoints only on faults; omit the event transcript')
     parser.add_argument('--sd', type=Path,
@@ -832,14 +842,21 @@ def main():
                             args.virtual_mcasp_clock):
         parser.error('--dsp-thread runs the real DSP with the legacy scheduler; '
                      'drop --dsp-model/--deferred-dsp-scheduling/--virtual-mcasp-clock')
+    if not 1 <= args.dsp_clock_mpps <= 100000:
+        parser.error('--dsp-clock-mpps must be 1..100000')
+    if args.audio_clock == 'virtual' and not (args.dsp_thread and args.functional_dsp_audio):
+        parser.error('--audio-clock virtual requires --dsp-thread and --functional-dsp-audio')
+    if args.audio_clock == 'virtual' and args.dsp_cycle_mcasp_clock:
+        parser.error('--audio-clock virtual cannot be combined with --dsp-cycle-mcasp-clock')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if args.virtual_mcasp_clock and not args.functional_dsp_audio:
         parser.error('--virtual-mcasp-clock requires --functional-dsp-audio')
     if args.dsp_cycle_mcasp_clock and not args.functional_dsp_audio:
         parser.error('--dsp-cycle-mcasp-clock requires --functional-dsp-audio')
-    if args.host_dsp_audio_wav and not args.virtual_mcasp_clock:
-        parser.error('--host-dsp-audio-wav requires --virtual-mcasp-clock')
+    if args.host_dsp_audio_wav and not (args.virtual_mcasp_clock or
+                                        args.audio_clock == 'virtual'):
+        parser.error('--host-dsp-audio-wav requires --virtual-mcasp-clock or --audio-clock virtual')
     if args.render_dsp_audio_wav and not args.functional_dsp_audio:
         parser.error('--render-dsp-audio-wav requires --functional-dsp-audio')
     if args.capture_dsp_tx_nonzero_only and not args.capture_dsp_tx:
@@ -1113,9 +1130,14 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
     main_env.pop('CDJ_NXS_DSP_THREAD', None)
     main_env.pop('CDJ_NXS_DSP_THREAD_ACCESS_PACKETS', None)
+    main_env.pop('CDJ_NXS_DSP_THREAD_MPPS', None)
+    main_env.pop('CDJ_NXS_DSP_AUDIO_CLOCK', None)
     if args.dsp_thread:
         main_env['CDJ_NXS_DSP_THREAD'] = '1'
         main_env['CDJ_NXS_DSP_THREAD_ACCESS_PACKETS'] = str(args.dsp_thread_access_packets)
+        main_env['CDJ_NXS_DSP_THREAD_MPPS'] = str(args.dsp_clock_mpps)
+    if args.audio_clock == 'virtual':
+        main_env['CDJ_NXS_DSP_AUDIO_CLOCK'] = 'virtual'
     main_env.pop('CDJ_NXS_DSP_MODEL', None)
     if args.dsp_model:
         main_env['CDJ_NXS_DSP_MODEL'] = '1'
@@ -1202,6 +1224,7 @@ def main():
         dsp_model=args.dsp_model,
         dsp_thread=args.dsp_thread,
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
+                         'dsp-thread-virtual' if args.audio_clock == 'virtual' else
                          'dsp-sysclk1-cycle' if args.dsp_cycle_mcasp_clock else
                          'coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
         dsp_host_audio=('dsp-audio.wav' if args.host_dsp_audio_wav else None),
@@ -1225,7 +1248,10 @@ def main():
         scheduling_provenance=(
             f'DSP on its own host thread, at most one quantum ahead of QEMU virtual time; '
             f'MAIN waits for {args.dsp_thread_access_packets} DSP packets per HPI access; '
-            'MAIN events land at host-scheduled packets, so not replay evidence'
+            'MAIN events land at host-scheduled packets, so not replay evidence' +
+            (f'; McASP slots at the configured rate on the DSP clock ({args.dsp_clock_mpps}M '
+             'packets per virtual second), slots the DSP falls behind fire late as underruns'
+             if args.audio_clock == 'virtual' else '')
             if args.dsp_thread else
             'experimental virtual McASP clock services DSP in 4096-packet slices '
             'between 1 ms QEMU timer batches; no calibrated DSP instruction clock'

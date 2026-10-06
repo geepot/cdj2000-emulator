@@ -35,6 +35,7 @@
 #include "cdj_dsp_checkpoint.h"
 #include "cdj_dsp_budget.h"
 #include "cdj_dsp_scheduler.h"
+#include "cdj_dsp_audio_clock.h"
 
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
@@ -70,6 +71,12 @@ typedef struct {
     CdjC6747Hpi hpi;
     bool reset_released, dsp_started, dsp_halted, dsp_running;
     bool functional_audio, virtual_audio_clock, cycle_audio_clock;
+    /* CDJ_NXS_DSP_AUDIO_CLOCK=virtual (DSP thread only): McASP slots at their
+     * configured rate on the DSP thread's clock; see cdj_dsp_audio_clock.h.
+     * audio_clock.rate_num is 0 while McASP1 transmit is stopped. */
+    bool thread_audio_clock;
+    CdjDspAudioClock audio_clock;
+    uint64_t audio_clock_next_packets;  /* packets at which next_ns is due */
     uint32_t legacy_budget;
     CdjDspScheduler scheduler;
     QEMUTimer *dsp_timer;
@@ -902,6 +909,7 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
                             s->cpu.packets, s->cpu.cycles,
                             qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
                             s->virtual_audio_clock ? "virtual-clock-batch" :
+                            s->thread_audio_clock ? "dsp-thread-virtual" :
                             s->cycle_audio_clock ? "dsp-sysclk1-cycle" :
                                                    "functional-coarse-packet-slot") < 0 ||
                         fflush(s->tx_capture)) {
@@ -955,10 +963,70 @@ static int functional_slot_probe(NxsHpi *s, CdjC6747Edma *edma,
     return result;
 }
 
+/* The DSP thread's packet count at which its clock reaches @ns. */
+static uint64_t audio_clock_packets(int64_t ns)
+{
+    return cdj_dsp_clock_packets_at(dsp_thread.epoch_ns,
+                                    dsp_thread.epoch_packets,
+                                    dsp_thread.packets_per_us, ns);
+}
+
+/* CDJ_NXS_DSP_AUDIO_CLOCK=virtual: fire every McASP slot whose deadline the
+ * DSP clock has reached.  Returns false with cpu.fault set. */
+static bool thread_audio_tick(NxsHpi *s)
+{
+    CdjDspAudioClock *c = &s->audio_clock;
+    if ((s->mcasp_control.gblctl[1] & 0x1f00u) != 0x1f00u) {
+        c->rate_num = 0;
+        return true;
+    }
+    if (c->rate_num && s->cpu.packets < s->audio_clock_next_packets)
+        return true;
+    uint64_t numerator;
+    uint32_t denominator;
+    unsigned slots = s->mcasp_control.afsxctl[1] >> 7;
+    if (slots < 2 || slots > 32 ||
+        !cdj_c6747_mcasp_tx_clock_hz(&s->mcasp_control, 1,
+            cdj_c6747_pll_auxclk_hz(), CDJ_C6747_MCASP_AFSX,
+            &numerator, &denominator) ||
+        numerator > UINT64_MAX / 2 / slots) {
+        s->cpu.fault = "unsupported virtual-clock McASP rate";
+        s->cpu.fault_pc = s->cpu.pc;
+        return false;
+    }
+    if (c->rate_num != numerator * slots || c->rate_den != denominator) {
+        /* Started, or reconfigured: the first slot one period from now. */
+        NxsDspThread *t = &dsp_thread;
+        int64_t now = t->epoch_ns + (int64_t)((s->cpu.packets - t->epoch_packets) *
+                                              1000 / t->packets_per_us);
+        if (!cdj_dsp_audio_clock_start(c, numerator * slots, denominator, now)) {
+            s->cpu.fault = "unsupported virtual-clock McASP rate";
+            s->cpu.fault_pc = s->cpu.pc;
+            return false;
+        }
+        info_report("nxs-c674x-audio-clock: virtual, %.3f McASP1 slots/s, "
+                    "%.1f DSP packets per slot", (double)c->rate_num / c->rate_den,
+                    t->packets_per_us * 1e6 * c->rate_den / c->rate_num);
+        s->audio_clock_next_packets = audio_clock_packets(c->next_ns);
+        return true;
+    }
+    do {
+        if (!advance_functional_mcasp_slots(s)) return false;
+        cdj_dsp_audio_clock_fire(c);
+        s->audio_clock_next_packets = audio_clock_packets(c->next_ns);
+    } while (s->cpu.packets >= s->audio_clock_next_packets);
+    return true;
+}
+
 static bool functional_audio_tick(NxsHpi *s)
 {
     if (!s->functional_audio || s->virtual_audio_clock)
         return true;
+    if (s->thread_audio_clock) {
+        if (thread_audio_tick(s)) return true;
+        if (s->cpu.fault) return false;
+        goto slot_fault;
+    }
     if (s->cycle_audio_clock) {
         if ((s->mcasp_control.gblctl[1] & 0x1f00u) != 0x1f00u) {
             s->mcasp_next_cycle = s->mcasp_cycle_period = 0;
@@ -1120,7 +1188,16 @@ static uint64_t dsp_idle_periods(const NxsHpi *s, uint64_t remaining)
     uint64_t cycles = s->cpu.cycles - s->idle_anchor_cycles;
     if (!packets || !cycles) return 0;
     uint64_t k = remaining / packets;
-    if (s->functional_audio && s->cycle_audio_clock) {
+    if (s->thread_audio_clock) {
+        /* Stop before the next slot edge (or before starting the clock). */
+        if ((s->mcasp_control.gblctl[1] & 0x1f00u) == 0x1f00u) {
+            if (!s->audio_clock.rate_num ||
+                s->audio_clock_next_packets <= s->cpu.packets)
+                return 0;
+            k = MIN(k, (s->audio_clock_next_packets - 1 - s->cpu.packets) /
+                       packets);
+        }
+    } else if (s->functional_audio && s->cycle_audio_clock) {
         if ((s->mcasp_control.gblctl[1] & 0x1f00u) == 0x1f00u) {
             if (!s->mcasp_next_cycle || s->mcasp_next_cycle <= s->cpu.cycles)
                 return 0;
@@ -1169,7 +1246,8 @@ static void dsp_idle_skip(NxsHpi *s, uint64_t k)
  * steps.  dsp_idle_periods proved each of them invisible to the DSP. */
 static bool dsp_idle_skip_slots(NxsHpi *s, uint64_t from)
 {
-    if (!s->functional_audio || s->cycle_audio_clock) return true;
+    if (!s->functional_audio || s->cycle_audio_clock || s->thread_audio_clock)
+        return true;
     const uint64_t interval = CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL;
     uint64_t now = s->cpu.packets;
     bool ok = true;
@@ -1617,8 +1695,8 @@ static void run_dsp(NxsHpi *s)
 static uint64_t dsp_thread_packets_at(int64_t ns)
 {
     NxsDspThread *t = &dsp_thread;
-    return t->epoch_packets +
-           (uint64_t)MAX(ns - t->epoch_ns, 0) * t->packets_per_us / 1000;
+    return cdj_dsp_clock_packets_at(t->epoch_ns, t->epoch_packets,
+                                    t->packets_per_us, ns);
 }
 
 /* Give up DSP time the DSP is behind virtual time.  Under dsp_thread.lock,
@@ -1632,9 +1710,18 @@ static void dsp_thread_slip(NxsHpi *s, int64_t virt)
     t->lag_max_ns = MAX(t->lag_max_ns, lag);
     t->epoch_ns += lag;
     t->slipped_ns += lag;
+    if (s->thread_audio_clock && s->audio_clock.rate_num) {
+        /* Slots due before virt fire now, short of their DSP packets. */
+        s->audio_clock.late_until_ns = virt;
+        s->audio_clock_next_packets = audio_clock_packets(s->audio_clock.next_ns);
+    }
 }
 
 #define DSP_THREAD_CHUNK 65536u
+/* With the virtual audio clock a DSP behind virtual time slips once per
+ * chunk, and the slots the slip passed fire together: short chunks keep that
+ * burst to a few dozen slots (about one EDMA period). */
+#define DSP_THREAD_AUDIO_CHUNK 2048u
 
 static void *dsp_thread_run(void *opaque)
 {
@@ -1661,7 +1748,9 @@ static void *dsp_thread_run(void *opaque)
                                 MAX(t->quantum_ns / 1000000, 1));
             continue;
         }
-        uint64_t quota = MIN(limit - s->cpu.packets, DSP_THREAD_CHUNK);
+        uint64_t quota = MIN(limit - s->cpu.packets,
+                             s->thread_audio_clock ? DSP_THREAD_AUDIO_CHUNK :
+                                                     DSP_THREAD_CHUNK);
         if (t->main_target > s->cpu.packets)
             quota = MIN(quota, t->main_target - s->cpu.packets);
         /* Idle skip stays within the quota, so this never passes @limit. */
@@ -1678,6 +1767,11 @@ static void *dsp_thread_run(void *opaque)
                         t->lag_max_ns / 1e9, t->slipped_ns / 1e9,
                         t->main_waits, t->main_wait_ns / 1e9, t->chunks,
                         t->host_breaks, t->waits, s->cpu.pc);
+            if (s->thread_audio_clock)
+                info_report("nxs-c674x-audio-clock: virtual=%.3fs slots=%" PRIu64
+                            " underruns=%" PRIu64 " (slots fired after a slip,"
+                            " short of their DSP packets)", virt / 1e9,
+                            s->audio_clock.slots, s->audio_clock.late);
             t->report_ns = virt;
         }
         /* Hand the lock to MAIN before taking the next chunk: one waiting
@@ -1728,6 +1822,10 @@ static void dsp_thread_shutdown(Notifier *notifier, void *data)
                 dsp_thread.slipped_ns / 1e9, dsp_thread.main_waits,
                 dsp_thread.main_wait_ns / 1e9, dsp_thread.chunks,
                 dsp_thread.host_breaks);
+    if (nxs_hpi->thread_audio_clock)
+        info_report("nxs-c674x-audio-clock: stopped slots=%" PRIu64
+                    " underruns=%" PRIu64, nxs_hpi->audio_clock.slots,
+                    nxs_hpi->audio_clock.late);
 }
 
 /* Experimental independent McASP event source. QEMU virtual time is host
@@ -2167,6 +2265,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     const char *virtual_audio = getenv("CDJ_NXS_DSP_VIRTUAL_MCASP");
     const char *cycle_audio = getenv("CDJ_NXS_DSP_CYCLE_MCASP");
+    const char *audio_clock = getenv("CDJ_NXS_DSP_AUDIO_CLOCK");
     const char *host_audio = getenv("CDJ_NXS_DSP_HOST_AUDIO");
     const char *pcm_wav = getenv("CDJ_NXS_DSP_PCM_WAV");
     const char *scheduler = getenv("CDJ_NXS_DSP_SCHEDULER");
@@ -2212,6 +2311,17 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
         error_report("nxs-c674x: select one McASP clock with functional audio");
         exit(EXIT_FAILURE);
     }
+    if (audio_clock && *audio_clock && strcmp(audio_clock, "packets")) {
+        const char *threaded_env = getenv("CDJ_NXS_DSP_THREAD");
+        if (strcmp(audio_clock, "virtual") || !s->functional_audio ||
+            s->virtual_audio_clock || s->cycle_audio_clock ||
+            !threaded_env || strcmp(threaded_env, "1")) {
+            error_report("nxs-c674x: CDJ_NXS_DSP_AUDIO_CLOCK=virtual needs the "
+                         "DSP thread and functional audio, and no other McASP clock");
+            exit(EXIT_FAILURE);
+        }
+        s->thread_audio_clock = true;
+    }
     if (s->virtual_audio_clock)
         s->mcasp_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, virtual_audio_tick, s);
     if (pcm_wav && *pcm_wav) {
@@ -2230,8 +2340,8 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
                     pcm_wav);
     }
     if (host_audio && !strcmp(host_audio, "1")) {
-        if (!s->virtual_audio_clock) {
-            error_report("nxs-c674x: host audio requires virtual McASP clock");
+        if (!s->virtual_audio_clock && !s->thread_audio_clock) {
+            error_report("nxs-c674x: host audio requires a virtual McASP clock");
             exit(EXIT_FAILURE);
         }
         Error *audio_error = NULL;
@@ -2290,6 +2400,8 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
         warn_report("nxs-c674x: experimental virtual-time McASP batches enabled; not hardware or host-audio validation");
     else if (s->cycle_audio_clock)
         warn_report("nxs-c674x: experimental SYSCLK1-cycle McASP slots enabled; QEMU host time remains independent");
+    else if (s->thread_audio_clock)
+        warn_report("nxs-c674x: McASP slots at their configured rate on the DSP thread's virtual clock; a DSP behind it underruns rather than slowing audio time");
     else if (s->functional_audio)
         warn_report("nxs-c674x: functional McASP slots every %u packets enabled; run is not audio-timing evidence",
                     CDJ_DSP_FUNCTIONAL_AUDIO_PACKET_INTERVAL);
@@ -2319,7 +2431,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     if (threaded && !strcmp(threaded, "1")) {
         NxsDspThread *t = &dsp_thread;
         if (s->model || s->scheduler.mode || s->virtual_audio_clock ||
-            s->audio_voice || !hint) {
+            (s->audio_voice && !s->thread_audio_clock) || !hint) {
             error_report("nxs-c674x: the DSP thread needs the real C674x with "
                          "the legacy scheduler and no virtual McASP clock");
             exit(EXIT_FAILURE);
