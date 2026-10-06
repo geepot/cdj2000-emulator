@@ -689,6 +689,13 @@ def main():
     parser.add_argument('--dsp-model', action='store_true',
                         help='behavioural DSP: answer MAIN without executing the C674x '
                              '(fast; no audio or playback position, so not playback evidence)')
+    parser.add_argument('--dsp-thread', action='store_true',
+                        help='run the real C674x on its own host thread, paced to at most one '
+                             'quantum ahead of QEMU virtual time, instead of inside MAIN\'s HPI '
+                             'write (no checkpoints; the event transcript is diagnostic, not replay evidence)')
+    parser.add_argument('--dsp-thread-access-packets', type=int, default=256,
+                        help='--dsp-thread: DSP packets MAIN waits for per HPI access '
+                             '(0..1000000, default 256)')
     parser.add_argument('--lightweight', action='store_true',
                         help='capture DSP checkpoints only on faults; omit the event transcript')
     parser.add_argument('--sd', type=Path,
@@ -810,6 +817,12 @@ def main():
     if args.dsp_model and (args.functional_dsp_audio or args.functional_dsp_timing or
                            args.deferred_dsp_scheduling):
         parser.error('--dsp-model executes no DSP code; drop the functional/deferred DSP options')
+    if not 0 <= args.dsp_thread_access_packets <= 1000000:
+        parser.error('--dsp-thread-access-packets must be 0..1000000')
+    if args.dsp_thread and (args.dsp_model or args.deferred_dsp_scheduling or
+                            args.virtual_mcasp_clock):
+        parser.error('--dsp-thread runs the real DSP with the legacy scheduler; '
+                     'drop --dsp-model/--deferred-dsp-scheduling/--virtual-mcasp-clock')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
         parser.error('--capture-dsp-tx requires --functional-dsp-audio')
     if args.virtual_mcasp_clock and not args.functional_dsp_audio:
@@ -1077,6 +1090,11 @@ def main():
         main_env['CDJ_NXS_DSP_FUNCTIONAL_TIMING'] = '1'
     if args.functional_dsp_audio:
         main_env['CDJ_NXS_DSP_FUNCTIONAL_AUDIO'] = '1'
+    main_env.pop('CDJ_NXS_DSP_THREAD', None)
+    main_env.pop('CDJ_NXS_DSP_THREAD_ACCESS_PACKETS', None)
+    if args.dsp_thread:
+        main_env['CDJ_NXS_DSP_THREAD'] = '1'
+        main_env['CDJ_NXS_DSP_THREAD_ACCESS_PACKETS'] = str(args.dsp_thread_access_packets)
     main_env.pop('CDJ_NXS_DSP_MODEL', None)
     if args.dsp_model:
         main_env['CDJ_NXS_DSP_MODEL'] = '1'
@@ -1160,6 +1178,7 @@ def main():
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
         dsp_model=args.dsp_model,
+        dsp_thread=args.dsp_thread,
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
                          'dsp-sysclk1-cycle' if args.dsp_cycle_mcasp_clock else
                          'coarse-packet-slots' if args.functional_dsp_audio else 'stopped-clock'),
@@ -1180,8 +1199,12 @@ def main():
         architectural_validation_eligible=not (
             args.lightweight or args.functional_dsp_timing or args.dsp_model or
             args.functional_dsp_audio or args.deferred_dsp_scheduling or
-            dsp_legacy_budget != 1000000),
+            args.dsp_thread or dsp_legacy_budget != 1000000),
         scheduling_provenance=(
+            f'DSP on its own host thread, at most one quantum ahead of QEMU virtual time; '
+            f'MAIN waits for {args.dsp_thread_access_packets} DSP packets per HPI access; '
+            'MAIN events land at host-scheduled packets, so not replay evidence'
+            if args.dsp_thread else
             'experimental virtual McASP clock services DSP in 4096-packet slices '
             'between 1 ms QEMU timer batches; no calibrated DSP instruction clock'
             if args.virtual_mcasp_clock else
@@ -1321,7 +1344,8 @@ def main():
                                                         if args.gui_firmware else ''))
             write_json(run / 'run.json', run_manifest)
             try:
-                if not args.lightweight or any((run / 'dsp-checkpoints').glob('*.cdjdsp')):
+                if not args.dsp_thread and (not args.lightweight or
+                                            any((run / 'dsp-checkpoints').glob('*.cdjdsp'))):
                     finalize_dsp_artifacts(run, gui_firmware, args.functional_dsp_timing,
                                            args.functional_dsp_audio, args.capture_dsp_tx,
                                            dsp_scheduler_mode, main_firmware,
