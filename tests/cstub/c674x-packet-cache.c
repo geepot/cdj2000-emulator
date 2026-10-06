@@ -57,6 +57,8 @@ static const uint8_t *sys_block(void *opaque, uint32_t block)
     System *s = opaque;
     if (block < BASE || block >= BASE + SIZE) return NULL;
     if (s->hide && block >= 0x1100 && block < 0x1200) return NULL;
+    /* Not plain memory: the read callback refuses it now and then. */
+    if (block == (FLAKY_READ & ~31u)) return NULL;
     return s->ram + (block - BASE);
 }
 
@@ -134,6 +136,54 @@ static uint32_t random_instruction(uint32_t pc)
     }
 }
 
+/* Loop-body extras: the operations the NXS audio kernels pipeline - MPYSP,
+ * ADDSP/SUBSP (every encoding), and loads/stores of every addressing mode
+ * and width (LDNDW/STNDW, LDDW/STDW, LDNW/STNW included) through A4-A7 and
+ * B4-B7, which init_cpu points into data RAM, some of them circular. */
+static unsigned pick_body_dst(void)
+{
+    unsigned r;
+    do r = rnd() & 15; while (r == 10 || (r >= 4 && r <= 7));
+    return r;
+}
+
+/* Kernel-shaped bodies: only unpredicated SP and memory operations (and
+ * NOPs), the shape steady-state kernels compile. */
+static bool kernel_body;
+
+static uint32_t random_body(uint32_t pc)
+{
+    if (kernel_body) {
+        if (rnd() % 4 == 0) return rnd() % 3 ? 0 : (rnd() % 4) << 13;
+    } else if (rnd() % 2) return random_instruction(pc);
+    unsigned s = rnd() & 1, x = rnd() & 1, dst = pick_body_dst();
+    unsigned a = rnd() & 15, b = rnd() & 15;
+    switch (rnd() % 4) {
+    case 0:
+        return (kernel_body ? 0 : predicate()) | dst << 23 | b << 18 |
+               a << 13 | x << 12 | 0xe00 | s << 1;             /* MPYSP */
+    case 1: {
+        static const uint32_t enc[] = {0x218, 0xe18, 0x238, 0x2b8, 0xe38,
+                                       0xeb8};
+        return (kernel_body ? 0 : predicate()) | dst << 23 | b << 18 |
+               a << 13 | x << 12 | enc[rnd() % 6] | s << 1;    /* ADD/SUBSP */
+    }
+    default: {
+        static const unsigned modes[] = {0, 1, 8, 9, 10, 11, 1, 9, 11, 5, 13};
+        unsigned mode = modes[rnd() % 11];
+        unsigned offset = (mode & 4) ? 1 + rnd() % 2 : rnd() % 8; /* A1/A2.. */
+        bool extended = rnd() % 3 == 0;
+        unsigned op = rnd() & 7;
+        if (extended && op < 2) op += 2;
+        if ((extended && op != 3 && op != 5) && (dst & 1)) dst &= ~1u;
+        return (kernel_body ? 0 : predicate()) | dst << 23 |
+               (4 + rnd() % 4) << 18 |
+               offset << 13 | mode << 9 | (extended ? 0x100u : 0) |
+               (rnd() & 1) << 7 | op << 4 | 4 | s << 1;
+    }
+    }
+}
+
 static void build(System *s)
 {
     memset(s->ram, 0, sizeof s->ram);
@@ -153,7 +203,7 @@ static void build_loop(System *s)
 {
     build(s);
     uint32_t code[CODE_END - BASE], *w = code;
-    unsigned n = 1 + rnd() % 12, len = 1 + rnd() % 20;
+    unsigned n = 1 + (rnd() % 4 ? rnd() % 12 : rnd() % 200), len = 1 + rnd() % 20;
     unsigned ii = 1 + rnd() % (len < 14 ? len + 1 : 14);
     *w++ = 3u << 23 | n << 7 | 0x28 | 2;           /* MVK.S2 n,B3 */
     *w++ = 13u << 23 | 3u << 18 | 0x3a2;            /* MVC.S2 B3,ILC */
@@ -161,7 +211,7 @@ static void build_loop(System *s)
     *w++ = (ii - 1) << 23 | 0x38000;                /* SPLOOP ii */
     for (unsigned i = 0; i < len; ++i) {
         uint32_t insn;
-        do insn = random_instruction(BASE + 4 * (uint32_t)(w - code));
+        do insn = random_body(BASE + 4 * (uint32_t)(w - code));
         while ((insn & 0x7c) == 0x10 || (insn & 0x1ffc) == 0x120 ||
                (insn & 0xffe) == 0x3a2 || (insn & 0xffe) == 0x3e2);
         if ((insn & 0x1ffff) == 0 && rnd() % 3) insn = 0;   /* mostly NOP 1 */
@@ -185,6 +235,8 @@ static void build_loop(System *s)
     memcpy(s->ram, code, 4 * (size_t)(w - code));
 }
 
+static bool loop_bases;
+
 static void init_cpu(CdjC674x *cpu, System *s, uint32_t a10, uint32_t b10)
 {
     cdj_c674x_reset(cpu, BASE);
@@ -193,6 +245,24 @@ static void init_cpu(CdjC674x *cpu, System *s, uint32_t a10, uint32_t b10)
     cpu->r[0][10] = a10;
     cpu->r[1][10] = b10;
     cpu->r[1][3] = 0;   /* MVC B3,AMR leaves every register linear */
+    if (loop_bases) {
+        /* Data pointers for random_body: A4-A7/B4-B7 into 0x1800-0x1bff,
+         * small index registers A1/A2/B1/B2, and circular addressing for
+         * some of the pointers (BK0 64..512 bytes, BK1 32..1024). */
+        for (unsigned side = 0; side < 2; ++side) {
+            for (unsigned r = 4; r <= 7; ++r)
+                cpu->r[side][r] = 0x1800 + (rnd() % 0x80) * 8;
+            cpu->r[side][1] = rnd() % 4;
+            cpu->r[side][2] = rnd() % 4;
+        }
+        uint32_t amr = (5 + rnd() % 4) << 16 | (4 + rnd() % 6) << 21;
+        for (unsigned field = 0; field < 8; ++field)
+            if (rnd() % 3) amr |= (1 + rnd() % 2) << (field * 2);
+        cpu->control[0] = amr;
+        /* FADCR/FMCR rounding modes for both units (bits 10:9, 26:25). */
+        cpu->control[18] = (rnd() & 3) << 9 | (rnd() & 3) << 25;
+        cpu->control[20] = (rnd() & 3) << 9 | (rnd() & 3) << 25;
+    }
     cpu->cycle_tick = sys_tick;
     cpu->cycle_opaque = s;
 }
@@ -232,6 +302,7 @@ static void lockstep(unsigned seed, bool loops)
     uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
                    rnd() % 8 == 0 ? BAD_COMMIT - 8 * 4 : 0x1800;
     state = rng_state;
+    loop_bases = loops;
     init_cpu(&a, &sa, a10, b10);
     rng_state = state;
     init_cpu(&b, &sb, a10, b10);
@@ -295,6 +366,127 @@ static void self_modifying(void)
     assert(cpu.r[0][2] == 0x4321);
 }
 
+/* JIT lockstep: system A runs loop-buffer cycles through cdj_c674x_run
+ * (compiled), system B steps the interpreter with the cache off.  B takes
+ * its step inside A's between callback, right after A's packet, so the two
+ * are compared after every packet; both then get the same random interrupt
+ * request (GIE and IER are set, so loops drain and vector).  Random run
+ * limits and between() refusals cover every cdj_c674x_run exit. */
+typedef struct {
+    CdjC674x *a, *b;
+    System *sa, *sb;
+    unsigned seed, step;
+} JitPair;
+
+static unsigned jit_packets, jit_runs, jit_between_exits, jit_stops,
+                jit_armed;
+
+static void present(JitPair *p)
+{
+    /* Interrupt recognition never reads the queues while a loop is active,
+     * which is the only time steady execution lasts across between(). */
+    uint32_t pending = rnd() % 23 == 0 ? (1u << (4 + rnd() % 12)) : 0;
+    uint64_t armed = UINT64_C(1) << 62;     /* loop interrupt armed */
+    bool was = p->a->control_ready[31] & armed;
+    bool ra = cdj_c674x_interrupt(p->a, pending);
+    bool rb = cdj_c674x_interrupt(p->b, pending);
+    assert(ra == rb);
+    jit_armed += !was && (p->a->control_ready[31] & armed);
+    static CdjC674x view;
+    cdj_c674x_view(p->a, &view);
+    same(&view, p->sa, p->b, p->sb, p->seed, p->step);
+}
+
+static void step_b(JitPair *p, bool expect)
+{
+    cdj_c674x_set_packet_cache(0);
+    bool rb = cdj_c674x_step(p->b, sys_read, sys_write, p->sb);
+    cdj_c674x_set_packet_cache(2);
+    assert(rb == expect);
+    ++p->step;
+    /* Inside a run A may be in a steady-state kernel, whose queue arrays
+     * are rebuilt only when it ends: compare the rebuilt view. */
+    static CdjC674x view;
+    cdj_c674x_view(p->a, &view);
+    same(&view, p->sa, p->b, p->sb, p->seed, p->step);
+}
+
+static bool jit_between(void *opaque)
+{
+    JitPair *p = opaque;
+    ++jit_packets;
+    step_b(p, true);
+    if (rnd() % 61 == 0) return false;
+    present(p);
+    return true;
+}
+
+static void jit_lockstep(unsigned seed)
+{
+    static System sa, sb;
+    static CdjC674x a, b;
+    rng_state = seed * 2654435761u + 7;
+    kernel_body = seed % 3 == 1;
+    build_loop(&sa);
+    kernel_body = false;
+    /* Functional timing: interrupt entry then sizes its pipe-down from the
+     * queues, which between() reads right after a loop ends. */
+    cdj_c674x_loop_set_functional_timing(seed % 4 == 3);
+    sa.ticks = 0;
+    sa.hide = false;
+    sb = sa;
+    uint32_t b10 = 0x1900;
+    uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
+                   rnd() % 8 == 0 ? BAD_COMMIT - 8 * 4 : 0x1800;
+    uint32_t state = rng_state;
+    loop_bases = true;
+    init_cpu(&a, &sa, a10, b10);
+    rng_state = state;
+    init_cpu(&b, &sb, a10, b10);
+    if (seed & 1) {                       /* interrupts recognized */
+        a.control[1] |= 1; b.control[1] |= 1;          /* GIE */
+        a.control[4] = b.control[4] = 0xfff3;          /* IER */
+        a.control[5] = b.control[5] = BASE;            /* ISTP */
+    }
+    JitPair p = {&a, &b, &sa, &sb, seed, 0};
+    bool pre_done = false;
+    while (p.step < 4000) {
+        if (!pre_done) present(&p);
+        pre_done = false;
+        if (a.loop_active && a.packets == b.packets) {
+            unsigned status, limit = 1 + rnd() % 64;
+            unsigned n = cdj_c674x_run(&a, sys_read, sys_write, &sa, limit,
+                                       jit_between, &p, &status);
+            jit_runs += n != 0;
+            if (status == CDJ_C674X_RUN_FAULT) {
+                step_b(&p, false);
+                ++faults_seen;
+                return;
+            }
+            if (status == CDJ_C674X_RUN_BETWEEN) {
+                ++jit_between_exits;
+                pre_done = true;
+                continue;
+            }
+            if (status == CDJ_C674X_RUN_STOPPED) {
+                ++jit_stops;
+                continue;
+            }
+            if (n) {
+                ++jit_packets;
+                step_b(&p, true);
+                continue;
+            }
+        }
+        bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+        step_b(&p, ra);
+        if (!ra) {
+            ++faults_seen;
+            return;
+        }
+    }
+}
+
 int main(void)
 {
     cdj_c674x_set_fetch_block(sys_read, sys_block);
@@ -308,5 +500,21 @@ int main(void)
     printf("SPLOOP lockstep: 3000 programs, %u packets, %u loop-buffer steps,"
            " %u faults\n", packets, loop_steps, faults_seen);
     assert(loop_steps > 300000 && faults_seen > 100);
+    faults_seen = 0;
+    cdj_c674x_set_jit(1);
+    for (unsigned seed = 1; seed <= 3000; ++seed) jit_lockstep(seed);
+    CdjC674xJitStats stats;
+    cdj_c674x_jit_stats(&stats);
+    cdj_c674x_loop_set_functional_timing(false);
+    printf("JIT lockstep: 3000 programs, %u compiled packets in %u runs "
+           "(%u between exits, %u stops; %llu native, %llu generic, "
+           "%llu steady), %u loop interrupts, %u faults\n",
+           jit_packets, jit_runs, jit_between_exits, jit_stops,
+           (unsigned long long)stats.native,
+           (unsigned long long)stats.generic,
+           (unsigned long long)stats.steady, jit_armed, faults_seen);
+    assert(jit_packets > 300000 && jit_armed > 300 && faults_seen > 100 &&
+           stats.native > 300000 && stats.generic > 10000 &&
+           stats.steady > 100000);
     return 0;
 }

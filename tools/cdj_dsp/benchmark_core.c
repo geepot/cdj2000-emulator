@@ -16,12 +16,12 @@
 #include <time.h>
 #include "cdj_c674x.h"
 
-static uint8_t ram[0x200]; /* 0x1000..0x11ff: code, then data at 0x1100 */
+static uint8_t ram[0x1000]; /* 0x1000..0x1fff: code, then data at 0x1100 */
 
 static bool bench_read(void *opaque, uint32_t address, uint32_t *value)
 {
     (void)opaque;
-    if (address < 0x1000 || address > 0x11fc || (address & 3)) return false;
+    if (address < 0x1000 || address > 0x1ffc || (address & 3)) return false;
     memcpy(value, ram + address - 0x1000, 4);
     return true;
 }
@@ -30,7 +30,7 @@ static bool bench_write(void *opaque, uint32_t address, uint64_t value,
                         unsigned size, bool commit)
 {
     (void)opaque;
-    if (address < 0x1100 || address + size > 0x1200 || (address & (size - 1)))
+    if (address < 0x1100 || address + size > 0x2000 || (address & (size - 1)))
         return false;
     if (commit) memcpy(ram + address - 0x1000, &value, size);
     return true;
@@ -39,11 +39,15 @@ static bool bench_write(void *opaque, uint32_t address, uint64_t value,
 static const uint8_t *bench_block(void *opaque, uint32_t block)
 {
     (void)opaque;
-    return block >= 0x1000 && block < 0x1200 ? ram + block - 0x1000 : NULL;
+    return block >= 0x1000 && block < 0x2000 ? ram + block - 0x1000 : NULL;
 }
 
 static void tick(void *opaque) { ++*(unsigned *)opaque; }
 
+static bool between(void *opaque) { (void)opaque; return true; }
+
+/* With CDJ_C674X_JIT=1, loop-buffer cycles run compiled through
+ * cdj_c674x_run (its between() is empty, the board's own work aside). */
 static double step_loop(const uint32_t *code, unsigned words, unsigned steps,
                         uint64_t *packets)
 {
@@ -57,11 +61,25 @@ static double step_loop(const uint32_t *code, unsigned words, unsigned steps,
     cpu.cycle_opaque = &ticks;
     cdj_c674x_set_fetch_block(bench_read, bench_block);
     clock_t start = clock();
-    for (unsigned i = 0; i < steps; ++i)
+    for (unsigned i = 0; i < steps; ++i) {
+        if (cpu.loop_active) {
+            unsigned status;
+            unsigned n = cdj_c674x_run(&cpu, bench_read, bench_write, NULL,
+                                       steps - i, between, NULL, &status);
+            if (status == CDJ_C674X_RUN_FAULT) {
+                fprintf(stderr, "fault %s at %08x\n", cpu.fault, cpu.fault_pc);
+                return -1;
+            }
+            if (n) {
+                i += n - 1;
+                continue;
+            }
+        }
         if (!cdj_c674x_step(&cpu, bench_read, bench_write, NULL)) {
             fprintf(stderr, "fault %s at %08x\n", cpu.fault, cpu.fault_pc);
             return -1;
         }
+    }
     *packets = cpu.packets;
     return (double)(clock() - start) / CLOCKS_PER_SEC;
 }
@@ -135,6 +153,31 @@ int main(void)
         (0x1fffffu & (uint32_t)-8) << 7 | 0x10,       /* B.S1 0x1000 */
         4u << 13,                                     /* NOP 5 */
     };
+    /* The stage-1 memcpy kernel (dsp_stage1_memcpy, 0x11804838), the
+     * hottest loop in NXS playback: SPLOOP 2 of LDNDW and STNDW. */
+    static const uint32_t copy[] = {
+        4u << 23 | 0x1400u << 7 | 0x28 | 2,           /* MVK.S2 0x1400,B4 */
+        5u << 23 | 0x1800u << 7 | 0x28,               /* MVK.S1 0x1800,A5 */
+        3u << 23 | 64u << 7 | 0x28 | 2,               /* MVK.S2 64,B3 */
+        13u << 23 | 3u << 18 | 0x3a2,                 /* MVC.S2 B3,ILC */
+        3u << 13,                                     /* NOP 4 */
+        1u << 23 | 0x38000,                           /* SPLOOP 2 */
+        7u << 23 | 4u << 18 | 1u << 13 | 11u << 9 | 0x100 | 1u << 7 |
+            2u << 4 | 4,                              /* LDNDW *B4++,A7:A6 */
+        3u << 13,                                     /* NOP 4 */
+        0x34001,                                      /* SPKERNEL || */
+        7u << 23 | 5u << 18 | 1u << 13 | 11u << 9 | 0x100 |
+            7u << 4 | 4,                              /* STNDW A7:A6,*A5++ */
+        (0x1fffffu & (uint32_t)-8) << 7 | 0x10,       /* B.S1 0x1000 */
+        4u << 13,                                     /* NOP 5 */
+    };
+    /* The same kernel without pointer updates and with ILC 30000: nearly
+     * every step is a steady-state loop-buffer cycle. */
+    uint32_t steady[12];
+    memcpy(steady, copy, sizeof steady);
+    steady[2] = 3u << 23 | 30000u << 7 | 0x28 | 2;  /* MVK.S2 30000,B3 */
+    steady[6] = (steady[6] & ~(15u << 9)) | 1u << 9; /* LDNDW *+B4[1] */
+    steady[9] = (steady[9] & ~(15u << 9)) | 1u << 9; /* STNDW *+A5[1] */
     uint64_t packets;
     double t = step_loop(alu, 6, 30000000, &packets);
     printf("step-alu %.6f s; packets=%llu (%.1f M packets/s)\n", t,
@@ -144,6 +187,12 @@ int main(void)
            (unsigned long long)packets, packets / t / 1e6);
     t = step_loop(sploop, 11, 30000000, &packets);
     printf("step-sploop %.6f s; packets=%llu (%.1f M packets/s)\n", t,
+           (unsigned long long)packets, packets / t / 1e6);
+    t = step_loop(copy, 12, 30000000, &packets);
+    printf("step-memcpy %.6f s; packets=%llu (%.1f M packets/s)\n", t,
+           (unsigned long long)packets, packets / t / 1e6);
+    t = step_loop(steady, 12, 30000000, &packets);
+    printf("step-kernel %.6f s; packets=%llu (%.1f M packets/s)\n", t,
            (unsigned long long)packets, packets / t / 1e6);
     return 0;
 }

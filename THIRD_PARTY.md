@@ -84,7 +84,7 @@ included; the Blackfin files have no third-party tables.
 | | |
 |---|---|
 | what | ideas from the C66x interpreter of `https://github.com/Stijn-Jacobs/cdj-nxs2-qemu` (commit `08d5cb1`), used with the author's permission |
-| used in | `emulator/qemu/cdj_c674x.c` (persistent per-PC decoded-packet cache and a fast path for common packets, after its `c66x_step.c` packet cache and `fast_cycles`), `tools/cdj_dsp/decode_crosscheck.{c,py}` (decoder-vs-objdump sweep over the whole DSP image, after its `make m1`) |
+| used in | `emulator/qemu/cdj_c674x.c` (persistent per-PC decoded-packet cache and a fast path for common packets, after its `c66x_step.c` packet cache and `fast_cycles`; compiled SPLOOP kernels, `cdj_c674x_run` (2026-10-06), after the design of its `tools/c14_jitgen.py`/`c66x_jit.c` region compiler - schedule and pipeline resolved ahead of time, interpreter semantics for each operation, in-flight writes restored into the interpreter's structures on exit), `tools/cdj_dsp/decode_crosscheck.{c,py}` (decoder-vs-objdump sweep over the whole DSP image, after its `make m1`) |
 | code copied | none: both were written against this core; files carry a courtesy credit line |
 
 ## Adapted design: cdj-nxs2-qemu (Stijn Jacobs)
