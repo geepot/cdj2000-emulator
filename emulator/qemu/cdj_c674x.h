@@ -161,16 +161,26 @@ enum {
     CDJ_C674X_RUN_STOPPED = 2,
     CDJ_C674X_RUN_FAULT = 3,
 };
+/* While a run is in a steady-state kernel the queue arrays (stores[],
+ * loads[]) are rebuilt only when it ends; their counts and everything else
+ * stay exact.  between() must therefore not read the queue arrays - the
+ * boards' between-step work does not - or call cdj_c674x_sync first, which
+ * rebuilds them (and costs the speed).  Every return from cdj_c674x_run
+ * leaves them exact. */
+void cdj_c674x_sync(CdjC674x *cpu);
+/* *out = *cpu with the queue arrays as cdj_c674x_sync would rebuild them,
+ * without ending steady execution (for tests comparing every packet). */
+void cdj_c674x_view(const CdjC674x *cpu, CdjC674x *out);
 unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                        void *opaque, unsigned limit, CdjC674xBetween between,
                        void *between_opaque, unsigned *status);
 void cdj_c674x_set_jit(int enabled);
 bool cdj_c674x_jit_enabled(void);
 /* Counters of the calling thread's compiled execution, for reports and
- * tests: runs that executed a packet, packets by path (native jit_exec,
- * execute_fast fallback), loop compiles. */
+ * tests: runs that executed a packet, loop-buffer cycles by path (native
+ * jit_exec, execute_fast fallback, steady-state kernel), loop compiles. */
 typedef struct {
-    uint64_t runs, native, generic, compiles;
+    uint64_t runs, native, generic, compiles, steady;
 } CdjC674xJitStats;
 void cdj_c674x_jit_stats(CdjC674xJitStats *stats);
 

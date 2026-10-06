@@ -147,20 +147,26 @@ static unsigned pick_body_dst(void)
     return r;
 }
 
+/* Kernel-shaped bodies: only unpredicated SP and memory operations (and
+ * NOPs), the shape steady-state kernels compile. */
+static bool kernel_body;
+
 static uint32_t random_body(uint32_t pc)
 {
-    if (rnd() % 2) return random_instruction(pc);
+    if (kernel_body) {
+        if (rnd() % 4 == 0) return rnd() % 3 ? 0 : (rnd() % 4) << 13;
+    } else if (rnd() % 2) return random_instruction(pc);
     unsigned s = rnd() & 1, x = rnd() & 1, dst = pick_body_dst();
     unsigned a = rnd() & 15, b = rnd() & 15;
     switch (rnd() % 4) {
     case 0:
-        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
-               0xe00 | s << 1;                                 /* MPYSP */
+        return (kernel_body ? 0 : predicate()) | dst << 23 | b << 18 |
+               a << 13 | x << 12 | 0xe00 | s << 1;             /* MPYSP */
     case 1: {
         static const uint32_t enc[] = {0x218, 0xe18, 0x238, 0x2b8, 0xe38,
                                        0xeb8};
-        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
-               enc[rnd() % 6] | s << 1;                        /* ADD/SUBSP */
+        return (kernel_body ? 0 : predicate()) | dst << 23 | b << 18 |
+               a << 13 | x << 12 | enc[rnd() % 6] | s << 1;    /* ADD/SUBSP */
     }
     default: {
         static const unsigned modes[] = {0, 1, 8, 9, 10, 11, 1, 9, 11, 5, 13};
@@ -170,7 +176,8 @@ static uint32_t random_body(uint32_t pc)
         unsigned op = rnd() & 7;
         if (extended && op < 2) op += 2;
         if ((extended && op != 3 && op != 5) && (dst & 1)) dst &= ~1u;
-        return predicate() | dst << 23 | (4 + rnd() % 4) << 18 |
+        return (kernel_body ? 0 : predicate()) | dst << 23 |
+               (4 + rnd() % 4) << 18 |
                offset << 13 | mode << 9 | (extended ? 0x100u : 0) |
                (rnd() & 1) << 7 | op << 4 | 4 | s << 1;
     }
@@ -376,6 +383,8 @@ static unsigned jit_packets, jit_runs, jit_between_exits, jit_stops,
 
 static void present(JitPair *p)
 {
+    /* Interrupt recognition never reads the queues while a loop is active,
+     * which is the only time steady execution lasts across between(). */
     uint32_t pending = rnd() % 23 == 0 ? (1u << (4 + rnd() % 12)) : 0;
     uint64_t armed = UINT64_C(1) << 62;     /* loop interrupt armed */
     bool was = p->a->control_ready[31] & armed;
@@ -383,7 +392,9 @@ static void present(JitPair *p)
     bool rb = cdj_c674x_interrupt(p->b, pending);
     assert(ra == rb);
     jit_armed += !was && (p->a->control_ready[31] & armed);
-    same(p->a, p->sa, p->b, p->sb, p->seed, p->step);
+    static CdjC674x view;
+    cdj_c674x_view(p->a, &view);
+    same(&view, p->sa, p->b, p->sb, p->seed, p->step);
 }
 
 static void step_b(JitPair *p, bool expect)
@@ -393,7 +404,11 @@ static void step_b(JitPair *p, bool expect)
     cdj_c674x_set_packet_cache(2);
     assert(rb == expect);
     ++p->step;
-    same(p->a, p->sa, p->b, p->sb, p->seed, p->step);
+    /* Inside a run A may be in a steady-state kernel, whose queue arrays
+     * are rebuilt only when it ends: compare the rebuilt view. */
+    static CdjC674x view;
+    cdj_c674x_view(p->a, &view);
+    same(&view, p->sa, p->b, p->sb, p->seed, p->step);
 }
 
 static bool jit_between(void *opaque)
@@ -411,7 +426,12 @@ static void jit_lockstep(unsigned seed)
     static System sa, sb;
     static CdjC674x a, b;
     rng_state = seed * 2654435761u + 7;
+    kernel_body = seed % 3 == 1;
     build_loop(&sa);
+    kernel_body = false;
+    /* Functional timing: interrupt entry then sizes its pipe-down from the
+     * queues, which between() reads right after a loop ends. */
+    cdj_c674x_loop_set_functional_timing(seed % 4 == 3);
     sa.ticks = 0;
     sa.hide = false;
     sb = sa;
@@ -485,13 +505,16 @@ int main(void)
     for (unsigned seed = 1; seed <= 3000; ++seed) jit_lockstep(seed);
     CdjC674xJitStats stats;
     cdj_c674x_jit_stats(&stats);
+    cdj_c674x_loop_set_functional_timing(false);
     printf("JIT lockstep: 3000 programs, %u compiled packets in %u runs "
-           "(%u between exits, %u stops; %llu native, %llu generic), "
-           "%u loop interrupts, %u faults\n",
+           "(%u between exits, %u stops; %llu native, %llu generic, "
+           "%llu steady), %u loop interrupts, %u faults\n",
            jit_packets, jit_runs, jit_between_exits, jit_stops,
            (unsigned long long)stats.native,
-           (unsigned long long)stats.generic, jit_armed, faults_seen);
+           (unsigned long long)stats.generic,
+           (unsigned long long)stats.steady, jit_armed, faults_seen);
     assert(jit_packets > 300000 && jit_armed > 300 && faults_seen > 100 &&
-           stats.native > 300000 && stats.generic > 10000);
+           stats.native > 300000 && stats.generic > 10000 &&
+           stats.steady > 100000);
     return 0;
 }
