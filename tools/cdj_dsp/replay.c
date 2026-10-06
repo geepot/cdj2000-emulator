@@ -342,6 +342,10 @@ static void horizon_close(void) { horizon.until = 0; }
 
 static void ticks_flush(void)
 {
+    /* Ticks the compiled paths counted (horizon.count_ticks). */
+    ticks.debt += horizon.ticks;
+    horizon.ticks = 0;
+    horizon.count_ticks = false;
     if (ticks.debt)
         cdj_dsp_ticks_apply(spis, &wm8740, &spi_transfer, &pll, ticks.debt,
                             cdj_c674x_loop_functional_timing());
@@ -377,6 +381,7 @@ static void cycle_tick(void *unused)
     ticks.steady = tick_batch &&
         cdj_dsp_ticks_quiet(timers, &spi_transfer, &wm8740,
                             cdj_c674x_loop_functional_timing());
+    horizon.count_ticks = ticks.steady && horizon_on;
 }
 static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }
@@ -399,7 +404,7 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
     (void)unused;
     /* Only plain RAM may be read with ticks outstanding. */
     if ((a & 3) || !memory_span(a, 4)) {
-        if (ticks.debt) ticks_flush();
+        if (ticks.debt || horizon.ticks) ticks_flush();
         horizon_close();
     }
     if (cdj_c6747_syscfg_read(&syscfg, a, v)) return true;
@@ -753,7 +758,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
     (void)unused;
     if ((size != 1 && size != 2 && size != 4 && size != 8) ||
         !memory_span(a, size)) {
-        if (ticks.debt) ticks_flush();
+        if (ticks.debt || horizon.ticks) ticks_flush();
         horizon_close();
         if (commit) ++fetch_epoch;
     }

@@ -1216,3 +1216,85 @@ and 5,314 DSP checkpoints of the common prefix byte-identical (each step's
 binary gets further in the 45 s: 304-311 K events).  A first version
 without the quota bound ran an activation 4 packets past its budget after
 an idle skip; the boot comparison caught it.
+
+### 3. Static schedules (`cdj_c674x.c`, "static schedules", "the lean path")
+
+Compiled C674x code runs the same pipeline at the same PC each time: on
+the live checkpoint 1.87 M traced packets showed 6,239 distinct (PC, queue
+shape) pairs for 5,548 PCs.  A **shape** (`DtsShape`, interned per thread)
+is what `dt_exec`'s decisions depend on in the queues - each entry's due
+cycle relative to the CPU's, its kind (size low byte), register and sign
+extension, and the pending branches' dues.  From the entry shape come the
+landing registers and the write-conflict masks at start + 4 and + 5 (which
+replace the per-operation queue scans); from the post-issue shape (entry
+shape plus what the issue appended) the cycle in which each entry commits,
+reads at E3 and retires, the maturing branch, the overlap-check pairs, and
+two straight-line programs (`dts_program`): the bus phase, and retirement
+with every compaction move and tail fill at the indices `dt_exec`'s
+compaction uses, so dead slots get the same bytes.  Such a **variant**
+belongs to its cache entry and records the shape the packet leaves, which
+is the next packet's entry shape: within a run packets chain shape to shape
+without looking at the queues (a real `between()` call ends the chain).
+The queues stay the CPU's own arrays, so any packet can fall back to the
+generic path and an exit is a return.
+
+`dt_exec` finds a variant by entry shape and checks the issue's actual
+appends (and cycle count, branches) entry by entry, building one when none
+matches.  The **lean path** (`dts_lean`) then runs a packet whose plan is
+lean - every instruction with a lean form - from its variant for the entry
+shape and the predicates of its memory, SP and branch instructions: the
+register-only arms NXS code consists of are computed in line (each its
+arm's expression: ADD/SUB in every listed encoding, MVK/MVKH/ADDK, AND/OR/
+XOR/ANDN, CMPxx(U)), memory and SP operations append without the scans
+the variant settled, generic arms (`dt_arm`) and compact memory operations
+are called as in `dt_exec` with their appends then checked against the
+variant, and the bus phase and retirement run the variant's programs.
+Everything data-dependent is still checked: addresses, alignment and bus
+mapping, the candidate pairs' overlap, writes to registers landing in the
+first cycle, two writes to one register, FAUCR conflicts.  A decline puts
+back what the issue changed (appended slots, FAUCR, branch state, fault)
+and hands the packet to `dt_exec`.  `CDJ_C674X_STATIC=0` turns both off.
+With nothing in flight `execute_single` still runs one-instruction packets
+(its result shape is known: empty, or one queued branch, cached per
+entry).
+
+### 4. ABSSP/CMPSP in compiled loops
+
+Loop-buffer cycles holding ABSSP or CMPxxSP (FAUCR written in place) were
+left to the transactional interpreter, ~1.5% of the live checkpoint's
+steps at ~10x a compiled cycle's cost.  Their shapes now run on
+`jit_exec` with FAUCR saved and put back on a decline, the arms sharing
+one `controls` array (so two FAUCR writers in a packet conflict as in
+`execute_packet`) and `execute_packet`'s delayed FP-status check; a
+decline goes to the interpreter, never `execute_fast` (which cannot roll
+FAUCR back).
+
+### 5. Per-packet board trims
+
+From the live DSP thread's profile: the fetch epoch now moves only on
+cache-controller and EMIFB writes (the two models `dsp_memory_span` reads;
+every device write had made the host pointers stale every few hundred
+packets); while the board's ticks are only counted, the compiled paths add
+cycles to `CdjC674xHorizon.ticks` instead of calling `cycle_tick` (the
+board folds them into its debt wherever it applies it, the replay too); the
+idle skip's anchoring bound is 1,024 packets (64 re-anchored, and logged
+up to 64 RAM words, far too often); and the HPIC-write and WM8740-latch
+reports (28 K and 18 K lines in a 4-minute run) are sampled like the EDMA
+ones, the event-transcript path looked up once.
+
+### Measurements so far
+
+| | develop | 1-2 | 3-5 |
+| --- | ---: | ---: | ---: |
+| replay real-USB 20 M, user s | 1.20 | 0.98 | 0.94 |
+| replay live 6 M, user s | 0.54 | 0.46 | 0.38 |
+| `benchmark_core` step-mem (horizon) | 47 M/s | - | 54 M/s |
+| `benchmark_core` step-alu (horizon) | 102 M/s | - | 78 M/s |
+| live, DSP packets per wall s | 13.7 M | - | 16.7-17.5 M |
+| live, per virtual s | 20.8 M | - | 24.0 M |
+| live, underrun slots | 86.2-86.5% | - | 83.9-84.4% |
+
+(Live: the virtual-clock scenario, A/B alternated, two runs each, shared
+host at load ~10; E-8302 on screen in every run.)  step-alu is a loop of
+one-instruction ALU packets and a branch, where `execute_single` was
+already lean; the static path costs it the branch's packets.

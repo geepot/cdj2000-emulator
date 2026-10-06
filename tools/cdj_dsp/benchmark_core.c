@@ -11,6 +11,7 @@
  * fetch-block hook, as the NXS board does; set CDJ_C674X_PACKET_CACHE=0 or
  * =decode to compare the packet cache's modes in one binary. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
 #include <time.h>
@@ -61,6 +62,11 @@ static double step_loop(const uint32_t *code, unsigned words, unsigned steps,
     cpu.cycle_tick = tick;
     cpu.cycle_opaque = &ticks;
     cdj_c674x_set_fetch_block(bench_read, bench_block);
+    /* CDJ_BENCH_HORIZON=1: between() is a no-op the run may skip, as the
+     * board's horizon lets it whenever nothing is due. */
+    static CdjC674xHorizon horizon = {.until = UINT64_MAX};
+    const char *h = getenv("CDJ_BENCH_HORIZON");
+    cdj_c674x_set_horizon(h && !strcmp(h, "1") ? &horizon : NULL);
     clock_t start = clock();
     for (unsigned i = 0; i < steps; ++i) {
         {

@@ -199,6 +199,12 @@ typedef struct {
     uint64_t until;
     uint32_t break_pc;
     uint64_t skipped;
+    /* While count_ticks (the board's choice: its cycle_tick would only
+     * count the cycle), the compiled paths add each cycle to `ticks`
+     * instead of calling cycle_tick; the board takes them from there
+     * wherever it applies its counted ticks. */
+    bool count_ticks;
+    uint64_t ticks;
 } CdjC674xHorizon;
 void cdj_c674x_set_horizon(CdjC674xHorizon *horizon);
 void cdj_c674x_set_jit(int enabled);
@@ -211,6 +217,10 @@ bool cdj_c674x_jit_enabled(void);
 typedef struct {
     uint64_t runs, native, generic, compiles, steady;
     uint64_t direct, direct_runs, direct_plans, direct_untraceable;
+    /* Direct packets run from a static schedule, schedules built, and
+     * shaped packets that fitted none. */
+    uint64_t static_hits, static_builds, static_misses;
+    uint64_t static_lean;               /* of those, on the lean path */
 } CdjC674xJitStats;
 void cdj_c674x_jit_stats(CdjC674xJitStats *stats);
 

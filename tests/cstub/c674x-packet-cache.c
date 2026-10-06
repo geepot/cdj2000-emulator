@@ -117,7 +117,27 @@ static uint32_t random_instruction(uint32_t pc)
     unsigned x = rnd() & 1;
     static const uint32_t l_ops[] = {0x78, 0xf8, 0xf78, 0xff8, 0xdf8, 0xa78,
                                      0x8f8, 0xaf8, 0x58};
-    switch (rnd() % 12) {
+    switch (rnd() % 14) {
+    case 13:                              /* MVK .L scst5 */
+        return predicate() | dst << 23 | (rnd() & 31) << 18 | x << 12 |
+               0xa358 | s << 1;
+    case 12: {                            /* more register-only forms */
+        static const uint32_t ops[] = {
+            0xa58, 0x8d8, 0x9d8, 0x9f8, 0xad8, 0xbd8, 0xbf8,  /* CMPxx(U) */
+            0xf98, 0xdb0, 0x830,                              /* ANDN */
+            0xab0, 0xaf0, 0xb30,                              /* ADD/SUB .D x */
+            0x7a0, 0xf58, 0x9f0, 0x7e0, 0x9b0,                /* AND */
+            0x1a0, 0x1e0, 0x0d8, 0x5a0, 0x5e0, 0x2f8, 0xd70,  /* ADD/SUB */
+            0xfd8, 0x6a0, 0x8f0, 0x6e0, 0x8b0,                /* OR */
+            0xdd8, 0x2a0, 0xbf0, 0x2e0, 0xbb0,                /* XOR */
+            0x10u << 7 | 0x40, 0x11u << 7 | 0x40,             /* ADD/SUB .D */
+            0x12u << 7 | 0x40, 0x13u << 7 | 0x40,             /* ... ucst5 */
+        };
+        /* src1 over all 32 values: the constant forms sign-extend or
+         * not from bit 4. */
+        return predicate() | dst << 23 | b << 18 | (rnd() & 31) << 13 |
+               x << 12 | ops[rnd() % (sizeof ops / sizeof ops[0])] | s << 1;
+    }
     case 0: return predicate() | dst << 23 | (rnd() & 0xffff) << 7 | 0x28 | s << 1;
     case 1: return predicate() | dst << 23 | (rnd() & 0xffff) << 7 | 0x68 | s << 1;
     case 2: case 3:
@@ -167,7 +187,7 @@ static unsigned pick_body_dst(void)
 
 /* Kernel-shaped bodies: only unpredicated SP and memory operations (and
  * NOPs), the shape steady-state kernels compile. */
-static bool kernel_body, direct_extras;
+static bool kernel_body, direct_extras, loop_extras;
 
 /* Direct-trace extras: CMPSP (FAUCR in place), 16x16 and half-by-word
  * multiplies (delayed results through the generic arm path), ADDA/SUBA
@@ -207,6 +227,20 @@ static uint32_t random_extra(void)
 static uint32_t random_body(uint32_t pc)
 {
     if (direct_extras && rnd() % 4 == 0) return random_extra();
+    /* Loop bodies: ABSSP and CMPxxSP, which write FAUCR in place (on a
+     * NaN or a denormal: the registers hold random bits). */
+    if (loop_extras && rnd() % 6 == 0) {
+        /* Sources often A16-A19/B16-B19, which hold NaNs and denormals
+         * (jit_lockstep): FAUCR then changes on most issues. */
+        unsigned s = rnd() & 1, x = rnd() & 1, dst = pick_body_dst();
+        unsigned a = rnd() % 2 ? 16 + rnd() % 4 : rnd() & 15;
+        unsigned b = rnd() % 2 ? 16 + rnd() % 4 : rnd() & 15;
+        return rnd() % 2 ? predicate() | dst << 23 | b << 18 | x << 12 |
+                           0xf20 | s << 1                       /* ABSSP */
+                         : predicate() | dst << 23 | b << 18 | a << 13 |
+                           x << 12 | (0x38 + rnd() % 3) << 6 | 0x20 |
+                           s << 1;                              /* CMPxxSP */
+    }
     if (kernel_body) {
         if (rnd() % 4 == 0) return rnd() % 3 ? 0 : (rnd() % 4) << 13;
     } else if (rnd() % 2) return random_instruction(pc);
@@ -564,8 +598,9 @@ static void jit_lockstep(unsigned seed)
     static CdjC674x a, b;
     rng_state = seed * 2654435761u + 7;
     kernel_body = seed % 3 == 1;
+    loop_extras = seed % 3 == 2;
     build_loop(&sa);
-    kernel_body = false;
+    kernel_body = loop_extras = false;
     /* Functional timing: interrupt entry then sizes its pipe-down from the
      * queues, which between() reads right after a loop ends. */
     cdj_c674x_loop_set_functional_timing(seed % 4 == 3);
@@ -581,6 +616,11 @@ static void jit_lockstep(unsigned seed)
     init_cpu(&a, &sa, a10, b10);
     rng_state = state;
     init_cpu(&b, &sb, a10, b10);
+    static const uint32_t special[] = {0x7fc00000u, 0x7f800001u, 0x00000123u,
+                                       0x80400000u};
+    for (unsigned side = 0; seed % 3 == 2 && side < 2; ++side)
+        for (unsigned r = 16; r < 20; ++r)
+            a.r[side][r] = b.r[side][r] = special[(r + side) % 4];
     if (seed & 1) {                       /* interrupts recognized */
         a.control[1] |= 1; b.control[1] |= 1;          /* GIE */
         a.control[4] = b.control[4] = 0xfff3;          /* IER */
@@ -808,6 +848,132 @@ static void dt_directed(void)
     }
 }
 
+/* Directed static-schedule checks: a loop of fixed packets run through
+ * cdj_c674x_run (system A) against the interpreter (B) as dt_lockstep
+ * does, whose first pass builds the packets' static schedules and whose
+ * second runs them on the lean path with data that must decline them
+ * there: dt_program runs it; the setups give each its registers. */
+static void dt_program(const uint32_t *code, unsigned n,
+                       void (*setup)(CdjC674x *), unsigned steps)
+{
+    static System sa, sb;
+    static CdjC674x a, b;
+    memset(&sa, 0, sizeof sa);
+    memcpy(sa.ram, code, n * 4);
+    sb = sa;
+    ++test_epoch;
+    rng_state = 12345;
+    for (unsigned side = 0; side < 2; ++side) {
+        CdjC674x *cpu = side ? &b : &a;
+        cdj_c674x_reset(cpu, BASE);
+        cpu->cycle_tick = sys_tick;
+        cpu->cycle_opaque = side ? &sb : &sa;
+        setup(cpu);
+    }
+    JitPair p = {&a, &b, &sa, &sb, 0, 0};
+    bool pre_done = false;
+    while (p.step < steps) {
+        if (!pre_done) present(&p);
+        pre_done = false;
+        if (a.packets == b.packets) {
+            unsigned status;
+            unsigned m = cdj_c674x_run(&a, sys_read, sys_write, &sa, 64,
+                                       jit_between, &p, &status);
+            if (getenv("DTDBG")) fprintf(stderr, "run pc %#x -> %u status %u (fault %s idle %u loop %d)\n", a.pc, m, status, a.fault ? a.fault : "-", a.idle_cycles, a.loop_active);
+            if (status == CDJ_C674X_RUN_FAULT) {
+                step_b(&p, false);
+                if (getenv("DTDBG")) fprintf(stderr, "dt_program: run fault %s at step %u\n", a.fault, p.step);
+                return;
+            }
+            if (status == CDJ_C674X_RUN_BETWEEN) {
+                catch_up_compare(&p);
+                pre_done = true;
+                continue;
+            }
+            if (status == CDJ_C674X_RUN_STOPPED) continue;
+            if (m) {
+                step_b(&p, true);
+                continue;
+            }
+        }
+        bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
+        step_b(&p, ra);
+        if (!ra) { if (getenv("DTDBG")) fprintf(stderr, "dt_program: step fault %s at step %u faucr %x\n", a.fault, p.step, a.control[19]); return; }
+    }
+}
+
+/* A load lands in A3 as a predicated MVK writes A3: the first passes (B0
+ * = 0) fill the packet cache and build the MVK's schedule, the third (B0 =
+ * 1) must refuse it on the lean path (the E1/E5 conflict execute_packet
+ * faults on). */
+static void setup_landing(CdjC674x *cpu)
+{
+    cpu->r[0][10] = 0x1800;
+    cpu->r[1][0] = 0;
+    cpu->r[1][1] = 2;       /* passes before the data changes: one fills
+                               the packet cache, one builds the schedules */
+}
+
+/* CMPGTSP sets FAUCR on a NaN in parallel with a load that faults on the
+ * third pass (A10 made unaligned, A16 made a NaN, after the second): the
+ * lean path must put FAUCR back when it declines. */
+static void setup_faucr(CdjC674x *cpu)
+{
+    cpu->r[0][10] = 0x1800;
+    cpu->r[0][16] = 0x3f800000u;               /* 1.0 */
+    cpu->r[0][17] = 0x40000000u;               /* 2.0 */
+    cpu->r[1][1] = 2;
+}
+
+static void dt_directed_static(void)
+{
+    const uint32_t branch_back = (uint32_t)((int32_t)-0 & 0x1fffff) << 7 | 0x10;
+    const uint32_t landing[] = {
+        0,                                              /* NOP */
+        3u << 23 | 10u << 18 | 1u << 9 | 6u << 4 | 4,   /* LDW *+A10[0],A3 */
+        2u << 13,                                       /* NOP 3 */
+        1u << 29 | 3u << 23 | 5u << 7 | 0x28,           /* [B0] MVK 5,A3 */
+        2u << 29 | 1u << 28 | 0u << 23 | 1u << 7 | 0x28 | 2, /* [!B1] MVK 1,B0 */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
+        branch_back,                                    /* B .S1 0x1000 */
+        4u << 13,                                       /* NOP 5 */
+    };
+    dt_program(landing, 8, setup_landing, 200);
+    const uint32_t faucr[] = {
+        0,                                              /* NOP: a run starts
+                                                           here, so the next
+                                                           packet is traced
+                                                           inside it */
+        6u << 23 | 17u << 18 | 16u << 13 | 0x39u << 6 | 0x20 | 1, /* CMPGTSP */
+        7u << 23 | 10u << 18 | 1u << 9 | 6u << 4 | 4,   /* || LDW *+A10[0],A7 */
+        4u << 13,                                       /* NOP 5 */
+        2u << 29 | 1u << 28 | 16u << 23 | 0x7fc0u << 7 | 0x68, /* [!B1] MVKH */
+        2u << 29 | 1u << 28 | 10u << 23 | 1u << 7 | 0x50,      /* [!B1] ADDK 1,A10 */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
+        branch_back,
+        4u << 13,
+    };
+    /* SADD saturates on the third pass and then appends a delayed SAT
+     * effect its schedule was not built with. */
+    const uint32_t sat[] = {
+        0,                                              /* NOP */
+        6u << 23 | 17u << 18 | 16u << 13 | 0x278,       /* SADD A16,A17,A6 */
+        4u << 13,                                       /* NOP 5 */
+        2u << 29 | 1u << 28 | 16u << 23 | 0xffffu << 7 | 0x28, /* [!B1] MVK -1 */
+        2u << 29 | 1u << 28 | 16u << 23 | 0x7fffu << 7 | 0x68, /* [!B1] MVKH */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
+        branch_back,
+        4u << 13,
+    };
+    dt_program(sat, 8, setup_faucr, 200);
+    CdjC674xJitStats f0, f1;
+    cdj_c674x_jit_stats(&f0);
+    dt_program(faucr, 9, setup_faucr, 200);
+    cdj_c674x_jit_stats(&f1);
+    if (getenv("DTDBG")) fprintf(stderr, "faucr program: direct %llu plans %llu untraceable %llu lean %llu hits %llu builds %llu\n", (unsigned long long)(f1.direct - f0.direct), (unsigned long long)(f1.direct_plans - f0.direct_plans), (unsigned long long)(f1.direct_untraceable - f0.direct_untraceable),
+        (unsigned long long)(f1.static_lean - f0.static_lean), (unsigned long long)(f1.static_hits - f0.static_hits), (unsigned long long)(f1.static_builds - f0.static_builds));
+}
+
 static bool always(void *opaque) { (void)opaque; return true; }
 
 /* Directed: a CMPEQDP's delayed FAUCR effect lands in the cycle a CMPGTSP
@@ -887,6 +1053,18 @@ int main(void)
     jit_packets = faults_seen = 0;
     dt_directed();
     dt_directed_faucr();
+    {
+        CdjC674xJitStats s0, s1;
+        cdj_c674x_jit_stats(&s0);
+        for (unsigned h = 0; h < 2; ++h) {
+            cdj_c674x_set_horizon(h ? &test_horizon : NULL);
+            test_horizon.until = 0;
+            dt_directed_static();
+        }
+        cdj_c674x_set_horizon(NULL);
+        cdj_c674x_jit_stats(&s1);
+        assert(s1.static_lean > s0.static_lean);
+    }
     for (unsigned seed = 1; seed <= 24000; ++seed) {
         cdj_c674x_set_horizon(seed % 5 ? &test_horizon : NULL);
         assert(!test_horizon.skipped);
@@ -905,6 +1083,13 @@ int main(void)
            (unsigned long long)(after.direct_untraceable -
                                 stats.direct_untraceable), faults_seen);
     assert(after.direct - stats.direct > 3000000 && faults_seen > 1000);
+    printf("static schedules: %llu packets from one (%llu lean), %llu built, %llu fitted none\n",
+           (unsigned long long)(after.static_hits + after.static_lean),
+           (unsigned long long)after.static_lean,
+           (unsigned long long)after.static_builds,
+           (unsigned long long)after.static_misses);
+    assert(after.static_hits + after.static_lean > 3000000 &&
+           after.static_lean > 1000000);
     printf("interrupt presentations: %u quiet (checked no-op), %u not\n",
            quiet_checks, loud_checks);
     assert(quiet_checks > 1000000 && loud_checks > 10000);

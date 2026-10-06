@@ -150,10 +150,12 @@ typedef struct {
      * packet again (A/B reference). */
     CdjC674xHorizon horizon;
     bool horizon_on;
-    /* cdj_c674x_set_fetch_epoch: moved by every committed device write (any
-     * of them could remap memory: EMIFB, the L1D partition) and by reset. */
+    /* cdj_c674x_set_fetch_epoch: moved by every committed write to the two
+     * models dsp_memory_span depends on (the cache controller's L1D
+     * partition, EMIFB's SDRAM enable) and by reset. */
     uint64_t fetch_epoch;
     uint64_t edma_writes, mcasp_control_writes;   /* see log_sample */
+    uint64_t hpic_writes, wm8740_latches;
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
     /* CDJ_NXS_DSP_MODEL=1: answer MAIN without executing the C674x. */
@@ -193,10 +195,13 @@ static void dsp_jit_report(void)
     info_report("nxs-c674x-jit: runs=%" PRIu64 " steady=%" PRIu64
                 " native=%" PRIu64 " generic=%" PRIu64 " compiles=%" PRIu64
                 " direct=%" PRIu64 " direct-runs=%" PRIu64
-                " plans=%" PRIu64 " untraceable=%" PRIu64,
+                " plans=%" PRIu64 " untraceable=%" PRIu64
+                " static=%" PRIu64 " static-builds=%" PRIu64
+                " static-misses=%" PRIu64,
                 jit.runs, jit.steady, jit.native, jit.generic, jit.compiles,
                 jit.direct, jit.direct_runs, jit.direct_plans,
-                jit.direct_untraceable);
+                jit.direct_untraceable, jit.static_hits, jit.static_builds,
+                jit.static_misses);
 }
 
 /*
@@ -319,7 +324,12 @@ static bool log_sample(uint64_t *count)
 static void record_event(NxsHpi *s, const char *type, uint64_t offset,
                          uint64_t address, uint64_t value, unsigned size)
 {
-    const char *path = getenv("CDJ_NXS_DSP_EVENTS");
+    static const char *path;
+    static bool looked;
+    if (!looked) {                      /* the environment is fixed */
+        path = getenv("CDJ_NXS_DSP_EVENTS");
+        looked = true;
+    }
     if (!path || !*path) return;
     if (!s->event_log) {
         s->event_log = fopen(path, "a");
@@ -1428,7 +1438,6 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
     }
     dsp_ticks_flush(s);
     dsp_horizon_close(s);
-    if (commit) ++s->fetch_epoch;
     if (commit && s->idle_skip) dsp_idle_note_write(s, address, value, size);
     if (dsp_l1d_write(s, address, value, size, commit)) return true;
     if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
@@ -1483,6 +1492,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         return true;
     }
     if (cdj_c6747_cache_write(&s->cache, address, value, size, commit)) {
+        if (commit) ++s->fetch_epoch;   /* the L1D partition may move */
         if (commit) info_report("nxs-cache: write address=%#x value=%#x",
                                 address, (uint32_t)value);
         return true;
@@ -1525,6 +1535,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         return true;
     }
     if (cdj_c6747_emifb_write(&s->emifb, address, value, size, commit)) {
+        if (commit) ++s->fetch_epoch;   /* SDRAM may be disabled */
         if (commit) info_report("nxs-emifb: write address=%#x value=%#x init-sequences=%u",
                                 address, (uint32_t)value, s->emifb.init_sequences);
         return true;
@@ -1533,8 +1544,10 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         bool old_hint = s->hpi.hint;
         if (cdj_c6747_hpi_cpu_write(&s->hpi, address, value, size, commit)) {
             if (commit) {
-                info_report("nxs-hpi: DSP HPIC write value=%#x DSPINT=%d HINT=%d",
-                            (uint32_t)value, s->hpi.dspint, s->hpi.hint);
+                if (log_sample(&s->hpic_writes))
+                    info_report("nxs-hpi: DSP HPIC write value=%#x DSPINT=%d HINT=%d"
+                                " (write %" PRIu64 ")", (uint32_t)value,
+                                s->hpi.dspint, s->hpi.hint, s->hpic_writes);
                 record_event(s, "dsp_hpic_write", 0, address, value, size);
                 if (!old_hint && s->hpi.hint && s->hint) s->hint(s->opaque, false);
             }
@@ -1590,6 +1603,10 @@ static const uint8_t *dsp_fetch_block(void *opaque, uint32_t block)
  * every non-RAM bus access and at the end of each activation. */
 static void dsp_ticks_flush(NxsHpi *s)
 {
+    /* Ticks the compiled paths counted (horizon.count_ticks). */
+    s->ticks.debt += s->horizon.ticks;
+    s->horizon.ticks = 0;
+    s->horizon.count_ticks = false;
     if (s->ticks.debt)
         cdj_dsp_ticks_apply(s->spis, &s->wm8740, &s->spi_transfer, &s->pll,
                             s->ticks.debt, cdj_c674x_loop_functional_timing());
@@ -1609,7 +1626,8 @@ static void dsp_cycle_tick(void *opaque)
     uint64_t transfers = s->wm8740.transfers;
     if (!cdj_c674x_loop_functional_timing())
         cdj_spi_core_tick(s->spis, &s->wm8740, &s->spi_transfer, &s->pll);
-    if (s->wm8740.transfers != transfers)
+    if (s->wm8740.transfers != transfers &&
+        log_sample(&s->wm8740_latches))
         info_report("nxs-spi: timed WM8740 latch word=%#x transfers=%" PRIu64,
                     s->wm8740.last_word, s->wm8740.transfers);
     cdj_c6747_pll_tick(&s->pll);
@@ -1630,6 +1648,7 @@ static void dsp_cycle_tick(void *opaque)
     s->ticks.steady = s->tick_batch &&
         cdj_dsp_ticks_quiet(s->timers, &s->spi_transfer, &s->wm8740,
                             cdj_c674x_loop_functional_timing());
+    s->horizon.count_ticks = s->ticks.steady && s->horizon_on;
 }
 
 static bool report_dsp(NxsHpi *s, const char *reason)
@@ -1710,7 +1729,7 @@ typedef struct {
  * DSP_HORIZON_IDLE_PACKETS (to anchor) and at the anchor PC (to detect the
  * repeat), so an idle loop is found as before.
  */
-#define DSP_HORIZON_IDLE_PACKETS 64u
+#define DSP_HORIZON_IDLE_PACKETS 1024u
 
 static void dsp_horizon_open(NxsHpi *s, const DspActivation *a)
 {
