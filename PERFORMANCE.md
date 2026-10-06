@@ -811,7 +811,7 @@ through it, no faster than `execute_fast` (lean replay 2.07 s against
   view (`cdj_c674x_view`) and memory must equal B's after every packet:
   1.29 M compiled packets (452 K steady, 784 K native, 55 K generic) in
   101 K runs, 375 loop interrupts, 2,220 faults. Clean under ASan/UBSan.
-* Mutations: 23 single-line breaks of the issue range, undo, compaction
+* Mutations: 22 single-line breaks of the issue range, undo, compaction
   fill, E3 values, overlap and collision checks, tick, span reads, buffer
   match, ILC, FP rounding, AMR, and of the kernel's tail copies, sync
   timing, FP status, pair high word and exits - each fails the test. Three
