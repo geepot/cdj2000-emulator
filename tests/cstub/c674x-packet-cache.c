@@ -136,6 +136,47 @@ static uint32_t random_instruction(uint32_t pc)
     }
 }
 
+/* Loop-body extras: the operations the NXS audio kernels pipeline - MPYSP,
+ * ADDSP/SUBSP (every encoding), and loads/stores of every addressing mode
+ * and width (LDNDW/STNDW, LDDW/STDW, LDNW/STNW included) through A4-A7 and
+ * B4-B7, which init_cpu points into data RAM, some of them circular. */
+static unsigned pick_body_dst(void)
+{
+    unsigned r;
+    do r = rnd() & 15; while (r == 10 || (r >= 4 && r <= 7));
+    return r;
+}
+
+static uint32_t random_body(uint32_t pc)
+{
+    if (rnd() % 2) return random_instruction(pc);
+    unsigned s = rnd() & 1, x = rnd() & 1, dst = pick_body_dst();
+    unsigned a = rnd() & 15, b = rnd() & 15;
+    switch (rnd() % 4) {
+    case 0:
+        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
+               0xe00 | s << 1;                                 /* MPYSP */
+    case 1: {
+        static const uint32_t enc[] = {0x218, 0xe18, 0x238, 0x2b8, 0xe38,
+                                       0xeb8};
+        return predicate() | dst << 23 | b << 18 | a << 13 | x << 12 |
+               enc[rnd() % 6] | s << 1;                        /* ADD/SUBSP */
+    }
+    default: {
+        static const unsigned modes[] = {0, 1, 8, 9, 10, 11, 1, 9, 11, 5, 13};
+        unsigned mode = modes[rnd() % 11];
+        unsigned offset = (mode & 4) ? 1 + rnd() % 2 : rnd() % 8; /* A1/A2.. */
+        bool extended = rnd() % 3 == 0;
+        unsigned op = rnd() & 7;
+        if (extended && op < 2) op += 2;
+        if ((extended && op != 3 && op != 5) && (dst & 1)) dst &= ~1u;
+        return predicate() | dst << 23 | (4 + rnd() % 4) << 18 |
+               offset << 13 | mode << 9 | (extended ? 0x100u : 0) |
+               (rnd() & 1) << 7 | op << 4 | 4 | s << 1;
+    }
+    }
+}
+
 static void build(System *s)
 {
     memset(s->ram, 0, sizeof s->ram);
@@ -163,7 +204,7 @@ static void build_loop(System *s)
     *w++ = (ii - 1) << 23 | 0x38000;                /* SPLOOP ii */
     for (unsigned i = 0; i < len; ++i) {
         uint32_t insn;
-        do insn = random_instruction(BASE + 4 * (uint32_t)(w - code));
+        do insn = random_body(BASE + 4 * (uint32_t)(w - code));
         while ((insn & 0x7c) == 0x10 || (insn & 0x1ffc) == 0x120 ||
                (insn & 0xffe) == 0x3a2 || (insn & 0xffe) == 0x3e2);
         if ((insn & 0x1ffff) == 0 && rnd() % 3) insn = 0;   /* mostly NOP 1 */
@@ -187,6 +228,8 @@ static void build_loop(System *s)
     memcpy(s->ram, code, 4 * (size_t)(w - code));
 }
 
+static bool loop_bases;
+
 static void init_cpu(CdjC674x *cpu, System *s, uint32_t a10, uint32_t b10)
 {
     cdj_c674x_reset(cpu, BASE);
@@ -195,6 +238,24 @@ static void init_cpu(CdjC674x *cpu, System *s, uint32_t a10, uint32_t b10)
     cpu->r[0][10] = a10;
     cpu->r[1][10] = b10;
     cpu->r[1][3] = 0;   /* MVC B3,AMR leaves every register linear */
+    if (loop_bases) {
+        /* Data pointers for random_body: A4-A7/B4-B7 into 0x1800-0x1bff,
+         * small index registers A1/A2/B1/B2, and circular addressing for
+         * some of the pointers (BK0 64..512 bytes, BK1 32..1024). */
+        for (unsigned side = 0; side < 2; ++side) {
+            for (unsigned r = 4; r <= 7; ++r)
+                cpu->r[side][r] = 0x1800 + (rnd() % 0x80) * 8;
+            cpu->r[side][1] = rnd() % 4;
+            cpu->r[side][2] = rnd() % 4;
+        }
+        uint32_t amr = (5 + rnd() % 4) << 16 | (4 + rnd() % 6) << 21;
+        for (unsigned field = 0; field < 8; ++field)
+            if (rnd() % 3) amr |= (1 + rnd() % 2) << (field * 2);
+        cpu->control[0] = amr;
+        /* FADCR/FMCR rounding modes for both units (bits 10:9, 26:25). */
+        cpu->control[18] = (rnd() & 3) << 9 | (rnd() & 3) << 25;
+        cpu->control[20] = (rnd() & 3) << 9 | (rnd() & 3) << 25;
+    }
     cpu->cycle_tick = sys_tick;
     cpu->cycle_opaque = s;
 }
@@ -234,6 +295,7 @@ static void lockstep(unsigned seed, bool loops)
     uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
                    rnd() % 8 == 0 ? BAD_COMMIT - 8 * 4 : 0x1800;
     state = rng_state;
+    loop_bases = loops;
     init_cpu(&a, &sa, a10, b10);
     rng_state = state;
     init_cpu(&b, &sb, a10, b10);
@@ -357,6 +419,7 @@ static void jit_lockstep(unsigned seed)
     uint32_t a10 = rnd() % 8 == 0 ? FLAKY_READ - 16 * 4 :
                    rnd() % 8 == 0 ? BAD_COMMIT - 8 * 4 : 0x1800;
     uint32_t state = rng_state;
+    loop_bases = true;
     init_cpu(&a, &sa, a10, b10);
     rng_state = state;
     init_cpu(&b, &sb, a10, b10);
@@ -420,10 +483,15 @@ int main(void)
     faults_seen = 0;
     cdj_c674x_set_jit(1);
     for (unsigned seed = 1; seed <= 3000; ++seed) jit_lockstep(seed);
+    CdjC674xJitStats stats;
+    cdj_c674x_jit_stats(&stats);
     printf("JIT lockstep: 3000 programs, %u compiled packets in %u runs "
-           "(%u between exits, %u stops), %u loop interrupts, %u faults\n",
-           jit_packets, jit_runs, jit_between_exits, jit_stops, jit_armed,
-           faults_seen);
-    assert(jit_packets > 300000 && jit_armed > 300 && faults_seen > 100);
+           "(%u between exits, %u stops; %llu native, %llu generic), "
+           "%u loop interrupts, %u faults\n",
+           jit_packets, jit_runs, jit_between_exits, jit_stops,
+           (unsigned long long)stats.native,
+           (unsigned long long)stats.generic, jit_armed, faults_seen);
+    assert(jit_packets > 300000 && jit_armed > 300 && faults_seen > 100 &&
+           stats.native > 300000 && stats.generic > 10000);
     return 0;
 }

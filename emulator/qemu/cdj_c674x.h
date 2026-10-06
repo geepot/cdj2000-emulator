@@ -166,6 +166,13 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                        void *between_opaque, unsigned *status);
 void cdj_c674x_set_jit(int enabled);
 bool cdj_c674x_jit_enabled(void);
+/* Counters of the calling thread's compiled execution, for reports and
+ * tests: runs that executed a packet, packets by path (native jit_exec,
+ * execute_fast fallback), loop compiles. */
+typedef struct {
+    uint64_t runs, native, generic, compiles;
+} CdjC674xJitStats;
+void cdj_c674x_jit_stats(CdjC674xJitStats *stats);
 
 /* Introspection of the conditional-instruction dispatch table, for the one
  * test that proves no two rows can claim the same instruction word.

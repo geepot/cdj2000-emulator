@@ -5955,6 +5955,12 @@ typedef struct {
 static bool jit_native(const CdjC674xDecoded *d);
 static void jit_op_compile(const CdjC674xDecoded *d, JitOp *op);
 static int jit_mode = -1;
+static _Thread_local CdjC674xJitStats jit_counts;
+
+void cdj_c674x_jit_stats(CdjC674xJitStats *stats)
+{
+    *stats = jit_counts;
+}
 
 void cdj_c674x_set_jit(int enabled)
 {
@@ -5998,6 +6004,7 @@ static bool jit_compile(JitLoop *l, const CdjC674x *cpu)
 {
     const CdjC674xLoop *loop = &cpu->loop;
     jit_release(l);
+    ++jit_counts.compiles;
     if (!loop->ii || loop->ii > 16 || !loop->length || loop->length > 48)
         return false;
     l->ii = loop->ii;
@@ -6108,12 +6115,6 @@ static bool jit_native(const CdjC674xDecoded *d)
            run == arm_bitfield;
 }
 
-/* Issue of one native operation: arm_scalar_memory, arm_mpysp and
- * arm_addsubsp with every field the arm derives from the word precomputed
- * (JitOp, jit_op_compile), operating in place exactly as the arm does under
- * execute_fast - registers deferred, queue appends saved for undo, written[]
- * as a bit mask.  Each returns false where the arm calls stop(); jit_exec
- * then declines the packet and the generic path reproduces the fault. */
 /* A linear load of `size` bytes whose fetch blocks the board's fetch-block
  * hook maps: by that hook's contract the read callback would return the
  * same bytes word for word, so the access needs no callback (reads are
@@ -6147,7 +6148,71 @@ static bool jit_read_mapped(CdjC674xRead read, void *opaque,
     return jit_read_span(read, opaque, address, encoded_size, NULL);
 }
 
+/* One load-queue entry in a cycle's retirement, as execute_packet's loop
+ * does it, its E3 read already done (*data, read only for an E3 entry).
+ * Returns whether it stays. */
+static bool jit_retire_load(CdjC674x *cpu, CdjC674xLoad *load, uint64_t now,
+                            const uint64_t *data)
+{
+    if (load->due > now + 2) return true;
+    if (queued_memory_load(load) && load->due == now + 2) load->value = *data;
+    if (load->due > now) return true;
+    if (load->size == CDJ_C674X_DELAYED_SAT) {
+        cpu->control[1] |= 0x200u;
+        cpu->control[21] |= load->address & 0x3fu;
+    } else if (load->size == CDJ_C674X_DELAYED_FAUCR) {
+        cpu->control[19] |= load->address;
+    } else {
+        cpu->r[load->bank][load->dst] = load->value;
+        if (queued_result_registers(load) == 2)
+            cpu->r[load->bank][load->dst + 1] = load->value >> 32;
+        if (!load->size)
+            cpu->control[load->sign_extend ? 20 : 18] |= load->address;
+    }
+    return false;
+}
+
+/* Issue of one native operation: arm_scalar_memory, arm_mpysp and
+ * arm_addsubsp with every field the arm derives from the word precomputed
+ * (JitOp, jit_op_compile), operating in place exactly as the arm does under
+ * execute_fast - registers deferred, written[] as a bit mask, queue appends
+ * with the overwritten slot bytes kept for undo.  Each returns false where
+ * the arm calls stop(); jit_exec then declines the packet and the generic
+ * path reproduces the fault. */
 enum { JOP_ARM, JOP_MEM, JOP_SP };
+
+/* The queue slots a packet's issue appends to, with their previous bytes.
+ * Every native operation, and every arm jit_op_compile leaves as JOP_ARM,
+ * appends at most once, so eight suffice. */
+typedef struct {
+    unsigned stores, loads;             /* counts before the issue */
+    CdjC674xStore store[8];
+    CdjC674xLoad load[8];
+} JitUndo;
+
+static CdjC674xStore *jit_append_store(CdjC674x *cpu, JitUndo *u)
+{
+    unsigned j = cpu->store_count++;
+    memcpy(&u->store[j - u->stores], &cpu->stores[j], sizeof(cpu->stores[j]));
+    return &cpu->stores[j];
+}
+
+static CdjC674xLoad *jit_append_load(CdjC674x *cpu, JitUndo *u)
+{
+    unsigned j = cpu->load_count++;
+    memcpy(&u->load[j - u->loads], &cpu->loads[j], sizeof(cpu->loads[j]));
+    return &cpu->loads[j];
+}
+
+static void jit_undo(CdjC674x *cpu, const JitUndo *u)
+{
+    for (unsigned j = u->stores; j < cpu->store_count; ++j)
+        memcpy(&cpu->stores[j], &u->store[j - u->stores], sizeof(cpu->stores[j]));
+    for (unsigned j = u->loads; j < cpu->load_count; ++j)
+        memcpy(&cpu->loads[j], &u->load[j - u->loads], sizeof(cpu->loads[j]));
+    cpu->store_count = u->stores;
+    cpu->load_count = u->loads;
+}
 
 static bool jit_mark(uint32_t written[2], unsigned side, unsigned reg)
 {
@@ -6157,10 +6222,10 @@ static bool jit_mark(uint32_t written[2], unsigned side, unsigned reg)
 }
 
 static bool jit_memory(CdjC674x *cpu, const JitOp *op, bool enabled,
-                       CdjC674xStore *save_stores, CdjC674xLoad *save_loads,
-                       CdjC674xDefer *defer, uint32_t written[2],
-                       unsigned *memory_count, bool *nonaligned_memory,
-                       CdjC674xRead read, CdjC674xWrite write, void *opaque)
+                       JitUndo *undo, CdjC674xDefer *defer,
+                       uint32_t written[2], unsigned *memory_count,
+                       bool *nonaligned_memory, CdjC674xRead read,
+                       CdjC674xWrite write, void *opaque)
 {
     unsigned size = op->size, bank = op->bank, b = op->b;
     bool amr = b >= 4 && b <= 7;
@@ -6185,7 +6250,7 @@ static bool jit_memory(CdjC674x *cpu, const JitOp *op, bool enabled,
         if (!write_transfer(write, opaque, address, value, encoded_size,
                             false) || cpu->store_count == 24)
             return false;
-        *append_store(save_stores, cpu) = (CdjC674xStore){
+        *jit_append_store(cpu, undo) = (CdjC674xStore){
             .due = cpu->cycles + 3, .address = address,
             .value = value, .size = encoded_size
         };
@@ -6203,7 +6268,7 @@ static bool jit_memory(CdjC674x *cpu, const JitOp *op, bool enabled,
                 op->dst < cpu->loads[j].dst +
                           queued_result_registers(&cpu->loads[j]))
                 return false;
-        *append_load(save_loads, cpu) = (CdjC674xLoad){
+        *jit_append_load(cpu, undo) = (CdjC674xLoad){
             .due = due, .address = address, .bank = op->side,
             .dst = op->dst, .size = encoded_size,
             .sign_extend = op->sign_extend
@@ -6217,7 +6282,7 @@ static bool jit_memory(CdjC674x *cpu, const JitOp *op, bool enabled,
 }
 
 static bool jit_sp(CdjC674x *cpu, const JitOp *op, bool enabled,
-                   CdjC674xLoad *save_loads)
+                   JitUndo *undo)
 {
     unsigned shift = op->side ? 16 : 0;
     CdjC674xSpResult result;
@@ -6244,7 +6309,7 @@ static bool jit_sp(CdjC674x *cpu, const JitOp *op, bool enabled,
             op->dst < cpu->loads[j].dst +
                       queued_result_registers(&cpu->loads[j]))
             return false;
-    *append_load(save_loads, cpu) = (CdjC674xLoad){
+    *jit_append_load(cpu, undo) = (CdjC674xLoad){
         .due = due, .value = result.value, .address = result.status << shift,
         .bank = op->side, .dst = op->dst, .size = 0,
         .sign_extend = op->multiply
@@ -6252,20 +6317,24 @@ static bool jit_sp(CdjC674x *cpu, const JitOp *op, bool enabled,
     return true;
 }
 
-/* Any other allowlisted arm, called as execute_packet calls it. */
-static bool jit_arm(CdjC674x *cpu, const JitShape *s, unsigned i,
-                    bool enabled, CdjC674xStore *save_stores,
-                    CdjC674xLoad *save_loads, CdjC674xDefer *defer,
-                    CdjC674xPacketTiming *timing, uint32_t written[2],
-                    unsigned *memory_count, bool *nonaligned_memory,
-                    CdjC674xRead read, CdjC674xWrite write, void *opaque)
+/* Any other allowlisted arm, called as execute_packet calls it.  Kept out
+ * of line: it is rare, and its scratch arrays should not size jit_exec's
+ * frame. */
+static __attribute__((noinline)) bool
+jit_arm(CdjC674x *cpu, const JitShape *s, unsigned i, bool enabled,
+        JitUndo *undo, CdjC674xDefer *defer, CdjC674xPacketTiming *timing,
+        uint32_t written[2], unsigned *memory_count, bool *nonaligned_memory,
+        CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     const CdjC674xInstruction *insn = &s->packet.instructions[i];
     uint32_t w = s->decoded[i].w;
     unsigned side = (w >> 1) & 1;
+    CdjC674xStore save_stores[24] CDJ_C674X_UNINITIALIZED;
+    CdjC674xLoad save_loads[40] CDJ_C674X_UNINITIALIZED;
     bool marks[2][32], controls[32] = {false}, bdec_issued = false;
     for (unsigned k = 0; k < 2; ++k)
         for (unsigned r = 0; r < 32; ++r) marks[k][r] = (written[k] >> r) & 1;
+    unsigned stores = cpu->store_count, loads = cpu->load_count;
     CdjC674xArm arm = {
         .cpu = cpu, .out = cpu, .save_stores = save_stores,
         .save_loads = save_loads, .defer = defer,
@@ -6281,7 +6350,15 @@ static bool jit_arm(CdjC674x *cpu, const JitShape *s, unsigned i,
         .enabled = enabled, .reg_write = true, .control_write = false,
         .long_offset = (w & 0x0c) == 12, .scalar_sat_op = w & 0xffc,
     };
-    if (!s->decoded[i].arm->run(&arm)) return false;
+    bool ok = s->decoded[i].arm->run(&arm);
+    /* Hand the slots the arm appended (one at most) to the packet's undo. */
+    for (unsigned j = stores; j < cpu->store_count; ++j)
+        memcpy(&undo->store[j - undo->stores], &save_stores[j],
+               sizeof(save_stores[j]));
+    for (unsigned j = loads; j < cpu->load_count; ++j)
+        memcpy(&undo->load[j - undo->loads], &save_loads[j],
+               sizeof(save_loads[j]));
+    if (!ok) return false;
     for (unsigned k = 0; k < 2; ++k)
         for (unsigned r = 0; r < 32; ++r)
             written[k] |= (uint32_t)marks[k][r] << r;
@@ -6349,31 +6426,71 @@ static void jit_op_compile(const CdjC674xDecoded *d, JitOp *op)
     op->mode = mode;
 }
 
+/* Remove the entries `keep` rejects, leaving exactly the bytes
+ * execute_packet's one-at-a-time memmove leaves.  Its removals run in
+ * ascending order and each shifts the tail down by one without touching
+ * the array's last slot, so after the cycle the survivors are compacted in
+ * order and every vacated slot holds the last entry as it was before the
+ * cycle's own updates (an entry updated this cycle - an E3 read - is never
+ * removed in it, and the last entry is reached last).  `last` is that
+ * copy; `keep` sees the entry's original index as r_. */
+#define JIT_COMPACT(array, count, last, keep)                               \
+    do {                                                                    \
+        unsigned n_ = (count), w_ = 0;                                      \
+        for (unsigned r_ = 0; r_ < n_; ++r_) {                              \
+            if (!(keep)) continue;                                          \
+            if (w_ != r_) memcpy(&(array)[w_], &(array)[r_],                \
+                                 sizeof((array)[0]));                       \
+            ++w_;                                                           \
+        }                                                                   \
+        for (unsigned k_ = w_; k_ < n_; ++k_)                               \
+            memcpy(&(array)[k_], &(last), sizeof((array)[0]));              \
+        (count) = w_;                                                       \
+    } while (0)
+
 /* execute_fast for a native shape (one cycle, single_cycle, no branch
  * maturing, no delayed IFR effect due), with the same results, faults and
- * rollback, but no snapshot: the issue runs the arms in place with deferred
- * register writes exactly as execute_fast does, then the cycle's bus
- * operations - the tick, the due store commits, the due E3 reads - run
- * before any register, control register or queue entry changes, so a
- * failing bus operation needs only the issue's appended queue slots put
- * back.  This reorders nothing the board can see: its callbacks get the
- * same calls in the same order, and the CPU fields they may read (cycles,
- * packets) hold the same values at each.  Returns as execute_fast. */
-static int jit_exec(CdjC674x *cpu, const JitShape *s, CdjC674xRead read,
-                    CdjC674xWrite write, void *opaque)
+ * rollback, but no snapshot: the issue runs exactly as under execute_fast,
+ * then the cycle's bus operations - the tick, the due store commits, the due
+ * E3 reads - run before any register, control register or queue entry
+ * changes, so a failing bus operation needs only the issue's appended
+ * queue slots put back.  This reorders nothing the board can see: its
+ * callbacks get the same calls in the same order, and the CPU fields they
+ * may read (cycles, packets) hold the same values at each.  The
+ * simultaneous load/store overlap check covers every pair when `all_pairs`
+ * and otherwise only pairs with an entry this packet appended: within one
+ * cdj_c674x_run every earlier cycle checked the older pairs, and a pair
+ * never changes.  Returns as execute_fast. */
+static int jit_exec(CdjC674x *cpu, const JitShape *s, bool all_pairs,
+                    CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     const CdjC674xPacket *packet = &s->packet;
     uint64_t now = cpu->cycles + 1;
     if (cpu->branch_count > 5 || (cpu->branch_due && cpu->branch_due == now))
         return 0;
-    for (unsigned j = 0; j < cpu->load_count; ++j)
-        if (cpu->loads[j].due <= now &&
-            (cpu->loads[j].size == CDJ_C674X_DELAYED_IFR_SET ||
-             cpu->loads[j].size == CDJ_C674X_DELAYED_IFR_CLEAR))
+    /* What the queues hold for this cycle: delayed results landing now
+     * (for the E1/E5 collision check), and whether anything acts at all. */
+    uint32_t landing[2] = {0, 0};
+    bool acting = false;
+    for (unsigned j = 0; j < cpu->load_count; ++j) {
+        const CdjC674xLoad *load = &cpu->loads[j];
+        if (load->due > now + 2) continue;
+        acting = true;
+        if (load->due > now) continue;
+        if (load->size == CDJ_C674X_DELAYED_IFR_SET ||
+            load->size == CDJ_C674X_DELAYED_IFR_CLEAR)
             return 0;
-    const unsigned stores0 = cpu->store_count, loads0 = cpu->load_count;
-    CdjC674xStore save_stores[24] CDJ_C674X_UNINITIALIZED;
-    CdjC674xLoad save_loads[40] CDJ_C674X_UNINITIALIZED;
+        unsigned count = queued_result_registers(load);
+        /* An out-of-range destination leaves it to execute_packet. */
+        if (count && (load->bank > 1 || load->dst + count > 32)) return 0;
+        if (count)
+            landing[load->bank] |= (count == 2 ? 3u : 1u) << load->dst;
+    }
+    for (unsigned j = 0; !acting && j < cpu->store_count; ++j)
+        acting = cpu->stores[j].due <= now;
+    JitUndo undo;
+    undo.stores = cpu->store_count;
+    undo.loads = cpu->load_count;
     CdjC674xDefer defer;
     defer.count = 0;
     CdjC674xPacketTiming timing = CDJ_C674X_PACKET_TIMING_INIT;
@@ -6387,24 +6504,32 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, CdjC674xRead read,
         const JitOp *op = &s->ops[i];
         bool enabled = !op->creg ||
             ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z);
-        ok = op->kind == JOP_MEM ?
-                 jit_memory(cpu, op, enabled, save_stores, save_loads, &defer,
-                            written, &memory_count, &nonaligned_memory,
-                            read, write, opaque) :
-             op->kind == JOP_SP ?
-                 jit_sp(cpu, op, enabled, save_loads) :
-                 jit_arm(cpu, s, i, enabled, save_stores, save_loads, &defer,
-                         &timing, written, &memory_count, &nonaligned_memory,
-                         read, write, opaque);
+        switch (op->kind) {
+        case JOP_MEM:
+            ok = jit_memory(cpu, op, enabled, &undo, &defer, written,
+                            &memory_count, &nonaligned_memory, read, write,
+                            opaque);
+            break;
+        case JOP_SP:
+            ok = jit_sp(cpu, op, enabled, &undo);
+            break;
+        default:
+            ok = jit_arm(cpu, s, i, enabled, &undo, &defer, &timing, written,
+                         &memory_count, &nonaligned_memory, read, write,
+                         opaque);
+            break;
+        }
     }
-    /* execute_packet's post-issue checks, verbatim. */
+    /* execute_packet's post-issue checks. */
     if (ok && nonaligned_memory && memory_count > 1) ok = false;
     for (unsigned j = 0; ok && cpu->store_count && j < cpu->load_count; ++j) {
-        if (!queued_memory_load(&cpu->loads[j])) continue;
+        const CdjC674xLoad *load = &cpu->loads[j];
+        if (!queued_memory_load(load)) continue;
         for (unsigned k = 0; ok && k < cpu->store_count; ++k) {
-            if (cpu->loads[j].due - 2 != cpu->stores[k].due) continue;
-            const CdjC674xLoad *load = &cpu->loads[j];
             const CdjC674xStore *store = &cpu->stores[k];
+            if (load->due - 2 != store->due ||
+                (!all_pairs && j < undo.loads && k < undo.stores))
+                continue;
             for (unsigned l = 0; ok && l < (load->size & 255); ++l)
             for (unsigned m = 0; ok && m < (store->size & 255); ++m)
                 if (circular_address(load->address, load->address + l, load->size >> 8) ==
@@ -6412,23 +6537,13 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, CdjC674xRead read,
                     ok = false;
         }
     }
-    for (unsigned j = 0; ok && j < cpu->load_count; ++j) {
-        const CdjC674xLoad *load = &cpu->loads[j];
-        unsigned count = queued_result_registers(load);
-        if (count && load->due == now &&
-            ((written[load->bank & 1] >> load->dst) & (count == 2 ? 3u : 1u)))
-            ok = false;
-    }
+    if (ok && ((landing[0] & written[0]) || (landing[1] & written[1])))
+        ok = false;
     if (ok && (defer.count > 24 || timing.idle || timing.cycles != 1))
         ok = false;
     if (!ok) {
         /* Declined: put back exactly what the issue changed. */
-        for (unsigned j = stores0; j < cpu->store_count && j < 24; ++j)
-            cpu->stores[j] = save_stores[j];
-        for (unsigned j = loads0; j < cpu->load_count && j < 40; ++j)
-            cpu->loads[j] = save_loads[j];
-        cpu->store_count = stores0;
-        cpu->load_count = loads0;
+        jit_undo(cpu, &undo);
         cpu->fault = fault;
         cpu->fault_pc = fault_pc;
         cpu->fault_word = fault_word;
@@ -6439,7 +6554,7 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, CdjC674xRead read,
     uint64_t data[40];
     const char *broke = NULL;
     if (cpu->cycle_tick) cpu->cycle_tick(cpu->cycle_opaque);
-    for (unsigned j = 0; j < stores0; ++j) {
+    for (unsigned j = 0; acting && j < undo.stores; ++j) {
         const CdjC674xStore *store = &cpu->stores[j];
         if (store->due > now) continue;
         if (!write_transfer(write, opaque, store->address, store->value,
@@ -6448,7 +6563,7 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, CdjC674xRead read,
             break;
         }
     }
-    for (unsigned j = 0; !broke && j < loads0; ++j) {
+    for (unsigned j = 0; acting && !broke && j < undo.loads; ++j) {
         const CdjC674xLoad *load = &cpu->loads[j];
         if (load->due != now + 2 || !queued_memory_load(load)) continue;
         if (!jit_read_span(read, opaque, load->address, load->size, &data[j]) &&
@@ -6458,12 +6573,7 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, CdjC674xRead read,
             data[j] = sx(data[j], (load->size & 255) * 8);
     }
     if (broke) {
-        for (unsigned j = stores0; j < cpu->store_count && j < 24; ++j)
-            cpu->stores[j] = save_stores[j];
-        for (unsigned j = loads0; j < cpu->load_count && j < 40; ++j)
-            cpu->loads[j] = save_loads[j];
-        cpu->store_count = stores0;
-        cpu->load_count = loads0;
+        jit_undo(cpu, &undo);
         stop(cpu, cpu->pc, 0, broke);
         return -1;
     }
@@ -6471,53 +6581,41 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, CdjC674xRead read,
     for (unsigned j = 0; j < defer.count; ++j)
         cpu->r[defer.write[j].side][defer.write[j].reg] = defer.write[j].value;
     cpu->pc = packet->next_pc;
-    for (unsigned j = 0; j < cpu->store_count;) {
-        CdjC674xStore *store = &cpu->stores[j];
-        if (store->due > now) { ++j; continue; }
-        /* memmove, element by element: the same bytes, no call. */
-        for (unsigned k = j, n = --cpu->store_count; k < n; ++k)
-            cpu->stores[k] = cpu->stores[k + 1];
+    if (acting && cpu->store_count) {
+        CdjC674xStore last;
+        memcpy(&last, &cpu->stores[cpu->store_count - 1], sizeof(last));
+        JIT_COMPACT(cpu->stores, cpu->store_count, last,
+                    cpu->stores[r_].due > now);
     }
-    /* Retirement only removes entries, so j counts the survivors in front
-     * of the next entry; `original` is its index before this cycle. */
-    for (unsigned j = 0, original = 0; j < cpu->load_count; ++original) {
-        CdjC674xLoad *load = &cpu->loads[j];
-        if (load->due > now + 2) { ++j; continue; }
-        if (queued_memory_load(load) && load->due == now + 2)
-            load->value = data[original];
-        if (load->due > now) { ++j; continue; }
-        if (load->size == CDJ_C674X_DELAYED_SAT) {
-            cpu->control[1] |= 0x200u;
-            cpu->control[21] |= load->address & 0x3fu;
-        } else if (load->size == CDJ_C674X_DELAYED_FAUCR) {
-            cpu->control[19] |= load->address;
-        } else {
-            cpu->r[load->bank][load->dst] = load->value;
-            if (queued_result_registers(load) == 2)
-                cpu->r[load->bank][load->dst + 1] = load->value >> 32;
-            if (!load->size)
-                cpu->control[load->sign_extend ? 20 : 18] |= load->address;
-        }
-        for (unsigned k = j, n = --cpu->load_count; k < n; ++k)
-            cpu->loads[k] = cpu->loads[k + 1];
+    if (acting && cpu->load_count) {
+        CdjC674xLoad last;
+        memcpy(&last, &cpu->loads[cpu->load_count - 1], sizeof(last));
+        JIT_COMPACT(cpu->loads, cpu->load_count, last,
+                    jit_retire_load(cpu, &cpu->loads[r_], now, &data[r_]));
     }
     cpu->cycles = now;
     ++cpu->packets;
     return 1;
 }
 
+/* loop_step_in_place's preconditions (and an active buffer). */
+static bool jit_ready(const CdjC674x *cpu)
+{
+    const CdjC674xLoop *loop = &cpu->loop;
+    return !cpu->fault && cpu->loop_active && loop->sealed &&
+        cpu->store_count <= 24 && cpu->load_count <= 40 &&
+        !loop_immediate_reload(cpu) && !loop_interrupt_armed(cpu) &&
+        !loop_interrupt_draining(cpu) && !loop_retained_valid(cpu) &&
+        !(cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) &&
+        !cpu->idle_cycles && loop->cycle < loop->post_cycle;
+}
+
 /* One loop_step_in_place, compiled.  Same return convention. */
-static int jit_cycle(CdjC674x *cpu, JitLoop *l, CdjC674xRead read,
-                     CdjC674xWrite write, void *opaque)
+static int jit_cycle(CdjC674x *cpu, JitLoop *l, bool all_pairs,
+                     CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     CdjC674xLoop *loop = &cpu->loop;
-    if (cpu->fault || !cpu->loop_active || !loop->sealed ||
-        cpu->store_count > 24 || cpu->load_count > 40 ||
-        loop_immediate_reload(cpu) || loop_interrupt_armed(cpu) ||
-        loop_interrupt_draining(cpu) || loop_retained_valid(cpu) ||
-        (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) ||
-        cpu->idle_cycles || loop->cycle >= loop->post_cycle)
-        return 0;
+    if (!jit_ready(cpu)) return 0;
     /* cdj_c674x_loop_issue_filtered_from with no filter. */
     uint64_t cycle = loop->cycle;
     uint64_t stage = cycle / l->ii;
@@ -6572,10 +6670,13 @@ static int jit_cycle(CdjC674x *cpu, JitLoop *l, CdjC674xRead read,
         ((((cpu->loop_pred_history & 7) << 1) | condition) & 7);
     unsigned extent[2];
     int fast = shape && shape->native ?
-        jit_exec(cpu, shape, read, write, opaque) : 0;
-    if (!fast)
+        jit_exec(cpu, shape, all_pairs, read, write, opaque) : 0;
+    if (fast > 0) ++jit_counts.native;
+    if (!fast) {
         fast = execute_fast(cpu, packet, decoded, branches, read, write,
                             opaque, extent);
+        if (fast > 0) ++jit_counts.generic;
+    }
     if (fast <= 0) {
         loop->cycle = cycle;
         cpu->control[26] = tsr;
@@ -6599,13 +6700,14 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                        void *between_opaque, unsigned *status)
 {
     *status = 0;
-    if (!limit || !cpu->loop_active || cpu->fault ||
-        !cdj_c674x_jit_enabled() || packet_cache_setting() != 2)
+    /* A loading loop is not compiled: only the sealed buffer is final. */
+    if (!limit || !jit_ready(cpu) || !cdj_c674x_jit_enabled() ||
+        packet_cache_setting() != 2)
         return 0;
     JitLoop *l = jit_lookup(cpu);
     if (!l) return 0;
     for (unsigned n = 0;;) {
-        int done = jit_cycle(cpu, l, read, write, opaque);
+        int done = jit_cycle(cpu, l, n == 0, read, write, opaque);
         if (done < 0) {
             *status = CDJ_C674X_RUN_FAULT;
             return n;
@@ -6614,6 +6716,7 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
             if (n) *status = CDJ_C674X_RUN_BETWEEN;
             return n;
         }
+        if (!n) ++jit_counts.runs;
         if (++n == limit) return n;
         if (!between(between_opaque)) {
             *status = CDJ_C674X_RUN_STOPPED;
