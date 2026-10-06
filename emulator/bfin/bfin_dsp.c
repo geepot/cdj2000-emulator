@@ -4,9 +4,9 @@
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
  * Changed 2026-10-05 (bfin-link): A1 = A0, An = An (S), A0 += A1 / A0 -= A1 and their register
  * forms, BYTEOP2P, BYTEOP3P, BYTEPACK and BYTEUNPACK (dsp32alu 11, 22-24, as
- * GNU sim's decode_dsp32alu_0 does them; the GUI's browse and image code
- * uses them), and a MAC with the pair bit and an odd register is only
- * undefined when MAC1 would write past R7 (GNU sim writes dst + 1).
+ * GNU sim's decode_dsp32alu_0 does them; DEPOSIT's 16-bit field and (X) fill; A = -A and ABS A operands as GNU sim decodes them; the GUI's browse and image code
+ * uses them), and a MAC pair from an odd register is not undefined: MAC1
+ * writes R((dst + 1) & 7), as objdump decodes it (GNU sim writes past R7).
  */
 /*
  * Blackfin DSP32 groups: the ALU (16-bit, vector and 32-bit arithmetic, the
@@ -366,16 +366,20 @@ void bfin_dsp32alu(bfin_core *c, uint16_t iw0, uint16_t iw1)
         set_half(&c->r[dst0], 0, (int8_t)(c->a[aop] >> 32));
         return;
     case 14:                                    /* A1 = -A0 ... */
-        if (s) {
+    case 16:                                    /* A1 = ABS A0 ... */
+        /* A<HL> = op A<aop>; aop 3 both in place (GNU sim's operands). */
+        if (s || x || aop == 2 || (aop == 3 && hl)) {
             break;
         }
-        switch (aop) {
-        case 0: c->a[0] = sext40(-c->a[0]); return;
-        case 1: c->a[1] = sext40(-c->a[0]); return;
-        case 2: c->a[0] = sext40(-c->a[1]); return;
-        case 3: c->a[1] = sext40(-c->a[1]); return;
+        for (int n = 0; n < 2; n++) {
+            if (aop == 3 || n == (int)hl) {
+                int64_t v = c->a[aop == 3 ? n : aop];
+
+                v = aopcde == 14 || v < 0 ? -v : v;
+                c->a[n] = clamp(v, ACC_MIN, ACC_MAX, &ov);
+            }
         }
-        break;
+        return;
     case 11:
         if (!x && acc_add(c, aop, s, hl, dst0)) {
             return;
@@ -386,17 +390,6 @@ void bfin_dsp32alu(bfin_core *c, uint16_t iw0, uint16_t iw1)
     case 24:
         if (!x && byteop(c, aopcde, aop, s, hl, dst0, dst1, src0, src1)) {
             return;
-        }
-        break;
-    case 16:                                    /* A0 = ABS A0 ... */
-        if (s) {
-            break;
-        }
-        switch (aop) {
-        case 0: c->a[0] = c->a[0] < 0 ? sext40(-c->a[0]) : c->a[0]; return;
-        case 1: c->a[1] = c->a[0] < 0 ? sext40(-c->a[0]) : c->a[0]; return;
-        case 2: c->a[0] = c->a[1] < 0 ? sext40(-c->a[1]) : c->a[1]; return;
-        case 3: c->a[1] = c->a[1] < 0 ? sext40(-c->a[1]) : c->a[1]; return;
         }
         break;
     }
@@ -516,14 +509,18 @@ static uint32_t extract(bfin_core *c, uint32_t v, uint16_t ctl, int x)
 static uint32_t deposit(bfin_core *c, uint32_t bg, uint32_t fg, int x)
 {
     unsigned pos = (fg >> 8) & 0x1F, len = fg & 0x1F;
-    uint32_t field = fg >> 16, mask = len ? ((1u << len) - 1) : 0;
+    /* The field is 16 bits: a longer length deposits 16 (GNU sim). (X)
+     * fills everything above the field with its sign. */
+    uint32_t mask = (1u << (len < 16 ? len : 16)) - 1;
+    uint32_t field = (fg >> 16) & mask;
     uint32_t r;
 
-    if (x && len && ((field >> (len - 1)) & 1)) {
-        field |= ~0u << len;
+    if (x) {
+        if (len && len <= 16 && ((field >> (len - 1)) & 1)) {
+            field |= ~0u << len;
+        }
         mask = ~0u;
     }
-    field &= mask;
     r = (bg & ~(mask << pos)) | (field << pos);
     bfin_flags_nz(c, r);
     return r;
@@ -647,30 +644,16 @@ void bfin_dsp32shiftimm32(bfin_core *c, uint16_t iw0, uint16_t iw1)
 
 /* ---- multiply/accumulate ------------------------------------------------ */
 
-static int mm_unsigned(unsigned mmod)
-{
-    return mmod == MM_FU || mmod == MM_TFU || mmod == MM_IU;
-}
+/* Ported from GNU sim's decode_multfunc, decode_macfunc and extract_mult
+ * (bfin-sim.c) by bfin-link: the upstream versions disagreed with it on the
+ * unsigned and integer modes (FU, TFU, IU, IH) and mixed (M) products, which
+ * the GUI's image decoding uses. Accumulators stay 40-bit sign-extended
+ * int64; an unsigned mode reads them zero-extended, as GNU sim does. */
 
-static int mm_integer(unsigned mmod)
+static int mm_signed(unsigned mmod)
 {
-    return mmod == MM_IS || mmod == MM_ISS2 || mmod == MM_IH || mmod == MM_IU;
-}
-
-static int64_t product(uint16_t a, uint16_t b, unsigned mmod, int mixed, int *ov)
-{
-    int64_t pa = mm_unsigned(mmod) ? a : (int16_t)a;
-    int64_t pb = mm_unsigned(mmod) || mixed ? b : (int16_t)b;
-    int64_t p = pa * pb;
-
-    if (!mm_unsigned(mmod) && !mm_integer(mmod) && !mixed) {
-        if (a == 0x8000 && b == 0x8000) {
-            *ov = 1;
-            return 0x7FFFFFFF;
-        }
-        p <<= 1;
-    }
-    return p;
+    return mmod == MM_DEFAULT || mmod == MM_IS || mmod == MM_T || mmod == MM_S2RND ||
+           mmod == MM_ISS2 || mmod == MM_IH || mmod == MM_W32;
 }
 
 /* Round a value at bit 16: unbiased (to even) unless ASTAT.RND_MOD. */
@@ -685,53 +668,190 @@ static int64_t round16(bfin_core *c, int64_t v)
     return (v + 0x8000) >> 16;
 }
 
-static uint16_t extract16(bfin_core *c, int64_t v, unsigned mmod, int *ov)
+static uint32_t sat_s16(int64_t v, int *ov)
 {
+    return (uint16_t)clamp(v, -0x8000, 0x7FFF, ov);
+}
+
+static uint32_t sat_u16(uint64_t v, int *ov)
+{
+    return v > 0xFFFF ? (*ov = 1, 0xFFFF) : (uint32_t)v;
+}
+
+static uint32_t sat_s32(int64_t v, int *ov)
+{
+    return (uint32_t)clamp(v, INT32_MIN, INT32_MAX, ov);
+}
+
+static uint32_t sat_u32(uint64_t v, int *ov)
+{
+    return v > 0xFFFFFFFFull ? (*ov = 1, 0xFFFFFFFFu) : (uint32_t)v;
+}
+
+/* One 16 x 16 product, sign- or zero-extended to 64 bits; *sat on the
+ * fractional -1 * -1. */
+static uint64_t multfunc(uint16_t a, uint16_t b, unsigned mmod, int mm, int *sat)
+{
+    uint32_t s0 = a, s1 = b, val;
+    uint64_t v;
+
+    if (mm) {
+        s0 = (uint32_t)(int16_t)a;
+    } else if (mm_signed(mmod)) {
+        s0 = (uint32_t)(int16_t)a;
+        s1 = (uint32_t)(int16_t)b;
+    }
+    val = s0 * s1;
+    *sat = 0;
+    if (!mm && (mmod == MM_DEFAULT || mmod == MM_T || mmod == MM_S2RND || mmod == MM_W32)) {
+        if (val == 0x40000000) {
+            val = mmod == MM_W32 ? 0x7FFFFFFF : 0x80000000;
+            *sat = 1;
+        } else {
+            val <<= 1;
+        }
+    }
+    v = val;
+    if (mm_signed(mmod) || mm) {
+        v = (uint64_t)(int64_t)(int32_t)val;
+    }
+    if (*sat) {
+        v &= 0xFFFFFFFFull;
+    }
+    return v;
+}
+
+/* 16 or 32 bits of a product or an accumulator, by mode. */
+static uint32_t extract_mult(bfin_core *c, uint64_t res, unsigned mmod, int mm, int full,
+                        int *ov)
+{
+    int64_t r = (int64_t)res;
+
+    if (full) {
+        switch (mmod) {
+        case MM_IU:
+        case MM_FU:
+            return mm ? sat_s32(r, ov) : sat_u32(res, ov);
+        case MM_S2RND:
+        case MM_ISS2:
+            return sat_s32((int64_t)(res << 1), ov);
+        default:
+            return sat_s32(r, ov);
+        }
+    }
     switch (mmod) {
-    case MM_IS:   return clamp(v, -0x8000, 0x7FFF, ov);
-    case MM_ISS2: return clamp(v * 2, -0x8000, 0x7FFF, ov);
-    case MM_IU:   return clamp(v, 0, 0xFFFF, ov);
-    case MM_FU:   return clamp(round16(c, v), 0, 0xFFFF, ov);
-    case MM_TFU:  return clamp(v >> 16, 0, 0xFFFF, ov);
-    case MM_T:    return clamp(v >> 16, -0x8000, 0x7FFF, ov);
-    case MM_S2RND: return clamp(round16(c, v * 2), -0x8000, 0x7FFF, ov);
-    default:      return clamp(round16(c, v), -0x8000, 0x7FFF, ov);
+    case MM_IS:
+        return sat_s16(r, ov);
+    case MM_FU:
+        return mm ? sat_s16(round16(c, r), ov) : sat_u16((uint64_t)round16(c, r), ov);
+    case MM_IU:
+        return mm ? sat_s16(r, ov) : sat_u16(res, ov);
+    case MM_T:
+        return sat_s16(r >> 16, ov);
+    case MM_TFU:
+        return mm ? sat_s16(r >> 16, ov) : sat_u16((uint64_t)(r >> 16), ov);
+    case MM_S2RND:
+        return sat_s16(round16(c, (int64_t)(res << 1)), ov);
+    case MM_ISS2:
+        return sat_s16((int64_t)(res << 1), ov);
+    default:                                    /* default, W32, IH */
+        return sat_s16(round16(c, r), ov);
     }
 }
 
-static uint32_t extract32(int64_t v, unsigned mmod, int *ov)
+/* One MAC unit: accumulate (op 0 =, 1 +=, 2 -=, 3 none) and extract. */
+static uint32_t macfunc(bfin_core *c, int n, unsigned op, uint16_t a, uint16_t b,
+                        unsigned mmod, int mm, int full, int *ov, int *neg)
 {
-    if (mm_unsigned(mmod)) {
-        return clamp(v, 0, 0xFFFFFFFFll, ov);
-    }
-    if (mmod == MM_S2RND || mmod == MM_ISS2) {
-        v *= 2;
-    }
-    return clamp(v, INT32_MIN, INT32_MAX, ov);
-}
+    uint64_t acc = mm_signed(mmod) || mm ? (uint64_t)c->a[n]
+                                         : (uint64_t)c->a[n] & 0xFFFFFFFFFFull;
+    int sat = 0;
 
-static int64_t accumulate(bfin_core *c, int n, unsigned op, int64_t p,
-                          unsigned mmod)
-{
-    int64_t a = op == 0 ? p : op == 1 ? c->a[n] + p : c->a[n] - p;
-    int ov = 0;
+    if (op != 3) {
+        int sgn40 = (acc >> 39) & 1, tsat;
+        uint64_t res = multfunc(a, b, mmod, mm, &tsat), nosat;
+        int64_t s;
 
-    if (mmod == MM_W32) {
-        a = clamp(a, INT32_MIN, INT32_MAX, &ov);
-    } else if (mm_unsigned(mmod)) {
-        a = clamp(a, 0, ACC_MAX, &ov);
-    } else {
-        a = clamp(a, ACC_MIN, ACC_MAX, &ov);
+        acc = op == 0 ? res : op == 1 ? acc + res : acc - res;
+        nosat = acc;
+        s = (int64_t)acc;
+        switch (mmod) {
+        case MM_TFU:
+        case MM_FU:
+            if (mm) {
+                if (s < ACC_MIN) {
+                    acc = (uint64_t)ACC_MIN, sat = 1;
+                } else if (s > ACC_MAX) {
+                    acc = ACC_MAX, sat = 1;
+                } else if (mmod == MM_FU && (acc & 0x8000000000ull)) {
+                    acc |= 0xFFFFFF0000000000ull;
+                }
+            } else if (s < 0) {
+                acc = 0, sat = 1;
+            } else if (s > 0xFFFFFFFFFFll) {
+                acc = 0xFFFFFFFFFFull, sat = 1;
+            }
+            break;
+        case MM_IU:
+            if (!mm && (acc >> 63)) {
+                acc = 0, sat = 1;
+            }
+            if (!mm && acc > 0xFFFFFFFFFFull) {
+                acc = 0xFFFFFFFFFFull, sat = 1;
+            }
+            if (mm && acc > 0xFFFFFFFFFFull) {
+                acc &= 0xFFFFFFFFFFull;
+            }
+            if (acc & 0x8000000000ull) {
+                acc |= 0xFFFFFF0000000000ull;
+            }
+            break;
+        case MM_IH:
+            if (s < INT32_MIN) {
+                acc = (uint64_t)(int64_t)INT32_MIN, sat = 1;
+            } else if (s > INT32_MAX) {
+                acc = INT32_MAX, sat = 1;
+            }
+            break;
+        case MM_W32:
+            if (sgn40 && (acc >> 31) != 0x1FFFFFFFFull && (acc >> 31) != 0) {
+                acc = 0x80000000, sat = 1;
+            }
+            if (!sat && !sgn40 && (acc >> 31) != 0 && (acc >> 31) != 0x1FFFFFFFFull) {
+                acc = 0x7FFFFFFF, sat = 1;
+            }
+            acc = (uint64_t)(int64_t)(int32_t)(uint32_t)acc;
+            sat |= tsat;
+            break;
+        default:                                /* default, T, IS, ISS2, S2RND */
+            if (s < ACC_MIN) {
+                acc = (uint64_t)ACC_MIN, sat = 1;
+            } else if (s > ACC_MAX) {
+                acc = ACC_MAX, sat = 1;
+            }
+            break;
+        }
+        *neg |= (acc >> 39) & 1;
+        c->a[n] = sext40((int64_t)(acc & 0xFFFFFFFFFFull));
+        c->astat &= ~(n ? AS_AV1 : AS_AV0);
+        if (sat) {
+            c->astat |= n ? AS_AV1 | AS_AV1S : AS_AV0 | AS_AV0S;
+            if (full) {
+                *ov = 1;
+            } else {
+                extract_mult(c, nosat, mmod, mm, full, ov);
+            }
+        }
     }
-    if (ov) {
-        c->astat |= n ? AS_AV1 | AS_AV1S : AS_AV0 | AS_AV0S;
-    }
-    return a;
+    uint32_t ret = extract_mult(c, acc, mmod, mm, full, ov);
+
+    *neg |= full ? ret >> 31 : (ret >> 15) & 1;
+    return ret;
 }
 
 /* dsp32mac (mult = 0) and dsp32mult (mult = 1) share one layout: MAC1 feeds
  * A1 and the high half (or the odd register of a pair), MAC0 A0 and the low
- * half (or the even register). */
+ * half (or the even register). MM (mixed) applies to MAC1 only. */
 void bfin_dsp32mac(bfin_core *c, uint16_t iw0, uint16_t iw1, int mult)
 {
     unsigned op1 = iw0 & 3, w1 = (iw0 >> 2) & 1, pair = (iw0 >> 3) & 1;
@@ -740,52 +860,76 @@ void bfin_dsp32mac(bfin_core *c, uint16_t iw0, uint16_t iw1, int mult)
     unsigned h10 = (iw1 >> 9) & 1, h00 = (iw1 >> 10) & 1;
     unsigned op0 = (iw1 >> 11) & 3, w0 = (iw1 >> 13) & 1;
     unsigned h11 = (iw1 >> 14) & 1, h01 = (iw1 >> 15) & 1;
-    uint32_t a = c->r[src0], b = c->r[src1];
-    uint32_t out[2] = { c->r[dst], c->r[pair && dst < 7 ? dst + 1 : dst] };
-    int ov = 0;
+    uint32_t a = c->r[src0], b = c->r[src1], res = c->r[dst];
+    unsigned dst1 = pair ? (dst + 1) & 7 : dst;
+    int ov[2] = { 0, 0 }, neg[2] = { 0, 0 }, zero = 0;
 
-    if (pair && dst == 7 && (iw0 & 4)) {         /* MAC1 into R8 */
+    if (mult) {
+        if (!w0 && !w1) {
+            c->undef = 1;
+            return;
+        }
+        for (int n = 1; n >= 0; n--) {
+            if (!(n ? w1 : w0)) {
+                continue;
+            }
+            int sat;
+            uint64_t r = multfunc(half(a, n ? h01 : h00), half(b, n ? h11 : h10), mmod,
+                                  n && mm, &sat);
+            uint32_t v = extract_mult(c, r, mmod, n && mm, pair, &ov[n]);
+
+            ov[n] |= sat;
+            if (pair) {
+                c->r[n ? dst1 : dst] = v;
+            } else {
+                set_half(&res, n, v);
+            }
+        }
+        if (!pair) {
+            c->r[dst] = res;
+        }
+        bfin_flags_v(c, ov[0] | ov[1]);
+        return;
+    }
+    if (!w0 && !w1 && op0 == 3 && op1 == 3) {
         c->undef = 1;
         return;
     }
     for (int n = 1; n >= 0; n--) {
         unsigned op = n ? op1 : op0, w = n ? w1 : w0;
-        int64_t v;
 
-        if (mult) {
-            if (!w) {
-                continue;
-            }
-            v = product(half(a, n ? h01 : h00), half(b, n ? h11 : h10), mmod,
-                        n && mm, &ov);
-        } else {
-            if (op != 3) {
-                c->a[n] = accumulate(c, n, op, product(half(a, n ? h01 : h00),
-                                     half(b, n ? h11 : h10), mmod, n && mm, &ov),
-                                     mmod);
-            }
-            if (!w) {
-                continue;
-            }
-            v = c->a[n];
+        if (!w && op == 3) {
+            continue;
+        }
+        uint32_t v = macfunc(c, n, op, half(a, n ? h01 : h00), half(b, n ? h11 : h10),
+                             mmod, n && mm, pair, &ov[n], &neg[n]);
+
+        if (op == 3) {
+            zero |= v == 0;
+        }
+        if (!w) {
+            ov[n] = 0;
+            continue;
         }
         if (pair) {
-            out[n] = extract32(v, mmod, &ov);
+            c->r[n ? dst1 : dst] = v;
         } else {
-            set_half(&out[0], n, extract16(c, v, mmod, &ov));
+            set_half(&res, n, v);
         }
     }
-    if (pair) {
-        if (w0) {
-            c->r[dst] = out[0];
-        }
-        if (w1) {
-            c->r[dst + 1] = out[1];
-        }
-    } else if (w0 || w1) {
-        c->r[dst] = out[0];
+    if (!pair && (w0 || w1)) {
+        c->r[dst] = res;
     }
-    if (w0 || w1) {
-        bfin_flags_v(c, ov);
+    if (pair || w0 || w1) {
+        c->astat &= ~AS_V;
+        if (ov[0] | ov[1]) {
+            c->astat |= AS_V | AS_VS;
+        }
+    }
+    if ((w0 && op0 == 3) || (w1 && op1 == 3)) {
+        c->astat = zero ? c->astat | AS_AZ : c->astat & ~AS_AZ;
+        int an = (w0 && op0 == 3 && neg[0]) || (w1 && op1 == 3 && neg[1]);
+
+        c->astat = an ? c->astat | AS_AN : c->astat & ~AS_AN;
     }
 }
