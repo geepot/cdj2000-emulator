@@ -114,8 +114,7 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
         if (!(s->cpu.packets & 63)) sched_yield();
         s->mailbox[1] = ++s->cpu.packets;
         if (s->cpu.packets == 1000) dsp_thread_hint(NULL, false);
-        if (qatomic_read(&t->host_waiting) || qatomic_read(&t->quit) ||
-            (t->main_target && s->cpu.packets >= t->main_target)) {
+        if (qatomic_read(&t->quit) || dsp_thread_main_due(s)) {
             ++t->host_breaks;
             break;
         }

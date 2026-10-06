@@ -293,6 +293,7 @@ static void release_virtual_clock(bool held)
 static void run_dsp(NxsHpi *s);
 static void main_lock(void);
 static void main_unlock(void);
+static bool dsp_thread_main_due(const NxsHpi *s);
 static void model_boot_phase(NxsHpi *s, unsigned phase);
 static void model_service(NxsHpi *s);
 static void virtual_audio_tick(void *opaque);
@@ -1738,10 +1739,7 @@ static bool dsp_post_step(DspActivation *a)
     if (dsp_thread.on) {
         /* The real DSP keeps running after HINT; MAIN only waits for
          * the chunk to reach a packet boundary. */
-        if (qatomic_read(&dsp_thread.host_waiting) ||
-            qatomic_read(&dsp_thread.quit) ||
-            (dsp_thread.main_target &&
-             s->cpu.packets >= dsp_thread.main_target)) {
+        if (qatomic_read(&dsp_thread.quit) || dsp_thread_main_due(s)) {
             ++dsp_thread.host_breaks;
             return false;
         }
@@ -1887,6 +1885,21 @@ static uint64_t dsp_thread_packets_at(int64_t ns)
                                     t->packets_per_us, ns);
 }
 
+/* Whether the DSP thread should hand @lock to MAIN now: MAIN is waiting
+ * for it (host_waiting) and the DSP has run the access_packets MAIN's
+ * main_lock would wait for anyway, or MAIN waits on a target the DSP has
+ * reached.  Stopping as soon as MAIN asks, short of that, made each MAIN
+ * access cost two more thread hand-overs (MAIN took the lock, found the
+ * DSP short, waited on @progress and the DSP retook it); MAIN still gets
+ * the lock at the same packet.  Under @lock, on the DSP thread. */
+static bool dsp_thread_main_due(const NxsHpi *s)
+{
+    NxsDspThread *t = &dsp_thread;
+    return (qatomic_read(&t->host_waiting) &&
+            s->cpu.packets >= t->main_last + t->access_packets) ||
+           (t->main_target && s->cpu.packets >= t->main_target);
+}
+
 /* Give up DSP time the DSP is behind virtual time.  Under dsp_thread.lock,
  * with the DSP started. */
 static void dsp_thread_slip(NxsHpi *s, int64_t virt)
@@ -1967,8 +1980,7 @@ static void *dsp_thread_run(void *opaque)
         }
         /* Hand the lock to MAIN before taking the next chunk: one waiting
          * for it, or one woken from @progress that must retake it. */
-        if (qatomic_read(&t->host_waiting) ||
-            (t->main_target && s->cpu.packets >= t->main_target)) {
+        if (dsp_thread_main_due(s)) {
             uint64_t packets = s->cpu.packets;
             qemu_mutex_unlock(&t->lock);
             while (!qatomic_read(&t->quit) &&

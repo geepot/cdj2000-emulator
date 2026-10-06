@@ -21,6 +21,7 @@ SHIM = r'''
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define NANOSECONDS_PER_SECOND 1000000000LL
+#define qatomic_read(p) __atomic_load_n(p, __ATOMIC_SEQ_CST)
 #define CDJ_C6747_MCASP_AFSX 0
 typedef int QemuMutex, QemuCond, QemuThread, QEMUBH;
 typedef struct Notifier { int unused; } Notifier;
