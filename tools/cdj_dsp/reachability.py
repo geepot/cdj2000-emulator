@@ -483,7 +483,7 @@ def build_report(args):
                     'disassemble to the compact software-loop family - sploop, sploopd and '
                     'spkernel - which this core IMPLEMENTS and validates in '
                     'tests/cstub/c674x-spkernel-fields.c; 0xdc66 is the very word '
-                    'DSP_BOOT_MILESTONE_AUDIT.md analyses. The compact sweep refuses them '
+                    'docs/history/DSP_BOOT_MILESTONE_AUDIT.md analyses. The compact sweep refuses them '
                     'only because a one-instruction probe packet has no active software loop '
                     'around them, which is the same reason tools/cdj_dsp/isa_probe.py '
                     'excludes that family from the 32-bit sweep. So these are NOT evidence '

@@ -3,7 +3,7 @@
 The manuals are proprietary TI documents: they live under ``build/references``,
 which is git-ignored, and only the provenance record
 (``build/references/provenance.json``) and the citations in
-``DSP_ARCHITECTURE_COVERAGE.md`` are ever committed.
+``docs/history/DSP_ARCHITECTURE_COVERAGE.md`` are ever committed.
 
 Usage::
 

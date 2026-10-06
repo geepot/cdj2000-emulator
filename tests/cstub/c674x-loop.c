@@ -165,7 +165,7 @@ int main(void)
 
     /* II=2: post-loop instructions may overlap the draining stores.
      *
-     * HONEST PROVENANCE, because the audit (DSP_ARCHITECTURE_COVERAGE.md §7)
+     * HONEST PROVENANCE, because the audit (docs/history/DSP_ARCHITECTURE_COVERAGE.md §7)
      * named this case as circular and that finding still stands. The derivation
      * below is sound and was written against the manual, but it was written
      * AFTER these expected values already matched the implementation - the

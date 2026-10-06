@@ -557,7 +557,7 @@ static void test_derived_multiply_dp(void)
          * that a .M overflow rounds the way the .L/.S adder does - which is a
          * reasonable reading of one FPU but is an ANALOGY.  They are kept so
          * the choice is pinned and visible rather than drifting, and recorded
-         * in DSP_ARCHITECTURE_COVERAGE.md as unresolved.  LFPN x LFPN
+         * in docs/history/DSP_ARCHITECTURE_COVERAGE.md as unresolved.  LFPN x LFPN
          * overflows and SFPN x SFPN underflows. */
         {UINT64_C(0x7fefffffffffffff), UINT64_C(0x7fefffffffffffff),
          UINT64_C(0x7ff0000000000000), 0x0e0, 0},
@@ -746,7 +746,7 @@ static void test_derived_conversions(void)
          * note 2 must work for signed infinity, where the sign IS meaningful.
          * For a NaN the sign bit carries no arithmetic meaning, so this is a
          * reading of the note rather than the note itself.  Recorded in
-         * DSP_ARCHITECTURE_COVERAGE.md; it is pinned here so the choice is
+         * docs/history/DSP_ARCHITECTURE_COVERAGE.md; it is pinned here so the choice is
          * visible and stable rather than accidental, not because the manual
          * settles it. */
         {UINT64_C(0x7ff8000000000000), 0x7fffffff, 0x012, 0, 0x7fffffff, 0x012},

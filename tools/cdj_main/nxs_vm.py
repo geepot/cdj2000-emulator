@@ -754,7 +754,7 @@ def main():
                              'it to put tools.cdj_main.link_inject between the '
                              'boards for transport diagnostics. Native NXS '
                              'ENTER and LOAD are verified through panel input '
-                             '(NXS_LINK_LOADING.md). MAIN still listens on --port')
+                             '(docs/history/NXS_LINK_LOADING.md). MAIN still listens on --port')
     parser.add_argument('--browse-aids', action='store_true',
                         help="opt into the legacy CDJ-2000 board-side aids "
                              "described in RUNNING.md (not a verified NXS "
@@ -1077,7 +1077,7 @@ def main():
         main_env['CDJ_SD_INSERT'] = str(args.sd_insert_seconds)
     # Preserve the existing insertion-relative key schedule. It does not wait
     # for NXS media-manager readiness: the filesystem can be mounted while
-    # the browser still answers NO CARD. See NXS_BROWSE_BLOCKER.md. Explicit
+    # the browser still answers NO CARD. See docs/history/NXS_BROWSE_BLOCKER.md. Explicit
     # options are necessary because inherited CDJ_ variables are sanitized.
     if source_key != 'none':
         if not args.source_key_when_ready:

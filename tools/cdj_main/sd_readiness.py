@@ -2,7 +2,7 @@
 
     python -m tools.cdj_main.sd_readiness --sd runs/wav-test/test-track.img
 
-NXS_SD_READINESS.md ends by asking for exactly this and nothing more:
+docs/history/NXS_SD_READINESS.md ends by asking for exactly this and nothing more:
 
     Capture all three readiness globals, the latch, device pointer, callback
     and status byte from stopped RAM.  If readiness is true and the latch is 1,
@@ -89,7 +89,7 @@ def byte_of(word: int, address: int) -> int:
 
     SH4 here is LITTLE-endian: byte n of a word is bits 8n..8n+7.  Reading it
     big-endian is what made the media-mode flag look like 0x00 for a whole run
-    while the firmware was acting on a set bit 1 - see NXS_SD_READINESS.md.
+    while the firmware was acting on a set bit 1 - see docs/history/NXS_SD_READINESS.md.
     """
     return (word >> (8 * (address & 3))) & 0xFF
 

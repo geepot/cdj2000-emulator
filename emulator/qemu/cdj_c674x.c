@@ -3210,7 +3210,7 @@ static bool arm_abs(CdjC674xArm *x)
      * the status quo.  It was not: doing nothing diverges from a stated general
      * rule, which is the less conservative choice, not the safer one.  Still
      * not stated for ABS by name, and recorded as an inference in
-     * DSP_ARCHITECTURE_COVERAGE.md. */
+     * docs/history/DSP_ARCHITECTURE_COVERAGE.md. */
     bool pair = ((x->w >> 5) & 0x7f) == 0x38;
     if (!pair) {
         uint32_t src2 = x->cpu->r[x->cross][x->b];

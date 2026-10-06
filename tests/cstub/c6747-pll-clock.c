@@ -13,7 +13,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
 { (void)unused; return cdj_c6747_pll_write(&pll, a, v, size, commit); }
 /* Every expected value below is hand-computed from the manuals, never read
  * back out of this emulator.  The one board fact is OSCIN = 16.9344 MHz
- * (RRV4356 X501, recorded in HANDOFF.md); every divider term cites its page
+ * (RRV4356 X501, recorded in docs/history/HANDOFF.md); every divider term cites its page
  * of SPRUH91D or SPRS377F. */
 static void rates(void)
 {

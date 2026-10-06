@@ -21,7 +21,7 @@ All six compiler-comparison runs produced byte-identical traces and final checkp
 
 The complete test suite passed with localhost socket access: **497 passed, 31 skipped in 56.15 s**. Its duration overlapped an earlier short benchmark and is a directional local baseline, not an isolated performance measurement. The initial sandboxed attempt had socket-related failures; the unrestricted rerun resolved them. No fresh full connected boot was run for this analysis.
 
-Scripts, raw measurements, and test output are in [analysis/iteration-audit-2026-09-10](analysis/iteration-audit-2026-09-10/). Run the scripts from the repository root; they use `/tmp/cdj-iteration-audit` and the local firmware checkpoint named above. They retain no proprietary firmware in the report directory.
+Scripts, raw measurements, and test output are in [analysis/iteration-audit-2026-09-10](../../analysis/iteration-audit-2026-09-10/). Run the scripts from the repository root; they use `/tmp/cdj-iteration-audit` and the local firmware checkpoint named above. They retain no proprietary firmware in the report directory.
 
 ## Prioritized opportunities
 
@@ -39,7 +39,7 @@ Scripts, raw measurements, and test output are in [analysis/iteration-audit-2026
 
 ### 1. Cache the replay build and explicitly select optimization
 
-[replay.py](tools/cdj_dsp/replay.py:344) snapshots source/header bytes, compiles all 18 C sources in a new temporary directory, and discards the executable after every invocation. The compiler command has no optimization flag. Tests that invoke the launcher repeatedly pay compilation repeatedly: three replay tests individually took 2.21–3.98 seconds in the full suite.
+[replay.py](../../tools/cdj_dsp/replay.py:344) snapshots source/header bytes, compiles all 18 C sources in a new temporary directory, and discards the executable after every invocation. The compiler command has no optimization flag. Tests that invoke the launcher repeatedly pay compilation repeatedly: three replay tests individually took 2.21–3.98 seconds in the full suite.
 
 Keep the source snapshot contract. Key a persistent build cache by source and header contents, compiler identity/version, flags, target/ABI, and a build-recipe version; atomically publish successful binaries and record their hash and build configuration in manifests. Include toolchain/system-header changes in invalidation or provide an explicit cache epoch. Use separate debug/sanitizer and optimized profiles. Do not reuse a binary merely because source mtimes match.
 
@@ -47,7 +47,7 @@ Caching and optimization should ship together: in this short workload, the extra
 
 ### 2. Make detailed standalone tracing optional; stream analysis
 
-[replay.c](tools/cdj_dsp/replay.c:1224) prints a JSON record on every standalone step. Connected-event replay already uses compact dynamic coverage rather than millions of step records. [coverage.py](tools/cdj_dsp/coverage.py:234) materializes every JSON event and traverses that list repeatedly; [replay.py](tools/cdj_dsp/replay.py:540) also reads entire trace files for coverage, hashing, and comparison.
+[replay.c](../../tools/cdj_dsp/replay.c:1224) prints a JSON record on every standalone step. Connected-event replay already uses compact dynamic coverage rather than millions of step records. [coverage.py](../../tools/cdj_dsp/coverage.py:234) materializes every JSON event and traverses that list repeatedly; [replay.py](../../tools/cdj_dsp/replay.py:540) also reads entire trace files for coverage, hashing, and comparison.
 
 Introduce explicit summary and detailed trace modes. Retain ordered external events, faults, stop state, coverage, mode/provenance information, and deterministic digests; retain detailed output for instruction debugging. Streaming hashing and comparison can preserve byte-exact verification without loading both files. Stream validation and keep only necessary event classes in the analyzer. Validate malformed and duplicate records and ordering as before; silently discarding validation failures is not an optimization.
 
@@ -55,7 +55,7 @@ The measured sample confirms that coverage does not require its step records. Au
 
 ### 3. Stop invalidating the QEMU build on every invocation
 
-[build-qemu-sh4.sh](scripts/build-qemu-sh4.sh:80) unconditionally copies every board `.c` and `.h` into QEMU. Unchanged files receive new mtimes, causing Ninja to reconsider/rebuild their dependents. Compare contents before copying, and update generated build wiring only when its contents change. This is a code-established dependency problem; build wall-time savings were not measured here.
+[build-qemu-sh4.sh](../../scripts/build-qemu-sh4.sh:80) unconditionally copies every board `.c` and `.h` into QEMU. Unchanged files receive new mtimes, causing Ninja to reconsider/rebuild their dependents. Compare contents before copying, and update generated build wiring only when its contents change. This is a code-established dependency problem; build wall-time savings were not measured here.
 
 Acceptance: a second build with no edits performs no compilation; changing one C source rebuilds that object and links; changing a shared header rebuilds only actual dependents; adding/removing source files refreshes wiring correctly.
 
@@ -63,11 +63,11 @@ The Blackfin script already avoids repeated configure and checksum-stamps patche
 
 ### 4. Remove work introduced by coverage, then address integration drift
 
-[coverage_capture](tools/cdj_dsp/replay.c:117) copies the complete CPU and fetches the packet; the execution path then fetches it again. Both standalone and connected replay also copy `cpu` into `before`. This work remains despite the recently reduced transaction in `cdj_c674x_execute`.
+[coverage_capture](../../tools/cdj_dsp/replay.c:117) copies the complete CPU and fetches the packet; the execution path then fetches it again. Both standalone and connected replay also copy `cpu` into `before`. This work remains despite the recently reduced transaction in `cdj_c674x_execute`.
 
 Expose an optional observation hook for successfully executed source packets and the small pre-execution metadata coverage actually needs. Preserve the distinction between direct fetches, loop fetches, scheduler/idle cycles, and failed packets. Compare coverage, trace, and complete final state against the current implementation across loop loading, interrupts, compact instructions, faults, and modified instruction memory. Measure with and without coverage before assuming its copies dominate.
 
-There is also concrete integration drift: QEMU's `dsp_read` now checks RAM first, while replay's [read_bus](tools/cdj_dsp/replay.c:322) still probes peripheral models first. Device ticking, staged EDMA writes, SPI/audio integration, and memory mapping have parallel implementations. Extract pure shared memory/device operations in small steps, keeping QEMU scheduling and host I/O in adapters. Start with mapping parity rather than a broad rewrite. Differential tests should feed equivalent transactions through both integrations and compare state, errors, and event order.
+There is also concrete integration drift: QEMU's `dsp_read` now checks RAM first, while replay's [read_bus](../../tools/cdj_dsp/replay.c:322) still probes peripheral models first. Device ticking, staged EDMA writes, SPI/audio integration, and memory mapping have parallel implementations. Extract pure shared memory/device operations in small steps, keeping QEMU scheduling and host I/O in adapters. Start with mapping parity rather than a broad rewrite. Differential tests should feed equivalent transactions through both integrations and compare state, errors, and event order.
 
 ### 5. Organize development around the smallest valid replay
 

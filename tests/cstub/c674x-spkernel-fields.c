@@ -100,7 +100,7 @@ static bool decode_schedule(CdjC674x *cpu, unsigned ii, unsigned field,
  *
  * Residual limitation, stated rather than hidden: the same misreading of page
  * 686 in both the test and cdj_c674x_loop_load would still pass. No cycle
- * oracle exists for this core (DSP_ARCHITECTURE_COVERAGE.md section 7). */
+ * oracle exists for this core (docs/history/DSP_ARCHITECTURE_COVERAGE.md section 7). */
 static void compare_field(unsigned ii, unsigned field)
 {
     CdjC674x full, compact;

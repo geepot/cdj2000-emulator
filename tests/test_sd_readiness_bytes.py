@@ -1,7 +1,7 @@
 """The media-mode flag byte must be read little-endian, as the SH4 here is.
 
 Reading it big-endian reported 0x00 for a whole run while bit 1 was set, which
-cost NXS_SD_READINESS.md a retraction that was itself wrong.
+cost docs/history/NXS_SD_READINESS.md a retraction that was itself wrong.
 """
 from tools.cdj_main.sd_readiness import byte_of
 

@@ -21,7 +21,7 @@ typedef struct {
 } CdjC6747Pll;
 /* NXS board fact, not a device property: X501 feeds OSCIN = 16.9344 MHz
  * (parent docs/dsp/dsp-hardware.md, from RRV4356 pp 12, 13, 96; recorded in
- * HANDOFF.md). It sits inside the datasheet's external-clock range of
+ * docs/history/HANDOFF.md). It sits inside the datasheet's external-clock range of
  * 12..50 MHz, SPRS377F Table 6-3 printed page 70 (PDF page 70). */
 #define CDJ_C6747_OSCIN_HZ 16934400u
 

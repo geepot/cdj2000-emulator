@@ -110,7 +110,7 @@ def test_probe_driver_reads_the_assembler_listing(tmp_path):
 
 # --------------------------------------------------------------------------
 # The three audit sweeps.  These assertions exist so that the numbers quoted in
-# DSP_ARCHITECTURE_COVERAGE.md stay reproducible: if the core changes, a sweep
+# docs/history/DSP_ARCHITECTURE_COVERAGE.md stay reproducible: if the core changes, a sweep
 # count changes and one of these fails, which is the point.
 # --------------------------------------------------------------------------
 

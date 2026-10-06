@@ -1,7 +1,7 @@
 """Validate analysis/dsp/coverage_inventory.json and generate its summary counts.
 
 The inventory is the single source of every number in
-DSP_ARCHITECTURE_COVERAGE.md.  This module exists so that those numbers are
+docs/history/DSP_ARCHITECTURE_COVERAGE.md.  This module exists so that those numbers are
 generated rather than typed, and so that a row cannot quietly lose the
 distinctions the audit depends on:
 

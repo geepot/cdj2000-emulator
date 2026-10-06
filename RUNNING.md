@@ -293,7 +293,7 @@ The fix prevents a duplicate interrupt from cancelling a newly armed payload
 receive. A normal cached-transport boot with detailed tracing disabled now
 passes a native Tk MENU hold/outside release, opens UTILITY, and retains free
 MAIN message pools after 80 seconds. The focused native/input/transport suite
-passes 128 tests. See `NXS_GUI_STALL.md` for the before/after trace and controls.
+passes 128 tests. See `docs/history/NXS_GUI_STALL.md` for the before/after trace and controls.
 Do not enable fresh-only delivery as a workaround: it remains diagnostic-only.
 E-7206 auth-chip emulation is still unresolved; USB/SD loading and audio playback
 are not yet validated.
@@ -412,7 +412,7 @@ in the following historical section describe CDJ-2000. They are not verified
 NXS addresses. NXS successfully lists TESTTONE.WAV with status halfword 26
 still at `0x1000`; that value does not establish a mount or browse blocker.
 Native NXS panel ENTER and LOAD are verified; see
-[NXS_LINK_LOADING.md](NXS_LINK_LOADING.md) for the actual captures and timing.
+[docs/history/NXS_LINK_LOADING.md](docs/history/NXS_LINK_LOADING.md) for the actual captures and timing.
 
 **Switching to a medium.** With a card image (`--sd card.img`, a rekordbox
 export on it) the launchers put the card in at 10 s and press its key at

@@ -428,7 +428,7 @@ length matching and repeated-payload gating. It requires that build and a C
 compiler. The first 90-second NXS test with this flag showed E-8709 and never
 consumed the announced 240-byte payload; it predated the SIC mask-order fix
 in patch 07. Later connected fresh-only runs reached native SD browse, load,
-PLAY and genuine PCM. See `NXS_LINK_LOADING.md` and the 2026-09-24 audio review.
+PLAY and genuine PCM. See `docs/history/NXS_LINK_LOADING.md` and the 2026-09-24 audio review.
 
 ## 06: opt-in DMA register timeline
 
@@ -473,7 +473,7 @@ updates, and the original pre-probe bypass when acceleration declines.
 
 `tests/test_bfin_cold_lzss.py` exercises the built helper with a synthetic
 space-producing bank and an unsupported source. Fixed-tick firmware benchmarks
-and the generated dispatcher prologue are recorded in `ITERATION_ANALYSIS.md`.
+and the generated dispatcher prologue are recorded in `docs/history/ITERATION_ANALYSIS.md`.
 Rebuild with `sh scripts/build-bfin-sim.sh` to apply the patch.
 
 ## 10: retain the SPORT receive capture descriptor

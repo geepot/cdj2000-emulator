@@ -18,7 +18,7 @@ The NXS launcher resolves `bin/cdj-run.exe` and `CDJ_QEMU`. `--debug` and
 sockets on macOS.
 
 For the optional SH7764 EtherC/RTL8201FL localhost backend, custom Dante MAIN
-input, integration tests and evidence limitations, see [ETHERNET_LOCAL.md](ETHERNET_LOCAL.md).
+input, integration tests and evidence limitations, see [docs/history/ETHERNET_LOCAL.md](docs/history/ETHERNET_LOCAL.md).
 The normal QEMU build script includes the new controller/PHY automatically.
 Without `--ethernet-peer-port`, the launcher keeps the Ethernet link disconnected.
 
@@ -84,7 +84,7 @@ success are synthesized. The QEMU adapter aggregates nine SCL periods per byte
 and one per STOP using 53.950MHz Pck; START/STOP and pin-level timing remain
 approximations, and the board's 53.930MHz alternative documentation is unresolved.
 Two corrected 120-second cold runs now reach normal player/UTILITY without
-E-7010 or E-7206 and respond to controls; see CLEAN_BOOT_EVIDENCE.md. This
+E-7010 or E-7206 and respond to controls; see docs/history/CLEAN_BOOT_EVIDENCE.md. This
 establishes clean startup, not storage/audio functionality or full fidelity.
 
 Strict timed SPI/schema-10 focused regression:
@@ -130,9 +130,9 @@ collects evidence; a zero launcher exit is NOT a successful-boot result. Inspect
 the frame timeline and DSP fault/handshake state, record basic interactions,
 and require at least 60 seconds after the normal player appears without
 E-7010 before repeating a cold boot. Two strict 120-second captures and a
-late encoder response are recorded in DSP_BOOT_MILESTONE_AUDIT.md. E-7206
+late encoder response are recorded in docs/history/DSP_BOOT_MILESTONE_AUDIT.md. E-7206
 AUTH CHIP ERROR remains; this evidence does not establish clean full boot,
-full DSP parity or working audio. See HANDOFF.md for current limitations.
+full DSP parity or working audio. See docs/history/HANDOFF.md for current limitations.
 `frames/manifest.json` records observation times, hashes and incomplete/missing
 frames. Unchanged images do not prove liveness. `run.json` records the actual
 binary/firmware hashes before launch and after exit. No frame capture or input
@@ -202,7 +202,7 @@ sh scripts/build-qemu-sh4.sh build/qemu
 Use current sources for pending circular transfers: the existing queue's size
 high byte now retains circular width at issue. AMR-use interlocks remain
 fail-closed after executed MVC AMR; exact stall prediction and loop missed-stall
-exceptions are not implemented. See HANDOFF.md for measured results and limits.
+exceptions are not implemented. See docs/history/HANDOFF.md for measured results and limits.
 
 Reanalyze a captured predicate inventory without rerunning firmware:
 
@@ -260,7 +260,7 @@ Inspect `coverage.json`'s `source_predicate_audit` and per-instruction
 of predicate-body execution in buffered loops or under SPMASK. Exploratory
 ancestry remains ineligible for architectural validation.
 
-Current validation checkpoint is the final section and HANDOFF.md. Earlier
+Current validation checkpoint is the final section and docs/history/HANDOFF.md. Earlier
 milestones below are historical and retain the limitations measured then.
 
 Two emulators, built separately, from sources that live outside this repository.
@@ -830,7 +830,7 @@ at compact `SPMASK S1`, `0x2d66` at `0x11801f26`. Repeated replay traces are
 byte-identical. The connected GUI exits 0 after 15 seconds and publishes a
 frame; full boot remains incomplete. The full suite passes 164 tests with
 43 skips; the CPU harness passes address/undefined-behavior sanitizers.
-See `HANDOFF.md` for hashes, timing limits, and the next implementation batch.
+See `docs/history/HANDOFF.md` for hashes, timing limits, and the next implementation batch.
 
 ### Static format inventory for batch implementation
 
@@ -1319,7 +1319,7 @@ periods remaining from a 418-period bound. Only four modeled periods have
 elapsed since the reset-release store committed. The attempted enable would
 commit two cycles after E1 validation if accepted. This short wait is an
 unresolved firmware/model/catalog discrepancy, not permission to bypass timing
-or invent lock status. See HANDOFF.md for investigation priorities. Connected
+or invent lock status. See docs/history/HANDOFF.md for investigation priorities. Connected
 GUI exits 0/frame exists; full boot and audio remain incomplete.
 
 ### PLL enable latch and fractional oscillator time
@@ -2328,4 +2328,4 @@ macOS. Run `tests/test_c674x.py`, `tests/test_c674x_spkernel_fields.py` and
 `tests/test_dsp_checkpoint_replay.py` alongside it for the focused architecture
 and replay gate; set `C6X_TI_BIN` as above to include the independent TI oracle.
 Connected throughput and panel measurements are in iteration 14 of
-`ITERATION_ANALYSIS.md`; fixed-work synthetic gains are reported separately.
+`docs/history/ITERATION_ANALYSIS.md`; fixed-work synthetic gains are reported separately.

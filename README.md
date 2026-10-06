@@ -63,7 +63,7 @@ a player. It is not a way to use a CDJ-2000 on a desktop.
   has so far been checked at idle boot; connected PLAY output remains to be
   validated. The DSP is a TI Aureus DA710 with a TMS320C674x core (see
   `RUNNING.md`), and `emulator/qemu/cdj_c674x.c` executes its instruction set
-  from TI's published SPRUFE8B - partially: see `DSP_ARCHITECTURE_COVERAGE.md`
+  from TI's published SPRUFE8B - partially: see `docs/history/DSP_ARCHITECTURE_COVERAGE.md`
   for what is and is not implemented. Instruction coverage is incomplete;
   accepting a mnemonic does not establish support for all its encodings or
   correct execution. See the [current probe scope](analysis/agent-dev-dsp-coverage.md).
@@ -164,7 +164,7 @@ reproduced with stock firmware on 2026-09-15, including the ten-second duration
 on the display. USB track loading and audible playback remain unverified.
 The legacy functionality described above is not an NXS completion claim.
 See [DEVELOPING.md](DEVELOPING.md), [RUNNING.md](RUNNING.md) and
-[NXS_GUI_STALL.md](NXS_GUI_STALL.md) for current evidence and limitations.
+[docs/history/NXS_GUI_STALL.md](docs/history/NXS_GUI_STALL.md) for current evidence and limitations.
 
 The NXS launcher also accepts experimental `--sd IMAGE` and `--usb IMAGE`
 mounts. Generate a plain WAV/FAT32 fixture with

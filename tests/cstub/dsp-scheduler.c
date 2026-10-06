@@ -8,7 +8,7 @@
  * therefore a REGRESSION guard plus a checkpoint-ABI guard - the two
  * _Static_asserts and the state-validity rules are what a schema-11
  * checkpoint reader depends on - and must not be read as architectural
- * validation. DSP_ARCHITECTURE_COVERAGE.md section 7 lists this test among
+ * validation. docs/history/DSP_ARCHITECTURE_COVERAGE.md section 7 lists this test among
  * the circular ones; this comment is the answer, not a fix, because the
  * subject has no specification to be faithful to. */
 #include <assert.h>

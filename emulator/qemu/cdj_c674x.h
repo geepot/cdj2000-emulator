@@ -6,7 +6,7 @@
 #include "cdj_c674x_loop.h"
 /* Partial interpreter. Encodings and semantics come from TI SPRUFE8B; no
  * third-party decoder code. Coverage is far wider than the seven instructions
- * this comment used to name: DSP_ARCHITECTURE_COVERAGE.md holds the measured
+ * this comment used to name: docs/history/DSP_ARCHITECTURE_COVERAGE.md holds the measured
  * position against the manual's 240 Table A-1 rows, and
  * analysis/dsp/isa_probe.json is regenerated from TI's own assembler. Do not
  * infer coverage from this header. */

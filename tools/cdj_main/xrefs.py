@@ -5,7 +5,7 @@
 SH4 has no absolute call or absolute load: reaching 0x042a033c or 0x04cf222c
 means `mov.l @(disp,PC),Rn` against a literal pool entry holding that value.
 So every xref is a literal-pool hit plus the PC-relative load that reads it,
-which is what this scans for.  That is the whole bottleneck NXS_SD_READINESS.md
+which is what this scans for.  That is the whole bottleneck docs/history/NXS_SD_READINESS.md
 names - QEMU's `xp /Ni` is linear and cannot answer "who calls this".
 
 Reports the loading instruction, the register loaded, and - when the value is
