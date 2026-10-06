@@ -181,6 +181,10 @@ int main(void)
     assert(!probe_ticks && ticks_held == 1 && ticks_enabled);
     assert(hpi.cpu.packets == 150000);
     assert(hpi.mailbox[0] == hpi.mailbox[1]);
+    /* The 50K packets run for MAIN past the pacing limit moved the DSP
+     * clock: the DSP is a quantum ahead again, not 50K packets further. */
+    assert(t->credited_packets == 50000);
+    assert(dsp_thread_packets_at(100000) == 150000);
     main_unlock();
     bql_unlock();
     pthread_join(probe, NULL);
@@ -194,7 +198,7 @@ int main(void)
     pthread_mutex_unlock(&t->lock);
     while (qatomic_read(&t->waits) == pacing) sched_yield();
     pthread_mutex_lock(&t->lock);
-    assert(t->slipped_ns == 10000000 - 150000);
+    assert(t->slipped_ns == 10000000 - 100000);
     assert(hpi.cpu.packets == dsp_thread_packets_at(10000000 + 100000));
     assert(hpi.cpu.packets == 250000);
     pthread_mutex_unlock(&t->lock);

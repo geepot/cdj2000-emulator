@@ -242,6 +242,7 @@ typedef struct {
     uint64_t main_last;             /* packets when MAIN last let go */
     uint64_t access_packets;        /* DSP progress owed per MAIN access */
     uint64_t chunks, host_breaks, waits, main_waits;
+    uint64_t credited_packets;      /* see dsp_thread_credit */
     int64_t lag_max_ns, slipped_ns, main_wait_ns;
     QEMUBH *hint_bh;
     bool hint_high;
@@ -1932,11 +1933,13 @@ static void *dsp_thread_run(void *opaque)
                         " idle-skipped=%" PRIu64 " lag-max=%.3fs slipped=%.3fs"
                         " main-waits=%" PRIu64 " main-wait=%.3fs"
                         " chunks=%" PRIu64 " host-breaks=%" PRIu64
-                        " pacing-waits=%" PRIu64 " pc=%#x",
+                        " pacing-waits=%" PRIu64 " credited=%" PRIu64
+                        " pc=%#x",
                         virt / 1e9, s->cpu.packets, s->idle_skipped_packets,
                         t->lag_max_ns / 1e9, t->slipped_ns / 1e9,
                         t->main_waits, t->main_wait_ns / 1e9, t->chunks,
-                        t->host_breaks, t->waits, s->cpu.pc);
+                        t->host_breaks, t->waits, t->credited_packets,
+                        s->cpu.pc);
             dsp_jit_report();
             if (s->thread_audio_clock)
                 info_report("nxs-c674x-audio-clock: virtual=%.3fs slots=%" PRIu64
@@ -2486,6 +2489,8 @@ static void hpi_write_locked(void *opaque, hwaddr offset, uint64_t value,
 /* MAIN side of dsp_thread.lock; a no-op in the synchronous default.  Takes the
  * lock, then waits (BQL released) until the running DSP has executed
  * access_packets since MAIN's previous access, and returns with both held. */
+static void dsp_thread_credit(NxsHpi *s);
+
 static void main_lock(void)
 {
     NxsDspThread *t = &dsp_thread;
@@ -2519,6 +2524,8 @@ static void main_lock(void)
                 qemu_cond_wait(&t->progress, &t->lock);
             qatomic_set(&t->main_target, 0);
             t->main_wait_ns += get_clock() - start;
+            if (held && s->dsp_started && !s->dsp_halted)
+                dsp_thread_credit(s);
         }
     }
     /* Holding @lock while waiting for the BQL is safe: no BQL holder ever
@@ -2532,6 +2539,31 @@ static void main_unlock(void)
     if (!dsp_thread.on) return;
     dsp_thread.main_last = nxs_hpi->cpu.packets;
     qemu_mutex_unlock(&dsp_thread.lock);
+}
+
+/* MAIN's per-access lockstep (main_lock) makes the DSP run access_packets
+ * while MAIN holds the virtual clock, so a burst of accesses - an 8,192-word
+ * firmware upload is 2.1 M packets - leaves the DSP clock far ahead of
+ * virtual time, and the pacing then stops the DSP until virtual time has
+ * caught up (14 ms for that upload), granting it only access_packets per
+ * MAIN access meanwhile.  MAIN's stage-1 boot handshake waits ~10 ms of
+ * virtual time for HINT and restarts the DSP download when it does not
+ * come; a DSP fast enough to reach the pacing limit (the idle skip, the
+ * JIT) then fails the boot (HPIC 0x14e, PERFORMANCE.md "Held clock and the
+ * DSP's pacing").  On the board the DSP runs on in parallel with an HPI
+ * access: packets run for MAIN with the clock held are not the DSP running
+ * ahead.  So the part of them past the pacing limit (a quantum ahead of
+ * virtual time) moves the DSP clock instead.  Under @lock. */
+static void dsp_thread_credit(NxsHpi *s)
+{
+    NxsDspThread *t = &dsp_thread;
+    uint64_t limit = dsp_thread_packets_at(
+        qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + t->quantum_ns);
+    if (s->cpu.packets <= limit) return;
+    t->epoch_packets += s->cpu.packets - limit;
+    t->credited_packets += s->cpu.packets - limit;
+    if (s->thread_audio_clock && s->audio_clock.rate_num)
+        s->audio_clock_next_packets = audio_clock_packets(s->audio_clock.next_ns);
 }
 
 void cdj_nxs_hpi_reset_line(bool released)
