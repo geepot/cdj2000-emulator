@@ -734,7 +734,7 @@ every interrupt-recognition boundary and McASP slot edge, re-check stores
 against the fetch blocks it was built from, and reproduce the E1/E3/E5
 queues and fault rollback byte for byte to keep the checkpoint evidence.
 
-## Compiled SPLOOP kernels (`CDJ_C674X_JIT=1`, `nxs_vm --dsp-jit`, opt-in, 2026-10-06)
+## Compiled SPLOOP kernels (`CDJ_C674X_JIT=1`, `nxs_vm --dsp-jit`, default on, 2026-10-06)
 
 Stage 1 of the compiler the previous section asked for: the loop-buffer
 cycles. All of it is in `emulator/qemu/cdj_c674x.c` ("Compiled SPLOOP
@@ -883,7 +883,7 @@ What real time would still need, in order of size:
 3. **MAIN/DSP hand-over**: MAIN waits for the DSP 73% of the time and the
    DSP yields to MAIN 23%; this shrinks only as the DSP gets faster.
 
-**Proposal:** default `CDJ_C674X_JIT` on (and `--dsp-jit` with it): every
+**Default:** `nxs_vm` now turns `--dsp-jit` on (`CDJ_C674X_JIT=1`); every
 exactness gate above passes, and it is a 1.3-1.5x on playback replay and
 2-2.5x on loop-buffer code with no measurable cost elsewhere.
 `CDJ_C674X_JIT=0` / `--no-dsp-jit` keeps the interpreter for A/B.

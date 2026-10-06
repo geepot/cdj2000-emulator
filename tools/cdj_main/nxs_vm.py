@@ -904,11 +904,11 @@ def main():
                              'registers and memory, no device access, quiescent peripherals) '
                              'by whole loop periods without executing them; events and '
                              'checkpoints are those of full execution (default: on)')
-    dsp.add_argument('--dsp-jit', action=argparse.BooleanOptionalAction, default=False,
+    dsp.add_argument('--dsp-jit', action=argparse.BooleanOptionalAction, default=True,
                         help='run the C674x\'s software-pipelined loops from compiled form '
                              '(CDJ_C674X_JIT=1; PERFORMANCE.md "Compiled SPLOOP kernels"); '
                              'events and checkpoints are those of the interpreter '
-                             '(default: off)')
+                             '(default: on; --no-dsp-jit runs the interpreter alone)')
     dsp.add_argument('--dsp-legacy-budget', type=int,
                         help='legacy packets per HPI wake (4096..1000000; default: 1000000)')
     removed = removed_option(sys.argv[1:])
