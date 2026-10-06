@@ -650,6 +650,18 @@ static void copy_prefix(CdjC674x *to, const CdjC674x *from, unsigned stores,
            offsetof(CdjC674x, loop) - offsetof(CdjC674x, load_count));
 }
 
+bool cdj_c674x_interrupt_quiet(const CdjC674x *cpu)
+{
+    /* cdj_c674x_interrupt(cpu, 0)'s first exit with nothing to change: IFR
+     * already within the maskable bits, nothing eligible to take, and no
+     * finished loop's drain phase to clear. */
+    const uint32_t maskable = 0x0000fff0u;
+    uint32_t eligible = cpu->control[2] & cpu->control[4] & maskable;
+    return !cpu->fault && !(cpu->control[2] & ~maskable) &&
+           (!(cpu->control[1] & 1u) || !(cpu->control[4] & 2u) || !eligible) &&
+           (cpu->loop_active || !loop_interrupt_draining(cpu));
+}
+
 bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
 {
     const uint32_t maskable = 0x0000fff0u;

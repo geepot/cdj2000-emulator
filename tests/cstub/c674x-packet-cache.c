@@ -416,7 +416,7 @@ typedef struct {
 } JitPair;
 
 static unsigned jit_packets, jit_runs, jit_between_exits, jit_stops,
-                jit_armed;
+                jit_armed, quiet_checks, loud_checks;
 
 static void present(JitPair *p)
 {
@@ -425,6 +425,16 @@ static void present(JitPair *p)
     uint32_t pending = rnd() % 23 == 0 ? (1u << (4 + rnd() % 12)) : 0;
     uint64_t armed = UINT64_C(1) << 62;     /* loop interrupt armed */
     bool was = p->a->control_ready[31] & armed;
+    /* cdj_c674x_interrupt_quiet: a no-op presentation, exactly. */
+    static CdjC674x probe;
+    cdj_c674x_view(p->a, &probe);
+    if (cdj_c674x_interrupt_quiet(&probe)) {
+        static CdjC674x after;
+        after = probe;
+        assert(cdj_c674x_interrupt(&after, 0) &&
+               !memcmp(&after, &probe, sizeof probe));
+        ++quiet_checks;
+    } else ++loud_checks;
     bool ra = cdj_c674x_interrupt(p->a, pending);
     bool rb = cdj_c674x_interrupt(p->b, pending);
     assert(ra == rb);
@@ -776,5 +786,8 @@ int main(void)
            (unsigned long long)(after.direct_untraceable -
                                 stats.direct_untraceable), faults_seen);
     assert(after.direct - stats.direct > 3000000 && faults_seen > 1000);
+    printf("interrupt presentations: %u quiet (checked no-op), %u not\n",
+           quiet_checks, loud_checks);
+    assert(quiet_checks > 1000000 && loud_checks > 10000);
     return 0;
 }

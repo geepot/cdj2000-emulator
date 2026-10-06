@@ -129,6 +129,9 @@ void cdj_c674x_reset(CdjC674x *cpu, uint32_t entry);
  * rejected. Requests latch in IFR even while masked. A recognized interrupt
  * redirects the next fetch to its IST entry without advancing CPU time. */
 bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending);
+/* True when cdj_c674x_interrupt(cpu, 0) would return true and change
+ * nothing, so a board with no request to present may skip the call. */
+bool cdj_c674x_interrupt_quiet(const CdjC674x *cpu);
 bool cdj_c674x_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque);
 /* Optional direct source packet observation, before loop-setup transformations.
  * Consume only when the step succeeds. count=0 for loop/idle steps; this does

@@ -1164,6 +1164,19 @@ slot_fault:
     return false;
 }
 
+/* functional_audio_tick would return true and change nothing: no McASP
+ * clock, or the DSP-thread clock (thread_audio_tick) running with its next
+ * slot still ahead, or stopped and already reset. */
+static inline bool functional_audio_idle(const NxsHpi *s)
+{
+    if (!s->functional_audio || s->virtual_audio_clock) return true;
+    if (!s->thread_audio_clock) return false;
+    if ((s->mcasp_control.gblctl[1] & 0x1f00u) != 0x1f00u)
+        return !s->audio_clock.rate_num;
+    return s->audio_clock.rate_num &&
+           s->cpu.packets < s->audio_clock_next_packets;
+}
+
 /*
  * Idle-loop skip.  In the legacy scheduler a DSP activation runs until HINT or
  * its packet budget, synchronously inside the SH-4's MMIO write, so while the
@@ -1672,9 +1685,13 @@ static bool dsp_pre_step(DspActivation *a)
             s->cpu.control[27],
             0, s->cpu.loop_active};
     }
-    deliver_edma_notifications(s);
-    if (!cdj_c674x_interrupt(
-            &s->cpu, cdj_c6747_intc_cpu_pending(&s->intc_delivery))) {
+    if (s->edma.irq_notifications & 2u) deliver_edma_notifications(s);
+    /* With no request to present, an interrupt check that cannot act is
+     * skipped (cdj_c674x_interrupt_quiet: the core's own no-op test). */
+    uint32_t pending = s->intc_delivery.cpu_request ?
+        cdj_c6747_intc_cpu_pending(&s->intc_delivery) : 0;
+    if ((pending || !cdj_c674x_interrupt_quiet(&s->cpu)) &&
+        !cdj_c674x_interrupt(&s->cpu, pending)) {
         a->reason = s->cpu.fault ? s->cpu.fault : "CPU interrupt stopped";
         s->dsp_halted = true;
         return false;
@@ -1731,7 +1748,7 @@ static bool dsp_post_step(DspActivation *a)
     if (s->psc.remaining[0][0] | s->psc.remaining[0][1] |
         s->psc.remaining[1][0] | s->psc.remaining[1][1])
         cdj_c6747_psc_tick(&s->psc);
-    if (!functional_audio_tick(s)) {
+    if (!functional_audio_idle(s) && !functional_audio_tick(s)) {
         a->reason = s->cpu.fault;
         s->dsp_halted = true;
         return false;
