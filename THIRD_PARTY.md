@@ -1,8 +1,9 @@
 # Third-party software
 
-This repository contains no third-party source. It contains **patches against**
-third-party source, and build scripts that fetch it. Each upstream keeps its own
-licence; the patches inherit the licence of what they patch.
+This repository contains one piece of vendored third-party source (the
+Blackfin core in `emulator/bfin/`, below). Otherwise it contains **patches
+against** third-party source, and build scripts that fetch it. Each upstream
+keeps its own licence; the patches inherit the licence of what they patch.
 
 ## GNU GDB 17.2 -- the Blackfin GUI board
 
@@ -51,9 +52,21 @@ there, so nothing in this repository is a modified QEMU file.
 QEMU 11.x or newer is required: the board includes `hw/core/boards.h` and
 `system/address-spaces.h`, which are the post-reorganisation header paths.
 
+## cdj-nxs2-qemu -- the Blackfin core behind `cdj-gui-run`
+
+| | |
+|---|---|
+| what | `hw/cdj/bfin/` `bfin_core.c`, `bfin_exec.c`, `bfin_dsp.c`, `bfin_dsp.h`, `bfin_priv.h`, `bfin.h`, `bf531.c`, `bf531.h`; `emulator/bfin/cdj_gui_run.c` is based on its `bfinrun.c` |
+| where from | Stijn Jacobs, `https://github.com/Stijn-Jacobs/cdj-nxs2-qemu`, commit `08d5cb1` (2026-10-03) |
+| licence | GPL-2.0-or-later (SPDX line in every file, kept), used with the author's permission |
+| our changes | dated notice at the top of each file; `bf531.c`/`bf531.h` (LDR boot split from the update loader, flash accessor, PF ready toggle, async bank 3 latch, IRQ-less GP timers no longer end a step), `bfin.h`/`bfin_core.c` (`bfin_code_lines_run`); the other four files are unchanged |
+
+None of the binutils-derived C66x decoder tables of that repository are
+included; the Blackfin files have no third-party tables.
+
 ## Nothing else is vendored
 
-No third-party source is copied into this tree. The only binaries this
+No other third-party source is copied into this tree. The only binaries this
 repository will ever hold are none.
 
 ## What this project's own code is licensed under
