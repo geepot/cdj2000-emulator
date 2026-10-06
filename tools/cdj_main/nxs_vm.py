@@ -790,7 +790,7 @@ def main():
     budget = parser.add_mutually_exclusive_group()
     parser.add_argument('--gui-head-start', type=float, metavar='SECONDS',
                         help='start the GUI simulator this many seconds before MAIN '
-                             '(default 1.5 with the idle skip, else 0: MAIN first, as '
+                             '(default 2.0 with the idle skip, else 0: MAIN first, as '
                              'before). A fast '
                              'MAIN otherwise reaches the GUI link before the slower simulated '
                              'GUI is ready and waits for a retry (0.5 s measured too short)')
@@ -855,7 +855,7 @@ def main():
     if args.debug_paused and not args.debug:
         parser.error('--debug-paused requires --debug')
     if args.gui_head_start is None:
-        args.gui_head_start = 1.5 if args.dsp_idle_skip and not (args.cosim or args.debug_paused) else 0
+        args.gui_head_start = 2.0 if args.dsp_idle_skip and not (args.cosim or args.debug_paused) else 0
     if not math.isfinite(args.gui_head_start) or not 0 <= args.gui_head_start <= 60:
         parser.error('--gui-head-start must be 0..60 seconds')
     if args.gui_head_start and (args.cosim or args.debug_paused):
