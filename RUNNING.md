@@ -349,7 +349,11 @@ clock the firmware programs its core timer for), and when the firmware parks
 its main loop or executes `IDLE` the simulator sleeps until the next event or
 the next record from MAIN. Guest time never runs ahead of the wall clock, so
 this board and the QEMU board, which was always on the wall clock, see the same
-time. Bursts the interpreter cannot keep up with make guest time fall behind,
+time. (One exception: with `--dsp-thread`, the default, MAIN's virtual clock
+stops while MAIN waits for the interpreted DSP on an HPI access, so after PLAY
+MAIN's time runs behind the wall clock; `CDJ_NXS_DSP_HOST_TIME=1` in QEMU's
+environment restores the old behaviour. See PERFORMANCE.md, "Virtual time held
+while MAIN waits for the DSP".) Bursts the interpreter cannot keep up with make guest time fall behind,
 up to `BFIN_WALL_LAG_MS` (50); the excess is dropped and reported.
 
 The display DMA is paced per frame at `BFIN_PPI_FPS` (60) instead of one

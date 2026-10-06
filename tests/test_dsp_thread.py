@@ -67,6 +67,12 @@ static bool bql_locked(void) { return bql_held; }
 static unsigned bh_scheduled;
 static void qemu_bh_schedule(QEMUBH *bh) { (void)bh; qatomic_inc(&bh_scheduled); }
 static void info_report(const char *format, ...) { (void)format; }
+/* QEMU_CLOCK_VIRTUAL's run state: held while MAIN waits for the DSP. */
+static bool ticks_enabled = true, vm_running = true;
+static unsigned ticks_held;
+static void cpu_disable_ticks(void) { if (ticks_enabled) ++ticks_held; ticks_enabled = false; }
+static void cpu_enable_ticks(void) { assert(bql_locked()); ticks_enabled = true; }
+static bool runstate_is_running(void) { return vm_running; }
 
 typedef struct {
     bool dsp_started, dsp_halted;
@@ -118,12 +124,13 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
     assert(s->cpu.packets <= limit);
 }
 
-static volatile bool probe_bql_free;
+static volatile bool probe_bql_free, probe_ticks;
 static void *bql_probe(void *arg)
 {
     (void)arg;
     while (!qatomic_read(&probe_bql_free)) {
         if (pthread_mutex_trylock(&bql) == 0) {
+            probe_ticks = ticks_enabled;    /* MAIN's wait: clock held */
             qatomic_set(&probe_bql_free, true);
             pthread_mutex_unlock(&bql);
         }
@@ -170,6 +177,7 @@ int main(void)
     assert(bql_locked());
     assert(t->main_waits == 1 && !t->main_target);
     assert(qatomic_read(&probe_bql_free));
+    assert(!probe_ticks && ticks_held == 1 && ticks_enabled);
     assert(hpi.cpu.packets == 150000);
     assert(hpi.mailbox[0] == hpi.mailbox[1]);
     main_unlock();
@@ -217,6 +225,16 @@ int main(void)
         main_unlock();
         bql_unlock();
     }
+
+    /* 4b. A VM stopped during the wait keeps its clock stopped. */
+    bql_lock();
+    vm_running = false;
+    main_lock();
+    assert(!ticks_enabled);
+    main_unlock();
+    vm_running = true;
+    ticks_enabled = true;               /* what vm_start does */
+    bql_unlock();
 
     /* 5. A halted DSP never makes MAIN wait. */
     pthread_mutex_lock(&t->lock);
