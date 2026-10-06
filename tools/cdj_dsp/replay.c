@@ -22,6 +22,7 @@
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
 #include "cdj_dsp_checkpoint.h"
+#include "cdj_dsp_ticks.h"
 static uint8_t ram[0x40000];
 static uint8_t shared_ram[CDJ_DSP_SHARED_RAM_SIZE];
 /* Physical L1D storage. Partition visibility is modeled; cache contents and
@@ -323,9 +324,27 @@ static void capture_devices(CdjDspCheckpointState *state, const char *reason)
     ++state->checkpoint_sequence;
     cdj_dsp_checkpoint_prepare(state, reason);
 }
+/* Batched ticks, as the board's (cdj_dsp_ticks.h); CDJ_NXS_DSP_TICK_BATCH=0
+ * ticks every cycle. */
+static CdjDspTicks ticks;
+static bool tick_batch = true;
+
+static void ticks_flush(void)
+{
+    if (ticks.debt)
+        cdj_dsp_ticks_apply(spis, &wm8740, &spi_transfer, &pll, ticks.debt,
+                            cdj_c674x_loop_functional_timing());
+    ticks.debt = 0;
+    ticks.steady = false;
+}
+
 static void cycle_tick(void *unused)
 {
     (void)unused;
+    if (ticks.steady) {
+        ++ticks.debt;
+        return;
+    }
     uint64_t transfers = wm8740.transfers;
     if (!cdj_c674x_loop_functional_timing())
         cdj_spi_core_tick(spis, &wm8740, &spi_transfer, &pll);
@@ -343,6 +362,9 @@ static void cycle_tick(void *unused)
         if (timer_outputs & (1u << bit))
             cdj_c6747_intc_deliver_event(&intc, &intc_delivery,
                                          cdj_c6747_timer_event(bit));
+    ticks.steady = tick_batch &&
+        cdj_dsp_ticks_quiet(timers, &spi_transfer, &wm8740,
+                            cdj_c674x_loop_functional_timing());
 }
 static uint32_t global(uint32_t a)
 { return a >= 0x00800000 && a < 0x00840000 ? a + 0x11000000 : a; }
@@ -358,9 +380,13 @@ static uint8_t *host_memory(uint32_t a)
         return sdram + offset;
     return NULL;
 }
+static uint8_t *memory_span(uint32_t address, size_t size);
+
 static bool read_bus(void *unused, uint32_t a, uint32_t *v)
 {
     (void)unused;
+    /* Only plain RAM may be read with ticks outstanding. */
+    if (ticks.debt && ((a & 3) || !memory_span(a, 4))) ticks_flush();
     if (cdj_c6747_syscfg_read(&syscfg, a, v)) return true;
     if (cdj_c6747_syscfg_priority_read(&syscfg_priority, a, v)) return true;
     if (cdj_c6747_psc_read(&psc, a, v)) return true;
@@ -710,6 +736,9 @@ static bool functional_audio_tick(void)
 static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool commit)
 {
     (void)unused;
+    if (ticks.debt && ((size != 1 && size != 2 && size != 4 && size != 8) ||
+                       !memory_span(a, size)))
+        ticks_flush();
     bool ok = false;
     if (!cdj_c674x_loop_functional_timing()) {
         if (cdj_c6747_spi_wm8740_timed_mapped(a)) {
@@ -922,7 +951,7 @@ static bool quota_between(void *opaque)
     return quota_post(q) && q->step < q->quota && quota_pre(q);
 }
 
-static const char *run_steps(Quota q)
+static const char *run_steps_ticked(Quota q)
 {
     const char *budget = "phase budget exhausted";
     unsigned quota = q.quota;
@@ -956,6 +985,15 @@ static const char *run_steps(Quota q)
         if (!quota_post(&q)) return q.reason;
     }
     return budget;
+}
+
+/* Everything outside a step loop (event replay, checkpoints, the final
+ * report) sees every tick applied. */
+static const char *run_steps(Quota q)
+{
+    const char *reason = run_steps_ticked(q);
+    ticks_flush();
+    return reason;
 }
 
 static const char *run_quota(ReplayLimits *limits, uint32_t breakpoint,
@@ -1345,6 +1383,8 @@ int main(int argc, char **argv)
         checkpoint_state.reset_released = checkpoint_state.dsp_started = true;
     }
     cpu.cycle_tick = cycle_tick;
+    tick_batch = !getenv("CDJ_NXS_DSP_TICK_BATCH") ||
+                 strcmp(getenv("CDJ_NXS_DSP_TICK_BATCH"), "0");
     coverage_initial_packets = cpu.packets;
     coverage_initial_cycles = cpu.cycles;
     ReplayLimits limits = {

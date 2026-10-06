@@ -37,6 +37,7 @@
 #include "cdj_dsp_budget.h"
 #include "cdj_dsp_scheduler.h"
 #include "cdj_dsp_audio_clock.h"
+#include "cdj_dsp_ticks.h"
 
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
@@ -140,6 +141,10 @@ typedef struct {
     /* CDJ_NXS_DSP_RAM_FAST=0 sends RAM stores through the full peripheral
      * chain again (A/B reference for the dsp_write RAM fast path). */
     bool ram_slow;
+    /* Batched per-cycle ticks (cdj_dsp_ticks.h); CDJ_NXS_DSP_TICK_BATCH=0
+     * ticks every cycle again (A/B reference). */
+    CdjDspTicks ticks;
+    bool tick_batch;
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
     /* CDJ_NXS_DSP_MODEL=1: answer MAIN without executing the C674x. */
@@ -448,6 +453,8 @@ static void nxs_pcm_shutdown(Notifier *notifier, void *opaque)
     s->pcm_wav = NULL;
 }
 
+static void dsp_ticks_flush(NxsHpi *s);
+
 static bool capture_checkpoint(NxsHpi *s, const char *reason)
 {
     if (s->model) return false;  /* no interpreter state to capture */
@@ -461,6 +468,7 @@ static bool capture_checkpoint(NxsHpi *s, const char *reason)
         error_report("nxs-hpi: cannot create DSP checkpoint directory %s", directory);
         return false;
     }
+    dsp_ticks_flush(s);
     CdjDspCheckpointState state = {0};
     state.hpi_address = s->address;
     state.boot_phase = s->boot_phase;
@@ -559,6 +567,7 @@ static void reset_line(NxsHpi *s, bool released)
         /* External DSP reset covers the HPI boot contract, C674x megamodule
          * INTC, Timer64P/SPI blocks, and interpreter lifecycle. Other device
          * peripheral reset domains remain explicit models. */
+        dsp_ticks_flush(s);
         cdj_c6747_hpi_reset(&s->hpi);
         cdj_c6747_intc_reset(&s->intc);
         cdj_c6747_intc_delivery_reset(&s->intc_delivery);
@@ -672,6 +681,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
         *value = ldl_le_p(s->sdram + sdram_offset);
         return true;
     }
+    dsp_ticks_flush(s);
     /* Past RAM, a device read voids an idle proof.  GPIO is exempt: its reads
      * are pure (a const model) and its inputs change only when MAIN writes
      * the boot phase, which cannot happen while the DSP runs.  The NXS idle
@@ -1291,6 +1301,7 @@ static void dsp_idle_skip(NxsHpi *s, uint64_t k)
             s->cpu.control_ready[i] += k * cycles;
     s->cpu.packets += k * packets;
     s->cpu.cycles += k * cycles;
+    /* Commutes with any batched tick debt: both are cdj_c6747_pll_ticks. */
     cdj_c6747_pll_ticks(&s->pll, k * cycles);
     s->idle_skipped_packets += k * packets;
 }
@@ -1368,6 +1379,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
             return true;
         }
     }
+    dsp_ticks_flush(s);
     if (commit && s->idle_skip) dsp_idle_note_write(s, address, value, size);
     if (dsp_l1d_write(s, address, value, size, commit)) return true;
     if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
@@ -1523,9 +1535,24 @@ static const uint8_t *dsp_fetch_block(void *opaque, uint32_t block)
     return dsp_memory_span(opaque, block, 32);
 }
 
+/* Apply the ticks dsp_cycle_tick only counted; see cdj_dsp_ticks.h.  Before
+ * every non-RAM bus access and at the end of each activation. */
+static void dsp_ticks_flush(NxsHpi *s)
+{
+    if (s->ticks.debt)
+        cdj_dsp_ticks_apply(s->spis, &s->wm8740, &s->spi_transfer, &s->pll,
+                            s->ticks.debt, cdj_c674x_loop_functional_timing());
+    s->ticks.debt = 0;
+    s->ticks.steady = false;
+}
+
 static void dsp_cycle_tick(void *opaque)
 {
     NxsHpi *s = opaque;
+    if (s->ticks.steady) {
+        ++s->ticks.debt;
+        return;
+    }
     uint64_t transfers = s->wm8740.transfers;
     if (!cdj_c674x_loop_functional_timing())
         cdj_spi_core_tick(s->spis, &s->wm8740, &s->spi_transfer, &s->pll);
@@ -1547,6 +1574,9 @@ static void dsp_cycle_tick(void *opaque)
         if (timer_outputs & (1u << bit))
             cdj_c6747_intc_deliver_event(&s->intc, &s->intc_delivery,
                                          cdj_c6747_timer_event(bit));
+    s->ticks.steady = s->tick_batch &&
+        cdj_dsp_ticks_quiet(s->timers, &s->spi_transfer, &s->wm8740,
+                            cdj_c674x_loop_functional_timing());
 }
 
 static bool report_dsp(NxsHpi *s, const char *reason)
@@ -1678,7 +1708,10 @@ static bool dsp_post_step(DspActivation *a)
         s->dsp_halted = true;
         return false;
     }
-    cdj_c6747_psc_tick(&s->psc);
+    /* psc_tick only counts down transitions in flight. */
+    if (s->psc.remaining[0][0] | s->psc.remaining[0][1] |
+        s->psc.remaining[1][0] | s->psc.remaining[1][1])
+        cdj_c6747_psc_tick(&s->psc);
     if (!functional_audio_tick(s)) {
         a->reason = s->cpu.fault;
         s->dsp_halted = true;
@@ -1754,6 +1787,7 @@ static void execute_dsp(NxsHpi *s, unsigned quota)
         }
         if (!dsp_post_step(&a)) break;
     }
+    dsp_ticks_flush(s);
     const char *reason = a.reason;
     unsigned steps = a.steps;
     s->dsp_running = false;
@@ -2352,6 +2386,7 @@ static void start_dsp(NxsHpi *s)
     cdj_c674x_reset(&s->cpu, ldl_le_p(s->l2));
     s->cpu.cycle_tick = dsp_cycle_tick;
     s->cpu.cycle_opaque = s;
+    s->ticks = (CdjDspTicks){0};
     s->dsp_started = true;
     if (dsp_thread.on) {
         dsp_thread.epoch_ns = dsp_thread.report_ns =
@@ -2579,6 +2614,7 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     s->functional_audio = audio && !strcmp(audio, "1");
     const char *ram_fast = getenv("CDJ_NXS_DSP_RAM_FAST");
     s->ram_slow = ram_fast && !strcmp(ram_fast, "0");
+    s->tick_batch = g_strcmp0(getenv("CDJ_NXS_DSP_TICK_BATCH"), "0") != 0;
     const char *idle_skip = getenv("CDJ_NXS_DSP_IDLE_SKIP");
     s->idle_skip = idle_skip && !strcmp(idle_skip, "1");
     if (s->idle_skip)

@@ -119,7 +119,9 @@ int main(void)
 }
 '''
     fixture = tmp_path / 'read.c'
-    fixture.write_text(harness + prefix + host + read + span + checks)
+    # Batched ticks (tests/cstub/dsp-ticks.c): nothing ticks here.
+    flush = 'static void dsp_ticks_flush(NxsHpi *s) { (void)s; }\n'
+    fixture.write_text(harness + prefix + flush + host + read + span + checks)
     binary = tmp_path / 'read-test'
     models = sorted(directory.glob('cdj_c6747_*.c'))
     subprocess.run([cc, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',

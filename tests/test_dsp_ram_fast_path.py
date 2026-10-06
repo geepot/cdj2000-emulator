@@ -66,6 +66,8 @@ static int functional_slot_probe(NxsHpi *s, CdjC6747Edma *edma,
                                  CdjC6747McaspControl *mcasp)
 { (void)s; (void)edma; (void)mcasp; return 0; }
 static bool functional_audio_tick(NxsHpi *s) { (void)s; return true; }
+/* Batched ticks (tests/cstub/dsp-ticks.c); nothing ticks here. */
+static void dsp_ticks_flush(NxsHpi *s) { (void)s; }
 '''
     checks = r'''
 static NxsHpi *board(bool slow)

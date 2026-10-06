@@ -396,6 +396,7 @@ def main():
     # .c has to be listed explicitly or the standalone build cannot find it.
     inputs = (SOURCES + [p.with_suffix('.h') for p in SOURCES[1:]] +
               [ROOT / 'emulator/qemu/cdj_c6747_spi_clock.h',
+               ROOT / 'emulator/qemu/cdj_dsp_ticks.h',
                ROOT / 'emulator/qemu/cdj_c674x_multicycle.h'])
     source_data = {p: p.read_bytes() for p in inputs}
     format_data = args.formats.read_bytes()
