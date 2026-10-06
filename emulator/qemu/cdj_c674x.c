@@ -4785,8 +4785,7 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out,
          * exactly that much first so execute_fast can restore it; a
          * declined packet (returning false before this point, with no
          * stop()) needs none of it. */
-        if (defer->count > 24 || timing.idle || packet->single_cycle)
-            return false;
+        if (defer->count > 24 || timing.idle) return false;
         uint64_t last = cpu->cycles + timing.cycles;
         bool active = false;
         for (unsigned j = 0; !active && j < out->store_count; ++j)
@@ -5018,7 +5017,8 @@ bool cdj_c674x_execute(CdjC674x *cpu, const CdjC674xPacket *packet,
  * Returns 1 executed, 0 declined (CPU untouched), -1 faulted. */
 static int execute_fast(CdjC674x *cpu, const CdjC674xPacket *packet,
                         const CdjC674xDecoded *decoded, bool branches,
-                        CdjC674xRead read, CdjC674xWrite write, void *opaque)
+                        CdjC674xRead read, CdjC674xWrite write, void *opaque,
+                        unsigned extent[2])
 {
     if (cpu->fault || cpu->store_count > 24 || cpu->load_count > 40 ||
         cpu->branch_count > 5)
@@ -5040,8 +5040,12 @@ static int execute_fast(CdjC674x *cpu, const CdjC674xPacket *packet,
         memcpy(save.branch_queue, cpu->branch_queue, sizeof(cpu->branch_queue));
     unsigned peak[2] = {0, 0};
     if (execute_packet(cpu, cpu, save.stores, save.loads, peak, packet,
-                       decoded, read, write, opaque, &defer))
+                       decoded, read, write, opaque, &defer)) {
+        /* As execute_transaction reports it. */
+        extent[0] = umax(peak[0], defer.stores);
+        extent[1] = umax(peak[1], defer.loads);
         return 1;
+    }
     /* Issue only appends, retirement only removes: the high-water mark is
      * peak[] once issue completed, else the counts as they stand. */
     unsigned stores = defer.committed ? peak[0] : cpu->store_count;
@@ -5141,32 +5145,40 @@ static int packet_cache_setting(void)
  * DINT/RINT gate.  Every instruction that is left either writes registers
  * through commit_reg/set_reg, appends through append_*, or queues a branch;
  * `branches` records whether queue_branch is reachable. */
+enum { INSN_SLOW, INSN_FAST, INSN_FAST_BRANCH };
+
+/* packet_fast for one instruction: a pure function of its decode. */
+static unsigned insn_fast(const CdjC674xDecoded *d)
+{
+    if (d->spmask || d->callp || d->nop > 9 ||
+        d->gate != CDJ_C674X_INTERRUPT_GATE_NONE)
+        return INSN_SLOW;
+    if (d->nop) return INSN_FAST;
+    if (d->compact)                                      /* compact BNOP */
+        return d->form == CDJ_C674X_COMPACT_MVC_ILC ? INSN_SLOW
+                                                    : INSN_FAST_BRANCH;
+    bool (*run)(CdjC674xArm *) = d->arm ? d->arm->run : NULL;
+    if (run == arm_mvc_write || run == arm_b_irp || run == arm_b_nrp ||
+        run == arm_abssp || run == arm_cmpsp || run == arm_approx ||
+        run == arm_two_cycle_dp)
+        return INSN_SLOW;
+    /* MVC TSCL snapshots TSCH into control[16]. */
+    if (run == arm_mvc_read && ((d->w >> 18) & 31) == 10) return INSN_SLOW;
+    if (run == arm_b_disp || run == arm_bdec || run == arm_bnop_disp ||
+        run == arm_bnop_reg || run == arm_b_reg || run == arm_bpos)
+        return INSN_FAST_BRANCH;
+    return INSN_FAST;
+}
+
 static bool packet_fast(const CdjC674xPacket *packet,
                         const CdjC674xDecoded *decoded, bool *branches)
 {
     *branches = false;
-    if (packet->single_cycle || packet->count > 8) return false;
+    if (packet->count > 8) return false;
     for (unsigned i = 0; i < packet->count; ++i) {
-        const CdjC674xDecoded *d = &decoded[i];
-        if (d->spmask || d->callp || d->nop > 9 ||
-            d->gate != CDJ_C674X_INTERRUPT_GATE_NONE)
-            return false;
-        if (d->nop) continue;
-        if (d->compact) {
-            if (d->form == CDJ_C674X_COMPACT_MVC_ILC) return false;
-            *branches = true;                            /* compact BNOP */
-            continue;
-        }
-        bool (*run)(CdjC674xArm *) = d->arm ? d->arm->run : NULL;
-        if (run == arm_mvc_write || run == arm_b_irp || run == arm_b_nrp ||
-            run == arm_abssp || run == arm_cmpsp || run == arm_approx ||
-            run == arm_two_cycle_dp)
-            return false;
-        /* MVC TSCL snapshots TSCH into control[16]. */
-        if (run == arm_mvc_read && ((d->w >> 18) & 31) == 10) return false;
-        if (run == arm_b_disp || run == arm_bdec || run == arm_bnop_disp ||
-            run == arm_bnop_reg || run == arm_b_reg || run == arm_bpos)
-            *branches = true;
+        unsigned fast = insn_fast(&decoded[i]);
+        if (fast == INSN_SLOW) return false;
+        *branches |= fast == INSN_FAST_BRANCH;
     }
     return true;
 }
@@ -5333,6 +5345,123 @@ static bool fetch_cached(CdjC674x *cpu, CdjC674xRead read, void *opaque,
     e->single = e->fast ? packet_single(fetched, e->decoded) : SINGLE_NONE;
     *entry = e;
     return true;
+}
+
+/* Decode records for a loop-buffer cycle, and packet_fast's answer for
+ * the packet.  The first `buffered` entries come from the loop buffer and
+ * repeat every iteration, so they are memoized per thread by instruction
+ * (decode is a pure function of word, compact and header; the key is the
+ * whole instruction), with insn_fast; the rest (post-loop program fetches)
+ * decode fresh. */
+static bool loop_decode(const CdjC674xPacket *packet, unsigned buffered,
+                        CdjC674xDecoded decoded[8], bool *branches)
+{
+    enum { LOOP_DECODE_SLOTS = 256 };
+    static _Thread_local struct {
+        CdjC674xInstruction insn;
+        CdjC674xDecoded decoded;
+        uint8_t fast;
+        bool valid;
+    } memo[LOOP_DECODE_SLOTS];
+    bool fast = packet->count <= 8;
+    *branches = false;
+    for (unsigned i = 0; i < packet->count && i < 8; ++i) {
+        const CdjC674xInstruction *insn = &packet->instructions[i];
+        unsigned kind;
+        if (i >= buffered) {
+            decode_instruction(insn, &decoded[i]);
+            kind = insn_fast(&decoded[i]);
+            fast &= kind != INSN_SLOW;
+            *branches |= kind == INSN_FAST_BRANCH;
+            continue;
+        }
+        unsigned slot = (insn->pc >> 1) & (LOOP_DECODE_SLOTS - 1);
+        if (!memo[slot].valid || memo[slot].insn.word != insn->word ||
+            memo[slot].insn.pc != insn->pc ||
+            memo[slot].insn.header != insn->header ||
+            memo[slot].insn.compact != insn->compact) {
+            memo[slot].insn = *insn;
+            decode_instruction(insn, &memo[slot].decoded);
+            memo[slot].fast = insn_fast(&memo[slot].decoded);
+            memo[slot].valid = true;
+        }
+        decoded[i] = memo[slot].decoded;
+        kind = memo[slot].fast;
+        fast &= kind != INSN_SLOW;
+        *branches |= kind == INSN_FAST_BRANCH;
+    }
+    return fast;
+}
+
+/* The common loop-buffer cycle - a sealed, non-reloading loop with no
+ * post-loop fetch, no interrupt drain, no IDLE and no retained interrupted
+ * loop, whose packet execute_fast takes - run in place on the CPU instead of
+ * on loop_step's scratch copy, which costs two ~1 KB copies per cycle.
+ * Each step below is loop_step's own for that case, in its order, except
+ * that the issue (which leaves the loop untouched when it fails) comes
+ * before TSR.SPLX is set; up to the execute nothing else is written, so the
+ * undo is three fields.  Returns 1 done, 0 not taken (CPU untouched; run
+ * loop_step), -1 faulted with the CPU as loop_step leaves it (pre-step
+ * state, fault recorded).  Mode 2 only; tests/cstub/c674x-packet-cache.c
+ * runs SPLOOP programs against loop_step in lockstep. */
+static int loop_step_in_place(CdjC674x *cpu, CdjC674xRead read,
+                              CdjC674xWrite write, void *opaque)
+{
+    if (packet_cache_setting() != 2 || !cpu->loop.sealed ||
+        cpu->store_count > 24 || cpu->load_count > 40 ||
+        loop_immediate_reload(cpu) || loop_interrupt_armed(cpu) ||
+        loop_interrupt_draining(cpu) || loop_retained_valid(cpu) ||
+        (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) ||
+        cpu->idle_cycles || cpu->loop.cycle >= cpu->loop.post_cycle)
+        return 0;
+    uint64_t cycle = cpu->loop.cycle;
+    uint32_t tsr = cpu->control[26];
+    unsigned history = cpu->loop_pred_history;
+    uint32_t tags[8];
+    unsigned count;
+    bool scheduler_post, drained;
+    if (!cdj_c674x_loop_issue_filtered_from(&cpu->loop, &cpu->loop, tags,
+                                            &count, &scheduler_post, &drained,
+                                            NULL, NULL))
+        return 0;
+    CdjC674xPacket combined = {.next_pc = cpu->pc, .single_cycle = true,
+                               .count = count};
+    for (unsigned i = 0; i < count; ++i)
+        combined.instructions[i] = cpu->loop_instructions[tags[i]];
+    CdjC674xDecoded decoded[8];
+    bool branches;
+    if (!loop_decode(&combined, count, decoded, &branches)) {
+        cpu->loop.cycle = cycle;
+        return 0;
+    }
+    cpu->control[26] |= CDJ_C674X_TSR_SPLX;
+    bool end_while = cpu->loop.predicate_loop && cpu->loop.cycle >= 4 &&
+        cpu->loop.cycle % cpu->loop.ii == 0 && !(cpu->loop_pred_history & 4);
+    bool condition = (cpu->r[cpu->loop_pred_bank][cpu->loop_pred_reg] != 0) ^
+                     cpu->loop_pred_invert;
+    cpu->loop_pred_history =
+        (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
+        ((((cpu->loop_pred_history & 7) << 1) | condition) & 7);
+    unsigned extent[2];
+    int fast = execute_fast(cpu, &combined, decoded, branches, read, write,
+                            opaque, extent);
+    if (fast <= 0) {
+        cpu->loop.cycle = cycle;
+        cpu->control[26] = tsr;
+        cpu->loop_pred_history = history;
+        return fast;
+    }
+    uint64_t launched = 1 + cpu->loop.cycle / cpu->loop.ii;
+    if (cpu->loop.delayed_count) {
+        if (!scheduler_post && cpu->loop.cycle >= 4 &&
+            cpu->loop.cycle % cpu->loop.ii == 0 && cpu->control[13])
+            --cpu->control[13];
+    } else if (!cpu->loop.predicate_loop)
+        cpu->control[13] = launched < cpu->loop.iterations ?
+                           cpu->loop.iterations - launched : 0;
+    if (end_while) loop_set_active(cpu, false);
+    if (drained && scheduler_post) loop_set_active(cpu, false);
+    return 1;
 }
 
 static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, void *opaque)
@@ -5659,7 +5788,26 @@ static bool loop_step(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write, voi
     bool branch_matures = reload && cpu->branch_due &&
         cpu->branch_due == cpu->cycles + 1;
     unsigned written[2];
-    if (!execute_transaction(&out, &combined, NULL, read, write, opaque, written))
+    /* Mode 2: the loop cycle on execute_fast, in place on the scratch copy
+     * `out` (all a failure discards) instead of under a second backup of
+     * it, with memoized decodes.  A retained interrupted loop is left to
+     * the transactional path: a branch maturing in this packet could then
+     * stop after the deferred register results were committed, with no
+     * snapshot to restore.  Other modes keep the reference path. */
+    CdjC674xDecoded decoded[8];
+    const CdjC674xDecoded *known = NULL;
+    bool branches;
+    int fast = 0;
+    if (packet_cache_setting() == 2 && combined.count <= 8) {
+        bool eligible = loop_decode(&combined, count, decoded, &branches);
+        known = decoded;
+        if (eligible && !loop_retained_valid(&out))
+            fast = execute_fast(&out, &combined, decoded, branches, read,
+                                write, opaque, written);
+    }
+    if (fast < 0 ||
+        (!fast && !execute_transaction(&out, &combined, known, read, write,
+                                       opaque, written)))
         return stop(cpu, out.fault_pc, out.fault_word, out.fault);
     if (branch_matures && reload) {
         /* Section 7.9.6.3: a taken branch ends program fetch after its last
@@ -5750,7 +5898,11 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
 {
     if (direct) direct->count = 0;
     if (cpu->fault) return false;
-    if (cpu->loop_active) return loop_step(cpu, read, write, opaque);
+    if (cpu->loop_active) {
+        int done = loop_step_in_place(cpu, read, write, opaque);
+        if (done) return done > 0;
+        return loop_step(cpu, read, write, opaque);
+    }
     if (cpu->idle_cycles) {
         CdjC674xPacket idle = {.next_pc = cpu->pc, .single_cycle = true};
         /* The IDLE sentinel never counts down; only an interrupt or a branch
@@ -5926,8 +6078,9 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
         execute_single(cpu, &entry->packet, entry->decoded, entry->single))
         return true;
     if (entry && entry->fast && packet_cache_mode == 2) {
+        unsigned extent[2];
         int fast = execute_fast(cpu, &entry->packet, entry->decoded,
-                                entry->branches, read, write, opaque);
+                                entry->branches, read, write, opaque, extent);
         if (fast) return fast > 0;
     }
     unsigned extent[2];

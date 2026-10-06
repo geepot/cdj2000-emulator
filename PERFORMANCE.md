@@ -614,3 +614,121 @@ real time needs a DSP roughly 15-20x faster on audio code. The profile of the
 starved DSP thread points at the first levers: 59% of step samples in the
 transactional (non-fast) packet path, and every RAM store walking the full peripheral
 probe chain in `dsp_write` before reaching L2/SDRAM (twice: check and commit).
+
+## RAM store dispatch and loop-buffer fast path (2026-10-06)
+
+Profiled first: stock NXS, the confirmed rekordbox USB, `--functional-dsp-audio
+--dsp-thread`, macOS `sample` on the DSP thread during playback, and a
+per-path counter (a temporary build, not kept) over 10 M packets replayed
+from a real-USB playback checkpoint (Bang Bang, 15 s after PLAY, taken from a
+synchronous run with `dev checkpoint`):
+
+| packets by step path (functional audio) | share |
+| --- | ---: |
+| SPLOOP loop-buffer cycles (`loop_step`, all transactional) | 52.0% |
+| direct, `execute_fast` | 32.6% |
+| direct, `execute_single` | 8.5% |
+| direct, not fast-eligible (CMPSP 90%, CALLP 8%) | 2.3% |
+| IDLE / SPLOOP setup | 0.7% |
+
+The audio kernels run from the loop buffer, and every loop-buffer cycle paid
+a ~1 KB scratch copy of the CPU in and out, a second ~1 KB backup inside
+`execute_transaction`, and a fresh decode of each buffered instruction: a
+loop cycle cost about eight direct packets. In the live DSP thread,
+`dsp_write` was 6.2% inclusive (each RAM store probing ~20 models twice) and
+the transactional path 13.4%.
+
+* **RAM store dispatch** (`cdj2000_nxs_hpi.c`). `dsp_write` asks
+  `dsp_memory_span` first: it is exactly the union of the RAM windows the
+  function accepted at its end (L1D SRAM, L2 and its local alias, shared RAM,
+  SDRAM while EMIFB enables it), none of which overlaps a register window of
+  any model (0x01800000-0x01efffff, EMIFB registers at 0xb0000000). A RAM
+  store lands, with the idle-proof write log, without probing any model; an
+  MMIO address, an odd size, a store straddling a window end or SDRAM with
+  EMIFB disabled falls through to the chain unchanged. `dsp_memory_span`
+  tests L2 first (as `dsp_read` does). `CDJ_NXS_DSP_RAM_FAST=0` restores the
+  chain for A/B.
+* **Loop-buffer cycles on the fast path** (`cdj_c674x.c`). A sealed,
+  non-reloading loop with no post-loop fetch, interrupt drain, IDLE or
+  retained interrupted loop - 93% of loop cycles in the playback replay - runs
+  in place (`loop_step_in_place`): issue, TSR.SPLX, the predicate history,
+  `execute_fast` and the ILC/termination updates, with a three-field undo; a
+  declined packet leaves the CPU untouched and `loop_step` runs it. The other
+  loop cycles keep `loop_step`, which now also executes its scratch copy with
+  `execute_fast` instead of under a second backup. Buffered instructions'
+  decodes and fast-path eligibility are memoized per thread by instruction
+  (`loop_decode`). The fast path's commit no longer refuses single-cycle
+  packets (direct packets never are). All of it is mode 2 only:
+  `CDJ_C674X_PACKET_CACHE=decode` or `0` runs the old path.
+
+### Exactness
+
+* Same QEMU binary, `CDJ_NXS_DSP_RAM_FAST=0 CDJ_C674X_PACKET_CACHE=decode`
+  (both new paths and the existing fast paths off) against default, 45-second
+  full-capture stock boots: all 243,298 events and 3,826 DSP checkpoints of
+  the common prefix byte-identical; with `--functional-dsp-audio`, 122,530
+  events and 562 checkpoints. Against the pre-change binary (fc8385b): 260,133
+  events and 4,281 checkpoints; functional audio 125,638 and 646. Final
+  screens identical in all six.
+* Replay: checkpoints 1, 25, 250 (1M steps), 400 (5M), the earlier
+  first-play snapshot (5M, strict and functional audio) and the real-USB
+  playback checkpoint (10M, strict and functional audio; 4.68M and 2.78M
+  trace lines) give identical traces and final checkpoints against the
+  pre-change core, and cache off against on in the new one.
+* `tests/cstub/c674x-packet-cache.c` adds 3,000 random SPLOOP programs (ILC
+  1-12, II 1-14, bodies of loads, stores, NOP n and parallel packets, failing
+  store commits and E3 reads) run in lockstep mode 2 against mode 0: 6.9M
+  packets, 5.6M loop-buffer cycles, 688 faults, whole CPU and memory equal
+  after every step. Removing the retirement snapshot or the loop-cycle undo,
+  dropping the ILC update or reading another instruction's memo entry each
+  fails it. Clean under ASan/UBSan.
+* `tests/test_dsp_ram_fast_path.py` compiles the board's `dsp_write` with the
+  real models and runs 200,000 random stores (window edges, every model's
+  registers, odd sizes, SDRAM gating toggled, every L1D partition, the idle
+  log armed) on two boards, fast and `ram_slow`, comparing results, memory
+  and model state, then a real EDMA transfer staged into SDRAM. Dropping the
+  idle-log call, mis-sizing a store or widening L2 by a word each fails it.
+
+### Measurements (Apple silicon, shared host, load 12-14)
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| `benchmark_core` step-sploop (new: SPLOOP, ILC 64, II 4) | 9.5-9.8 M/s | 19.9-20.0 M/s |
+| `benchmark_core` step-alu / step-mem | 79-81 / 37 M/s | unchanged |
+| replay real-USB playback, 10M, functional audio, user s | 2.07-2.08 | 1.74-1.76 |
+| same, strict | 2.54-2.56 | 2.02-2.03 |
+| replay ckpt 400 (boot), 20M | 1.72-1.74 | 1.70-1.71 |
+| `--audio-clock virtual` playback run, DSP packets/s | 3.3 M | 5.2 M |
+| same, underrun slots | 97.85% | 96.6% |
+| same, USB press to root list / Enter to duration | 25.1 / 2.4 s | 12.1 / 1.2 s |
+
+Replay times include `replay.c`'s own write trace and peripheral chain
+(unchanged), so the core gain on audio code is larger than they show. The
+virtual-clock runs are the scenario of the previous section (`--dsp-thread
+--lightweight --audio-clock virtual`, link_hub, same key presses); neither
+plays (the counter never advances) and the DSP still gets 59 of its 1,700.7
+packets per slot. In the live DSP thread after the change, sched_yield and
+the lock (the per-access hand-over to MAIN) are 24% of samples, the
+transactional path 2%, `dsp_write` 2%, `advance_functional_mcasp_slots`
+(three ~4 KB EDMA state copies per slot) 4%, and the interpreter's issue
+loop (`execute_packet`) the largest single cost.
+
+**Real time needs a compiler, not more of this.** The previous section put
+playback demand near 63 M packets/s on this code; the interpreter now
+delivers ~5 M in the live board and ~20 M on a pure SPLOOP microbenchmark,
+and what remains is spread over the generic issue loop (operand fetch, arm
+dispatch, the E1/E3/E5 queues, a board tick per cycle) with no single cost
+left that an exact change removes an order of magnitude from. Stijn Jacobs'
+cdj-nxs2-qemu reaches real time on its C66x only with a block compiler:
+`c66x_jit.c` (860 lines in the core) loads regions that
+`tools/c14_jitgen.py` (2,650 lines) generates as C from a run profile, with
+the pipeline resolved at compile time (each write's landing cycle and the
+branches in flight are static state; conditional branches fork it; loops
+close by merging states), interpreter handlers called with captured writes
+for anything without a native form, and exits that put in-flight writes back
+where the interpreter keeps them. Its decoder, state layout and write ring
+are its own, so it is a design to follow rather than code to drop in; here a
+compiled region would also have to call the board's per-cycle tick, stop at
+every interrupt-recognition boundary and McASP slot edge, re-check stores
+against the fetch blocks it was built from, and reproduce the E1/E3/E5
+queues and fault rollback byte for byte to keep the checkpoint evidence.

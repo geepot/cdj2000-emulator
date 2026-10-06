@@ -119,12 +119,31 @@ int main(void)
         0x10,
         4u << 13,
     };
+    /* An SPLOOP (ILC 64, II 4) of load, add, constant and store - the
+     * shape of the NXS audio kernels, which run from the loop buffer -
+     * then a branch back to reload ILC. */
+    static const uint32_t sploop[] = {
+        3u << 23 | 64u << 7 | 0x28 | 2,               /* MVK.S2 64,B3 */
+        13u << 23 | 3u << 18 | 0x3a2,                 /* MVC.S2 B3,ILC */
+        3u << 13,                                     /* NOP 4 */
+        3u << 23 | 0x38000,                           /* SPLOOP 4 */
+        4u << 23 | 10u << 18 | 1u << 9 | 6u << 4 | 4, /* LDW *+A10[0],A4 */
+        3u << 23 | 3u << 18 | 1u << 13 | 0x78,        /* ADD.L1 A1,A3,A3 */
+        1u << 23 | 0x1234u << 7 | 0x28,               /* MVK.S1 0x1234,A1 */
+        3u << 23 | 10u << 18 | 1u << 13 | 1u << 9 | 7u << 4 | 4, /* STW */
+        0x34000,                                      /* SPKERNEL */
+        (0x1fffffu & (uint32_t)-8) << 7 | 0x10,       /* B.S1 0x1000 */
+        4u << 13,                                     /* NOP 5 */
+    };
     uint64_t packets;
     double t = step_loop(alu, 6, 30000000, &packets);
     printf("step-alu %.6f s; packets=%llu (%.1f M packets/s)\n", t,
            (unsigned long long)packets, packets / t / 1e6);
     t = step_loop(mem, 6, 30000000, &packets);
     printf("step-mem %.6f s; packets=%llu (%.1f M packets/s)\n", t,
+           (unsigned long long)packets, packets / t / 1e6);
+    t = step_loop(sploop, 11, 30000000, &packets);
+    printf("step-sploop %.6f s; packets=%llu (%.1f M packets/s)\n", t,
            (unsigned long long)packets, packets / t / 1e6);
     return 0;
 }

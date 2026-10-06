@@ -136,6 +136,9 @@ typedef struct {
     DspFaultHistory fault_history[DSP_FAULT_HISTORY_COUNT];
     uint32_t fault_history_next;
     char *fault_history_path;
+    /* CDJ_NXS_DSP_RAM_FAST=0 sends RAM stores through the full peripheral
+     * chain again (A/B reference for the dsp_write RAM fast path). */
+    bool ram_slow;
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
     /* CDJ_NXS_DSP_MODEL=1: answer MAIN without executing the C674x. */
@@ -567,10 +570,10 @@ static uint8_t *host_memory(NxsHpi *s, uint32_t address)
         cdj_c6747_l1d_sram_span(&s->cache, address, 4, &l1d_offset))
         return s->l1d + l1d_offset;
     if (address >= L2_BASE && address <= L2_BASE + L2_SIZE - 4)
-        return s->l2 + address - L2_BASE;
+        return s->l2 + (address - L2_BASE);
     if (address >= SHARED_RAM_BASE &&
         address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4)
-        return s->shared_ram + address - SHARED_RAM_BASE;
+        return s->shared_ram + (address - SHARED_RAM_BASE);
     uint32_t sdram_offset;
     if (cdj_c6747_emifb_sdram_offset(&s->emifb, address, 4, SDRAM_SIZE,
                                     &sdram_offset))
@@ -597,7 +600,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     if (address >= 0x00800000 && address < 0x00840000) local_address += 0x11000000;
     if (!(local_address & 3) && local_address >= L2_BASE &&
         local_address <= L2_BASE + L2_SIZE - 4) {
-        *value = ldl_le_p(s->l2 + local_address - L2_BASE);
+        *value = ldl_le_p(s->l2 + (local_address - L2_BASE));
         return true;
     }
     uint32_t l1d_offset;
@@ -608,7 +611,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
     }
     if (!(address & 3) && address >= SHARED_RAM_BASE &&
         address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - 4) {
-        *value = ldl_le_p(s->shared_ram + address - SHARED_RAM_BASE);
+        *value = ldl_le_p(s->shared_ram + (address - SHARED_RAM_BASE));
         return true;
     }
     uint32_t sdram_offset;
@@ -651,17 +654,18 @@ static uint8_t *dsp_memory_span(NxsHpi *s, uint32_t address, size_t size)
 {
     uint64_t end = (uint64_t)address + size;
     if (!size || end > UINT64_C(0x100000000)) return NULL;
+    /* Disjoint windows, so the order is free: L2 first, as in dsp_read. */
+    if (address >= L2_BASE && end <= (uint64_t)L2_BASE + L2_SIZE)
+        return s->l2 + (address - L2_BASE);
     uint32_t l1d_offset;
     if (cdj_c6747_l1d_sram_span(&s->cache, address, size, &l1d_offset))
         return s->l1d + l1d_offset;
-    if (address >= L2_BASE && end <= (uint64_t)L2_BASE + L2_SIZE)
-        return s->l2 + address - L2_BASE;
     if (address >= 0x00800000u &&
         end <= UINT64_C(0x00800000) + L2_SIZE)
-        return s->l2 + address - 0x00800000u;
+        return s->l2 + (address - 0x00800000u);
     if (address >= SHARED_RAM_BASE &&
         end <= (uint64_t)SHARED_RAM_BASE + SHARED_RAM_SIZE)
-        return s->shared_ram + address - SHARED_RAM_BASE;
+        return s->shared_ram + (address - SHARED_RAM_BASE);
     uint32_t sdram_offset;
     if (cdj_c6747_emifb_sdram_offset(&s->emifb, address, size, SDRAM_SIZE,
                                     &sdram_offset))
@@ -1292,6 +1296,27 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
                       unsigned size, bool commit)
 {
     NxsHpi *s = opaque;
+    /* RAM first: dsp_memory_span is exactly the union of the L1D SRAM, L2
+     * (and its local alias), shared RAM and enabled-SDRAM windows accepted
+     * at the end of this function, and none of them overlaps a register
+     * window of any model probed below (those are 0x01800000-0x01efffff and
+     * the EMIFB registers at 0xb0000000), so a RAM store lands exactly where
+     * it would without asking every model twice (check, then commit).  An
+     * MMIO address, an odd size, a store straddling a window end or SDRAM
+     * with EMIFB disabled gets no span and takes the full chain unchanged. */
+    if ((size == 1 || size == 2 || size == 4 || size == 8) && !s->ram_slow) {
+        uint8_t *target = dsp_memory_span(s, address, size);
+        if (target) {
+            if (commit) {
+                if (s->idle_skip) dsp_idle_note_write(s, address, value, size);
+                if (size == 4) stl_le_p(target, value);
+                else if (size == 8) stq_le_p(target, value);
+                else if (size == 2) stw_le_p(target, value);
+                else *target = value;
+            }
+            return true;
+        }
+    }
     if (commit && s->idle_skip) dsp_idle_note_write(s, address, value, size);
     if (dsp_l1d_write(s, address, value, size, commit)) return true;
     if (cdj_c6747_syscfg_pll_locked(&s->syscfg) &&
@@ -1406,7 +1431,7 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         address >= SHARED_RAM_BASE &&
         address <= SHARED_RAM_BASE + SHARED_RAM_SIZE - size) {
         if (commit) {
-            uint8_t *target = s->shared_ram + address - SHARED_RAM_BASE;
+            uint8_t *target = s->shared_ram + (address - SHARED_RAM_BASE);
             if (size == 8) stq_le_p(target, value);
             else if (size == 1) *target = value;
             else if (size == 2) stw_le_p(target, value);
@@ -1430,10 +1455,10 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
     if ((size != 1 && size != 2 && size != 4 && size != 8) ||
         address < L2_BASE || address > L2_BASE + L2_SIZE - size) return false;
     if (commit) {
-        if (size == 8) stq_le_p(s->l2 + address - L2_BASE, value);
+        if (size == 8) stq_le_p(s->l2 + (address - L2_BASE), value);
         else if (size == 1) s->l2[address - L2_BASE] = value;
-        else if (size == 2) stw_le_p(s->l2 + address - L2_BASE, value);
-        else stl_le_p(s->l2 + address - L2_BASE, value);
+        else if (size == 2) stw_le_p(s->l2 + (address - L2_BASE), value);
+        else stl_le_p(s->l2 + (address - L2_BASE), value);
     }
     return true;
 }
@@ -1901,12 +1926,12 @@ static void virtual_audio_tick(void *opaque)
 
 static uint32_t model_get(NxsHpi *s, uint32_t address)
 {
-    return ldl_le_p(s->l2 + address - L2_BASE);
+    return ldl_le_p(s->l2 + (address - L2_BASE));
 }
 
 static void model_put(NxsHpi *s, uint32_t address, uint32_t value)
 {
-    stl_le_p(s->l2 + address - L2_BASE, value);
+    stl_le_p(s->l2 + (address - L2_BASE), value);
 }
 
 /* A DSP-side HPIC store, with the same effects and transcript record. */
@@ -2299,6 +2324,8 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     cdj_c674x_loop_set_functional_timing(timing && !strcmp(timing, "1"));
     cdj_c674x_set_fetch_block(dsp_read, dsp_fetch_block);
     s->functional_audio = audio && !strcmp(audio, "1");
+    const char *ram_fast = getenv("CDJ_NXS_DSP_RAM_FAST");
+    s->ram_slow = ram_fast && !strcmp(ram_fast, "0");
     const char *idle_skip = getenv("CDJ_NXS_DSP_IDLE_SKIP");
     s->idle_skip = idle_skip && !strcmp(idle_skip, "1");
     if (s->idle_skip)
