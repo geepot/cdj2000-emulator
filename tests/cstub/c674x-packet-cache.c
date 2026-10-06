@@ -8,8 +8,10 @@
  * rewrites code between steps (an HPI/EDMA upload), the fetch-block hook
  * withdraws and restores a code window (a remap), and the bus fails a store
  * commit or a load's E3 read on chosen addresses (retirement faults after
- * the fast path has committed).  A few directed cases check the same
- * properties with known outcomes. */
+ * the fast path has committed).  A second set of programs runs SPLOOP
+ * loops of random bodies (loads, stores, NOP n, parallel packets, every II),
+ * whose loop-buffer cycles take execute_fast in mode 2.  A few directed
+ * cases check the same properties with known outcomes. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -146,6 +148,43 @@ static void build(System *s)
     }
 }
 
+/* MVK n,B3; MVC B3,ILC; NOP 4; SPLOOP ii; body; SPKERNEL; post; B BASE. */
+static void build_loop(System *s)
+{
+    build(s);
+    uint32_t code[CODE_END - BASE], *w = code;
+    unsigned n = 1 + rnd() % 12, len = 1 + rnd() % 20;
+    unsigned ii = 1 + rnd() % (len < 14 ? len + 1 : 14);
+    *w++ = 3u << 23 | n << 7 | 0x28 | 2;           /* MVK.S2 n,B3 */
+    *w++ = 13u << 23 | 3u << 18 | 0x3a2;            /* MVC.S2 B3,ILC */
+    *w++ = 3u << 13;                                /* NOP 4 */
+    *w++ = (ii - 1) << 23 | 0x38000;                /* SPLOOP ii */
+    for (unsigned i = 0; i < len; ++i) {
+        uint32_t insn;
+        do insn = random_instruction(BASE + 4 * (uint32_t)(w - code));
+        while ((insn & 0x7c) == 0x10 || (insn & 0x1ffc) == 0x120 ||
+               (insn & 0xffe) == 0x3a2 || (insn & 0xffe) == 0x3e2);
+        if ((insn & 0x1ffff) == 0 && rnd() % 3) insn = 0;   /* mostly NOP 1 */
+        if (i + 1 < len && ((BASE + 4 * (uint32_t)(w - code)) & 31) != 28 &&
+            rnd() % 3 == 0)
+            insn |= 1;
+        *w++ = insn;
+    }
+    *w++ = 0x34000;                                 /* SPKERNEL 0,0 */
+    for (unsigned i = rnd() % 4; i; --i) {
+        uint32_t insn;
+        do insn = random_instruction(BASE + 4 * (uint32_t)(w - code));
+        while ((insn & 0x7c) == 0x10 || (insn & 0x1ffc) == 0x120 ||
+               (insn & 0xffe) == 0x3a2);
+        *w++ = insn;
+    }
+    uint32_t pc = BASE + 4 * (uint32_t)(w - code);
+    *w++ = ((uint32_t)(-(int32_t)((pc & ~31u) - BASE) / 4) & 0x1fffff) << 7 |
+           0x10;                                    /* B.S1 BASE */
+    *w++ = 4u << 13;                                /* NOP 5 */
+    memcpy(s->ram, code, 4 * (size_t)(w - code));
+}
+
 static void init_cpu(CdjC674x *cpu, System *s, uint32_t a10, uint32_t b10)
 {
     cdj_c674x_reset(cpu, BASE);
@@ -175,14 +214,15 @@ static void same(const CdjC674x *a, const System *sa, const CdjC674x *b,
     }
 }
 
-static unsigned packets, faults_seen;
+static unsigned packets, faults_seen, loop_steps;
 
-static void lockstep(unsigned seed)
+static void lockstep(unsigned seed, bool loops)
 {
     static System sa, sb;
     static CdjC674x a, b;
     rng_state = seed * 2654435761u + 1;
-    build(&sa);
+    if (loops) build_loop(&sa);
+    else build(&sa);
     sa.ticks = 0;
     sa.hide = false;
     sb = sa;
@@ -197,7 +237,7 @@ static void lockstep(unsigned seed)
     init_cpu(&b, &sb, a10, b10);
     same(&a, &sa, &b, &sb, seed, 0);
     for (unsigned step = 1; step <= 3000; ++step) {
-        if (rnd() % 97 == 0) {            /* host upload into code */
+        if (!loops && rnd() % 97 == 0) {  /* host upload into code */
             uint32_t pc = BASE + (rnd() % ((CODE_END - BASE) / 4)) * 4;
             uint32_t w = random_instruction(pc);
             memcpy(sa.ram + (pc - BASE), &w, 4);
@@ -206,6 +246,7 @@ static void lockstep(unsigned seed)
         if (rnd() % 89 == 0) sa.hide = sb.hide = !sa.hide;
         cdj_c674x_set_packet_cache(2);
         uint64_t before = a.packets;
+        loop_steps += a.loop_active;
         bool ra = cdj_c674x_step(&a, sys_read, sys_write, &sa);
         cdj_c674x_set_packet_cache(0);
         bool rb = cdj_c674x_step(&b, sys_read, sys_write, &sb);
@@ -258,9 +299,14 @@ int main(void)
 {
     cdj_c674x_set_fetch_block(sys_read, sys_block);
     self_modifying();
-    for (unsigned seed = 1; seed <= 3000; ++seed) lockstep(seed);
+    for (unsigned seed = 1; seed <= 3000; ++seed) lockstep(seed, false);
     printf("packet cache lockstep: 3000 programs, %u packets, %u faults\n",
            packets, faults_seen);
     assert(packets > 1000000 && faults_seen > 100);
+    packets = faults_seen = 0;
+    for (unsigned seed = 1; seed <= 3000; ++seed) lockstep(seed, true);
+    printf("SPLOOP lockstep: 3000 programs, %u packets, %u loop-buffer steps,"
+           " %u faults\n", packets, loop_steps, faults_seen);
+    assert(loop_steps > 300000 && faults_seen > 100);
     return 0;
 }

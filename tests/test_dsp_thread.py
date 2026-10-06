@@ -21,6 +21,7 @@ SHIM = r'''
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "cdj_dsp_audio_clock.h"
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define NANOSECONDS_PER_SECOND 1000000000LL
@@ -72,7 +73,11 @@ typedef struct {
     struct { uint64_t packets; uint32_t pc; } cpu;
     uint64_t idle_skipped_packets;
     uint64_t mailbox[2];   /* written non-atomically inside a chunk */
+    bool thread_audio_clock;   /* off: tests/test_dsp_audio_clock.py */
+    CdjDspAudioClock audio_clock;
+    uint64_t audio_clock_next_packets;
 } NxsHpi;
+static uint64_t audio_clock_packets(int64_t ns) { (void)ns; return 0; }
 static NxsHpi *nxs_hpi;
 static void execute_dsp(NxsHpi *s, unsigned quota);
 '''
@@ -254,7 +259,7 @@ def test_dsp_thread_handoff(tmp_path):
     harness.write_text(code)
     binary = tmp_path / 'dsp_thread'
     subprocess.run([cc, '-std=gnu11', '-O1', '-g', '-Wall', '-Wno-unused-function',
-                    '-pthread', str(harness), '-o', str(binary)], check=True)
+                    '-I', str(ROOT / 'emulator/qemu'), '-pthread', str(harness), '-o', str(binary)], check=True)
     result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'ok'
