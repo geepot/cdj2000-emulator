@@ -11,6 +11,7 @@ import json
 import math
 import os
 import shlex
+import signal
 import socket
 import threading
 from pathlib import Path
@@ -24,6 +25,7 @@ from tools.cdj_main.run_state import write_json
 from tools.cdj_main.nxs_panel import neutral_frame
 from tools.cdj_main import media_readiness, panel_control
 from tools.cdj_main.qmp import connect_chardev
+from tools.cdj_main.parent_watch import Lifeline, watch
 from tools.paths import BFIN_SIM, QEMU, qemu_environment
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1221,6 +1223,10 @@ def main():
     write_json(run / 'session.json', session)
     processes = []
     result = {}
+    # Children (and this launcher, if its own parent dies) exit on SIGKILL of
+    # us; the normal teardown below is unchanged.
+    lifeline = Lifeline()
+    watch(lambda: os.kill(os.getpid(), signal.SIGINT))
     stop_requested = False
     viewer = None
     snapshots = None
@@ -1233,24 +1239,24 @@ def main():
             if args.gui_head_start:
                 # The simulator opens its MAIN link lazily and retries, so it
                 # can boot first; MAIN then starts after the head start.
-                gui = subprocess.Popen(gui_command, cwd=ROOT, env=gui_env, stdin=subprocess.DEVNULL, stdout=guilog, stderr=guilog)
+                gui = lifeline.popen(gui_command, cwd=ROOT, env=gui_env, stdin=subprocess.DEVNULL, stdout=guilog, stderr=guilog)
                 processes.append(gui)
                 session['processes']['gui'] = gui.pid
                 time.sleep(args.gui_head_start)
-            main_process = subprocess.Popen(main_command, cwd=ROOT, env=qemu_environment(main_env), stdin=subprocess.DEVNULL, stdout=mainlog, stderr=mainlog)
+            main_process = lifeline.popen(main_command, cwd=ROOT, env=qemu_environment(main_env), stdin=subprocess.DEVNULL, stdout=mainlog, stderr=mainlog)
             processes.append(main_process)
             session['processes']['main'] = main_process.pid
             write_json(run / 'session.json', session)
             time.sleep(1)
             if main_process.poll() is not None: raise RuntimeError('MAIN exited; see main-stderr.log')
             if gui is None:
-                gui = subprocess.Popen(gui_command, cwd=ROOT, env=gui_env, stdin=subprocess.DEVNULL, stdout=guilog, stderr=guilog)
+                gui = lifeline.popen(gui_command, cwd=ROOT, env=gui_env, stdin=subprocess.DEVNULL, stdout=guilog, stderr=guilog)
                 processes.append(gui)
                 session['processes']['gui'] = gui.pid
             if args.frame_interval:
                 snapshots = FrameSnapshots(run, args.frame_interval, time.monotonic())
             if args.ui:
-                viewer = subprocess.Popen([sys.executable, '-m', 'tools.cdj_gui.view_ui',
+                viewer = lifeline.popen([sys.executable, '-m', 'tools.cdj_gui.view_ui',
                     '--attach', '--device-name', 'CDJ-2000NXS', '--nxs-panel',
                     '--run', str(run),
                     '--output', str(run / 'screen.ppm'),

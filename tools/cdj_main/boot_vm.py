@@ -28,6 +28,7 @@ import argparse
 import os
 import re
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -37,6 +38,7 @@ import time
 from pathlib import Path
 
 from tools.cdj_main import caution
+from tools.cdj_main.parent_watch import Lifeline, watch
 from tools.cdj_main.procs import stop_tree
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -691,7 +693,9 @@ def main() -> int:
     board_stderr = open(args.stderr, "wb") if args.stderr else subprocess.DEVNULL
     if args.stderr:
         print(f"# MAIN stderr -> {args.stderr}")
-    board = subprocess.Popen(
+    lifeline = Lifeline()
+    watch(lambda: os.kill(os.getpid(), signal.SIGINT))
+    board = lifeline.popen(
         [
             str(QEMU), "-M", "cdj2000-main",
             "-bios", str(flash_with_mac(args.firmware or FIRMWARE / "main-firmware.bin",
@@ -814,7 +818,7 @@ def main() -> int:
             for value in args.gui_env:
                 if value.startswith("BFIN_FAST_LZSS"):
                     print(f"# GUI:  {value}")
-        gui = gui if args.no_gui else subprocess.Popen(
+        gui = gui if args.no_gui else lifeline.popen(
             [
                 sys.executable, "-m", "tools.cdj_gui.run_headless",
                 "--seconds", str(args.seconds),
