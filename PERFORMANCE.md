@@ -821,9 +821,11 @@ through it, no faster than `execute_fast` (lean replay 2.07 s against
   ends in a full cycle (only SPLOOPW can).
 * Replay (`tools/cdj_dsp/replay.c`), JIT off against on: checkpoints 1,
   25, 250 (1 M steps), 400 (5 M), the first-play snapshot (5 M, strict and
-  functional audio) and the real-USB playback checkpoint (10 M, strict and
-  functional audio) give identical traces and final checkpoints, which also
-  equal the pre-change core's.
+  functional audio) and the real-USB playback checkpoint (10 M and 60 M
+  steps, strict and functional audio; 28.6 M and 17.2 M trace lines at
+  60 M) give identical traces and final checkpoints, which at 10 M also
+  equal the pre-change core's. Of the boot checkpoints only the playback
+  ones reach loops in their window (checkpoint 400: none in 5 M steps).
 * 45-second full-capture stock boots, `develop` (ccc0c79) binary against
   this one with the JIT on: all 262,797 events and 4,353 DSP checkpoints of
   the common prefix byte-identical; with `--functional-dsp-audio`, 130,522
