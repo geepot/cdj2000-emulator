@@ -6,6 +6,12 @@
  * bf531_load_update, bf531_flash, the PF ready toggle on flag-register reads
  * (bf531_set_ready_toggle), the async bank 3 latch at 0x20300000, and GP
  * timers without TIMER_IRQ_ENA no longer end a step (next_event/advance).
+ * Changed 2026-10-05 for the MAIN link (bfin-link): SPORT1 RX/TX DMA as
+ * byte pumps to the host (sport1_rx_pump, sport1_tx_send) with live
+ * CURR_ADDR/CURR_X_COUNT, partial bursts and retries, descriptor flows on
+ * every channel, SPORT1 registers modelled, the real SIC mask (no forced
+ * DMA3 bit), PF straps, ELF boot, a configurable frame period, and the
+ * flash's AMD program/erase commands (the GUI saves settings at run time).
  */
 /*
  * ADSP-BF531 SoC model (see bf531.h). System MMRs sit at 0xFFC00000; the
@@ -49,7 +55,7 @@ enum {
     PLL_CTL = 0x000, PLL_DIV = 0x004, PLL_STAT = 0x00C, CHIPID = 0x014,
     SIC_IMASK = 0x10C, SIC_IAR0 = 0x110, SIC_ISR = 0x120, SIC_IWR = 0x124,
     SPI_CTL = 0x500, SPI_STAT = 0x508, SPI_TDBR = 0x50C, SPI_RDBR = 0x510,
-    SPORT1_TCR1 = 0x900,
+    SPORT1_TCR1 = 0x900, SPORT1_END = 0x960,
     TIMER0 = 0x600, TIMER_ENABLE = 0x640, TIMER_DISABLE = 0x644,
     TIMER_STATUS = 0x648,
     FIO_FLAG_D = 0x700, FIO_FLAG_C = 0x704, FIO_FLAG_S = 0x708,
@@ -69,6 +75,7 @@ enum {
 
 #define DMAEN       0x0001
 #define TSPEN       0x0001
+#define WNR         0x0002
 #define DMA2D       0x0010
 #define DI_EN       0x0080
 #define DMA_DONE    0x0001
@@ -113,16 +120,14 @@ struct bf531 {
     uint16_t *fb;
     uint64_t frames;
 
-    /* One standing SPORT1 RX packet from the host, consumed the next time
-     * the firmware arms DMA3 (see bf531_sport1_rx). MAIN's packets are at
-     * most its 2 KB transmit buffer. */
-    uint8_t  sport1_rx[2048];
-    size_t   sport1_rx_len;
-    bool     sport1_rx_armed;
+    /* Core cycles of one display frame and of a SPORT receive retry. */
+    uint64_t ppi_frame, sport_retry;
 
     /* CDJ board additions (see bf531.h). */
+    uint16_t strap_mask, strap_value;
     uint16_t ready_toggle;
     unsigned ready_phase;
+    unsigned flash_cycle, flash_program;
     uint32_t latch;
 };
 
@@ -333,16 +338,35 @@ static unsigned dma_rows(const bf531_dma *d)
     return d->reg[D_CONFIG / 4] & DMA2D ? (d->reg[D_YCOUNT / 4] & 0xFFFF) : 1;
 }
 
-/* The PPI clocks one 16-bit word per pixel. Its clock is not modelled: a
- * work unit takes the time a 60 Hz panel spends on its share of a 525-line
- * frame, which is all the firmware can observe of it. */
-static void dma_start_unit(bf531 *s, bf531_dma *d)
+/* Starts a work unit. The PPI clocks one 16-bit word per pixel. Its clock
+ * is not modelled: a work unit takes the time a 60 Hz panel (ppi_frame)
+ * spends on its share of a 525-line frame, which is all the firmware can
+ * observe of it. SPORT1 receive (DMA3) pumps at once; SPORT1 transmit (DMA4)
+ * goes out once TSPEN is also set: the firmware enables DMA4, fills the
+ * buffer, then sets TSPEN. */
+static void dma_start_unit(bf531 *s, int ch)
 {
-    uint64_t lines = dma_rows(d);
+    bf531_dma *d = &s->dma[ch];
+    uint64_t now = bfin_cycles(s->core);
 
     d->reg[D_CURR_ADDR / 4] = d->reg[D_START / 4];
+    d->reg[D_CURR_X / 4] = d->reg[D_XCOUNT / 4] & 0xFFFF;
+    d->reg[D_CURR_Y / 4] = d->reg[D_YCOUNT / 4] & 0xFFFF;
     d->reg[D_IRQ_STATUS / 4] |= DMA_RUN;
-    d->due = bfin_cycles(s->core) + lines * (BF531_CCLK_HZ / 60 / 262);
+    switch (ch) {
+    case 0:
+        d->due = now + dma_rows(d) * (s->ppi_frame / 262);
+        break;
+    case 3:
+        d->due = now;
+        break;
+    case 4:
+        d->due = s->mmr[SPORT1_TCR1 / 4] & TSPEN ? now : NEVER;
+        break;
+    default:
+        d->due = NEVER;
+        break;
+    }
     bfin_yield(s->core);
 }
 
@@ -400,42 +424,58 @@ static void dma_unit_done(bf531 *s, int ch)
         dma_fetch(s, d);
         break;
     }
-    dma_start_unit(s, d);
+    dma_start_unit(s, ch);
 }
 
-/* Copies one host packet into an armed DMA3 (SPORT1 RX) target and
- * completes the unit, as MAIN's own clock would over a real link. Nothing
- * in the firmware unmasks the SIC bit for this channel before it gets here
- * on a plain boot (checked to 2 G cycles with no packet waiting), so it is
- * set here too. */
-static void sport1_rx_complete(bf531 *s, int ch)
+static unsigned dma_elem(const bf531_dma *d)
 {
-    bf531_dma *d = &s->dma[ch];
-    size_t want = (d->reg[D_XCOUNT / 4] & 0xFFFF) * 2;
-    size_t len = s->sport1_rx_len < want ? s->sport1_rx_len : want;
-    uint8_t *to = load_target(s, d->reg[D_START / 4], len);
-
-    if (to) {
-        memcpy(to, s->sport1_rx, len);
-    }
-    s->sport1_rx_len = 0;
-    s->sport1_rx_armed = false;
-    s->mmr[SIC_IMASK / 4] |= 1u << (IRQ_PPI_DMA + ch);
-    dma_unit_done(s, ch);
+    return 1u << ((d->reg[D_CONFIG / 4] >> 2) & 3);
 }
 
-/* Hands DMA4's buffer (SPORT1 TX, the answer to MAIN) to the host and
- * completes the unit, once both the channel and the transmitter are on: the
- * firmware enables DMA4, fills the buffer, then sets TSPEN. */
-static void sport1_tx_start(bf531 *s)
+/* One pump of DMA3, SPORT1 receive, as bin/cdj-run's DMA engine pumps its
+ * peer: the host hands over what MAIN has sent, at most what is left of the
+ * unit (and 4 KB, the longest record). Nothing: try again after the SPORT
+ * retry time. A short burst lands and the channel keeps running for the
+ * rest, CURR_ADDR and CURR_X_COUNT live, as a native partial DMA does. */
+static void sport1_rx_pump(bf531 *s)
+{
+    bf531_dma *d = &s->dma[3];
+    unsigned esize = dma_elem(d);
+    unsigned cap = (d->reg[D_CURR_X / 4] & 0xFFFF) * esize;
+    uint32_t addr = d->reg[D_CURR_ADDR / 4];
+    uint8_t buf[4096];
+    unsigned n;
+    uint8_t *to;
+
+    cap = cap < sizeof(buf) ? cap : sizeof(buf);
+    n = s->host.sport1_rx ? s->host.sport1_rx(s->host.opaque, buf, cap, addr) : 0;
+    n -= n % esize;
+    if (!n || n > cap) {
+        d->due = bfin_cycles(s->core) + s->sport_retry;
+        return;
+    }
+    if ((to = load_target(s, addr, n))) {
+        memcpy(to, buf, n);
+    } else {
+        slog(s, "SPORT1 RX of %u bytes to 0x%08x has no target", n, addr);
+    }
+    d->reg[D_CURR_ADDR / 4] = addr + n;
+    d->reg[D_CURR_X / 4] -= n / esize;
+    if (d->reg[D_CURR_X / 4] & 0xFFFF) {
+        d->due = bfin_cycles(s->core) + 1;
+    } else {
+        dma_unit_done(s, 3);
+    }
+}
+
+/* Hands DMA4's whole unit (SPORT1 TX, a request to MAIN) to the host and
+ * completes it, once both the channel and the transmitter are on. */
+static void sport1_tx_send(bf531 *s)
 {
     bf531_dma *d = &s->dma[4];
-    uint8_t pkt[128];
-    size_t len = (d->reg[D_XCOUNT / 4] & 0xFFFF) * 2;
+    size_t len = (d->reg[D_XCOUNT / 4] & 0xFFFF) * dma_elem(d);
+    static uint8_t pkt[0x10000 * 4];     /* X_COUNT's ceiling of words */
 
-    if (len > sizeof(pkt)) {
-        len = sizeof(pkt);
-    }
     for (size_t i = 0; i < len; i++) {
         pkt[i] = mem_read(s, d->reg[D_START / 4] + i, 1);
     }
@@ -462,35 +502,22 @@ static void dma_write(bf531 *s, uint32_t off, uint32_t v)
     }
     if (!(v & DMAEN)) {
         d->due = NEVER;
-        s->sport1_rx_armed &= ch != 3;
         d->reg[D_IRQ_STATUS / 4] &= ~DMA_RUN;
         return;
     }
     /* The PPI channel moves frames; DMA3 and DMA4 are SPORT1's receive and
      * transmit, MAIN's link. */
-    if (ch == 0) {
-        if (((v >> 12) & 7) >= 4) {
-            if (((v >> 12) & 7) == 4) {
-                d->reg[D_CURR_DESC / 4] = d->reg[D_NEXT / 4];
-            }
-            dma_fetch(s, d);
+    if (((v >> 12) & 7) >= 4) {
+        if (((v >> 12) & 7) == 4) {
+            d->reg[D_CURR_DESC / 4] = d->reg[D_NEXT / 4];
         }
-        dma_start_unit(s, d);
-    } else {
-        slog(s, "DMA%u enabled, config 0x%04x, start 0x%08x, %u words", ch, v,
-             d->reg[D_START / 4], d->reg[D_XCOUNT / 4] & 0xFFFF);
-        if (ch == 3) {
-            s->sport1_rx_armed = true;
-            if (s->sport1_rx_len) {
-                sport1_rx_complete(s, ch);
-            }
-        } else if (ch == 4) {
-            d->reg[D_IRQ_STATUS / 4] |= DMA_RUN;
-            if (s->mmr[SPORT1_TCR1 / 4] & TSPEN) {
-                sport1_tx_start(s);
-            }
-        }
+        dma_fetch(s, d);
     }
+    if (ch != 0 && ch != 3 && ch != 4) {
+        slog(s, "DMA%u enabled, config 0x%04x, start 0x%08x, %u words (unmodelled)",
+             ch, v, d->reg[D_START / 4], d->reg[D_XCOUNT / 4] & 0xFFFF);
+    }
+    dma_start_unit(s, ch);
 }
 
 static uint32_t dma_read(bf531 *s, uint32_t off)
@@ -505,6 +532,7 @@ static int mmr_modelled(uint32_t off)
     return off < 0x020 || (off >= 0x100 && off < 0x128) ||
            (off >= 0x500 && off < 0x520) || (off >= 0x600 && off < 0x650) ||
            (off >= 0x700 && off < 0x750) || (off >= 0xA00 && off < 0xA20) ||
+           (off >= SPORT1_TCR1 && off < SPORT1_END) ||
            (off >= DMA0 && off < DMA_END) || (off >= PPI_CONTROL && off < 0x1014);
 }
 
@@ -535,7 +563,7 @@ static uint32_t sys_read(bf531 *s, uint32_t off)
         if (s->ready_toggle) {
             d = (d & ~s->ready_toggle) | (s->ready_phase++ & 1 ? s->ready_toggle : 0);
         }
-        return d;
+        return (d & ~s->strap_mask) | (s->strap_value & s->strap_mask);
     }
     case EBIU_SDSTAT: return 0x8;             /* SDRS: SDRAM powered up */
     }
@@ -566,10 +594,9 @@ static void sys_write(bf531 *s, uint32_t off, uint32_t v)
         return;
     case SPORT1_TCR1:
         if (v & ~s->mmr[off / 4] & TSPEN &&
-            s->dma[4].reg[D_IRQ_STATUS / 4] & DMA_RUN) {
-            s->mmr[off / 4] = v;
-            sport1_tx_start(s);
-            return;
+            s->dma[4].reg[D_IRQ_STATUS / 4] & DMA_RUN && s->dma[4].due == NEVER) {
+            s->dma[4].due = bfin_cycles(s->core);
+            bfin_yield(s->core);
         }
         break;
     case FIO_FLAG_C: s->mmr[FIO_FLAG_D / 4] &= ~v; return;
@@ -606,6 +633,56 @@ static uint32_t mem_read(bf531 *s, uint32_t addr, unsigned size)
     return 0;
 }
 
+/* The flash's AMD command set (cmdset 2, as the gdb board file's CFI
+ * device): unlock AA/55 at word 0x555/0x2AA, then A0 programs the next word
+ * (bits can only clear), 80 + unlock + 30 erases the 64 KB sector, + 10 the
+ * chip. Reads stay in array mode, so the firmware's DQ7/DQ6 status polls
+ * see the operation already done. Only the in-memory copy changes. */
+static void flash_write(bf531 *s, uint32_t off, uint32_t v, unsigned size)
+{
+    unsigned word = (off >> 1) & 0x7FF;
+    uint8_t cmd = v;
+
+    if (s->flash_program) {
+        s->flash_program = 0;
+        for (unsigned i = 0; i < size && off + i < FLASH_SIZE; i++) {
+            s->flash[off + i] &= v >> (8 * i);
+        }
+        return;
+    }
+    switch (s->flash_cycle) {
+    case 0: case 3:
+        if (word == 0x555 && cmd == 0xAA) {
+            s->flash_cycle++;
+            return;
+        }
+        break;
+    case 1: case 4:
+        if (word == 0x2AA && cmd == 0x55) {
+            s->flash_cycle++;
+            return;
+        }
+        break;
+    case 2:
+        if (word == 0x555 && cmd == 0xA0) {
+            s->flash_program = 1;
+        } else if (word == 0x555 && cmd == 0x80) {
+            s->flash_cycle = 3;
+            return;
+        }
+        break;
+    case 5:
+        if (cmd == 0x30 || (cmd == 0x10 && word == 0x555)) {
+            uint32_t at = cmd == 0x30 ? off & ~0xFFFFu : 0;
+
+            memset(s->flash + at, 0xFF, cmd == 0x30 ? 0x10000 : FLASH_SIZE);
+            slog(s, "flash erase 0x%08x", ASYNC_BASE + at);
+        }
+        break;
+    }
+    s->flash_cycle = 0;
+}
+
 static uint32_t bus_read(void *opaque, uint32_t addr, unsigned size)
 {
     return mem_read(opaque, addr, size);
@@ -618,7 +695,7 @@ static void bus_write(void *opaque, uint32_t addr, uint32_t val, unsigned size)
     if (addr - SYS_BASE < SYS_SIZE) {
         sys_write(s, addr - SYS_BASE, val);
     } else if (addr - ASYNC_BASE < FLASH_SIZE) {
-        slog(s, "flash write 0x%08x = 0x%x", addr, val);
+        flash_write(s, addr - ASYNC_BASE, val, size);
     } else if (addr - LATCH_BASE < LATCH_SIZE) {
         s->latch = val;
     } else {
@@ -657,6 +734,8 @@ bf531 *bf531_new(uint32_t sdram_size, const bf531_host *host, FILE *log)
     for (int n = 0; n < 8; n++) {
         s->dma[n].due = NEVER;
     }
+    s->ppi_frame = BF531_CCLK_HZ / 60;
+    s->sport_retry = BF531_CCLK_HZ / 1000;
     return s;
 }
 
@@ -668,19 +747,31 @@ void bf531_free(bf531 *s)
     free(s);
 }
 
-void bf531_sport1_rx(bf531 *s, const uint8_t *data, size_t len)
+void bf531_set_strap(bf531 *s, uint16_t mask, uint16_t value)
 {
-    if (len > sizeof(s->sport1_rx)) {
-        len = sizeof(s->sport1_rx);
-    }
-    if (data) {
-        memcpy(s->sport1_rx, data, len);
-    }
-    s->sport1_rx_len = data ? len : 0;
-    /* Lands as the chip's next event, not from the host's call, so the
-     * interrupt it raises reaches the core inside bf531_run. */
-    if (data && s->sport1_rx_armed) {
-        s->dma[3].due = bfin_cycles(s->core);
+    s->strap_mask = mask;
+    s->strap_value = value;
+}
+
+void bf531_set_timing(bf531 *s, uint64_t ppi_frame, uint64_t sport_retry)
+{
+    s->ppi_frame = ppi_frame ? ppi_frame : 1;
+    s->sport_retry = sport_retry ? sport_retry : 1;
+}
+
+uint32_t bf531_read(bf531 *s, uint32_t addr, unsigned size)
+{
+    return mem_read(s, addr, size);
+}
+
+void bf531_write(bf531 *s, uint32_t addr, uint32_t val, unsigned size)
+{
+    uint8_t *h = load_target(s, addr, size);
+
+    if (h) {
+        memcpy(h, &val, size);
+    } else {
+        bus_write(s, addr, val, size);
     }
 }
 
@@ -728,6 +819,46 @@ int bf531_boot_ldr(bf531 *s, const uint8_t *img, size_t len)
         }
     }
     return -1;
+}
+
+int bf531_boot_elf(bf531 *s, const uint8_t *img, size_t len)
+{
+    uint32_t entry, phoff;
+    uint16_t phentsize, phnum;
+
+    if (len < 52 || memcmp(img, "\177ELF\1\1", 6)) {
+        return -1;
+    }
+    memcpy(&entry, img + 24, 4);
+    memcpy(&phoff, img + 28, 4);
+    memcpy(&phentsize, img + 42, 2);
+    memcpy(&phnum, img + 44, 2);
+    for (unsigned i = 0; i < phnum; i++) {
+        const uint8_t *ph = img + phoff + (size_t)i * phentsize;
+        uint32_t type, off, paddr, filesz, memsz;
+        uint8_t *to;
+
+        if (phoff + (size_t)(i + 1) * phentsize > len) {
+            return -1;
+        }
+        memcpy(&type, ph, 4);
+        memcpy(&off, ph + 4, 4);
+        memcpy(&paddr, ph + 12, 4);
+        memcpy(&filesz, ph + 16, 4);
+        memcpy(&memsz, ph + 20, 4);
+        if (type != 1 || !memsz) {
+            continue;
+        }
+        if (filesz > memsz || off > len || filesz > len - off ||
+            !(to = load_target(s, paddr, memsz))) {
+            slog(s, "ELF segment at 0x%08x (0x%x bytes) has no target", paddr, memsz);
+            return -1;
+        }
+        memcpy(to, img + off, filesz);
+        memset(to + filesz, 0, memsz - filesz);
+    }
+    bfin_reset(s->core, entry);
+    return 0;
 }
 
 int bf531_load_update(bf531 *s, const uint8_t *img, size_t len)
@@ -789,9 +920,14 @@ static void advance(bf531 *s)
         }
     }
     for (int n = 0; n < 8; n++) {
-        if (s->dma[n].due <= now && n == 3) {
-            sport1_rx_complete(s, n);
-        } else if (s->dma[n].due <= now) {
+        if (s->dma[n].due > now) {
+            continue;
+        }
+        if (n == 3) {
+            sport1_rx_pump(s);
+        } else if (n == 4) {
+            sport1_tx_send(s);
+        } else {
             dma_unit_done(s, n);
         }
     }
@@ -827,6 +963,11 @@ bfin_stop bf531_run(bf531 *s, uint64_t n)
 bfin_core *bf531_core(bf531 *s)
 {
     return s->core;
+}
+
+uint64_t bf531_cycles(const bf531 *s)
+{
+    return bfin_cycles(s->core);
 }
 
 uint64_t bf531_frames(const bf531 *s)

@@ -2,7 +2,11 @@
 /*
  * From hw/cdj/bfin/bfin_dsp.c of Stijn Jacobs' cdj-nxs2-qemu,
  * https://github.com/Stijn-Jacobs/cdj-nxs2-qemu, commit 08d5cb1.
- * Unchanged from upstream.
+ * Changed 2026-10-05 (bfin-link): A1 = A0, An = An (S), A0 += A1 / A0 -= A1 and their register
+ * forms, BYTEOP2P, BYTEOP3P, BYTEPACK and BYTEUNPACK (dsp32alu 11, 22-24, as
+ * GNU sim's decode_dsp32alu_0 does them; the GUI's browse and image code
+ * uses them), and a MAC with the pair bit and an odd register is only
+ * undefined when MAC1 would write past R7 (GNU sim writes dst + 1).
  */
 /*
  * Blackfin DSP32 groups: the ALU (16-bit, vector and 32-bit arithmetic, the
@@ -114,6 +118,117 @@ static int32_t minmax(int32_t a, int32_t b, int max)
     return max ? (a > b ? a : b) : (a < b ? a : b);
 }
 
+static int64_t round16(bfin_core *c, int64_t v);
+
+/* The byte-aligned word starting aln bytes into the pair l:h (BYTEOP*). */
+static uint32_t algn(uint32_t l, uint32_t h, unsigned aln)
+{
+    return aln ? l >> (8 * aln) | h << (32 - 8 * aln) : l;
+}
+
+static void set_flag(bfin_core *c, uint32_t bit, int on)
+{
+    c->astat = on ? c->astat | bit : c->astat & ~bit;
+}
+
+/* A0 += A1 and A0 -= A1 (aopcde 11): aop 0 also writes Rd, aop 1 a rounded
+ * half, aop 2 only A0, aop 3 subtracts; s is (W32). */
+static int acc_add(bfin_core *c, unsigned aop, unsigned s, unsigned hl, unsigned dst)
+{
+    int64_t a0 = c->a[0], a1 = c->a[1], r;
+    uint64_t m = 0xFFFFFFFFFFull;
+    int carry = aop == 3 ? ((uint64_t)a1 & m) < ((uint64_t)a0 & m)
+                         : (~(uint64_t)a1 & m) < ((uint64_t)a0 & m);
+    int ov = 0;
+
+    if ((aop == 0 && (s || hl)) || (aop == 1 && s) || (aop >= 2 && hl)) {
+        return 0;
+    }
+    r = clamp(aop == 3 ? a0 - a1 : a0 + a1, ACC_MIN, ACC_MAX, &ov);
+    if (aop >= 2 && s) {                        /* (W32) */
+        r = r < 0 ? sext40(r & 0x80FFFFFFFFll) : r & 0xFFFFFFFFll;
+        ov |= aop == 3 && r < 0;
+    }
+    c->a[0] = r;
+    set_flag(c, AS_AV0, aop == 3 ? ov : ov && a1);
+    if (ov) {
+        c->astat |= AS_AV0S;
+    }
+    set_flag(c, AS_AC0 | AS_AC0_COPY, carry);
+    if (aop >= 2) {
+        set_flag(c, AS_AZ, r == 0);
+        set_flag(c, AS_AN, r < 0);
+        return 1;
+    }
+    int sat = 0;
+    uint32_t d;
+
+    if (aop) {
+        uint16_t h = clamp(round16(c, r), -0x8000, 0x7FFF, &sat);
+
+        set_half(&c->r[dst], hl, h);
+        d = (uint32_t)h << 16;
+    } else {
+        d = c->r[dst] = clamp(r, INT32_MIN, INT32_MAX, &sat);
+    }
+    set_flag(c, AS_AZ, d == 0);
+    set_flag(c, AS_AN, d >> 31);
+    bfin_flags_v(c, sat);
+    return 1;
+}
+
+static uint8_t clamp_u8(int32_t v)
+{
+    return v < 0 ? 0 : v > 255 ? 255 : v;
+}
+
+/* BYTEOP2P, BYTEOP3P, BYTEPACK, BYTEUNPACK (aopcde 22-24). The source pairs
+ * are R1:0 or R3:2, byte-aligned by I0 (and I1 for BYTEOP3P's second). */
+static int byteop(bfin_core *c, unsigned aopcde, unsigned aop, unsigned s,
+                  unsigned hl, unsigned dst0, unsigned dst1, unsigned src0,
+                  unsigned src1)
+{
+    uint32_t *r = c->r;
+    int pairs = (src0 == 0 || src0 == 2) && (src1 == 0 || src1 == 2);
+    uint32_t s0 = 0, s1 = 0;
+
+    if (pairs) {
+        s0 = s ? algn(r[src0 + 1], r[src0], c->i[0] & 3) : algn(r[src0], r[src0 + 1], c->i[0] & 3);
+        s1 = s ? algn(r[src1 + 1], r[src1], c->i[aopcde == 23] & 3)
+               : algn(r[src1], r[src1 + 1], c->i[aopcde == 23] & 3);
+    }
+    if (aopcde == 22 && aop < 2 && pairs) {     /* BYTEOP2P */
+        unsigned rnd = aop ? 0 : 2;
+        uint32_t t0 = ((s1 >> 8 & 0xFF) + (s1 & 0xFF) + (s0 >> 8 & 0xFF) + (s0 & 0xFF) + rnd) >> 2 & 0xFF;
+        uint32_t t1 = ((s1 >> 24) + (s1 >> 16 & 0xFF) + (s0 >> 24) + (s0 >> 16 & 0xFF) + rnd) >> 2 & 0xFF;
+
+        r[dst0] = t1 << (16 + hl * 8) | t0 << (hl * 8);
+        return 1;
+    }
+    if (aopcde == 23 && aop == 0 && pairs) {    /* BYTEOP3P */
+        int32_t t0 = (int16_t)s0 + (int32_t)(s1 >> (8 * !hl) & 0xFF);
+        int32_t t1 = (int16_t)(s0 >> 16) + (int32_t)(s1 >> (16 + 8 * !hl) & 0xFF);
+
+        r[dst0] = (uint32_t)clamp_u8(t0) << (8 * hl) | (uint32_t)clamp_u8(t1) << (16 + 8 * hl);
+        return 1;
+    }
+    if (aopcde == 24 && aop == 0 && !s && !hl) {    /* BYTEPACK */
+        r[dst0] = (r[src0] & 0xFF) | (r[src0] >> 16 & 0xFF) << 8 |
+                  (r[src1] & 0xFF) << 16 | (r[src1] >> 16 & 0xFF) << 24;
+        return 1;
+    }
+    if (aopcde == 24 && aop == 1 && !hl && pairs && dst0 != dst1) {   /* BYTEUNPACK */
+        uint64_t v = s ? (uint64_t)r[src0] << 32 | r[src0 + 1]
+                       : (uint64_t)r[src0 + 1] << 32 | r[src0];
+        unsigned o = 8 * (c->i[0] & 3);
+
+        r[dst0] = (uint8_t)(v >> o) | (uint32_t)(uint8_t)(v >> (o + 8)) << 16;
+        r[dst1] = (uint8_t)(v >> (o + 16)) | (uint32_t)(uint8_t)(v >> (o + 24)) << 16;
+        return 1;
+    }
+    return 0;
+}
+
 void bfin_dsp32alu(bfin_core *c, uint16_t iw0, uint16_t iw1)
 {
     unsigned aopcde = iw0 & 0x1F, hl = (iw0 >> 5) & 1;
@@ -201,8 +316,28 @@ void bfin_dsp32alu(bfin_core *c, uint16_t iw0, uint16_t iw1)
         return;
     }
     case 8:                                     /* A0 = 0 ... */
-        if (s) {
+        if (hl || x) {
             break;
+        }
+        if (aop == 3) {                         /* A0 = A1, A1 = A0 */
+            c->a[s] = c->a[!s];
+            return;
+        }
+        if (s) {                                /* A0 = A0 (S) ... */
+            for (int n = 0; n < 2; n++) {
+                if (aop == 2 || aop == (unsigned)n) {
+                    int sat = 0;
+
+                    c->a[n] = clamp(c->a[n], INT32_MIN, INT32_MAX, &sat);
+                    set_flag(c, n ? AS_AV1 : AS_AV0, sat);
+                    if (sat) {
+                        c->astat |= n ? AS_AV1S : AS_AV0S;
+                    }
+                }
+            }
+            set_flag(c, AS_AZ, (aop != 1 && !c->a[0]) || (aop != 0 && !c->a[1]));
+            set_flag(c, AS_AN, (aop != 1 && c->a[0] < 0) || (aop != 0 && c->a[1] < 0));
+            return;
         }
         switch (aop) {
         case 0: c->a[0] = 0; return;
@@ -239,6 +374,18 @@ void bfin_dsp32alu(bfin_core *c, uint16_t iw0, uint16_t iw1)
         case 1: c->a[1] = sext40(-c->a[0]); return;
         case 2: c->a[0] = sext40(-c->a[1]); return;
         case 3: c->a[1] = sext40(-c->a[1]); return;
+        }
+        break;
+    case 11:
+        if (!x && acc_add(c, aop, s, hl, dst0)) {
+            return;
+        }
+        break;
+    case 22:
+    case 23:
+    case 24:
+        if (!x && byteop(c, aopcde, aop, s, hl, dst0, dst1, src0, src1)) {
+            return;
         }
         break;
     case 16:                                    /* A0 = ABS A0 ... */
@@ -594,10 +741,10 @@ void bfin_dsp32mac(bfin_core *c, uint16_t iw0, uint16_t iw1, int mult)
     unsigned op0 = (iw1 >> 11) & 3, w0 = (iw1 >> 13) & 1;
     unsigned h11 = (iw1 >> 14) & 1, h01 = (iw1 >> 15) & 1;
     uint32_t a = c->r[src0], b = c->r[src1];
-    uint32_t out[2] = { c->r[dst], c->r[pair ? dst + 1 : dst] };
+    uint32_t out[2] = { c->r[dst], c->r[pair && dst < 7 ? dst + 1 : dst] };
     int ov = 0;
 
-    if (pair && (dst & 1)) {
+    if (pair && dst == 7 && (iw0 & 4)) {         /* MAC1 into R8 */
         c->undef = 1;
         return;
     }

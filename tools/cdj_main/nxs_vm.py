@@ -24,7 +24,7 @@ from tools.cdj_main.run_state import write_json
 from tools.cdj_main.nxs_panel import neutral_frame
 from tools.cdj_main import media_readiness, panel_control
 from tools.cdj_main.qmp import connect_chardev
-from tools.paths import BFIN_SIM, QEMU, qemu_environment
+from tools.paths import BFIN_SIM, GUI_RUN, QEMU, qemu_environment
 
 ROOT = Path(__file__).resolve().parents[2]
 # MinGW QEMU has no Unix chardev; POSIX keeps the existing local sockets.
@@ -683,6 +683,13 @@ def main():
                         help='--cosim link latency and lookahead in microseconds (100)')
     parser.add_argument('--cosim-shift', type=int, default=2,
                         help='--cosim: MAIN runs 2^N ns per instruction (-icount shift=N)')
+    parser.add_argument('--gui-sim', choices=('gdb', 'fast'), default='gdb',
+                        help='GUI board simulator: gdb, bin/cdj-run (default until the '
+                             'fast one is qualified), or fast, bin/cdj-gui-run on the '
+                             'vendored Blackfin core (same firmware inputs, link and '
+                             'captures; no gdb probes)')
+    parser.add_argument('--gui-env', action='append', default=[], metavar='NAME=VALUE',
+                        help='extra GUI simulator environment variable (e.g. BFIN_PROF=...); may be repeated')
     parser.add_argument('--panel-rev2', action='store_true',
                         help='the GUI board reads PF3 = 1, the late "/2" panel revision '
                              '(BFIN_GPIO_STRAP=0x8:0x8)')
@@ -923,7 +930,9 @@ def main():
     if args.gui_firmware and not gui_firmware.is_dir():
         parser.error(f'GUI firmware directory does not exist: {gui_firmware}')
     args.qemu = resolve_qemu(args.qemu)
-    simulator = resolve_simulator()
+    simulator = resolve_simulator() if args.gui_sim == 'gdb' else GUI_RUN
+    if not simulator.is_file() and args.gui_sim == 'fast':
+        parser.error(f'missing {simulator}; run sh scripts/build-cdj-gui-run.sh')
     for path in (args.qemu, simulator, main_firmware,
                  gui_firmware / 'gui-boot-memory.elf',
                  gui_firmware / 'gui-flash-image.bin'):
@@ -1012,6 +1021,11 @@ def main():
     gui_command = [str(simulator), '--model', 'bf531', '--environment', 'operating', '--memory-region', '0,64M',
         '--hw-board-file', str(gui_board) if args.gui_firmware else 'emulator/cdj2000-gui-nxs.hw',
         str(gui_firmware / 'gui-boot-memory.elf')]
+    if args.gui_sim == 'fast':
+        # The same ELF and flash the board file maps; cdj-gui-run reads the
+        # same BFIN_* environment for everything else.
+        gui_command = [str(simulator), '-f', str(gui_firmware / 'gui-flash-image.bin'),
+                       str(gui_firmware / 'gui-boot-memory.elf')]
     overrides = dict(BFIN_PARALLEL_WRITEBACK='1', BFIN_GUI_COLOR='rgb555le',
         BFIN_GUI_OUTPUT=str(run / 'screen.ppm'),
         BFIN_MAIN_LINK=args.gui_link or f'127.0.0.1:{args.port}',
@@ -1027,6 +1041,11 @@ def main():
         overrides['BFIN_COSIM_QUANTUM_US'] = str(args.cosim_quantum_us)
     if args.trace_link_tx:
         overrides['BFIN_SPORT_TX_OUTPUT'] = str(run / 'gui-link-tx.bin')
+    for item in args.gui_env:
+        name, sep, value = item.partition('=')
+        if not sep or not name.startswith('BFIN_'):
+            raise SystemExit(f'--gui-env wants BFIN_NAME=VALUE, got {item!r}')
+        overrides[name] = value
     # Do not inherit replay/proxy data or a firmware shortcut from the shell.
     gui_env = {k:v for k,v in os.environ.items() if not k.startswith('BFIN_')}
     gui_env.update(overrides)
@@ -1132,6 +1151,7 @@ def main():
                        limitations='START/STOP and pin timing approximate; 53.930MHz board reference discrepancy; '
                                    'no IRQ, arbitration, double buffering, repeated START or certificates'),
         input_artifacts=input_artifacts, frame_interval_seconds=args.frame_interval,
+        gui_sim=args.gui_sim,
         firmware=dict(main=str(main_firmware), gui=str(gui_firmware),
                       gui_board_file=str(gui_board),
                       gui_board_mode=('run-local override' if args.gui_firmware else 'stock'),
