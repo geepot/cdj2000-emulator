@@ -7776,7 +7776,10 @@ static unsigned dt_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                 e->dt = dt_plan(e) ? 1 : -1;
                 ++*(e->dt > 0 ? &dt_counts.plans : &dt_counts.untraceable);
             }
-            if (same && e->dt > 0)
+            /* execute_single's one-instruction shapes are leaner still. */
+            if (same && e->single)
+                done = execute_single(cpu, &e->packet, e->decoded, e->single);
+            if (same && !done && e->dt > 0)
                 done = dt_exec(cpu, e, n == 0, read, write, opaque);
         }
         if (done <= 0) {

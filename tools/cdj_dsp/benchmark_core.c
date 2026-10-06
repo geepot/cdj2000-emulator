@@ -46,8 +46,9 @@ static void tick(void *opaque) { ++*(unsigned *)opaque; }
 
 static bool between(void *opaque) { (void)opaque; return true; }
 
-/* With CDJ_C674X_JIT=1, loop-buffer cycles run compiled through
- * cdj_c674x_run (its between() is empty, the board's own work aside). */
+/* With CDJ_C674X_JIT=1, loop-buffer cycles and direct traces run compiled
+ * through cdj_c674x_run (its between() is empty, the board's own work
+ * aside). */
 static double step_loop(const uint32_t *code, unsigned words, unsigned steps,
                         uint64_t *packets)
 {
@@ -62,7 +63,7 @@ static double step_loop(const uint32_t *code, unsigned words, unsigned steps,
     cdj_c674x_set_fetch_block(bench_read, bench_block);
     clock_t start = clock();
     for (unsigned i = 0; i < steps; ++i) {
-        if (cpu.loop_active) {
+        {
             unsigned status;
             unsigned n = cdj_c674x_run(&cpu, bench_read, bench_write, NULL,
                                        steps - i, between, NULL, &status);
