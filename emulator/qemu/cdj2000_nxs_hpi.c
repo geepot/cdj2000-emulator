@@ -144,12 +144,18 @@ typedef struct {
     /* CDJ_NXS_DSP_MODEL=1: answer MAIN without executing the C674x. */
     bool model;
     int64_t model_ns;           /* virtual time the position last advanced */
-    uint64_t model_audio_ns;    /* audio time played since the stream started */
-    uint64_t model_samples;     /* the same in 44.1 kHz samples */
+    uint64_t model_audio_ns;    /* played time not yet a whole sample */
+    uint64_t model_samples;     /* position: 44.1 kHz samples since the stream start */
     uint32_t model_received[2]; /* frames announced per stream buffer */
     uint32_t model_total[2];    /* +0x1c frames of each buffer's stream */
     uint32_t model_record, model_length; /* the last command, until its first header */
-    bool model_pending;
+    uint32_t model_bound[2];    /* record + 1 bound to each buffer, 0 none */
+    uint32_t model_search;      /* search multiple from command 3 */
+    uint32_t model_next;        /* record + 1 queued behind the playing one */
+    uint64_t model_boundary;    /* the frame where that record starts */
+    uint32_t model_play_len;    /* frames of the playing record, 0 unknown */
+    uint32_t model_next_len;    /* the same for the queued one */
+    bool model_pending, model_late, model_search_back;
     bool idle_skip, idle_dirty, idle_anchor_valid;
     unsigned idle_anchor_step;
     uint32_t idle_anchor_pc;
@@ -1987,14 +1993,17 @@ static void virtual_audio_tick(void *opaque)
 #define MODEL_WINDOW_END 0x1183fb60u    /* end of the two stream records */
 #define MODEL_CMD 0x11838100u           /* stream command; 2..4 accepted */
 #define MODEL_REQUEST 0x11837ba0u       /* run request: 1 load, 2 play, 4 cue */
+#define MODEL_COMMAND2 0x11837ba4u      /* second command; +4..+0x14 params */
 #define MODEL_RATE 0x11837bc0u          /* 12.20 rate, 0x100000 = 1.0 */
-#define MODEL_SUBFRAME 0x11837bf4u      /* samples left in the frame, both halves */
+#define MODEL_SUBFRAME 0x11837bf4u      /* samples into the frame, both halves */
 #define MODEL_STATE 0x11837bf8u         /* the request last taken */
 #define MODEL_FREE 0x11837cc8u          /* frames the stream buffer can take */
 #define MODEL_BEHIND 0x11837cccu        /* buffered frames already played */
 #define MODEL_AHEAD 0x11837cd0u         /* buffered frames not yet played */
 #define MODEL_HEADER 0x11838140u        /* stream header; +4 = its frames */
 #define MODEL_FRAME_SAMPLES 588u        /* 44.1 kHz / 75 CD frames */
+#define MODEL_FRAMES 0x1a24u           /* ahead + behind + free, constant */
+#define MODEL_EARLY_FRAMES 0x12u        /* see model_publish_position */
 
 static uint32_t model_get(NxsHpi *s, uint32_t address)
 {
@@ -2041,47 +2050,103 @@ static void model_boot_phase(NxsHpi *s, unsigned phase)
      * every service step) and 0x11837cc8=0x1a24. Values as transcribed. */
     memset(s->l2 + MODEL_WINDOW - L2_BASE, 0, MODEL_WINDOW_END - MODEL_WINDOW);
     model_put(s, MODEL_STATE, 1);
-    model_put(s, MODEL_FREE, 0x1a24);
+    model_put(s, MODEL_FREE, MODEL_FRAMES);
+    s->model_bound[0] = s->model_bound[1] = 0;
 }
 
-/* The CD frame reached, as the DSP publishes it (0x11837c10 and its four
- * copies), and the samples left before the next one. */
+/* The CD frame reached, as the DSP publishes it (0x11837c10 and its
+ * copies), and the samples into it. */
 static void model_publish_position(NxsHpi *s)
 {
-    static const uint32_t copies[] = {
-        0x11837c10, 0x11837c24, 0x11837c30, 0x11837c44, 0x11837c50,
-    };
+    static const uint32_t copies[] = { 0x11837c10, 0x11837c30, 0x11837c50 };
     uint32_t frame = s->model_samples / MODEL_FRAME_SAMPLES;
-    uint32_t left = MODEL_FRAME_SAMPLES - s->model_samples % MODEL_FRAME_SAMPLES;
+    uint32_t into = s->model_samples % MODEL_FRAME_SAMPLES;
     for (size_t i = 0; i < ARRAY_SIZE(copies); ++i)
         model_put(s, copies[i], frame);
-    model_put(s, MODEL_SUBFRAME, left << 16 | left);
+    /* MAIN's position is in half frames (1/150 s, its counter unit):
+     * 2 x 0x11837c10 + (low half / 294) (djlink_beat_sync_module), and a
+     * high half >= 294 counts the current frame's first half as played
+     * (djcont_out_rate_step limits). Samples into the frame satisfy both. */
+    model_put(s, MODEL_SUBFRAME, into << 16 | into);
+    /* +0x10..+0x18 of both position blocks: (0, frame, 0) for the first
+     * 18 frames of a stream, then -1 in all three for good (dsp-model-ref-3:
+     * also through the later CUE and PLAY). Meaning not established. */
+    bool early = frame < MODEL_EARLY_FRAMES && !s->model_late;
+    s->model_late = !early;
+    for (uint32_t block = 0x11837c20; block <= 0x11837c40; block += 0x20) {
+        model_put(s, block, early ? 0 : UINT32_MAX);
+        model_put(s, block + 4, early ? frame : UINT32_MAX);
+        model_put(s, block + 8, early ? 0 : UINT32_MAX);
+    }
 }
 
-/* Play the virtual time since the last service at MAIN's rate, moving whole
- * frames from ahead to behind; a dry buffer stops the position as an
- * underrun would. ponytail: the rate word applies over the whole interval;
- * per-write rate changes would need MAIN's write times. */
+/* Move the position to `samples`, carrying whole frames between ahead
+ * (unplayed) and behind (played) and clamped to what both hold. */
+static void model_move(NxsHpi *s, int64_t samples)
+{
+    int64_t frame = s->model_samples / MODEL_FRAME_SAMPLES;
+    int64_t ahead = model_get(s, MODEL_AHEAD), behind = model_get(s, MODEL_BEHIND);
+    int64_t low = (frame - behind) * MODEL_FRAME_SAMPLES;
+    int64_t high = (frame + ahead) * MODEL_FRAME_SAMPLES;
+    samples = MAX(MIN(samples, high), MAX(low, 0));
+    int64_t moved = samples / MODEL_FRAME_SAMPLES - frame;
+    s->model_samples = samples;
+    model_put(s, MODEL_AHEAD, ahead - moved);
+    model_put(s, MODEL_BEHIND, behind + moved);
+    /* The playing record ends at its length (stream command +0x1c, MAIN's
+     * duration) or where a record MAIN queued behind it (continuous play)
+     * starts. Its frames past that are dropped: an MP3 stream delivers
+     * more buffer frames than its length (Obey: 0x8520 for 0x7e93,
+     * runs/dsp-model-play-7), and playing them on left the end unreached.
+     * ponytail: how the real DSP spends that surplus is not established. */
+    uint64_t end = s->model_play_len;
+    if (s->model_next && (!end || s->model_boundary < end)) end = s->model_boundary;
+    if (end && s->model_samples >= end * MODEL_FRAME_SAMPLES) {
+        uint64_t at = s->model_samples / MODEL_FRAME_SAMPLES;
+        uint32_t rest = model_get(s, MODEL_AHEAD);
+        uint32_t drop = !s->model_next ? rest :
+            MIN(rest, s->model_boundary > at ? s->model_boundary - at : 0);
+        model_put(s, MODEL_AHEAD, rest - drop);
+        model_put(s, MODEL_FREE, model_get(s, MODEL_FREE) + drop);
+        if (s->model_next) {
+            /* The next record plays on; the position blocks name it and
+             * count from its start. */
+            s->model_samples -= end * MODEL_FRAME_SAMPLES;
+            model_put(s, 0x11837c14, s->model_next - 1);
+            model_put(s, 0x11837c34, s->model_next - 1);
+            s->model_play_len = s->model_next_len;
+            s->model_next = 0;
+            s->model_late = false;
+        } else {
+            s->model_samples = end * MODEL_FRAME_SAMPLES;
+        }
+    }
+    model_publish_position(s);
+}
+
+/* Play the virtual time since the last service: at MAIN's rate word in
+ * state 2, and in state 5, the search MAIN requests while a search key is
+ * held (djcont_out_cd_toc_cmd 041eddc6; its 6 for reverse reaches the DSP
+ * as 5), at the multiple its 0x11837ba4 = 3 command passes (8) in the
+ * direction its 0x11837ba4 = 2 command names (+4: 0 forward, 1 back).
+ * ponytail: the real DSP's search speed is not measured; 8x follows that
+ * parameter. A dry buffer stops the position as an underrun would. The
+ * rate word applies over the whole interval; per-write changes would need
+ * MAIN's write times. */
 static void model_advance(NxsHpi *s)
 {
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     int64_t elapsed = now - s->model_ns;
     s->model_ns = now;
-    if (model_get(s, MODEL_STATE) != 2 || elapsed <= 0) return;
-    /* Totals, not per-tick truncation, so the position cannot drift. */
-    s->model_audio_ns += (uint64_t)elapsed * model_get(s, MODEL_RATE) >> 20;
-    uint32_t frame = s->model_samples / MODEL_FRAME_SAMPLES;
-    uint32_t ahead = model_get(s, MODEL_AHEAD);
-    uint64_t limit = (uint64_t)(frame + ahead) * MODEL_FRAME_SAMPLES;
-    s->model_samples = s->model_audio_ns * 44100u / 1000000000u;
-    if (s->model_samples > limit) {
-        s->model_samples = limit;
-        s->model_audio_ns = limit * 1000000000u / 44100u;
-    }
-    uint32_t played = s->model_samples / MODEL_FRAME_SAMPLES - frame;
-    model_put(s, MODEL_AHEAD, ahead - played);
-    model_put(s, MODEL_BEHIND, model_get(s, MODEL_BEHIND) + played);
-    model_publish_position(s);
+    uint32_t state = model_get(s, MODEL_STATE);
+    if (elapsed <= 0 || (state != 2 && state != 5)) return;
+    uint64_t rate = state == 2 ? model_get(s, MODEL_RATE) : (uint64_t)s->model_search << 20;
+    /* Fractions carry over, so the position cannot drift. */
+    s->model_audio_ns += (uint64_t)elapsed * rate >> 20;
+    int64_t samples = s->model_audio_ns * 44100u / 1000000000u;
+    s->model_audio_ns -= samples * 1000000000u / 44100u;
+    if (state == 5 && s->model_search_back) samples = -samples;
+    model_move(s, (int64_t)s->model_samples + samples);
 }
 
 /* A new stream's first header (byte 2 = 1) names its buffer (byte 1: 1 the
@@ -2093,12 +2158,38 @@ static void model_bind(NxsHpi *s, unsigned buffer)
 {
     uint32_t block = buffer ? 0x11838180 : 0x118381a0;
     s->model_pending = false;
+    /* A stream re-issued for the record its buffer already holds (MAIN
+     * does this at CUE and whenever it resumes reading in that direction)
+     * continues: the stock DSP keeps the buffered frames, the received
+     * count, the position and the other block's record (dsp-model-ref-3,
+     * the track's command 3 at the play request). */
+    if (s->model_bound[buffer] == s->model_record + 1) return;
+    bool queued = !buffer && s->model_bound[0] && model_get(s, MODEL_AHEAD);
+    s->model_bound[buffer] = s->model_record + 1;
     s->model_received[buffer] = 0;
     s->model_total[buffer] = s->model_length;
     model_put(s, block + 4, s->model_record);
     model_put(s, block + 0xc, 0x128);
     if (buffer) return;
-    model_put(s, 0x11838184, s->model_record);   /* until a second stream */
+    if (queued) {
+        /* Continuous play: MAIN appends the next track's stream (a new
+         * record, no 0x11837cb0 reset) while frames of the playing one
+         * remain; the receive block names it now, the position blocks once
+         * those frames have played (CMD 3 for record 2 in runs/dsp-model-
+         * play-3; switching at the boundary avoids its EMERGENCY LOOP,
+         * runs/dsp-model-play-5). */
+        s->model_next = s->model_record + 1;
+        s->model_next_len = s->model_length;
+        s->model_boundary = s->model_samples / MODEL_FRAME_SAMPLES + model_get(s, MODEL_AHEAD);
+        for (uint32_t at = 0x10; at <= 0x18; at += 4)
+            model_put(s, block + at, UINT32_MAX);
+        return;
+    }
+    s->model_next = 0;
+    s->model_play_len = s->model_length;
+    s->model_bound[1] = 0;      /* a new track's second stream starts afresh */
+    model_put(s, 0x11838180, 0);                 /* until a second stream */
+    model_put(s, 0x11838184, s->model_record);
     for (uint32_t at = 0x10; at <= 0x18; at += 4)
         model_put(s, block + at, UINT32_MAX);
     model_put(s, 0x11837c14, s->model_record);
@@ -2107,14 +2198,45 @@ static void model_bind(NxsHpi *s, unsigned buffer)
     model_put(s, 0x11837c3c, 0x128);
     model_put(s, 0x11837c58, 0x10001);
     s->model_samples = s->model_audio_ns = 0;
+    s->model_late = false;
+    model_publish_position(s);
+}
+
+/* Host command 0x11837cb0 = 1 (track load) or 2 (re-sync after a search
+ * or cue) runs the stock stream_start_reset (c004a3a8, from
+ * host_stream_service c004a424): decode_pipeline_reset zeroes the position
+ * (0x11837c10) and the first two words of both status blocks, and the
+ * buffer levels restart empty. MAIN sends it right after REQ 1 (runs/r2,
+ * real DSP) and, in djcont_out_status_cmd (041ef02e), then waits for new
+ * frames, requests cue (4) and steps the position to its target with
+ * 0x11837ba4 = 1 before requesting play. */
+static void model_stream_reset(NxsHpi *s)
+{
+    model_put(s, MODEL_AHEAD, 0);
+    model_put(s, MODEL_BEHIND, 0);
+    model_put(s, MODEL_FREE, MODEL_FRAMES);
+    s->model_bound[0] = s->model_bound[1] = 0;
+    s->model_next = 0;
+    for (uint32_t at = 0x11838180; at <= 0x118381a4; at += 4)
+        if ((at & 0x1f) < 8) model_put(s, at, 0);
+    s->model_samples = s->model_audio_ns = 0;
     model_publish_position(s);
 }
 
 /* One DSPINT: ack it and consume the mailboxes MAIN polls for zero. */
 static void model_service(NxsHpi *s)
 {
+    /* 0x11837ba4 is MAIN's second command word (sub_041c72c6 writes its
+     * five parameters at +4..+0x14 first; MAIN sends no run request until
+     * it reads back zero). The stock DSP clears it within one service
+     * step (dsp-model-ref-3, search while paused: 1 then read 0). */
+    /* 0x11837c80 is the third command word (0x21 cue play, 0x22, 0x2f,
+     * 0x921; parameters at +4..+0x18, sub_041c74fa): djcont_out_cue_cmd
+     * waits for it to read zero and otherwise ends in E-8302 (000D). The
+     * stock DSP clears it within one step (dsp-model-ref-3 at CUE and
+     * PLAY). */
     static const uint32_t cleared[] = {
-        0x11837c9c, 0x11837cb0, 0x118381c4,
+        MODEL_COMMAND2, 0x11837c80, 0x11837c9c, 0x11837cb0, 0x118381c4,
     };
     model_hpic(s, 0x14a);
     model_advance(s);
@@ -2134,9 +2256,17 @@ static void model_service(NxsHpi *s)
         unsigned buffer = (header >> 8 & 0xff) == 2;
         if (s->model_pending && (header >> 16 & 0xff) == 1)
             model_bind(s, buffer);
+        /* One pool of 0x1a24 frames: ahead + behind + free stays constant
+         * (dsp-model-ref-3). With too little free space the new frames
+         * take the other side's oldest ones instead of going negative. */
         uint32_t level = buffer ? MODEL_BEHIND : MODEL_AHEAD;
-        model_put(s, level, model_get(s, level) + frames);
-        model_put(s, MODEL_FREE, model_get(s, MODEL_FREE) - frames);
+        uint32_t other = buffer ? MODEL_AHEAD : MODEL_BEHIND;
+        uint32_t free_frames = model_get(s, MODEL_FREE);
+        uint32_t taken = MIN(frames, free_frames);
+        uint32_t stolen = MIN(frames - taken, model_get(s, other));
+        model_put(s, other, model_get(s, other) - stolen);
+        model_put(s, level, model_get(s, level) + taken + stolen);
+        model_put(s, MODEL_FREE, free_frames - taken);
         s->model_received[buffer] += frames;
         /* The track counts up from its start; the auxiliary stream down
          * from its end (0x6d06 = 0x6d9e - 2 x 0x4c in dsp-model-ref-3). */
@@ -2157,6 +2287,20 @@ static void model_service(NxsHpi *s)
         model_put(s, 0x11838140, 0);
         model_put(s, 0x118381c4, 0);
         model_put(s, MODEL_CMD, 0);
+    }
+    uint32_t host_command = model_get(s, 0x11837cb0);
+    if (host_command == 1 || host_command == 2) model_stream_reset(s);
+    if (model_get(s, MODEL_COMMAND2) == 2)
+        s->model_search_back = model_get(s, MODEL_COMMAND2 + 4) == 1;
+    if (model_get(s, MODEL_COMMAND2) == 3)
+        s->model_search = model_get(s, MODEL_COMMAND2 + 4);
+    if (model_get(s, MODEL_COMMAND2) == 1) {
+        /* Step: +4 is a signed count of half frames. MAIN repeats it until
+         * its position reaches a seek or cue target, bounding each step by
+         * the frames ahead (forward) or behind (back): djcont_dual_rate_step
+         * 041e1296, djcont_out_rate_step 041e1038. */
+        int32_t step = model_get(s, MODEL_COMMAND2 + 4);
+        model_move(s, (int64_t)s->model_samples + (int64_t)step * MODEL_FRAME_SAMPLES / 2);
     }
     for (size_t i = 0; i < ARRAY_SIZE(cleared); ++i)
         if (model_get(s, cleared[i])) model_put(s, cleared[i], 0);

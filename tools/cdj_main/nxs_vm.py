@@ -771,7 +771,8 @@ def main():
                              '(BFIN_GPIO_STRAP=0x8:0x8)')
     dsp.add_argument('--dsp-model', action='store_true',
                         help='behavioural DSP: answer MAIN without executing the C674x '
-                             '(fast; no audio or playback position, so not playback evidence)')
+                             '(fast; real-time transport position, no audio, so not audio '
+                             'or DSP evidence)')
     dsp.add_argument('--dsp-thread', action=argparse.BooleanOptionalAction, default=None,
                         help='run the real C674x on its own host thread, paced to at most one '
                              'quantum ahead of QEMU virtual time, instead of inside MAIN\'s HPI '
