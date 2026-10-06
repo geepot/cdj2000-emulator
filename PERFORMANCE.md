@@ -202,7 +202,8 @@ In the legacy scheduler a DSP activation runs until HINT or its 1,000,000
 packet budget, synchronously inside the SH-4's MMIO write. After the DSP
 acknowledges MAIN's command it sits in its polling loop, so ~95% of
 activations ended by exhausting the budget while MAIN was frozen: 88% of the
-SH-4 thread was DSP execution. (`--fast-dsp` does not help: 65,536 packets
+SH-4 thread was DSP execution. (The since-removed `--fast-dsp`, i.e.
+`--dsp-legacy-budget 65536`, does not help: 65,536 packets
 often end before the DSP's acknowledgement, DSPINT never falls, and the DSP
 is starved.)
 

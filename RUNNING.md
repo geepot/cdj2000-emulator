@@ -4,6 +4,11 @@ Everything below assumes you have built both emulators (BUILD.md) and extracted
 your own firmware into `firmware/` (FIRMWARE.md). Run every command from the
 repository root.
 
+For the CDJ-2000NXS, the quickest start is `python -m tools.cdj_main.launch
+deck` (a generated test track, or `CDJ_USB=IMAGE` for your own USB image);
+README.md describes its defaults and DEVELOPING.md the agent workflow. The
+sections below are the original CDJ-2000 profile unless they say NXS.
+
 ## The whole player, in a window
 
 ```sh

@@ -36,7 +36,9 @@ The tool hashes the transcript and names the firmware address-map hash, but
 does not authenticate its origin or establish boot, GUI liveness, or absence
 of a later error. Use it alongside strict replay and the connected visual gate.
 
-Deferred scheduling is an opt-in diagnostic, not a boot-validation mode:
+Deferred scheduling was an opt-in diagnostic, not a boot-validation mode.
+`nxs_vm --deferred-dsp-scheduling` has since been removed (use `--dsp-thread`);
+the board and replay still accept deferred-v1 state. Historical recipe:
 
 ```sh
 .venv/bin/python -m pytest -q tests/test_dsp_scheduler.py \
