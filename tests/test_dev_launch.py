@@ -5,12 +5,6 @@ import pytest
 from tools.cdj_main import nxs_vm
 
 
-@pytest.fixture(autouse=True)
-def _no_parent_watch(monkeypatch):
-    # These tests stub time.sleep; the launcher's parent-poll thread would spin.
-    monkeypatch.setenv('CDJ_NO_PARENT_WATCH', '1')
-
-
 FRAME = b"P6\n2 1\n255\n\0\xff\x80\xff\0\0"
 
 
