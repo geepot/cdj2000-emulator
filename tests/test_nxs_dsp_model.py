@@ -235,7 +235,9 @@ def test_model_continuous_play_switches_record_at_the_boundary():
 
 
 def test_model_track_plays_to_its_length():
-    """Playback ends at the command's length (+0x1c); later frames drop."""
+    """The deck's stream keeps no frame past its length (+0x1c): the last
+    0x28 unit is cut so the received word reads length - 1 (runs/el-real-4,
+    Obey: 0x7e75 + 0x28 -> 0x7e92 for 0x7e93), and playback stops there."""
     with model_board() as board:
         put, get = board.put, board.get
         put(0x11837bc0, 0x100000)
@@ -246,12 +248,74 @@ def test_model_track_plays_to_its_length():
         put(0x11838144, 0x28)
         put(0x11838140, 0x01010100)
         board.dspint()
-        put(0x11838140, 0x01020100)
-        board.dspint()
-        assert get(0x118381a0) == 2 * 0x28 - 1 and get(0x11837cd0) == 0x50
+        for _ in range(2):                             # the second unit is cut,
+            put(0x11838140, 0x01020100)                # the third adds nothing
+            board.dspint()
+        assert get(0x118381a0) == 0x30 - 1 and get(0x11837cd0) == 0x30
+        assert get(0x11837cd0) + get(0x11837ccc) + get(0x11837cc8) == 0x1a24
         put(0x11837ba0, 2)
         board.dspint()
         board.step(1000000000)                         # 75 frames of time
         board.dspint()
         assert get(0x11837c10) == 0x30 and get(0x11837cd0) == 0
         assert get(0x11837cd0) + get(0x11837ccc) + get(0x11837cc8) == 0x1a24
+
+
+def test_model_end_of_file_flag_is_a_status_write_not_frames():
+    """Header 0x3000100 (MAIN's sub_041c8b90 at reader EOF) copies
+    0x11838144..0x11838150 into the deck's status block when 0x11838168
+    names its stream; it adds no frames. Another stream's write is dropped."""
+    with model_board() as board:
+        put, get = board.put, board.get
+        stream(board, record=1, frames=0x28)
+        ahead, received = get(0x11837cd0), get(0x118381a0)
+        for record, flagged in ((2, False), (1, True)):
+            put(0x11838168, record)
+            put(0x11838144, received)
+            put(0x11838148, 1)
+            put(0x1183814c, get(0x118381a8))
+            put(0x11838150, get(0x118381ac) | 0x1000000)
+            put(0x11838140, 0x03000100)
+            board.dspint()
+            assert get(0x11838140) == 0
+            assert get(0x11837cd0) == ahead and get(0x118381a0) == received
+            assert bool(get(0x118381ac) & 0x1000000) == flagged
+
+
+def test_model_coded_header_waits_for_its_bytes():
+    """A coded stream's header stays pending until MAIN has delivered the
+    file chunks its frames take at the stream's mean rate (+0x18 bytes over
+    +0x1c frames; 2.77 chunks per 0x28 frames for Obey, runs/el-real-8).
+    Each chunk is 0x118381c4 = 1, cleared when taken; 2 is the file's last
+    chunk and completes the header at once."""
+    with model_board() as board:
+        put, get = board.put, board.get
+        put(0x11838120, 1)
+        put(0x1183811c, 0x50)                          # 80 frames
+        put(0x11838118, 0x50 * 0x300)                  # 0x300 bytes a frame
+        put(0x11838100, 3)
+        board.dspint()
+        put(0x11838144, 0x28)
+        put(0x11838140, 0x01010100)                    # binds: taken at once
+        board.dspint()
+        assert get(0x11838140) == 0 and get(0x118381a0) == 0x27
+        put(0x11838140, 0x01020100)                    # 0x50 frames: 0xf000 bytes
+        for chunk in range(8):
+            assert get(0x11838140) == 0x01020100, chunk
+            put(0x118381c4, 1)
+            board.dspint()
+            assert get(0x118381c4) == 0
+        assert get(0x11838140) == 0 and get(0x118381a0) == 0x4f
+        put(0x11838120, 1)                             # re-issued: counts afresh
+        put(0x1183811c, 0xa0)
+        put(0x11838118, 0xa0 * 0x300)
+        put(0x11838100, 3)
+        board.dspint()
+        put(0x11838140, 0x01010100)
+        board.dspint()
+        put(0x11838140, 0x01020100)
+        board.dspint()
+        assert get(0x11838140) == 0x01020100
+        put(0x118381c4, 2)                             # the last chunk
+        board.dspint()
+        assert get(0x11838140) == 0
