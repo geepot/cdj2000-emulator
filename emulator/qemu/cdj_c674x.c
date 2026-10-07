@@ -6429,6 +6429,13 @@ typedef struct {
 } JitShape;
 
 typedef struct {
+    int state;                          /* 0 unknown, 1 copy kernel, -1 not */
+    unsigned lo, so;                    /* the load and the store op */
+    unsigned pl, ps;                    /* their issue phases */
+    unsigned size, read_age, retire_age, commit_age, delta;
+} JkCopy;
+
+typedef struct {
     bool valid;
     uint32_t setup_pc;
     unsigned ii, length, tags;          /* tags: highest referenced tag + 1 */
@@ -6440,6 +6447,7 @@ typedef struct {
     struct JitKernel *kernel;           /* steady-state form, lazily */
     const struct AotKernel *aotk;       /* its compiled-ahead burst */
     uint64_t steady;                    /* steady cycles run (profile) */
+    JkCopy copy;                        /* jk_copy_analyze of the kernel */
 } JitLoop;
 typedef struct JitKernel JitKernel;
 
@@ -10136,6 +10144,247 @@ static inline bool aot_current(CdjC674xCacheEntry *f, void *opaque)
 #  define AOT_TAIL
 #endif
 
+/* Copy kernels in bulk.  The stage-1 memcpy (dsp_stage1_memcpy, SPLOOP 2:
+ * LDNDW *B4++ -> A7:A6, STNDW A7:A6 -> *A5++) is most of a playing DSP's
+ * steady cycles.  Its kernel moves memory through one register pair: each
+ * store issues the pair as the latest retired load left it, so the store
+ * issued at loop cycle t carries the data of the load issued at t - delta.
+ * When every value in flight at a period's start still equals the memory it
+ * came from, the state N periods later is this one with every address moved
+ * by N * size and every value read again at its moved address, and the
+ * stores committed meanwhile copied memory from the moved-load addresses -
+ * provided neither range overlaps the other, so no load can see a store.
+ * jk_bulk checks all of that (the entries' addresses against the bases,
+ * their values against memory) and declines otherwise; it then does the
+ * copy and rebuilds the model, the registers, the counters and the queue
+ * tails the last period would have written, exactly as N * II steady
+ * cycles would have left them. */
+
+static void jk_copy_analyze(JkCopy *x, const JitKernel *k, unsigned ii)
+{
+    x->state = -1;
+    if (k->state <= 0 || k->ops != 2 || ii > 16) return;
+    const JitOp *a = &k->op[0], *b = &k->op[1];
+    if (a->kind != JOP_MEM || b->kind != JOP_MEM || a->is_store == b->is_store)
+        return;
+    x->lo = a->is_store ? 1 : 0;
+    x->so = 1 - x->lo;
+    const JitOp *l = &k->op[x->lo], *s = &k->op[x->so];
+    /* Post-increment by an immediate of exactly the size, pairs of 8 bytes
+     * through the same register pair, distinct bases outside that pair. */
+    if (l->size != 8 || s->size != 8 || !l->pair || !s->pair ||
+        l->side != s->side || l->dst != s->dst || l->sign_extend ||
+        (l->mode & 4) || (s->mode & 4) || (l->mode & 11) != 11 ||
+        (s->mode & 11) != 11 || l->a * l->scale != 8 || s->a * s->scale != 8 ||
+        (l->bank == s->bank && l->b == s->b) ||
+        (l->bank == l->side && (l->b == l->dst || l->b == l->dst + 1)) ||
+        (s->bank == l->side && (s->b == l->dst || s->b == l->dst + 1)))
+        return;
+    x->size = 8;
+    int pl = -1, ps = -1, ra = -1, ta = -1, ca = -1;
+    for (unsigned p = 0; p < ii; ++p) {
+        const JitPhase *ph = &k->phase[p];
+        for (unsigned i = 0; i < ph->ops; ++i) {
+            unsigned o = ph->first + i;
+            if (o == x->lo) { if (pl >= 0) return; pl = p; }
+            if (o == x->so) { if (ps >= 0) return; ps = p; }
+        }
+        for (unsigned i = 0; i < ph->reads; ++i) {
+            const JitRef *r = &ph->load[ph->read[i]];
+            if (r->op != x->lo || ra >= 0) return;
+            ra = r->age;
+        }
+        for (unsigned i = 0; i < ph->retires; ++i) {
+            const JitRef *r = &ph->load[ph->retire[i]];
+            if (r->op != x->lo || ta >= 0) return;
+            ta = r->age;
+        }
+        for (unsigned i = 0; i < ph->commits; ++i) {
+            const JitRef *r = &ph->store[ph->commit[i]];
+            if (r->op != x->so || ca >= 0) return;
+            ca = r->age;
+        }
+        /* Only freshly issued entries as queue tails (their value at the
+         * cycle is the one the model keeps). */
+        if ((ph->store_new < ph->store_pre && ph->store_tail.age) ||
+            (ph->load_new < ph->load_pre && ph->load_tail.age))
+            return;
+    }
+    if (pl < 0 || ps < 0 || ra < 0 || ta < 0 || ca < 0) return;
+    x->pl = pl; x->ps = ps;
+    x->read_age = ra; x->retire_age = ta; x->commit_age = ca;
+    /* The store issued at t reads the pair the last retirement before t
+     * left: the load issued at the latest u = pl (mod ii) with
+     * u + retire_age <= t - 1. */
+    unsigned t = ii * 4 + ps, u = t - 1 - ta;
+    while (u % ii != (unsigned)pl) --u;
+    x->delta = t - u;
+    if (x->delta > 64) return;
+    x->state = 1;
+}
+
+static inline uint64_t jk_mem8(const uint8_t *p)
+{
+    return ram_load(p, 8);
+}
+
+/* N periods of a copy kernel at loop cycle c0 (phase 0) in one step, or 0
+ * (nothing changed) where any check fails.  @k is the active model's
+ * kernel (or its AOT copy, same bytes). */
+static unsigned jk_bulk(CdjC674x *cpu, JitLoop *l, const JitKernel *k,
+                        unsigned periods, CdjC674xRead read,
+                        CdjC674xWrite write, void *opaque)
+{
+    const JkCopy *x = &l->copy;
+    JitModel *m = jit_model;
+    CdjC674xLoop *loop = &cpu->loop;
+    const unsigned ii = l->ii;
+    const JitOp *lo = &k->op[x->lo], *so = &k->op[x->so];
+    CdjC674xHorizon *h = horizon;
+    if (!h || !h->count_ticks || periods < 4 ||
+        read != fetch_block_read || !fetch_block ||
+        write != ram_write_callback || !ram_writes_direct ||
+        !*ram_writes_direct || !ram_window || !fetch_epoch)
+        return 0;
+    /* Linear addressing for both bases, as jk_exec would find it. */
+    unsigned width;
+    if (((lo->b >= 4 && lo->b <= 7) || (so->b >= 4 && so->b <= 7)) &&
+        cpu->control_ready[0] > cpu->cycles)
+        return 0;
+    if (!address_width(cpu, lo->bank, lo->b, &width) || width ||
+        !address_width(cpu, so->bank, so->b, &width) || width)
+        return 0;
+    /* The loop condition register must not be one the kernel changes. */
+    unsigned pb = cpu->loop_pred_bank, pr = cpu->loop_pred_reg;
+    if ((pb == lo->bank && pr == lo->b) || (pb == so->bank && pr == so->b) ||
+        (pb == lo->side && (pr == lo->dst || pr == lo->dst + 1)))
+        return 0;
+    const uint64_t c0 = loop->cycle, K = (uint64_t)periods * ii;
+    const int64_t s = 8;
+    const uint32_t bl = cpu->r[lo->bank][lo->b], bs = cpu->r[so->bank][so->b];
+    /* Addresses of the load/store issued at cycle u (u in its phase). */
+#define ADDR_L(u) ((uint32_t)(bl + s * (((int64_t)(u) - (int64_t)(c0 + x->pl)) / (int64_t)ii)))
+#define ADDR_S(u) ((uint32_t)(bs + s * (((int64_t)(u) - (int64_t)(c0 + x->ps)) / (int64_t)ii)))
+    /* Ranges: every address this step reads or writes, with a margin of
+     * eight periods back. */
+    uint32_t src_lo = ADDR_L(c0 + x->pl - 8 * ii);
+    uint32_t src_hi = ADDR_L(c0 + x->pl + K + ii) + 8;
+    uint32_t dst_lo = ADDR_S(c0 + x->ps - 8 * ii);
+    uint32_t dst_hi = ADDR_S(c0 + x->ps + K + ii) + 8;
+    if (src_hi <= src_lo || dst_hi <= dst_lo || (dst_lo & 7)) return 0;
+    uint8_t *src = ram_ptr(opaque, src_lo, src_hi - src_lo);
+    uint8_t *dst = ram_ptr(opaque, dst_lo, dst_hi - dst_lo);
+    if (!src || !dst || (src < dst + (dst_hi - dst_lo) &&
+                         dst < src + (src_hi - src_lo)))
+        return 0;
+#define HOST_L(a) (src + (uint32_t)((a) - src_lo))
+#define HOST_S(a) (dst + (uint32_t)((a) - dst_lo))
+    /* The live entries at a phase-0 start, and the value each must hold. */
+    const JitPhase *ph0 = &k->phase[0];
+    for (unsigned j = 0; j < ph0->loads; ++j) {
+        const JitRef *r = &ph0->load[j];
+        uint64_t u = c0 - r->age;
+        unsigned slot = u % JK_AGES;
+        if (r->op != x->lo || u % ii != x->pl || m->e[r->op][slot].size != 8 ||
+            m->e[r->op][slot].address != ADDR_L(u) ||
+            m->e[r->op][slot].value != (r->age > x->read_age ?
+                jk_mem8(HOST_L(ADDR_L(u))) : 0))
+            return 0;
+    }
+    for (unsigned j = 0; j < ph0->stores; ++j) {
+        const JitRef *r = &ph0->store[j];
+        uint64_t t = c0 - r->age;
+        unsigned slot = t % JK_AGES;
+        if (r->op != x->so || t % ii != x->ps || m->e[r->op][slot].size != 8 ||
+            m->e[r->op][slot].address != ADDR_S(t) ||
+            m->e[r->op][slot].value != jk_mem8(HOST_L(ADDR_L(t - x->delta))))
+            return 0;
+    }
+    /* The pair: the last load retired before c0. */
+    uint64_t ur = c0 - 1 - x->retire_age;
+    while (ur % ii != x->pl) --ur;
+    uint64_t pair = cpu->r[lo->side][lo->dst] |
+                    (uint64_t)cpu->r[lo->side][lo->dst + 1] << 32;
+    if (pair != jk_mem8(HOST_L(ADDR_L(ur)))) return 0;
+    /* The stores committing in [c0, c0 + K): issued from t1 on, one per
+     * period, each the data of the load issued delta cycles before. */
+    uint64_t t1 = c0 - x->commit_age;
+    while (t1 % ii != x->ps) ++t1;
+    uint32_t to = ADDR_S(t1), from = ADDR_L(t1 - x->delta);
+    uint64_t bytes = (uint64_t)periods * 8;
+    for (uint64_t i = 0; i < bytes; i += 8)
+        if (code_page(HOST_S(to) + i)) ++code_gen;
+    memcpy(HOST_S(to), HOST_L(from), bytes);
+    /* The state K cycles on: addresses moved by N * 8, values read again. */
+    const uint64_t c1 = c0 + K, shift = (uint64_t)periods * 8;
+    struct JkNew { unsigned op, slot; uint64_t value; uint32_t address; } ne[64];
+    unsigned nn = 0;
+    for (unsigned j = 0; j < ph0->loads; ++j) {
+        const JitRef *r = &ph0->load[j];
+        uint32_t a = (uint32_t)(ADDR_L(c0 - r->age) + shift);
+        ne[nn++] = (struct JkNew){r->op, (c1 - r->age) % JK_AGES,
+            r->age > x->read_age ? jk_mem8(HOST_L(a)) : 0, a};
+    }
+    for (unsigned j = 0; j < ph0->stores; ++j) {
+        const JitRef *r = &ph0->store[j];
+        uint64_t t = c1 - r->age;
+        ne[nn++] = (struct JkNew){r->op, t % JK_AGES,
+            jk_mem8(HOST_L(ADDR_L(t - x->delta))), ADDR_S(t)};
+    }
+    for (unsigned j = 0; j < nn; ++j) {
+        m->e[ne[j].op][ne[j].slot].value = ne[j].value;
+        m->e[ne[j].op][ne[j].slot].address = ne[j].address;
+        m->e[ne[j].op][ne[j].slot].size = 8;
+    }
+    /* The queue tails the last period's cycles wrote (fresh entries only,
+     * jk_copy_analyze). */
+    for (uint64_t c = c1 - ii; c < c1; ++c) {
+        const JitPhase *ph = &k->phase[c % ii];
+        uint64_t t = cpu->cycles + (c - c0);
+        if (ph->store_new < ph->store_pre) {
+            CdjC674xStore tail = {
+                .due = t + k->lat[ph->store_tail.op], .address = ADDR_S(c),
+                .value = jk_mem8(HOST_L(ADDR_L(c - x->delta))), .size = 8
+            };
+            for (unsigned j = ph->store_new; j < ph->store_pre; ++j)
+                memcpy(&cpu->stores[j], &tail, sizeof(tail));
+        }
+        if (ph->load_new < ph->load_pre) {
+            const JitOp *op = &k->op[ph->load_tail.op];
+            CdjC674xLoad tail = {
+                .due = t + k->lat[ph->load_tail.op], .value = 0,
+                .address = ADDR_L(c), .bank = op->side, .dst = op->dst,
+                .size = 8, .sign_extend = op->sign_extend
+            };
+            for (unsigned j = ph->load_new; j < ph->load_pre; ++j)
+                memcpy(&cpu->loads[j], &tail, sizeof(tail));
+        }
+    }
+    uint64_t last = jk_mem8(HOST_L(ADDR_L(ur + K)));
+    cpu->r[lo->side][lo->dst] = (uint32_t)last;
+    cpu->r[lo->side][lo->dst + 1] = (uint32_t)(last >> 32);
+    cpu->r[lo->bank][lo->b] = (uint32_t)(bl + shift);
+    cpu->r[so->bank][so->b] = (uint32_t)(bs + shift);
+#undef ADDR_L
+#undef ADDR_S
+#undef HOST_L
+#undef HOST_S
+    /* jit_cycle's bookkeeping over the K cycles. */
+    bool condition = (cpu->r[pb][pr] != 0) ^ cpu->loop_pred_invert;
+    cpu->loop_pred_history = (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
+                             (condition ? 7u : 0u);
+    uint64_t launched = c1 / ii + 1;
+    cpu->control[13] = launched < loop->iterations ?
+                       loop->iterations - launched : 0;
+    loop->cycle = c1;
+    cpu->cycles += K;
+    cpu->packets += K;
+    h->ticks += K;
+    h->skipped += K;
+    jit_counts.steady += K;
+    return K;
+}
+
 /* Steady cycles back to back: what run_compiled's loop does for each - the
  * cycle (jit_cycle), the jit_ready re-check, the limit and the horizon's
  * skip of between() - for cycles jit_cycle would run as a full steady
@@ -10188,6 +10437,35 @@ jk_burst_t(CdjC674x *cpu, JitLoop *l, unsigned max, CdjC674xRead read,
                             (shape->fast || shape->faucr) ? 1 : 2;
         }
         if (native[phase] != 1) break;
+        if (!phase && l->copy.state >= 0) {
+            if (!l->copy.state) jk_copy_analyze(&l->copy, l->kernel, ii);
+            if (l->copy.state > 0) {
+                /* Room for the step and one more period: the limit, the
+                 * horizon, the full stretch and post_cycle. */
+                uint64_t room = max - n, until = 0;
+                if (horizon)
+                    until = __atomic_load_n(&horizon->until, __ATOMIC_ACQUIRE);
+                uint64_t lim = until > cpu->packets + 1 ?
+                               until - cpu->packets - 1 : 0;
+                if (lim < room) room = lim;
+                if (loop->post_cycle - cycle < room)
+                    room = loop->post_cycle - cycle;
+                for (unsigned p = 0; p < ii; ++p) {
+                    if (!l->phase_count[p]) continue;
+                    lim = l->origins[p][0] + span > cycle ?
+                          l->origins[p][0] + span - cycle : 0;
+                    if (lim < room) room = lim;
+                }
+                if (room >= 5 * ii) {
+                    unsigned b = jk_bulk(cpu, l, jit_model->k,
+                                         room / ii - 1, read, write, opaque);
+                    if (b) {
+                        n += b;
+                        continue;
+                    }
+                }
+            }
+        }
         loop->cycle = cycle + 1;
         uint32_t tsr = cpu->control[26];
         unsigned history = cpu->loop_pred_history;
