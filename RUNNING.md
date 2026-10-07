@@ -798,6 +798,23 @@ sector 0 -- the CDJ-2000's GUI loader, in no update file -- and the top 16 KiB u
 992 records of 2048 bytes each way). Beyond it: the real sector-0 loader (not dumped)
 and a power cut while programming.
 
+`nxs_gui_update_check` is the same gate for the NXS on `nxs_vm`: stock MAIN 1.44
+booted with RELOOP/EXIT + USB held (`--panel-frame`), a stick holding a C2KNXS.UPD
+(or C2KNXSG.UPD with `--file gui`) built from the stock file with the mods repo's
+`cdjfw.repack.Updater`, GUI retitled Ver1.205 to install `--body` and Ver9.999 to roll
+the stock body back. Both passes boot the GUI from a 2 MiB flash
+(`nxs_vm --gui-flash-boot`, the LDR at 0x10000, no ELF), so the rollback really starts
+the installed body -- a code pack's unpacker included (`BFIN_CODE_RANGE` coverage). The
+verdict reads MAIN's updater state over QMP (`update_phase`, `update_phase_saved`,
+`update_write_index`, `update_progress_gui`, `gui_update_status`) and the dumped flash:
+body at 0x10000, sector 0 (a placeholder: the real first-stage loader is in no file and
+not emulated) and the 0x1FC000 brightness journal untouched. The flash model erases the
+MX29LV160DT's top-boot sectors (32/8/8/16 KiB) separately, as installer 0x00d09db0 needs.
+With C2KNXS.UPD, DRIVE and PANEL are selected after GUI and the DRIVE writer never ends
+here, so the pass ends once MAIN is past the GUI component. 2026-10-07: the stock body
+PASSes both ways with either file. The mods' native-transport GUIs cannot talk to stock
+MAIN at all (E-8709), so their rollback needs `--rollback-main` with the paired MAIN.
+
 **More of the player's own paths (2026-09-24).** `cosim_scenario --usb` plugs the
 card image in as a USB stick instead of the SD card (USB SOURCE key at 12 s); stock
 4.33 loads, plays and counts from it (`runs/cosim/usb-7`), writes included: MAIN writes

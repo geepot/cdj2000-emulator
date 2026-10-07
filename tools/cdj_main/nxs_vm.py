@@ -766,6 +766,13 @@ def main():
                              'bin/cdj-run, the reference, for gdb probes and A/B checks')
     diag.add_argument('--gui-env', action='append', default=[], metavar='NAME=VALUE',
                         help='extra GUI simulator environment variable (e.g. BFIN_PROF=...); may be repeated')
+    diag.add_argument('--gui-flash-boot', type=Path, metavar='FLASH',
+                      help='boot the GUI (fast sim only) from this 2 MiB flash image, the LDR '
+                           'stream at 0x10000 as the updater programs it, instead of the ELF; '
+                           'the flash is the boot medium and the resource store both')
+    media.add_argument('--panel-frame', metavar='HEX',
+                       help='the panel payload held from power-on (CDJ_PANEL_FRAME), e.g. '
+                            'an update chord; default the neutral frame')
     diag.add_argument('--panel-rev2', action='store_true',
                         help='the GUI board reads PF3 = 1, the late "/2" panel revision '
                              '(BFIN_GPIO_STRAP=0x8:0x8)')
@@ -1059,6 +1066,15 @@ def main():
     firmware = ROOT / 'firmware/nxs'
     main_firmware = (args.main_firmware or firmware / 'main-firmware.bin').resolve()
     gui_firmware = (args.gui_firmware or firmware).resolve()
+    if args.gui_flash_boot and (args.gui_sim != 'fast' or not args.gui_flash_boot.is_file()
+                                or args.gui_flash_boot.stat().st_size != 0x200000):
+        parser.error('--gui-flash-boot needs --gui-sim fast and a 2 MiB flash image')
+    if args.panel_frame is not None:
+        try:
+            if len(bytes.fromhex(args.panel_frame)) != len(neutral_frame()):
+                raise ValueError
+        except ValueError:
+            parser.error(f'--panel-frame must be {len(neutral_frame())} hex bytes')
     if args.gui_firmware and not gui_firmware.is_dir():
         parser.error(f'GUI firmware directory does not exist: {gui_firmware}')
     args.qemu = resolve_qemu(args.qemu)
@@ -1108,6 +1124,8 @@ def main():
     # new run-local artifact.
     if args.gui_firmware:
         inputs['gui_board'] = gui_board
+    if args.gui_flash_boot:
+        inputs['gui_flash_boot'] = args.gui_flash_boot.resolve()
     inputs.update(media_inputs)
     input_artifacts = {name: input_metadata(path) for name, path in inputs.items()}
     main_command = [str(args.qemu.resolve()), '-M', 'cdj2000nxs-main', '-bios', str(main_firmware),
@@ -1158,6 +1176,8 @@ def main():
         # same BFIN_* environment for everything else.
         gui_command = [str(simulator), '-f', str(gui_firmware / 'gui-flash-image.bin'),
                        str(gui_firmware / 'gui-boot-memory.elf')]
+        if args.gui_flash_boot:
+            gui_command = [str(simulator), str(args.gui_flash_boot.resolve())]
     overrides = dict(BFIN_PARALLEL_WRITEBACK='1', BFIN_GUI_COLOR='rgb555le',
         BFIN_GUI_OUTPUT=str(run / 'screen.ppm'),
         BFIN_MAIN_LINK=args.gui_link or f'127.0.0.1:{args.port}',
@@ -1166,6 +1186,8 @@ def main():
     if args.fresh_link or args.cosim:
         # --cosim: a wire delivers what MAIN sent, once (see boot_vm --cosim).
         overrides['BFIN_LINK_FRESH_ONLY'] = '1'
+    if args.gui_flash_boot:
+        overrides['BFIN_FLASH_BOOT_AT'] = '0x10000'
     if args.panel_rev2:
         overrides['BFIN_GPIO_STRAP'] = '0x8:0x8'
     if args.cosim:
@@ -1186,7 +1208,7 @@ def main():
     if args.cosim:
         main_env['CDJ_COSIM'] = str(args.port + 5)
         main_env['CDJ_COSIM_QUANTUM_US'] = str(args.cosim_quantum_us)
-    main_env['CDJ_PANEL_FRAME'] = neutral_frame().hex()
+    main_env['CDJ_PANEL_FRAME'] = args.panel_frame or neutral_frame().hex()
     main_env['CDJ_NXS_SD_LID'] = 'closed'
     if args.trace_bus:
         main_env['CDJ_BUS_TRACE'] = '1'
