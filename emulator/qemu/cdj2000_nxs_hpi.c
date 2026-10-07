@@ -2194,6 +2194,15 @@ static void dsp_thread_slip(NxsHpi *s, int64_t virt)
  * burst to a few dozen slots (about one EDMA period). */
 #define DSP_THREAD_AUDIO_CHUNK 2048u
 
+/* This thread's CPU time: packets per CPU second is the DSP's speed on a
+ * shared host, where packets per wall second also measures the load. */
+static double dsp_thread_cpu_seconds(void)
+{
+    struct timespec ts;
+    return clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) ? 0 :
+           ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
 static void *dsp_thread_run(void *opaque)
 {
     NxsHpi *s = opaque;
@@ -2235,12 +2244,12 @@ static void *dsp_thread_run(void *opaque)
                         " main-waits=%" PRIu64 " main-wait=%.3fs"
                         " chunks=%" PRIu64 " host-breaks=%" PRIu64
                         " pacing-waits=%" PRIu64 " credited=%" PRIu64
-                        " pc=%#x",
+                        " pc=%#x thread-cpu=%.3fs",
                         virt / 1e9, s->cpu.packets, s->idle_skipped_packets,
                         t->lag_max_ns / 1e9, t->slipped_ns / 1e9,
                         t->main_waits, t->main_wait_ns / 1e9, t->chunks,
                         t->host_breaks, t->waits, t->credited_packets,
-                        s->cpu.pc);
+                        s->cpu.pc, dsp_thread_cpu_seconds());
             dsp_jit_report();
             if (s->thread_audio_clock)
                 info_report("nxs-c674x-audio-clock: virtual=%.3fs slots=%" PRIu64

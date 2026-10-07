@@ -1610,3 +1610,52 @@ hand-over under the shim) and the EDMA test pass.
 Live, three runs: **61.8 / 60.8 / 53.3 M per virtual second** (the last
 at virtual/wall 0.70 under load 12-17), underrun slots 61-64%.  E-8302
 stays on screen: real time is not reached yet.
+
+**Where E-8302 comes from.**  In every virtual-clock run, at 26 to 67 M
+packets per virtual second and with DSP clocks of 60, 100 and 150 Mpps, the
+counter stops at elapsed frame 239 (1.6 s into the track) and E-8302
+follows; with the packets clock the same build plays on (slowly, 0.09x,
+pause/resume/seek/cue all work).  A temporary log of MAIN's HPI writes to
+the stream header (0x11838140) and data hand-over (0x118381c4), and of
+the DSP's frames-ahead/position words (0x11837cd0/0x11837c10) at DSPINT,
+shows why: before play MAIN hands over a block every ~0.1 virtual s and
+preloads 0x78 frames; once playing, the DSP consumes them at about real
+time (0x76 frames in 2.8 virtual s) and then waits with one frame ahead,
+while MAIN hands over a block only every ~2-2.5 virtual s (a 0x28-frame
+buffer per ~6.5 s against ~1 s needed).  The feed is starved, not the
+decode: the DSP's background tasks, which serve MAIN's stream traffic,
+get what the audio interrupts leave.  Weighting packets by CSR.GIE at
+each between(): of ~57 M packets per virtual second, ~36 M ran with
+interrupts disabled (the ISRs, mostly) and ~21 M in the background.  So
+"~63 M packets per virtual second" understates what real time needs: the
+background must be several times faster, i.e. a DSP well above 100 M
+packets per virtual second.
+
+**Measurement.**  The DSP thread's report now includes its CPU time
+(`thread-cpu=`), so `rate.py` gives packets per DSP-thread CPU second,
+which the host's load moves far less than packets per wall second.
+
+### 2. One copy of the core's compiled-path state
+
+The compiled paths' per-thread state (`core_tls`: code generation, packet
+cache, horizon, RAM TLB, counters; the loop tables, the steady-kernel
+model, the shape table) was `_Thread_local`; on Mach-O each access is a
+`_tlv_get_addr` call, and the AOT regions' chain checks (`aot_current`,
+`horizon_skip`, the tick counting) made them 9% of the DSP thread
+(`aot_current` 5.3% self, `_tlv_get_addr` 3.6%).  Every user steps one
+core on one thread at a time (the board holds its DSP lock around every
+call, from either thread; replay and tests are single-threaded), so the
+state is now one process-wide copy; `-DCDJ_C674X_TLS=_Thread_local`
+restores per-thread copies for a client that needs them.  (As a side
+effect MAIN's HPI writes now see the code pages the DSP thread marked,
+which `cdj_c674x_may_hold_code` reads; before, MAIN's own empty
+thread-local copy answered.)
+
+Exactness: the eight checkpoint replays identical (develop JIT on against
+this with the horizon; this JIT off against AOT on with the horizon), 45 s
+full-capture boot byte-identical over the common prefix (298,354 events,
+5,314 checkpoints), C674x and DSP test files pass.
+
+Live, alternated with step 1 (two each): **51.1 / 53.1 M packets per
+DSP-thread CPU second against 43.7 / 45.1 M (+17%)**; per virtual second
+63.1 / 66.5 M against 55.7 / 56.7 M.  E-8302 as before.

@@ -5260,8 +5260,15 @@ typedef struct {
     uint64_t epoch;
 } RamTlb;
 typedef struct { uint64_t packets, runs, plans, untraceable; } DtCounts;
+/* The compiled paths' state is one copy for the process: its only users
+ * step one core at a time on one thread at a time (the NXS board holds its
+ * DSP lock around every call, the replay and the tests are single-threaded),
+ * and on Mach-O every thread-local access is a call (_tlv_get_addr was 4% of
+ * a playing DSP thread on its own, AOT region chains included: PERFORMANCE.md
+ * "C674x stage 5").  A client stepping cores on several threads at once
+ * builds with -DCDJ_C674X_TLS=_Thread_local. */
 #ifndef CDJ_C674X_TLS
-#  define CDJ_C674X_TLS _Thread_local
+#  define CDJ_C674X_TLS
 #endif
 typedef struct {
     uint64_t hits, builds, misses, lean, aot, aot_exit[6];
@@ -5648,7 +5655,7 @@ static bool loop_decode(const CdjC674xPacket *packet, unsigned buffered,
                         CdjC674xDecoded decoded[8], bool *branches)
 {
     enum { LOOP_DECODE_SLOTS = 256 };
-    static _Thread_local struct {
+    static CDJ_C674X_TLS struct {
         CdjC674xInstruction insn;
         CdjC674xDecoded decoded;
         uint8_t fast;
@@ -6350,8 +6357,8 @@ static bool jit_compile(JitLoop *l, const CdjC674x *cpu)
 /* The compiled loop for the CPU's current buffer, compiling on a miss. */
 static JitLoop *jit_lookup(const CdjC674x *cpu)
 {
-    static _Thread_local JitLoop *loops;
-    static _Thread_local unsigned victim;
+    static CDJ_C674X_TLS JitLoop *loops;
+    static CDJ_C674X_TLS unsigned victim;
     if (!loops && !(loops = calloc(JIT_LOOPS, sizeof(*loops)))) return NULL;
     uint32_t pc = loop_setup_pc(cpu);
     JitLoop *l = NULL;
@@ -7190,7 +7197,7 @@ typedef struct {
     struct { uint64_t value; uint32_t address; unsigned size; } e[JK_OPS][JK_AGES];
 } JitModel;
 
-static _Thread_local JitModel *jit_model;
+static CDJ_C674X_TLS JitModel *jit_model;
 
 /* A queue entry as the interpreter would hold it: operation `o` of age `a`
  * (issued `a` loop cycles before loop cycle `c`, CPU time `t`). */
@@ -8045,8 +8052,8 @@ enum {
 #define DTS_SHAPE_BUCKETS 4096u
 #define DTS_SHAPES_MAX 65536u
 #define DTS_VARIANTS_MAX 8u
-static _Thread_local DtsShape **dts_table;
-static _Thread_local unsigned dts_shapes;
+static CDJ_C674X_TLS DtsShape **dts_table;
+static CDJ_C674X_TLS unsigned dts_shapes;
 static int dts_mode = -1;
 
 /* CDJ_C674X_STATIC=0 runs every traced packet through the generic path. */
@@ -8076,7 +8083,7 @@ static uint64_t dts_mix(uint64_t h, uint64_t v)
 /* The CPU's queue shape, interned; NULL when an entry falls outside what a
  * shape holds (dues more than 63 cycles out or already past, a bank or
  * register out of range, a delayed IFR effect) or the table is full. */
-static _Thread_local const DtsShape *dts_empty;
+static CDJ_C674X_TLS const DtsShape *dts_empty;
 static const DtsShape *dts_intern(const CdjC674x *cpu);
 
 static const DtsShape *dts_shape_of(const CdjC674x *cpu)
@@ -9867,7 +9874,7 @@ enum { AOT_DECLINED, AOT_LIMIT, AOT_BETWEEN, AOT_CONT, AOT_FAULT, AOT_REDO };
 #ifdef CDJ_C674X_AOT_STRESS
 __attribute__((unused)) static inline bool aot_stress(void)
 {
-    static _Thread_local uint32_t x = 1;
+    static CDJ_C674X_TLS uint32_t x = 1;
     x = x * 1103515245u + 12345u;
     return (x >> 16) % 16 == 0;
 }
