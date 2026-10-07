@@ -18,7 +18,13 @@ share a C function (goto); an edge into another function is a tail call.
 The approach follows Stijn Jacobs' c14_jitgen.py for cdj-nxs2-qemu
 (THIRD_PARTY.md); the semantics are this core's.
 
+Steady SPLOOP kernels (the profiles' J lines: a JitKernel's bytes, as
+jk_compile made them) become constant JitKernels with jk_burst_t over them,
+so the compiler folds each phase's tables into straight-line code; the core
+uses one for a loop whose own kernel has the same bytes.
+
 usage: aot_gen.py OUT.c PROFILE [PROFILE...] [--min N] [--group N]
+                  [--kernel-min N]
 """
 import argparse
 import collections
@@ -64,6 +70,10 @@ def shape(tokens):
     return (ld, st, br, land)
 
 
+KJ = {}
+KERNELS = collections.OrderedDict()
+
+
 def parse(paths):
     nodes = {}
     for path in paths:
@@ -71,6 +81,17 @@ def parse(paths):
         for line in open(path):
             t = line.split()
             if not t:
+                continue
+            if t[0] == "KJ":
+                kj = fields(t[1:])
+                if KJ and KJ != kj:
+                    sys.exit("%s: kernels laid out by another core" % path)
+                KJ.update(kj)
+                continue
+            if t[0] == "J":
+                f = dict(zip(t[1::2], t[2::2]))
+                key = (int(f["ii"]), int(f["ops"]), f["op"], f["lat"], f["ph"])
+                KERNELS[key] = KERNELS.get(key, 0) + int(f["steady"])
                 continue
             if t[0] == "K":
                 k = fields(t[1:])
@@ -559,6 +580,44 @@ def emit_tail(w, n):
         w("    return AOT_CONT;\n")
 
 
+def emit_kernels(out, min_steady):
+    ks = [(k, n) for k, n in KERNELS.items() if n >= min_steady]
+    w = out.write
+    w("\n/* Steady kernels: %u. */\n#define CDJ_C674X_AOT_KERNELS 1\n" % len(ks))
+    if not ks:
+        w("static const AotKernel aot_kernels[1];\nstatic const unsigned aot_nkernels = 0;\n")
+        return
+    w("_Static_assert(sizeof(JitOp) == %d && sizeof(JitPhase) == %d,"
+      " \"profile from another core\");\n" % (KJ["jk_op"], KJ["jk_phase"]))
+    w("#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wmissing-braces\"\n")
+    osz, psz = KJ["jk_op"], KJ["jk_phase"]
+    for i, ((ii, ops, op, lat, ph), n) in enumerate(ks):
+        ob, lb, pb = bytes.fromhex(op), bytes.fromhex(lat), bytes.fromhex(ph)
+        assert len(ob) == ops * osz and len(lb) == ops and len(pb) == ii * psz
+        def arr(b):
+            return ",".join(str(x) for x in b)
+        w("/* %d steady cycles profiled */\n" % n)
+        w("static const JitKernel aot_kernel_%d = {.state = 1, .ops = %d,\n" % (i, ops))
+        w("  .op = {%s},\n" % ",".join("{%s}" % arr(ob[j * osz:(j + 1) * osz]) for j in range(ops)))
+        w("  .lat = {%s},\n" % arr(lb))
+        w("  .phase = {%s}};\n" % ",".join("{%s}" % arr(pb[j * psz:(j + 1) * psz]) for j in range(ii)))
+        w("static int aot_kx_%d(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,\n"
+          "                     CdjC674xWrite write, void *opaque)\n{\n    switch (p) {\n" % i)
+        for p in range(ii):
+            w("    case %d: return jk_exec_t(cpu, &aot_kernel_%d, %d, c, read, write, opaque);\n" % (p, i, p))
+        w("    }\n    __builtin_unreachable();\n}\n")
+        w("static unsigned aot_kb_%d(CdjC674x *cpu, JitLoop *l, unsigned max, CdjC674xRead read,\n"
+          "                         CdjC674xWrite write, void *opaque, bool *between_due,\n"
+          "                         bool *fault)\n{\n"
+          "    return jk_burst_t(cpu, l, max, read, write, opaque, between_due, fault,\n"
+          "                      aot_kx_%d);\n}\n" % (i, i))
+    w("#pragma GCC diagnostic pop\n")
+    w("static const AotKernel aot_kernels[] = {\n")
+    for i, ((ii, *_), n) in enumerate(ks):
+        w("    {&aot_kernel_%d, %d, aot_kb_%d},\n" % (i, ii, i))
+    w("};\nstatic const unsigned aot_nkernels = %d;\n" % len(ks))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
@@ -566,6 +625,8 @@ def main():
     ap.add_argument("--min", type=int, default=64, help="runs a node needs")
     ap.add_argument("--group", type=int, default=256, help="nodes per C function")
     ap.add_argument("--no-direct", action="store_true", help="the lean form only")
+    ap.add_argument("--kernel-min", type=int, default=10000,
+                    help="steady cycles a kernel needs")
     a = ap.parse_args()
     global DIRECT
     DIRECT = not a.no_direct
@@ -573,7 +634,10 @@ def main():
     globals().update({name.upper(): value for name, value in K.items()})
     with open(a.out, "w") as f:
         emit(nodes, f, a.group)
-    print("%s: %u nodes" % (a.out, len(nodes)), file=sys.stderr)
+        if KJ:
+            emit_kernels(f, a.kernel_min)
+    print("%s: %u nodes, %u kernels" % (a.out, len(nodes),
+          sum(1 for n in KERNELS.values() if n >= a.kernel_min)), file=sys.stderr)
 
 
 if __name__ == "__main__":
