@@ -274,6 +274,8 @@ static uint32_t random_extra(void)
 {
     unsigned s = rnd() & 1, x = rnd() & 1, dst = pick_body_dst();
     unsigned a = rnd() & 15, b = rnd() & 15;
+    if (rnd() % 24 == 0)                  /* B .S2 A12/B12 (code addresses) */
+        return predicate() | 12u << 18 | (rnd() & 1) << 12 | 0x362;
     if (rnd() % 7 == 0) {
         /* MVC to CSR or IER (written in place), or a read of what they
          * write (CSR, IER, TSR, ITSR): a packet holding both stays with
@@ -785,6 +787,21 @@ static void jit_lockstep(unsigned seed)
  * (system A) against the uncached interpreter (B), compared after every
  * packet, with random interrupts, run limits and between() refusals, host
  * code uploads, a withdrawn code window and failing bus operations. */
+static uint32_t random_compact(void)
+{
+    switch (rnd() % 10) {
+    case 0: case 1: case 2:
+        return 0x8c05u | (rnd() & 0x73f8u);         /* B15 word (C-16) */
+    case 3: case 4: case 9:
+        return 0x0077u | (rnd() & 0xf780u);         /* Dpp (C-21) */
+    case 5: return 0x0866u | (rnd() & 0xe399u);     /* MVK01 (G-3) */
+    case 6: case 7:
+        return 0x0006u | (rnd() & 0xffd9u);         /* moves (G-1/G-2) */
+    case 8: return rnd() & 0xffffu;                 /* anything */
+    default: return 0x042eu | (rnd() & 0xfb81u);    /* ADDK */
+    }
+}
+
 static void build_direct(System *s)
 {
     build(s);
@@ -805,6 +822,22 @@ static void build_direct(System *s)
         while ((body & 0x7c) == 0x10 || (body & 0x1ffc) == 0x120);
         w = (body & ~1u) | (w & 1);
         memcpy(s->ram + (pc - BASE), &w, 4);
+    }
+    /* One fetch packet in eight compact (SPRUFE8B 3.10): a header in
+     * word 7 with a random layout, expansion field and p-bits, and the
+     * words it marks holding two 16-bit instructions - the B15 word and
+     * Dpp stack transfers, MVK01, ADDK, the moves, or anything. */
+    for (uint32_t block = BASE; block < CODE_END; block += 32) {
+        if (rnd() % 8) continue;
+        uint32_t layout = rnd() & 0x7f;
+        uint32_t header = 0xe0000000u | layout << 21 | (rnd() & 0x7f) << 14 |
+                          (rnd() & 0x3fff);
+        for (unsigned i = 0; i < 7; ++i) {
+            if (!((layout >> i) & 1)) continue;
+            uint32_t w = random_compact() | (uint32_t)random_compact() << 16;
+            memcpy(s->ram + (block + 4 * i - BASE), &w, 4);
+        }
+        memcpy(s->ram + (block + 28 - BASE), &header, 4);
     }
     direct_extras = false;
 }
@@ -836,6 +869,12 @@ static void dt_lockstep(unsigned seed)
     init_cpu(&a, &sa, a10, b10);
     rng_state = state;
     init_cpu(&b, &sb, a10, b10);
+    /* B15 into data RAM, for the compact stack transfers; A12/B12 at
+     * fetch packets, for the register branches. */
+    a.r[1][15] = b.r[1][15] = 0x1c00 + (rnd() % 128) * 4;
+    for (unsigned side = 0; side < 2; ++side)
+        a.r[side][12] = b.r[side][12] =
+            BASE + (rnd() % ((CODE_END - BASE) / 32)) * 32;
     if (seed & 2) {                       /* interrupts recognized */
         a.control[1] |= 1; b.control[1] |= 1;
         a.control[4] = b.control[4] = 0xfff3;
@@ -1113,10 +1152,14 @@ static void dt_directed_smc(void)
         5u << 23 | 10u << 18 | 1u << 9 | 1u << 7 | 7u << 4 | 4 | 2, /* 1020 STW B5,*B10 */
         3u << 29 | 5u << 23 | 128u << 7 | 0x50 | 2,     /* [B2] ADDK 128,B5 */
         3u << 29 | 2u << 23 | 0u << 7 | 0x28 | 2 | 1,   /* [B2] MVK 0,B2 */
-        3u << 29 | 1u << 28 | 2u << 23 | 1u << 7 | 0x28 | 2, /* || [!B2] MVK 1,B2 */
+        3u << 29 | 1u << 28 | 2u << 23 | 1u << 7 | 0x28 | 2 | 1, /* || [!B2] MVK 1,B2 */
+        9u << 23 | 10u << 18 | 0x3e2,                   /* || MVC TSCL,B9: the
+                                                           interpreter's, and
+                                                           the store commits
+                                                           in it */
         8u << 7 | 0x10,                                 /* B .S1 0x1040 */
         4u << 13,                                       /* NOP 5 */
-        0, 0,
+        0,
         3u << 23 | 1u << 7 | 0x50,                      /* 1040 ADDK k,A3 (target) */
         1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
         2u << 29 | (uint32_t)(-8 & 0x1fffff) << 7 | 0x10, /* [B1] B .S1 0x1020 */
@@ -1125,7 +1168,7 @@ static void dt_directed_smc(void)
     static System sa, sb;
     static CdjC674x a, b;
     bool direct = test_direct;
-    for (unsigned mode = 0; mode < 4; ++mode) {
+    for (unsigned mode = 0; mode < 8; ++mode) {
         memset(&sa, 0, sizeof sa);
         memcpy(sa.ram, code, sizeof code);
         sb = sa;
@@ -1139,6 +1182,7 @@ static void dt_directed_smc(void)
         }
         test_direct = mode & 1;
         cdj_c674x_set_code_writes(mode & 2 ? &test_code_writes : NULL);
+        cdj_c674x_set_run_steps(mode & 4);
         count_sys = NULL;
         /* A horizon without end: between() never runs inside a run. */
         cdj_c674x_set_horizon(current_horizon = &test_horizon);
@@ -1171,7 +1215,45 @@ static void dt_directed_smc(void)
     }
     test_horizon.until = 0;
     cdj_c674x_set_horizon(current_horizon = NULL);
+    cdj_c674x_set_run_steps(false);
     test_direct = direct;
+}
+
+/* The compact stack transfers on the lean path: a Dpp pair turned
+ * unaligned after its schedule was built, and a Dpp writing B15 in parallel
+ * with a (predicated) ADDK to it (the interpreter's faults; the lean path
+ * must decline both). */
+static void setup_dpp(CdjC674x *cpu)
+{
+    cpu->r[1][15] = 0x1c00;
+    cpu->r[1][0] = 0;
+    cpu->r[1][1] = 2;
+}
+
+static void dt_directed_dpp(void)
+{
+    const uint32_t unaligned[] = {
+        (0x0077u | 1u << 15 | 1u << 14 | 4u << 7) |            /* LDDW pop */
+        (uint32_t)(0x0077u | 1u << 15 | 4u << 7) << 16,         /* STDW push */
+        2u << 29 | 1u << 28 | 15u << 23 | 4u << 7 | 0x50 | 2,   /* [!B1] ADDK 4,B15 */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,                     /* ADDK -1,B1 */
+        0x10,                                                   /* B .S1 0x1000 */
+        4u << 13,                                               /* NOP 5 */
+        0, 0,
+        0xe0000000u | 1u << 21,                                 /* header */
+    };
+    dt_program(unaligned, 8, setup_dpp, 200);
+    const uint32_t twice[] = {
+        1u << 29 | 15u << 23 | 8u << 7 | 0x50 | 2 | 1,          /* [B0] ADDK 8,B15 */
+        (0x0077u | 4u << 7) | 0x0c6eu << 16,                    /* || STW push; NOP */
+        2u << 29 | 1u << 28 | 0u << 23 | 1u << 7 | 0x28 | 2,    /* [!B1] MVK 1,B0 */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,                     /* ADDK -1,B1 */
+        0x10,                                                   /* B .S1 0x1000 */
+        4u << 13,                                               /* NOP 5 */
+        0,
+        0xe0000000u | 1u << 22,                                 /* header */
+    };
+    dt_program(twice, 8, setup_dpp, 200);
 }
 
 static void dt_directed_static(void)
@@ -1215,6 +1297,20 @@ static void dt_directed_static(void)
         4u << 13,
     };
     dt_program(sat, 8, setup_faucr, 200);
+    /* Two writes to A3 in one packet once B0 is set (the interpreter's
+     * "parallel register write conflict"): a compiled form must not take
+     * the third pass. */
+    const uint32_t twice[] = {
+        0,                                              /* NOP */
+        1u << 29 | 3u << 23 | 1u << 7 | 0x28 | 1,       /* [B0] MVK 1,A3 */
+        3u << 23 | 2u << 7 | 0x28,                      /* || MVK 2,A3 */
+        2u << 29 | 1u << 28 | 0u << 23 | 1u << 7 | 0x28 | 2, /* [!B1] MVK 1,B0 */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
+        branch_back,
+        4u << 13,
+        0,
+    };
+    dt_program(twice, 8, setup_landing, 200);
     CdjC674xJitStats f0, f1;
     cdj_c674x_jit_stats(&f0);
     dt_program(faucr, 9, setup_faucr, 200);
@@ -1287,6 +1383,7 @@ int main(void)
         test_horizon.until = 0;
         test_direct = seed % 4 < 2;
         cdj_c674x_set_code_writes(seed % 3 == 1 ? &test_code_writes : NULL);
+        cdj_c674x_set_run_steps(seed % 7 < 3);
         jit_lockstep(seed);
     }
     CdjC674xJitStats stats;
@@ -1310,7 +1407,7 @@ int main(void)
     FILE *aot_file = aot_profile ? fopen(aot_profile, "w") : NULL;
     if (aot_file) {
         cdj_c674x_aot_profile(true);
-        cdj_c674x_aot_profile_to(aot_file, 8);
+        cdj_c674x_aot_profile_to(aot_file, 1);
     }
     dt_directed();
     dt_directed_faucr();
@@ -1325,6 +1422,7 @@ int main(void)
             cdj_c674x_set_horizon(current_horizon = h % 2 ? &test_horizon : NULL);
             test_horizon.until = 0;
             dt_directed_static();
+            dt_directed_dpp();
         }
         cdj_c674x_set_horizon(current_horizon = NULL);
         cdj_c674x_jit_stats(&s1);
@@ -1336,16 +1434,18 @@ int main(void)
         test_horizon.until = 0;
         test_direct = seed % 4 < 2;
         cdj_c674x_set_code_writes(seed % 3 == 1 ? &test_code_writes : NULL);
+        cdj_c674x_set_run_steps(seed % 7 < 3);
         direct_programs = true;
         dt_lockstep(seed);
         direct_programs = false;
     }
     cdj_c674x_set_horizon(current_horizon = NULL);
+    cdj_c674x_set_run_steps(false);
     cdj_c674x_loop_set_functional_timing(false);
     CdjC674xJitStats after;
     cdj_c674x_jit_stats(&after);
     if (aot_file) {
-        cdj_c674x_aot_profile_dump(aot_file, 8);
+        cdj_c674x_aot_profile_dump(aot_file, 1);
         cdj_c674x_aot_profile_to(NULL, 0);
         cdj_c674x_aot_profile(false);
         fclose(aot_file);
@@ -1372,13 +1472,14 @@ int main(void)
            (unsigned long long)(after.direct_plans - stats.direct_plans),
            (unsigned long long)(after.direct_untraceable -
                                 stats.direct_untraceable), faults_seen);
-    assert(after.direct - stats.direct > 3000000 && faults_seen > 1000);
+    /* (Compact packets end programs sooner: their random forms fault.) */
+    assert(after.direct - stats.direct > 2300000 && faults_seen > 1000);
     printf("static schedules: %llu packets from one (%llu lean), %llu built, %llu fitted none\n",
            (unsigned long long)(after.static_hits + after.static_lean),
            (unsigned long long)after.static_lean,
            (unsigned long long)after.static_builds,
            (unsigned long long)after.static_misses);
-    assert(after.static_hits + after.static_lean > 3000000 &&
+    assert(after.static_hits + after.static_lean > 2000000 &&
            after.static_lean > 1000000);
     printf("interrupt presentations: %u quiet (checked no-op), %u not\n",
            quiet_checks, loud_checks);

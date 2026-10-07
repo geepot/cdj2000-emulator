@@ -650,16 +650,22 @@ static void copy_prefix(CdjC674x *to, const CdjC674x *from, unsigned stores,
            offsetof(CdjC674x, loop) - offsetof(CdjC674x, load_count));
 }
 
-bool cdj_c674x_interrupt_quiet(const CdjC674x *cpu)
+/* cdj_c674x_interrupt(cpu, 0)'s first exit with nothing to change: IFR
+ * already within the maskable bits, nothing eligible to take, and no
+ * finished loop's drain phase to clear. */
+static inline __attribute__((always_inline)) bool
+interrupt_quiet(const CdjC674x *cpu)
 {
-    /* cdj_c674x_interrupt(cpu, 0)'s first exit with nothing to change: IFR
-     * already within the maskable bits, nothing eligible to take, and no
-     * finished loop's drain phase to clear. */
     const uint32_t maskable = 0x0000fff0u;
     uint32_t eligible = cpu->control[2] & cpu->control[4] & maskable;
     return !cpu->fault && !(cpu->control[2] & ~maskable) &&
            (!(cpu->control[1] & 1u) || !(cpu->control[4] & 2u) || !eligible) &&
            (cpu->loop_active || !loop_interrupt_draining(cpu));
+}
+
+bool cdj_c674x_interrupt_quiet(const CdjC674x *cpu)
+{
+    return interrupt_quiet(cpu);
 }
 
 bool cdj_c674x_interrupt(CdjC674x *cpu, uint32_t pending)
@@ -6457,25 +6463,45 @@ void cdj_c674x_set_ram_window(CdjC674xWrite write, CdjC674xRamWindow window,
 }
 
 
-static inline uint8_t *ram_ptr(void *opaque, uint32_t address, unsigned size)
+/* ram_ptr past its first entry: the others (a hit moves to the front),
+ * then the board. */
+static __attribute__((noinline)) uint8_t *ram_ptr_slow(void *opaque,
+                                                       uint32_t address,
+                                                       unsigned size)
 {
-    if (!ram_window || !fetch_epoch) return NULL;
     uint64_t epoch = *fetch_epoch;
-    RamTlb *t = ram_tlb.entry;
-    for (unsigned i = 0; i < 4; ++i, ++t) {
+    RamTlb *e = ram_tlb.entry;
+    for (unsigned i = 1; i < 4; ++i) {
+        RamTlb *t = &e[i];
         uint32_t off = address - t->lo;
         if (off < t->span && size <= t->span - off && t->epoch == epoch &&
-            t->opaque == opaque)
-            return t->host + off;
+            t->opaque == opaque) {
+            RamTlb hit = *t;
+            memmove(&e[1], &e[0], i * sizeof(e[0]));
+            e[0] = hit;
+            return hit.host + off;
+        }
     }
     uint32_t lo, hi;
     uint8_t *host;
     if (!ram_window(opaque, address, &lo, &hi, &host) || address < lo ||
         (uint64_t)address + size > hi || hi <= lo)
         return NULL;
-    t = &ram_tlb.entry[ram_tlb.next++ & 3];
-    *t = (RamTlb){lo, hi - lo, host, opaque, epoch};
+    memmove(&e[1], &e[0], 3 * sizeof(e[0]));
+    e[0] = (RamTlb){lo, hi - lo, host, opaque, epoch};
     return host + (address - lo);
+}
+
+static inline __attribute__((always_inline)) uint8_t *
+ram_ptr(void *opaque, uint32_t address, unsigned size)
+{
+    if (!ram_window || !fetch_epoch) return NULL;
+    const RamTlb *t = &ram_tlb.entry[0];
+    uint32_t off = address - t->lo;
+    if (off < t->span && size <= t->span - off && t->epoch == *fetch_epoch &&
+        t->opaque == opaque)
+        return t->host + off;
+    return ram_ptr_slow(opaque, address, size);
 }
 
 /* Little-endian loads and stores of 1-8 bytes at host memory. */
@@ -6512,9 +6538,20 @@ static inline void ram_store(uint8_t *p, uint64_t value, unsigned size)
 /* write_transfer for the compiled paths: an aligned 1/2/4/8-byte linear
  * store into a RAM window while the board allows it, without the
  * callback (what the callback would do: check, or store the bytes). */
-static bool ram_write_transfer(CdjC674xWrite write, void *opaque,
-                               uint32_t address, uint64_t value,
-                               unsigned encoded_size, bool commit)
+static __attribute__((noinline)) bool
+ram_write_callback_transfer(CdjC674xWrite write, void *opaque,
+                            uint32_t address, uint64_t value,
+                            unsigned encoded_size, bool commit)
+{
+    bool ok = write_transfer(write, opaque, address, value, encoded_size,
+                             commit);
+    if (commit) code_gen_external();    /* the callback may write code */
+    return ok;
+}
+
+static inline __attribute__((always_inline)) bool
+ram_write_transfer(CdjC674xWrite write, void *opaque, uint32_t address,
+                   uint64_t value, unsigned encoded_size, bool commit)
 {
     unsigned size = encoded_size & 255;
     if (write == ram_write_callback && ram_writes_direct &&
@@ -6530,14 +6567,16 @@ static bool ram_write_transfer(CdjC674xWrite write, void *opaque,
             return true;
         }
     }
-    bool ok = write_transfer(write, opaque, address, value, encoded_size,
-                             commit);
-    if (commit) code_gen_external();    /* the callback may write code */
-    return ok;
+    return ram_write_callback_transfer(write, opaque, address, value,
+                                       encoded_size, commit);
 }
 
-static bool jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
-                          unsigned encoded_size, uint64_t *value)
+static bool jit_read_blocks(void *opaque, uint32_t address, unsigned size,
+                            uint64_t *value);
+
+static inline __attribute__((always_inline)) bool
+jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
+              unsigned encoded_size, uint64_t *value)
 {
     unsigned size = encoded_size & 255;
     if (read != fetch_block_read || !fetch_block || (encoded_size >> 8) ||
@@ -6548,6 +6587,13 @@ static bool jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
         if (value) *value = ram_load(r, size);
         return true;
     }
+    return jit_read_blocks(opaque, address, size, value);
+}
+
+/* jit_read_span outside the RAM windows: through the fetch blocks. */
+static __attribute__((noinline)) bool
+jit_read_blocks(void *opaque, uint32_t address, unsigned size, uint64_t *value)
+{
     uint32_t first = address & ~31u, last = (address + size - 1) & ~31u;
     const uint8_t *p = fetch_block(opaque, first);
     const uint8_t *q = last == first ? p : fetch_block(opaque, last);
@@ -6563,8 +6609,9 @@ static bool jit_read_span(CdjC674xRead read, void *opaque, uint32_t address,
     return true;
 }
 
-static bool jit_read_mapped(CdjC674xRead read, void *opaque,
-                            uint32_t address, unsigned encoded_size)
+static inline __attribute__((always_inline)) bool
+jit_read_mapped(CdjC674xRead read, void *opaque, uint32_t address,
+                unsigned encoded_size)
 {
     return jit_read_span(read, opaque, address, encoded_size, NULL);
 }
@@ -8730,7 +8777,7 @@ static inline __attribute__((always_inline)) bool horizon_skip(const CdjC674x *c
 {
     CdjC674xHorizon *h = horizon;
     if (!h || cpu->packets >= __atomic_load_n(&h->until, __ATOMIC_ACQUIRE) ||
-        cpu->pc == h->break_pc || !cdj_c674x_interrupt_quiet(cpu))
+        cpu->pc == h->break_pc || !interrupt_quiet(cpu))
         return false;
     ++h->skipped;
     return true;
@@ -8767,6 +8814,7 @@ enum {
     LOP_CMEM,                           /* compact memory, as dt_exec */
     LOP_CALLP,                          /* dt_callp */
     LOP_MVC_CTL,                        /* dt_mvc_ctl */
+    LOP_CB15, LOP_CDPP,                 /* compact_memory's forms in line */
     /* arms computed in line, each as its arm's own expression */
     LOP_ADD_IMM, LOP_ADD_REG, LOP_SUB_REG, LOP_SUB_IMM, LOP_D_ADD,
     LOP_D_ADDK, LOP_D_SUB, LOP_D_SUBK, LOP_DX_ADD, LOP_DX_ADDK, LOP_DX_SUB,
@@ -8796,7 +8844,29 @@ static void dts_lean_plan(const CdjC674xCacheEntry *e, DtPlan *plan)
         case DT_BRANCH: lop = LOP_BRANCH; break;
         case DT_ARM:
         case DT_CMPSP: lop = LOP_GENERIC; break;
-        case DT_COMPACT_MEMORY: lop = LOP_CMEM; break;
+        case DT_COMPACT_MEMORY: {
+            /* compact_memory's two forms in line (LOP_CB15, LOP_CDPP), with
+             * their fields here; a pair to an odd register (the
+             * interpreter's fault) stays generic. */
+            const CdjC674xInstruction *insn = &e->packet.instructions[i];
+            JitOp *o = &plan->op[i];
+            if (d->form == CDJ_C674X_COMPACT_B15_WORD) {
+                lop = LOP_CB15;
+                o->is_store = !(w & 8);
+                o->bank = (w >> 12) & 1;
+                o->dst = ((w >> 4) & 7) + ((insn->header & 0x80000) ? 16 : 0);
+                o->a = ((w >> 13) & 3) | (((w >> 7) & 7) << 2);
+            } else if (d->form == CDJ_C674X_COMPACT_DPP &&
+                       !((w & 0x8000) && ((w >> 7) & 1))) {
+                lop = LOP_CDPP;
+                o->is_store = !(w & 0x4000);
+                o->bank = (w >> 12) & 1;
+                o->dst = (w >> 7) & 15;
+                o->size = (w & 0x8000) ? 8 : 4;
+                o->a = o->size * (((w >> 13) & 1) + 1);
+            } else lop = LOP_CMEM;
+            break;
+        }
         case DT_CALLP: lop = LOP_CALLP; break;
         case DT_MVC_CTL: lop = LOP_MVC_CTL; break;
         case DT_VALUE: {
@@ -9090,6 +9160,79 @@ LEAN_INLINE bool lean_issue(CdjC674x *cpu, const CdjC674xCacheEntry *e,
         if (!op->creg || ((cpu->r[op->creg_bank][op->creg_reg] != 0) ^ op->z))
             dt_mvc_ctl(cpu, op->dst, cpu->r[op->cross][op->b]);
         break;
+    case LOP_CB15: {
+        /* compact_memory's B15 word transfer (Figure C-16): what it
+         * appends where it succeeds; anything it stops on declines. */
+        ++L->memory_count;
+        uint32_t address = cpu->r[1][15] + op->a * 4u;
+        if (address & 3) return false;
+        if (op->is_store) {
+            uint32_t value = cpu->r[op->bank][op->dst];
+            if (cpu->store_count == 24 ||
+                !ram_write_transfer(write, opaque, address, value, 4, false))
+                return false;
+            *jit_append_store(cpu, &L->undo) = (CdjC674xStore){
+                .due = start + 3, .value = value, .address = address,
+                .size = 4
+            };
+        } else {
+            uint64_t dummy;
+            if (cpu->load_count == 40 ||
+                (!jit_read_mapped(read, opaque, address, 4) &&
+                 !read_transfer(read, opaque, address, 4, &dummy)))
+                return false;
+            for (unsigned j = 0; j < cpu->load_count; ++j)
+                if (cpu->loads[j].due == start + 5 &&
+                    cpu->loads[j].bank == op->bank &&
+                    cpu->loads[j].dst == op->dst)
+                    return false;
+            *jit_append_load(cpu, &L->undo) = (CdjC674xLoad){
+                .due = start + 5, .address = address, .bank = op->bank,
+                .dst = op->dst, .size = 4
+            };
+        }
+        break;
+    }
+    case LOP_CDPP: {
+        /* compact_memory's B15 stack forms (Figure C-21). */
+        ++L->memory_count;
+        unsigned size = op->size, reg = op->dst, bank = op->bank;
+        bool load = !op->is_store;
+        uint32_t old_sp = cpu->r[1][15], delta = op->a;
+        uint32_t address = load ? old_sp + delta : old_sp;
+        if (address & (size - 1)) return false;
+        uint64_t data = cpu->r[bank][reg];
+        if (size == 8) data |= (uint64_t)cpu->r[bank][reg + 1] << 32;
+        uint64_t dummy;
+        if (load ? (!jit_read_mapped(read, opaque, address, size) &&
+                    !read_transfer(read, opaque, address, size, &dummy))
+                 : !ram_write_transfer(write, opaque, address, data, size,
+                                       false))
+            return false;
+        if (!jit_mark(L->written, 1, 15)) return false;
+        if (load) {
+            if (cpu->load_count == 40) return false;
+            for (unsigned j = 0; j < cpu->load_count; ++j)
+                if (cpu->loads[j].due == start + 5 &&
+                    cpu->loads[j].bank == bank &&
+                    cpu->loads[j].dst < reg + (size == 8 ? 2 : 1) &&
+                    reg < cpu->loads[j].dst +
+                          queued_result_registers(&cpu->loads[j]))
+                    return false;
+            *jit_append_load(cpu, &L->undo) = (CdjC674xLoad){
+                .due = start + 5, .address = address, .bank = bank,
+                .dst = reg, .size = size
+            };
+        } else {
+            if (cpu->store_count == 24) return false;
+            *jit_append_store(cpu, &L->undo) = (CdjC674xStore){
+                .due = start + 3, .value = data, .address = address,
+                .size = size
+            };
+        }
+        commit_reg(cpu, &L->defer, 1, 15, load ? address : old_sp - delta);
+        break;
+    }
     case LOP_ARM:
     case LOP_BRANCH: {
         const CdjC674xInstruction *insn = &packet->instructions[i];
@@ -9291,6 +9434,137 @@ LEAN_INLINE int lean_end(CdjC674x *cpu, const DtsLean *L, unsigned last)
     return 1;
 }
 
+/* The ahead-of-time "direct" form of a lean packet (tools/cdj_dsp/aot_gen.py
+ * decides where it applies: register-only, memory and SP operations with
+ * no write that can conflict): every check first, without touching the
+ * CPU, so a decline needs no undo; the bus phase, which then cannot act on
+ * this packet's appends; the appends; the register writes; retirement.
+ * These are lean_issue's memory and SP cases split that way. */
+typedef struct { uint32_t address, updated; unsigned encoded; uint64_t value; } DtsMem;
+
+/* An enabled LOP_MEM's checks and fields (lean_issue's, no append). */
+LEAN_INLINE __attribute__((unused)) bool lean_mem_prep(const CdjC674x *cpu, const JitOp *op,
+                               DtsMem *m, CdjC674xRead read,
+                               CdjC674xWrite write, void *opaque)
+{
+    unsigned size = op->size, bank = op->bank, b = op->b;
+    bool amr = b >= 4 && b <= 7;
+    if (amr && cpu->control_ready[0] > cpu->cycles) return false;
+    unsigned width = 0;
+    if (amr && !address_width(cpu, bank, b, &width)) return false;
+    if (op->nonaligned && width && width < 5) return false;
+    uint32_t offset = ((op->mode & 4) ? cpu->r[bank][op->a] : op->a) *
+                      op->scale;
+    uint32_t base = cpu->r[bank][b];
+    m->updated = circular_address(base,
+        (op->mode & 1) ? base + offset : base - offset, width);
+    m->address = ((op->mode & 10) == 10) ? base : m->updated;
+    m->encoded = size | ((op->nonaligned ? width : 0) << 8);
+    if (!op->nonaligned && (m->address & (size - 1))) return false;
+    if (op->is_store) {
+        m->value = cpu->r[op->side][op->dst];
+        if (op->pair) m->value |= (uint64_t)cpu->r[op->side][op->dst + 1] << 32;
+        return ram_write_transfer(write, opaque, m->address, m->value,
+                                  m->encoded, false);
+    }
+    uint64_t dummy;
+    return jit_read_mapped(read, opaque, m->address, m->encoded) ||
+           read_transfer(read, opaque, m->address, m->encoded, &dummy);
+}
+
+/* LOP_CB15's and LOP_CDPP's checks and fields (lean_issue's, no append;
+ * the conflicts it also checks are fixed by the variant's shape here). */
+LEAN_INLINE __attribute__((unused)) bool
+lean_cb15_prep(const CdjC674x *cpu, const JitOp *op, DtsMem *m,
+               CdjC674xRead read, CdjC674xWrite write, void *opaque)
+{
+    m->address = cpu->r[1][15] + op->a * 4u;
+    m->encoded = 4;
+    if (m->address & 3) return false;
+    if (op->is_store) {
+        m->value = cpu->r[op->bank][op->dst];
+        return ram_write_transfer(write, opaque, m->address, m->value, 4,
+                                  false);
+    }
+    uint64_t dummy;
+    return jit_read_mapped(read, opaque, m->address, 4) ||
+           read_transfer(read, opaque, m->address, 4, &dummy);
+}
+
+LEAN_INLINE __attribute__((unused)) bool
+lean_cdpp_prep(const CdjC674x *cpu, const JitOp *op, DtsMem *m,
+               CdjC674xRead read, CdjC674xWrite write, void *opaque)
+{
+    unsigned size = op->size;
+    uint32_t old_sp = cpu->r[1][15], delta = op->a;
+    m->address = op->is_store ? old_sp : old_sp + delta;
+    m->updated = op->is_store ? old_sp - delta : m->address;
+    m->encoded = size;
+    if (m->address & (size - 1)) return false;
+    if (op->is_store) {
+        m->value = cpu->r[op->bank][op->dst];
+        if (size == 8)
+            m->value |= (uint64_t)cpu->r[op->bank][op->dst + 1] << 32;
+        return ram_write_transfer(write, opaque, m->address, m->value, size,
+                                  false);
+    }
+    uint64_t dummy;
+    return jit_read_mapped(read, opaque, m->address, size) ||
+           read_transfer(read, opaque, m->address, size, &dummy);
+}
+
+/* A disabled LOP_MEM still declines while AMR is not ready. */
+LEAN_INLINE __attribute__((unused)) bool lean_mem_ready(const CdjC674x *cpu, const JitOp *op)
+{
+    return !(op->b >= 4 && op->b <= 7 && cpu->control_ready[0] > cpu->cycles);
+}
+
+/* An enabled LOP_SP's result (lean_issue's). */
+LEAN_INLINE __attribute__((unused)) CdjC674xSpResult lean_sp(const CdjC674x *cpu, const JitOp *op)
+{
+    unsigned shift = op->side ? 16 : 0;
+    if (op->multiply) {
+        unsigned rmode = (cpu->control[20] >> (shift + 9)) & 3;
+        return cdj_c674x_multiply_sp(cpu->r[op->side][op->a],
+                                     cpu->r[op->cross][op->b], rmode);
+    }
+    uint32_t source1 = cpu->r[op->side][op->a];
+    uint32_t source2 = cpu->r[op->cross][op->b];
+    if (op->swap) {
+        source1 = cpu->r[op->cross][op->a];
+        source2 = cpu->r[op->side][op->b];
+    }
+    unsigned rmode = (cpu->control[18] >> (shift + 9)) & 3;
+    return cdj_c674x_add_sub_sp(source1, source2, op->operation, rmode);
+}
+
+/* lean_check's overlap test for one (load, store) pair. */
+LEAN_INLINE __attribute__((unused)) bool lean_overlap(uint32_t la, unsigned lsize, uint32_t sa,
+                              unsigned ssize)
+{
+    for (unsigned l = 0; l < (lsize & 255); ++l)
+    for (unsigned m = 0; m < (ssize & 255); ++m)
+        if (circular_address(la, la + l, lsize >> 8) ==
+            circular_address(sa, sa + m, ssize >> 8))
+            return true;
+    return false;
+}
+
+/* lean_e3 into a local. */
+LEAN_INLINE __attribute__((unused)) const char *lean_e3_to(const CdjC674x *cpu, unsigned j,
+                                   uint64_t *data, CdjC674xRead read,
+                                   void *opaque)
+{
+    const CdjC674xLoad *load = &cpu->loads[j];
+    uint64_t value;
+    if (!jit_read_span(read, opaque, load->address, load->size, &value) &&
+        !read_transfer(read, opaque, load->address, load->size, &value))
+        return "RAM load mapping changed during execution";
+    *data = load->sign_extend ?
+        (uint64_t)(int64_t)sx(value, (load->size & 255) * 8) : value;
+    return NULL;
+}
+
 /* One packet on the lean path, for variant v (v->in is the queues' shape,
  * v->outcome the pmask predicates).  Returns as dt_exec. */
 static int dts_lean(CdjC674x *cpu, const CdjC674xCacheEntry *e,
@@ -9446,16 +9720,36 @@ static void aot_dump_entry(FILE *f, const CdjC674xCacheEntry *e,
                 const CdjC674xInstruction *in = &e->packet.instructions[k];
                 const CdjC674xDecoded *d = &e->decoded[k];
                 const JitOp *op = &e->plan->op[k];
+                /* For the direct form: the branch arm, and where a
+                 * compact_value form writes (its encoding decides). */
+                unsigned arm = 0, cside = 0, cdst = 0;
+                if (d->arm && !d->compact) {
+                    bool (*run)(CdjC674xArm *) = d->arm->run;
+                    arm = run == arm_b_disp ? 1 : run == arm_bnop_disp ? 2 :
+                          run == arm_b_reg ? 3 : run == arm_bnop_reg ? 4 : 0;
+                }
+                if (e->plan->lop[k] == LOP_COMPACT) {
+                    static CdjC674x scratch;
+                    uint32_t value;
+                    for (unsigned t = 0; t < 2; ++t) {
+                        memset(&scratch, 0, sizeof(scratch));
+                        scratch.r[0][0] = scratch.r[1][0] = t;
+                        if (compact_value(&scratch, in, d->w, d->form, &cside,
+                                          &cdst, &value) == 1)
+                            break;
+                    }
+                }
                 fprintf(f, "I %u lop %u kind %u w %#x pc %#x compact %u "
                         "creg %u cb %u cr %u z %u side %u dst %u a %u b %u "
                         "cross %u bank %u mode %u size %u scale %u pair %u "
-                        "nonaligned %u store %u sx %u mul %u swap %u oper %u\n",
+                        "nonaligned %u store %u sx %u mul %u swap %u oper %u "
+                        "header %#x form %u arm %u cside %u cdst %u\n",
                         k, e->plan->lop[k], op->kind, d->w, in->pc, d->compact,
                         op->creg, op->creg_bank, op->creg_reg, op->z, op->side,
                         op->dst, op->a, op->b, op->cross, op->bank, op->mode,
                         op->size, op->scale, op->pair, op->nonaligned,
                         op->is_store, op->sign_extend, op->multiply, op->swap,
-                        op->operation);
+                        op->operation, in->header, d->form, arm, cside, cdst);
             }
             aot_dump_shape(f, "S", v->in);
             fprintf(f, "P outcome %u pmask %u branches_plan %u generic %u ctl %u "
@@ -9507,6 +9801,15 @@ static void aot_refill(const CdjC674xCacheEntry *e)
 
 void cdj_c674x_aot_profile_dump(FILE *f, uint64_t min_runs)
 {
+    /* The numbering aot_gen.py's output relies on (it asserts it). */
+    fprintf(f, "K lop_nop %u lop_mem %u lop_sp %u lop_inline %u p_tick %u "
+            "p_commit %u p_e3 %u p_stail %u p_smove %u p_sfill %u p_scount %u "
+            "p_ltail %u p_le3 %u p_lret %u p_lmove %u p_lfill %u p_lcount %u "
+            "p_branch %u lop_branch %u lop_compact %u lop_cb15 %u lop_cdpp %u\n",
+            LOP_NOP, LOP_MEM, LOP_SP, LOP_ADD_IMM, P_TICK,
+            P_COMMIT, P_E3, P_STAIL, P_SMOVE, P_SFILL, P_SCOUNT, P_LTAIL,
+            P_LE3, P_LRET, P_LMOVE, P_LFILL, P_LCOUNT, P_BRANCH, LOP_BRANCH,
+            LOP_COMPACT, LOP_CB15, LOP_CDPP);
     if (!packet_cache) return;
     for (unsigned i = 0; i < 1u << CDJ_C674X_PACKET_CACHE_BITS; ++i)
         aot_dump_entry(f, &packet_cache[i], min_runs);
@@ -9588,14 +9891,15 @@ aot_key(const CdjC674x *cpu, const AotPacket *p)
     return key;
 }
 
-/* The entry is current (entry_current inside a run), the usual case in
- * line: checked since code_gen last moved.  (The fetch epoch only moves
- * where code_gen does - a committed device write, between(), a run's
- * start - and a refill leaves bytes just fetched, so entry_current's
- * epoch test adds nothing here.) */
+/* The entry is current (entry_current inside a run), its usual case in
+ * line: checked since code_gen last moved, at host pointers of this fetch
+ * epoch. */
 static inline bool aot_current(CdjC674xCacheEntry *f, void *opaque)
 {
-    return f->checked_gen == code_gen || entry_current(f, opaque, true);
+    if (f->checked_gen == code_gen && f->host_valid &&
+        f->host_opaque == opaque && f->host_epoch == *fetch_epoch)
+        return true;
+    return entry_current(f, opaque, true);
 }
 /* An edge into another function: a guaranteed tail call where the
  * compiler has one (chains are long). */
@@ -9937,6 +10241,20 @@ static int jit_cycle(CdjC674x *cpu, JitLoop *l, bool all_pairs,
     return 1;
 }
 
+static unsigned run_compiled(CdjC674x *cpu, CdjC674xRead read,
+                             CdjC674xWrite write, void *opaque, unsigned limit,
+                             CdjC674xBetween between, void *between_opaque,
+                             unsigned *status);
+
+/* cdj_c674x_set_run_steps: the run steps the interpreter itself where no
+ * compiled path takes a packet, and goes on. */
+static bool run_steps;
+
+void cdj_c674x_set_run_steps(bool on)
+{
+    run_steps = on;
+}
+
 unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
                        void *opaque, unsigned limit, CdjC674xBetween between,
                        void *between_opaque, unsigned *status)
@@ -9945,6 +10263,44 @@ unsigned cdj_c674x_run(CdjC674x *cpu, CdjC674xRead read, CdjC674xWrite write,
     if (!limit || !cdj_c674x_jit_enabled() || packet_cache_setting() != 2)
         return 0;
     code_gen_external();                /* anyone may have written code */
+    if (!run_steps)
+        return run_compiled(cpu, read, write, opaque, limit, between,
+                            between_opaque, status);
+    /* As the caller's own loop would: a packet no compiled path takes is
+     * stepped, then between() (or the horizon's skip of it) as after any
+     * other packet. */
+    for (unsigned n = 0;;) {
+        unsigned st = 0;
+        n += run_compiled(cpu, read, write, opaque, limit - n, between,
+                          between_opaque, &st);
+        if (st == CDJ_C674X_RUN_FAULT || st == CDJ_C674X_RUN_STOPPED ||
+            n == limit) {
+            *status = st;
+            return n;
+        }
+        /* st is 0 (nothing run) or BETWEEN (between() done after the last
+         * packet): the next is the interpreter's. */
+        if (!cdj_c674x_step(cpu, read, write, opaque)) {
+            *status = CDJ_C674X_RUN_FAULT;
+            return n;
+        }
+        code_gen_external();            /* its stores used the callback */
+        if (++n == limit) return n;
+        if (horizon_skip(cpu)) continue;
+        if (!between(between_opaque)) {
+            *status = CDJ_C674X_RUN_STOPPED;
+            return n;
+        }
+        code_gen_external();
+    }
+}
+
+static unsigned run_compiled(CdjC674x *cpu, CdjC674xRead read,
+                             CdjC674xWrite write, void *opaque, unsigned limit,
+                             CdjC674xBetween between, void *between_opaque,
+                             unsigned *status)
+{
+    *status = 0;
     if (!cpu->loop_active)
         return !dt_enabled() ? 0 : dt_run(cpu, read, write, opaque, limit, between,
                       between_opaque, status);

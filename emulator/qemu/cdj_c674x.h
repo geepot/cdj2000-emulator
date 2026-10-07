@@ -184,6 +184,13 @@ bool cdj_c674x_step_capture_direct(CdjC674x *, CdjC674xRead, CdjC674xWrite,
  * Off unless CDJ_C674X_JIT=1 (or cdj_c674x_set_jit(1)); =loops compiles
  * loop-buffer cycles only.  Needs packet-cache mode 2.  Process-wide, like the packet cache. */
 typedef bool (*CdjC674xBetween)(void *opaque);
+/* With run steps on (default off), cdj_c674x_run steps the interpreter
+ * itself where no compiled path takes a packet - exactly cdj_c674x_step -
+ * and goes on with between() (or the horizon's skip of it) after it, as
+ * after any packet; it then returns 0 only with nothing run at all (never
+ * for that reason), and a fault of the interpreter's step returns
+ * CDJ_C674X_RUN_FAULT. */
+void cdj_c674x_set_run_steps(bool on);
 enum {
     CDJ_C674X_RUN_BETWEEN = 1,
     CDJ_C674X_RUN_STOPPED = 2,

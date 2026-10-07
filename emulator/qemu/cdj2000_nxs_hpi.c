@@ -195,10 +195,19 @@ typedef struct {
     uint32_t idle_log_address[64], idle_log_value[64];
 } NxsHpi;
 /* After the board itself writes `size` bytes of DSP memory at `host`. */
-static inline void dsp_code_write(NxsHpi *s, const void *host, size_t size)
+static inline __attribute__((unused)) void
+dsp_code_write(NxsHpi *s, const void *host, size_t size)
 {
     if (cdj_c674x_may_hold_code(host, size))
         __atomic_add_fetch(&s->code_writes, 1, __ATOMIC_RELEASE);
+}
+
+/* The idle proof is broken: RAM writes need no logging any more, so the
+ * core may store directly again (cdj_c674x_set_ram_window's flag). */
+static inline __attribute__((unused)) void dsp_idle_dirty(NxsHpi *s)
+{
+    s->idle_dirty = true;
+    s->ram_direct = !s->ram_slow;
 }
 
 static NxsHpi *nxs_hpi;
@@ -756,7 +765,7 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
      * are pure (a const model) and its inputs change only when MAIN writes
      * the boot phase, which cannot happen while the DSP runs.  The NXS idle
      * loop polls those boot-phase inputs. */
-    if (address < 0x01e26000u || address >= 0x01e27000u) s->idle_dirty = true;
+    if (address < 0x01e26000u || address >= 0x01e27000u) dsp_idle_dirty(s);
     if (cdj_c6747_syscfg_read(&s->syscfg, address, value)) return true;
     if (cdj_c6747_syscfg_priority_read(&s->syscfg_priority, address, value))
         return true;
@@ -937,7 +946,7 @@ static void deliver_edma_notifications(NxsHpi *s)
     /* C6747 system event 8 is the EDMA3CC region-1 completion pulse. */
     if (cdj_c6747_edma_take_irq_notification(&s->edma, 1)) {
         cdj_c6747_intc_deliver_event(&s->intc, &s->intc_delivery, 8);
-        s->idle_dirty = true;
+        dsp_idle_dirty(s);
     }
 }
 
@@ -1010,7 +1019,7 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
          * RAM write and read no transiently rewritten word (an EDMA
          * completion dirties it in deliver_edma_notifications). */
         if (trial_context.write_count || trial_context.idle_log_hit)
-            s->idle_dirty = true;
+            dsp_idle_dirty(s);
         deliver_edma_notifications(s);
         if (s->tx_capture || s->audio_voice || s->pcm_wav) {
             for (unsigned instance = 1; instance <= 2; ++instance) {
@@ -1432,7 +1441,7 @@ static void dsp_idle_note_write(NxsHpi *s, uint32_t address, uint64_t value,
     (void)value;
     if (!s->idle_anchor_valid || s->idle_dirty) return;
     if (size > 8 || !dsp_memory_span(s, address, size)) {
-        s->idle_dirty = true;
+        dsp_idle_dirty(s);
         return;
     }
     for (uint32_t word = address & ~3u; word < address + size; word += 4) {
@@ -1441,7 +1450,7 @@ static void dsp_idle_note_write(NxsHpi *s, uint32_t address, uint64_t value,
         if (i < s->idle_log_count) continue;
         const uint8_t *p = dsp_memory_span(s, word, 4);
         if (!p || i == 64) {
-            s->idle_dirty = true;
+            dsp_idle_dirty(s);
             return;
         }
         s->idle_log_address[i] = word;
@@ -1466,7 +1475,8 @@ static bool dsp_write(void *opaque, uint32_t address, uint64_t value,
         uint8_t *target = dsp_memory_span(s, address, size);
         if (target) {
             if (commit) {
-                if (s->idle_skip) dsp_idle_note_write(s, address, value, size);
+                if (s->idle_skip && s->idle_anchor_valid && !s->idle_dirty)
+                    dsp_idle_note_write(s, address, value, size);
                 if (size == 4) stl_le_p(target, value);
                 else if (size == 8) stq_le_p(target, value);
                 else if (size == 2) stw_le_p(target, value);
@@ -2898,6 +2908,12 @@ void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *op
     if (getenv("CDJ_NXS_DSP_CODE_WRITES") == NULL ||
         strcmp(getenv("CDJ_NXS_DSP_CODE_WRITES"), "0"))
         cdj_c674x_set_code_writes(&s->code_writes);
+    /* The compiled run steps the interpreter itself where it must and goes
+     * on (cdj_c674x_set_run_steps): the activation loop's own per-step
+     * work then runs only where the horizon does not skip it.
+     * CDJ_NXS_DSP_RUN_STEPS=0 turns it off. */
+    cdj_c674x_set_run_steps(getenv("CDJ_NXS_DSP_RUN_STEPS") == NULL ||
+                            strcmp(getenv("CDJ_NXS_DSP_RUN_STEPS"), "0"));
     cdj_c674x_set_ram_window(dsp_write, dsp_ram_window, &s->ram_direct);
     s->functional_audio = audio && !strcmp(audio, "1");
     const char *ram_fast = getenv("CDJ_NXS_DSP_RAM_FAST");
