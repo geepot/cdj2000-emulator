@@ -303,6 +303,36 @@ Do not enable fresh-only delivery as a workaround: it remains diagnostic-only.
 E-7206 auth-chip emulation is still unresolved; USB/SD loading and audio playback
 are not yet validated.
 
+### NXS EMERGENCY LOOP at a track end (2026-10-06)
+
+`EMERGENCY LOOP` on the player screen is status-record word 20 = 0x46, a
+GUI message (`EMERGENCY LOOP(*)` in the GUI's message table). On a deck it
+is the loop the player falls back to when its buffered audio runs out on a
+stream it has not finished reading; MAIN's RS-232 `Emergency Loop Test`
+command forces it by flagging the PCM region reader. The MAIN code that
+raises 0x46 was not located. A normal track end does not show it, and the
+stock firmware on the real C674x does not: on the confirmed USB, Obey (MP3)
+played its last 28 s into track 06 with no message (`runs/el-real-5`,
+`--functional-dsp-audio`, needle search while paused, then PLAY; also
+`runs/el-real-3`).
+
+It came from the DSP model (`--dsp-model`). For a coded stream MAIN's input
+pump feeds 8 KiB file chunks beside each 0x28-frame header, one handshake
+each (MAIN writes 0x118381c4 = 1, 2 for the file's last chunk; the DSP
+clears it), and the stock DSP consumes the header only once it has decoded
+its frames: 2.77 chunks per header for Obey (`runs/el-real-8`). The model
+consumed every header on its first chunk, so its position ran 2.6x ahead of
+MAIN's file reader; at the track's length most of the file was unread, MAIN
+kept feeding the finished stream, showed EMERGENCY LOOP and started track 06
+25-60 s late (`runs/el-model-1`). The model now keeps a coded header pending
+until the chunks its frames take at the stream's mean rate (command +0x18
+bytes over +0x1c frames) have arrived, caps the deck stream at its length as
+the stock DSP does (its last-received word ends on length - 1), and treats
+the 0x3000100/0x3000200 status write (MAIN's end-of-file flag) as a
+status-block copy instead of frames. Obey now plays into track 06 with no
+message and no gap (`runs/el-model-9`, `runs/el-model-final`). PCM
+(AIFF/WAV, command 2) streams take their headers at once as before.
+
 ### Existing tracing tools
 
 ```sh

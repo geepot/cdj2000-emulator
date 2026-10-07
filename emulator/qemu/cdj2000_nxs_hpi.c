@@ -176,12 +176,16 @@ typedef struct {
     uint32_t model_received[2]; /* frames announced per stream buffer */
     uint32_t model_total[2];    /* +0x1c frames of each buffer's stream */
     uint32_t model_record, model_length; /* the last command, until its first header */
+    uint32_t model_command, model_size; /* its kind (2 PCM, 3/4 coded) and +0x18 bytes */
+    bool model_coded[2];        /* each buffer's stream is coded (MP3/AAC) */
+    uint32_t model_bytes_total[2]; /* +0x18: the coded stream's size in bytes */
+    uint32_t model_base[2];     /* frames received when MAIN last (re)issued it */
+    uint64_t model_bytes[2];    /* coded bytes MAIN delivered since then */
+    bool model_eof[2];          /* MAIN sent the stream's last chunk (0x118381c4 = 2) */
     uint32_t model_bound[2];    /* record + 1 bound to each buffer, 0 none */
     uint32_t model_search;      /* search multiple from command 3 */
     uint32_t model_next;        /* record + 1 queued behind the playing one */
     uint64_t model_boundary;    /* the frame where that record starts */
-    uint32_t model_play_len;    /* frames of the playing record, 0 unknown */
-    uint32_t model_next_len;    /* the same for the queued one */
     bool model_pending, model_late, model_search_back;
     bool idle_skip, idle_dirty, idle_anchor_valid;
     unsigned idle_anchor_step;
@@ -2423,33 +2427,18 @@ static void model_move(NxsHpi *s, int64_t samples)
     s->model_samples = samples;
     model_put(s, MODEL_AHEAD, ahead - moved);
     model_put(s, MODEL_BEHIND, behind + moved);
-    /* The playing record ends at its length (stream command +0x1c, MAIN's
-     * duration) or where a record MAIN queued behind it (continuous play)
-     * starts. Its frames past that are dropped: an MP3 stream delivers
-     * more buffer frames than its length (Obey: 0x8520 for 0x7e93,
-     * runs/dsp-model-play-7), and playing them on left the end unreached.
-     * ponytail: how the real DSP spends that surplus is not established. */
-    uint64_t end = s->model_play_len;
-    if (s->model_next && (!end || s->model_boundary < end)) end = s->model_boundary;
-    if (end && s->model_samples >= end * MODEL_FRAME_SAMPLES) {
-        uint64_t at = s->model_samples / MODEL_FRAME_SAMPLES;
-        uint32_t rest = model_get(s, MODEL_AHEAD);
-        uint32_t drop = !s->model_next ? rest :
-            MIN(rest, s->model_boundary > at ? s->model_boundary - at : 0);
-        model_put(s, MODEL_AHEAD, rest - drop);
-        model_put(s, MODEL_FREE, model_get(s, MODEL_FREE) + drop);
-        if (s->model_next) {
-            /* The next record plays on; the position blocks name it and
-             * count from its start. */
-            s->model_samples -= end * MODEL_FRAME_SAMPLES;
-            model_put(s, 0x11837c14, s->model_next - 1);
-            model_put(s, 0x11837c34, s->model_next - 1);
-            s->model_play_len = s->model_next_len;
-            s->model_next = 0;
-            s->model_late = false;
-        } else {
-            s->model_samples = end * MODEL_FRAME_SAMPLES;
-        }
+    /* Continuous play: the position passes into the record MAIN queued
+     * behind the playing one where that record's frames start. The playing
+     * record cannot run past its length: model_service never buffers frames
+     * beyond it, so the position stops on its last frame. */
+    if (s->model_next && s->model_samples >= s->model_boundary * MODEL_FRAME_SAMPLES) {
+        /* The next record plays on; the position blocks name it and count
+         * from its start. */
+        s->model_samples -= s->model_boundary * MODEL_FRAME_SAMPLES;
+        model_put(s, 0x11837c14, s->model_next - 1);
+        model_put(s, 0x11837c34, s->model_next - 1);
+        s->model_next = 0;
+        s->model_late = false;
     }
     model_publish_position(s);
 }
@@ -2493,7 +2482,15 @@ static void model_bind(NxsHpi *s, unsigned buffer)
      * continues: the stock DSP keeps the buffered frames, the received
      * count, the position and the other block's record (dsp-model-ref-3,
      * the track's command 3 at the play request). */
-    if (s->model_bound[buffer] == s->model_record + 1) return;
+    s->model_coded[buffer] = s->model_command != 2;
+    s->model_bytes_total[buffer] = s->model_size;
+    s->model_bytes[buffer] = 0;
+    s->model_eof[buffer] = false;
+    if (s->model_bound[buffer] == s->model_record + 1) {
+        s->model_base[buffer] = s->model_received[buffer];
+        return;
+    }
+    s->model_base[buffer] = 0;
     bool queued = !buffer && s->model_bound[0] && model_get(s, MODEL_AHEAD);
     s->model_bound[buffer] = s->model_record + 1;
     s->model_received[buffer] = 0;
@@ -2509,14 +2506,12 @@ static void model_bind(NxsHpi *s, unsigned buffer)
          * play-3; switching at the boundary avoids its EMERGENCY LOOP,
          * runs/dsp-model-play-5). */
         s->model_next = s->model_record + 1;
-        s->model_next_len = s->model_length;
         s->model_boundary = s->model_samples / MODEL_FRAME_SAMPLES + model_get(s, MODEL_AHEAD);
         for (uint32_t at = 0x10; at <= 0x18; at += 4)
             model_put(s, block + at, UINT32_MAX);
         return;
     }
     s->model_next = 0;
-    s->model_play_len = s->model_length;
     s->model_bound[1] = 0;      /* a new track's second stream starts afresh */
     model_put(s, 0x11838180, 0);                 /* until a second stream */
     model_put(s, 0x11838184, s->model_record);
@@ -2577,6 +2572,52 @@ static void model_service(NxsHpi *s)
         model_put(s, MODEL_REQUEST, 0);
     }
     uint32_t header = model_get(s, MODEL_HEADER);
+    if ((header & 0xffff00ffu) == 0x03000000u) {
+        /* 0x3000100 / 0x3000200 is not data: host_stream_service (c004a424)
+         * routes it to c00487c0, which, when 0x11838168 names the stream
+         * the block holds, copies 0x11838144..0x11838150 into the status
+         * block (byte 1: 1 the deck's 0x118381a0, 2 the second 0x11838180)
+         * and clears the header. MAIN sends it from sub_041c8b90 /
+         * sub_041c88d2 to set or clear the end-of-file flag (+0xc bit 24
+         * resp. 25) once its reader reaches EOF, and reads that flag back
+         * when its input manager restarts (041d33f8): a lost flag makes it
+         * read the file again. Counting +4 as frames (the block's received
+         * word, read back) refilled the buffer at every EOF. */
+        uint32_t block = (header >> 8 & 0xff) == 2 ? 0x11838180 : 0x118381a0;
+        if (model_get(s, 0x11838168) == model_get(s, block + 4))
+            for (uint32_t at = 0; at < 0x10; at += 4)
+                model_put(s, block + at, model_get(s, MODEL_HEADER + 4 + at));
+        model_put(s, MODEL_HEADER, 0);
+        header = 0;
+    }
+    /* A coded stream (MPEG/AAC, command 3/4) arrives as 8 KiB file chunks
+     * beside its header: MAIN's input pump (djcont_dec_input_pump
+     * 041d1e3e) hands each to its transfer task, which writes 0x118381c4 =
+     * 1 (2 for the file's last chunk) and waits for the DSP to clear it,
+     * and the pump keeps reading chunks until the header is consumed. The
+     * DSP consumes the header once it has decoded its 0x28 frames: 2.77
+     * chunks per header on average for Obey (320 kbps, 21.3 KB per 0x28
+     * frames; runs/el-real-8), not one. The model has no decoder, so it
+     * charges each header the stream's mean bytes per frame (+0x18 bytes
+     * over +0x1c frames). Consuming the header on the first chunk let the
+     * position run 2.6x ahead of MAIN's file reader: the track "ended"
+     * with most of the file unread, MAIN kept feeding the finished stream
+     * and showed EMERGENCY LOOP. ponytail: a mean rate, so a VBR file's
+     * local bitrate is not followed; its end is (2 marks the last chunk). */
+    unsigned chunk_buffer = header && (header >> 8 & 0xff) == 2;
+    uint32_t chunk = model_get(s, 0x118381c4);
+    if (chunk == 1 || chunk == 2) {
+        s->model_bytes[chunk_buffer] += 0x2000;
+        if (chunk == 2) s->model_eof[chunk_buffer] = true;
+    }
+    if (header && (header >> 24) == 1 && !(s->model_pending && (header >> 16 & 0xff) == 1)) {
+        unsigned b = chunk_buffer;
+        uint64_t frames = (model_get(s, MODEL_HEADER + 4) & 0xffff) +
+                          (uint64_t)s->model_received[b] - s->model_base[b];
+        if (s->model_coded[b] && !s->model_eof[b] && s->model_total[b] &&
+            s->model_bytes[b] < frames * s->model_bytes_total[b] / s->model_total[b])
+            header = 0;                         /* still decoding: stays pending */
+    }
     if (header) {
         /* A stream header announces +0x8144 frames into buffer byte 1:
          * 1 is the track (level 0x7cd0, status 0x81a0), 2 the second
@@ -2586,6 +2627,13 @@ static void model_service(NxsHpi *s)
         unsigned buffer = (header >> 8 & 0xff) == 2;
         if (s->model_pending && (header >> 16 & 0xff) == 1)
             model_bind(s, buffer);
+        /* The deck's stream takes no frame past its length (+0x1c): the
+         * header of MAIN's last chunk still says 0x28, but the stock DSP's
+         * last-received word ends on length - 1 (Obey 0x7e93: 0x7e75 + 29
+         * in runs/el-real-4, 0x7e73 + 31 in runs/el-real-8, both 0x7e92). */
+        if (!buffer && s->model_total[0])
+            frames = MIN(frames, s->model_total[0] > s->model_received[0] ?
+                         s->model_total[0] - s->model_received[0] : 0);
         /* One pool of 0x1a24 frames: ahead + behind + free stays constant
          * (dsp-model-ref-3). With too little free space the new frames
          * take the other side's oldest ones instead of going negative. */
@@ -2613,6 +2661,8 @@ static void model_service(NxsHpi *s)
          * header names; see model_bind. */
         s->model_record = model_get(s, 0x11838120);
         s->model_length = model_get(s, 0x1183811c);
+        s->model_command = command;
+        s->model_size = model_get(s, 0x11838118);
         s->model_pending = true;
         model_put(s, 0x11838140, 0);
         model_put(s, 0x118381c4, 0);
