@@ -124,6 +124,7 @@ def describe(frame: bytes) -> dict:
 BIOCSBLEN, BIOCGBLEN = 0xC0044266, 0x40044266
 BIOCSETIF, BIOCIMMEDIATE = 0x8020426C, 0x80044270
 BIOCSHDRCMPLT, BIOCSSEESENT = 0x80044275, 0x80044277
+BIOCPROMISC = 0x20004269        # _IO('B', 105): emulated decks' MACs are not the NIC's
 
 
 def bpf_frames(buffer: bytes) -> list[bytes]:
@@ -161,6 +162,9 @@ class Bpf:
         fcntl.ioctl(self.fd, BIOCIMMEDIATE, one)
         fcntl.ioctl(self.fd, BIOCSHDRCMPLT, one)
         fcntl.ioctl(self.fd, BIOCSSEESENT, struct.pack("I", 0))
+        # Unicast to an emulated deck (ARP replies, dbserver TCP) is addressed to its
+        # MAC, which the NIC filters out unless the interface is promiscuous.
+        fcntl.ioctl(self.fd, BIOCPROMISC)
         self.size = struct.unpack("I", fcntl.ioctl(self.fd, BIOCGBLEN, b"\0" * 4))[0]
         self.interface = interface
 
