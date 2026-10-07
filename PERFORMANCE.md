@@ -1474,3 +1474,66 @@ in about a minute.
   state (`code_gen`, the packet cache, the horizon, the RAM TLB, the
   counters) is one `_Thread_local` struct (`CDJ_C674X_TLS`), so a
   function locates it once; `horizon_skip` is always inlined.
+
+### Direct form, run steps and the rest (473f10d)
+
+- **Direct form** (`aot_gen.py`, `emit_direct`).  Where a packet holds
+  only register-only, memory, SP, compact-value, compact stack (B15 word,
+  Dpp) and B/BNOP displacement or register operations, and no write can
+  conflict (no two writes to one register, none to a register landing that
+  cycle), the node checks everything first without touching the CPU (a
+  decline needs no undo), runs the bus phase (which then cannot act on its
+  own appends - checked at generation), appends, writes registers and
+  retires.  79% of the compiled runs of the stock profile take it; the rest
+  keep the lean form (generic arms, compact BNOP, CALLP, MVC).  Profiles
+  carry the core's enum numbering and the generated file asserts it.
+- **Run steps** (`cdj_c674x_set_run_steps`, on in the NXS board,
+  `CDJ_NXS_DSP_RUN_STEPS=0` off): a run steps the interpreter itself where
+  no compiled path takes a packet and goes on, with between() or the
+  horizon's skip of it after the step as after any packet.
+- **Compact stack transfers in line** (`LOP_CB15`, `LOP_CDPP`) instead of
+  `compact_memory`'s generic path.
+- **RAM window fast paths and the interrupt check always inlined**, the
+  RAM TLB move-to-front; the board stores directly again as soon as the
+  idle proof breaks.
+
+Exactness (all on 473f10d): the lockstep test (now also with compact fetch
+packets, register branches, directed Dpp, duplicate-write,
+self-modifying-code and CSR/IER programs, tick counting and run-count
+checks) clean, also under ASan/UBSan; the AOT build of it (profile of the
+test's own programs, every variant dumped, forced declines) clean, also
+under ASan/UBSan; mutation checks on every new path (core and generator) -
+the remaining misses are equivalent or unreachable by construction (a
+disabled access's AMR-ready decline, the compact-value fault restore of a
+form that cannot fault, aliasing PCs the harness cannot place, the
+loop/idle test in `aot_next`, profiled edges whose shapes always match);
+the eight checkpoint replays identical (develop JIT on vs this with the
+horizon, develop JIT off vs this JIT on, this JIT off vs AOT on with the
+horizon); the 60 M-step replays identical in trace and final checkpoint
+(develop, JIT off, AOT on; with the horizon identical but for coverage
+lines); 45 s full-capture boots byte-identical over the common prefix
+against develop (298,354 events, 5,314 checkpoints; functional audio
+142,177 / 1,093) and JIT off against AOT on (373,168 / 7,336); the full
+suite passes but the known TMU test and the orphan-watchdog flake.
+
+Live, real USB, `--lightweight --dsp-thread --audio-clock virtual`
+(**preliminary**: the machine was shared with other agents' emulators,
+which moves single runs by ±10% and more):
+
+| build | trials | per virtual s | per wall s | underrun slots |
+|---|---|---|---|---|
+| develop | 3 (interleaved) | 20.8-21.2 M | 15.0-16.3 M | 86.0-86.4% |
+| stage 3 (b2eb06b) | 3 (interleaved) | 26.1-26.7 M | 19.0-20.8 M | 82.5-83.1% |
+| this, AOT on | 2 (interleaved, MAIN slowed: virtual/wall 0.57-0.59) | 27.8 / 38.7 M | 15.9 / 23.0 M | 81.6 / 72.7% |
+| this, AOT on | 4 (two earlier sessions, virtual/wall 0.73-0.78) | 39.5-44.1 M | 31-34 M | 73.1-75.5% |
+
+E-8302 stays on screen: **real time is not reached**.  At ~40-44 M per
+virtual second the gap to the ~63 M playback needs is ~1.5x.  The DSP
+thread now spends ~40% in the compiled regions themselves, ~10% in loops,
+~7% in stores the board logs for the idle proof, ~4% in the board's 4 KB
+EDMA backup per McASP slot, ~5% in between().  What would close the gap:
+regions that keep in-flight writes across packets (no queue array copies:
+~4.5 struct copies per packet now), compiled SPLOOP kernels and loading
+cycles, fewer horizon ends (each ~55 packets), an EDMA slot rollback that
+copies only what a slot touches, and a cheaper idle-proof policy while
+playing.  AOT stays off by default (`CDJ_C674X_AOT=1`).
