@@ -909,6 +909,11 @@ def main():
                              '(CDJ_C674X_JIT=1; PERFORMANCE.md "Compiled SPLOOP kernels"); '
                              'events and checkpoints are those of the interpreter '
                              '(default: on; --no-dsp-jit runs the interpreter alone)')
+    dsp.add_argument('--dsp-aot', action=argparse.BooleanOptionalAction, default=True,
+                        help='run ahead-of-time compiled C674x regions when the QEMU build has them '
+                             '(CDJ_C674X_AOT=1; PERFORMANCE.md "C674x stage 4"); events and '
+                             'checkpoints are those of the interpreter; a build without regions '
+                             'ignores it (default: on; --no-dsp-aot)')
     dsp.add_argument('--dsp-legacy-budget', type=int,
                         help='legacy packets per HPI wake (4096..1000000; default: 1000000)')
     removed = removed_option(sys.argv[1:])
@@ -1220,6 +1225,9 @@ def main():
     if args.dsp_idle_skip:
         main_env['CDJ_NXS_DSP_IDLE_SKIP'] = '1'
     main_env.pop('CDJ_C674X_JIT', None)
+    main_env.pop('CDJ_C674X_AOT', None)
+    if args.dsp_aot:
+        main_env['CDJ_C674X_AOT'] = '1'
     if args.dsp_jit:
         main_env['CDJ_C674X_JIT'] = '1'
     if args.functional_dsp_timing:
@@ -1323,6 +1331,7 @@ def main():
         dsp_thread=args.dsp_thread,
         dsp_thread_choice=dsp_thread_choice,
         dsp_jit=args.dsp_jit,
+        dsp_aot=args.dsp_aot,
         dsp_audio_clock=('virtual-clock-batch' if args.virtual_mcasp_clock else
                          'dsp-thread-virtual' if args.audio_clock == 'virtual' else
                          'dsp-sysclk1-cycle' if args.dsp_cycle_mcasp_clock else
