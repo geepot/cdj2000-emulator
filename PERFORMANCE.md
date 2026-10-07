@@ -1537,3 +1537,76 @@ regions that keep in-flight writes across packets (no queue array copies:
 cycles, fewer horizon ends (each ~55 packets), an EDMA slot rollback that
 copies only what a slot touches, and a cheaper idle-proof policy while
 playing.  AOT stays off by default (`CDJ_C674X_AOT=1`).
+
+## C674x stage 5 (`dsp-jit5`, 2026-10-06/07)
+
+Goal: real-time stock playback under `--audio-clock virtual` (~63 M DSP
+packets per virtual second, no E-8302).  Live numbers below are the
+virtual-clock scenario of stage 4 (stock firmware, the confirmed rekordbox
+USB, `--lightweight --dsp-thread --audio-clock virtual`, auto-play after
+load), measured from 5 s after the load to the end of a 150 s run, on a
+host shared with other agents' emulators (load 11-17 on 16 cores).
+Baseline (develop f3fe256 with the stage-4 AOT file): **50.6-52.8 M
+packets per virtual second** (5 runs), underrun slots 66-69%.
+
+### 1. Board: MAIN's hand-over, the idle skip, the slot's EDMA copies
+
+A live profile of the DSP thread (`sample`, 10 s of playback) and
+temporary counters (horizon ends by cause, interpreter steps by kind) gave:
+
+- **MAIN's waits ended every horizon.**  85 M of ~120 M between() calls
+  in a run came from `dsp_horizon_open` closing the horizon whenever
+  `host_waiting` was set: MAIN tries the DSP lock on every HPI access
+  (~400 K/s while a track plays), and while it waited for the DSP to reach
+  `main_last + access_packets` the DSP called between() after *every*
+  packet up to that point.  But `until` is already bounded by that packet
+  count, and `dsp_thread_main_due` ends the chunk there: only a DSP past
+  it must stop at once.  `dsp_horizon_open` now closes only then, and
+  `main_lock` closes only when the published `until` lies past it
+  (a Dekker pair: MAIN raises the flag, barrier, reads `until`; the DSP
+  publishes `until`, barrier, reads the flag).  AOT region exits at a
+  horizon end fell from 41.6 M to 5.5 M per run.  Live alone: +2%
+  (52.5-52.8 M), within the noise.
+- **The idle skip only costs under the virtual audio clock.**  During
+  playback it never skipped (`idle-skipped` flat after boot: the next slot
+  edge is always due for a DSP behind virtual time), but every activation
+  re-anchored (a state copy), RAM stores went through the logging
+  callback instead of the direct path, and every pass of the anchor PC
+  was a between().  `--no-dsp-idle-skip` alone: **58.8-59.9 M** against
+  ~51.5 M, and `Not Loaded.` 1.1 s sooner (no 2 s GUI head start, which
+  only exists for the skip).  A back-off of the anchoring instead (fewer
+  anchors after unproductive ones, the GUI head start kept) put 4 of 6
+  runs into a different firmware regime: the DSP spent most of its time
+  in the 8-byte SPLOOP memcpy at 0x11804838 (2.0 G steady kernel cycles
+  per run against ~0.37 G) at ~33 M per virtual second, as did 2 of 5
+  runs with the skip off in the board but the head start kept.  Skipping
+  is exact either way (45 s boots byte-identical), so this is timing
+  sensitivity of the firmware, not a fault; the launcher setting that
+  never showed it is the one adopted: `nxs_vm` now defaults to
+  `--no-dsp-idle-skip` (and so no GUI head start) with `--audio-clock
+  virtual`; `--dsp-idle-skip` still turns it on.
+- **The McASP slot's EDMA copies.**  Each slot copied the 4 KB EDMA state
+  twice: the board's undo copy and `cdj_c6747_edma_event`'s own trial run
+  on a copy (`preview`).  Every board caller of `service_mcasp_axevt`
+  already discards or restores both models on failure, so it now uses
+  `cdj_c6747_edma_event_unchecked` (the commit pass alone, which fails
+  exactly where the trial would) with a journal of the PaRAM sets the
+  events change (an event changes only its own set; each is saved once,
+  before its first change), and the slot copies only the ~250 bytes of
+  registers outside `param[]`.  `tests/cstub/c6747-edma.c` checks the
+  unchecked events against the checked ones (state and bus) and the undo
+  after a failure in a chained transfer.
+- **QoS.**  The DSP thread asks macOS for the performance cores
+  (`QOS_CLASS_USER_INTERACTIVE`): on the busy host an occasional run had
+  shown about half the packet rate per wall second with the normal kernel
+  mix, as on an efficiency core.  Not measured on its own.
+
+Exactness: 45 s full-capture stock boots against develop, all 298,354
+events and 5,314 checkpoints of the common prefix byte-identical (this
+binary reaches 395,405 events), with `--functional-dsp-audio` 142,177 and
+1,093 (the slot path with the journal); `tests/test_dsp_thread.py` (MAIN's
+hand-over under the shim) and the EDMA test pass.
+
+Live, three runs: **61.8 / 60.8 / 53.3 M per virtual second** (the last
+at virtual/wall 0.70 under load 12-17), underrun slots 61-64%.  E-8302
+stays on screen: real time is not reached yet.
