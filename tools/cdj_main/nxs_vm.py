@@ -776,6 +776,11 @@ def main():
     diag.add_argument('--panel-rev2', action='store_true',
                         help='the GUI board reads PF3 = 1, the late "/2" panel revision '
                              '(BFIN_GPIO_STRAP=0x8:0x8)')
+    dsp.add_argument('--dsp-rom', type=Path, metavar='PATH', default=None,
+                     help='C6747 DSP L2 ROM image (1 MiB, SHA-256 checked) mapped read-only at '
+                          '0x11700000 for the C674x core, as CDJ_DSP_ROM; build one from your own '
+                          'TI codec download with tools/cdj_dsp/build_dsp_rom.py. Without it the '
+                          'ROM stays unmapped (stock AAC decode faults on its table reads).')
     dsp.add_argument('--dsp-model', action='store_true',
                         help='behavioural DSP: answer MAIN without executing the C674x '
                              '(fast; real-time transport position, no audio, so not audio '
@@ -1290,6 +1295,8 @@ def main():
     if args.audio_clock == 'virtual':
         main_env['CDJ_NXS_DSP_AUDIO_CLOCK'] = 'virtual'
     main_env.pop('CDJ_NXS_DSP_MODEL', None)
+    if args.dsp_rom:
+        main_env['CDJ_DSP_ROM'] = str(args.dsp_rom.resolve())
     if args.dsp_model:
         main_env['CDJ_NXS_DSP_MODEL'] = '1'
     main_env.pop('CDJ_NXS_DSP_VIRTUAL_MCASP', None)

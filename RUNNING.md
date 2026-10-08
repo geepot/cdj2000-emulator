@@ -1336,3 +1336,24 @@ depends on, and a distorted race is a void measurement. The runners use fixed
 ports and take no lock, so an orphaned process either fails the next run or --
 worse -- talks to it. `tools/cdj_main/procs.py` cleans up; it exists because
 fourteen orphaned simulators were once found at once.
+
+## The DSP's L2 ROM (stock AAC)
+
+The C6747 has 1 MiB of ROM at `0x11700000` (local `0x00700000`). Stock's AAC
+decoder reads TI constant tables from it (window shapes, scale-factor band
+tables, Huffman tuples, the CRC table); it executes no code from it (the
+decode path never fetches from ROM, and stock's `ISTP` is the L2 RAM table).
+The ROM is TI's, so it is never in this repository: it is loaded at run time
+from a file you supply, read-only, and its SHA-256 must be one the board
+accepts (`CDJ_DSP_ROM_SHA256` adds one).
+
+```sh
+python3 tools/cdj_dsp/build_dsp_rom.py          # from ~/.cache/dspdec/ti-x/lib/heaac
+python3 -m tools.cdj_dsp.replay CHECKPOINT OUT --dsp-rom build/dsp-rom/c6747-l2-rom.bin ...
+python3 -m tools.cdj_main.nxs_vm ... --dsp-rom build/dsp-rom/c6747-l2-rom.bin   # or CDJ_DSP_ROM=...
+```
+
+`build_dsp_rom.py` lays the tables stock references from TI's own MP4AACDEC 1.01
+objects (your download) at the addresses stock uses, zero elsewhere. Without a
+ROM file the region stays unmapped, as before, and each run prints a warning;
+stock AAC then faults on its first table read.

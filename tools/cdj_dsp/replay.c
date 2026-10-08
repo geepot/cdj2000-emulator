@@ -21,6 +21,7 @@
 #include "cdj_c6747_pll.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
+#include "cdj_c6747_rom.h"
 #include "cdj_dsp_checkpoint.h"
 #include "cdj_dsp_ticks.h"
 static uint8_t ram[0x40000];
@@ -47,6 +48,7 @@ static CdjC6747SyscfgPriority syscfg_priority;
 static CdjC6747Pll pll;
 static CdjC6747Hpi hpi;
 static CdjC6747Emifb emifb;
+static CdjC6747Rom dsp_rom;     /* L2 ROM, CDJ_DSP_ROM; read-only */
 static CdjC674x cpu;
 static CdjDspCheckpointState checkpoint_state;
 typedef struct {
@@ -536,6 +538,7 @@ static bool read_bus(void *unused, uint32_t a, uint32_t *v)
              (uint32_t)sdram[offset + 2] << 16 | (uint32_t)sdram[offset + 3] << 24;
         return true;
     }
+    if (cdj_c6747_rom_read(&dsp_rom, a, v)) return true;
     a = global(a);
     uint32_t l1_offset;
     if (!(a & 3) && cdj_c6747_l1d_sram_span(
@@ -1578,6 +1581,7 @@ mismatch:
 }
 int main(int argc, char **argv)
 {
+    cdj_c6747_rom_init_env(&dsp_rom);
     const char *compact_trace = getenv("CDJ_DSP_COMPACT_TRACE");
     bool trace_steps = !compact_trace || strcmp(compact_trace, "1");
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");

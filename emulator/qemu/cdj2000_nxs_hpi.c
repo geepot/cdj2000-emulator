@@ -33,6 +33,7 @@
 #include "cdj_c6747_edma.h"
 #include "cdj_c6747_hpi.h"
 #include "cdj_c6747_emifb.h"
+#include "cdj_c6747_rom.h"
 #include "cdj_dsp_checkpoint.h"
 #include "cdj_dsp_budget.h"
 #ifdef __APPLE__
@@ -152,6 +153,7 @@ typedef struct {
     CdjC6747SyscfgPriority syscfg_priority;
     CdjC6747Pll pll;
     CdjC6747Emifb emifb;
+    CdjC6747Rom rom;            /* L2 ROM tables, user-supplied (CDJ_DSP_ROM) */
     uint8_t *shared_ram;
     uint8_t *sdram;
     void (*hint)(void *, bool);
@@ -794,6 +796,8 @@ static bool dsp_read(void *opaque, uint32_t address, uint32_t *value)
         *value = ldl_le_p(s->sdram + sdram_offset);
         return true;
     }
+    /* L2 ROM (read-only data tables): pure, so it needs no tick flush. */
+    if (cdj_c6747_rom_read(&s->rom, address, value)) return true;
     dsp_ticks_flush(s);
     dsp_horizon_close(s);
     /* Past RAM, a device read voids an idle proof.  GPIO is exempt: its reads
@@ -3052,6 +3056,7 @@ static const MemoryRegionOps hpi_ops = {
 void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *opaque)
 {
     NxsHpi *s = g_new0(NxsHpi, 1);
+    cdj_c6747_rom_init_env(&s->rom);
     s->playback_metrics = g_strcmp0(getenv("CDJ_NXS_DSP_PLAYBACK_METRICS"), "1") == 0;
     s->horizon.count_gie = s->playback_metrics;
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");

@@ -30,7 +30,7 @@ SOURCES = [ROOT / 'tools/cdj_dsp/replay.c', *[
      'cdj_c6747_hpi.c', 'cdj_c6747_emifb.c', 'cdj_c6747_intc.c',
      'cdj_c6747_timer.c',
      'cdj_c6747_spi.c',
-     'cdj_c6747_cache.c',
+     'cdj_c6747_cache.c', 'cdj_c6747_rom.c',
      'cdj_c6747_edma.c',
      'cdj_dsp_scheduler.c',
      'cdj_dsp_checkpoint.c')]]
@@ -366,9 +366,14 @@ def main():
     parser.add_argument('--overlay', type=Path,
                         help='JSON overlay of DSP memory writes applied when the DSP first '
                              'reaches trigger_pc (null: at replay start)')
+    parser.add_argument('--dsp-rom', type=Path,
+                        help='C6747 L2 ROM image mapped read-only at 0x11700000 (else CDJ_DSP_ROM); '
+                             'build one with tools/cdj_dsp/build_dsp_rom.py')
     parser.add_argument('--formats', type=Path, default=DEFAULT_FORMATS,
                         help='GNU tic6x-insn-formats.h used for automatic coverage')
     args = parser.parse_args()
+    if args.dsp_rom:
+        os.environ['CDJ_DSP_ROM'] = str(args.dsp_rom.resolve())
     if not 0 <= args.connected_stops <= 0xffffffff or (args.connected_stops and not args.events):
         parser.error('--connected-stops requires --events and a count from 1 to 4294967295')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
