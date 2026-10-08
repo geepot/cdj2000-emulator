@@ -561,8 +561,16 @@ static bool read_transfer_counted(CdjC674xRead read, void *opaque,
     return true;
 }
 
+/* The read that completes a load: counts gap words. */
 static bool read_transfer(CdjC674xRead read, void *opaque, uint32_t address,
                           unsigned encoded_size, uint64_t *value)
+{
+    return read_transfer_counted(read, opaque, address, encoded_size, value, true);
+}
+
+/* Issue-time mapping probe: does not count. */
+static bool read_transfer_probe(CdjC674xRead read, void *opaque, uint32_t address,
+                                unsigned encoded_size, uint64_t *value)
 {
     return read_transfer_counted(read, opaque, address, encoded_size, value, false);
 }
@@ -1236,7 +1244,7 @@ static bool arm_scalar_memory(CdjC674xArm *x)
         if (pair) store_value |= (uint64_t)x->cpu->r[x->side][x->dst + 1] << 32;
         if ((!nonaligned && (address & (size - 1))) ||
             (is_store ? !write_transfer(x->write, x->opaque, address, store_value, encoded_size, false)
-                      : !read_transfer(x->read, x->opaque, address, encoded_size, &dummy)))
+                      : !read_transfer_probe(x->read, x->opaque, address, encoded_size, &dummy)))
             return stop(x->cpu, x->pc, x->insn->word, "unaligned or unmapped scalar memory access");
         if (is_store) {
             if (x->out->store_count == 24) return stop(x->cpu, x->pc, x->insn->word, "store queue full");
@@ -5026,7 +5034,7 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out,
             if (load->due > now + 2) { ++j; continue; }
             if (queued_memory_load(load) && load->due == now + 2) {
                 uint64_t data;
-                if (!read_transfer_counted(read, opaque, load->address, load->size, &data, true))
+                if (!read_transfer(read, opaque, load->address, load->size, &data))
                     return stop(cpu, entry_pc, 0, "RAM load mapping changed during execution");
                 if (load->sign_extend) data = sx(data, (load->size & 255) * 8);
                 load->value = data;
@@ -7043,7 +7051,7 @@ static bool jit_memory(CdjC674x *cpu, const JitOp *op, bool enabled,
     } else {
         uint64_t dummy;
         if (!jit_read_mapped(read, opaque, address, encoded_size) &&
-            !read_transfer(read, opaque, address, encoded_size, &dummy))
+            !read_transfer_probe(read, opaque, address, encoded_size, &dummy))
             return false;
         if (cpu->load_count == 40) return false;
         uint64_t due = cpu->cycles + 5;
@@ -7378,7 +7386,7 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, bool all_pairs,
         const CdjC674xLoad *load = &cpu->loads[j];
         if (load->due != now + 2 || !queued_memory_load(load)) continue;
         if (!jit_read_span(read, opaque, load->address, load->size, &data[j]) &&
-            !read_transfer_counted(read, opaque, load->address, load->size, &data[j], true))
+            !read_transfer(read, opaque, load->address, load->size, &data[j]))
             broke = "RAM load mapping changed during execution";
         else if (load->sign_extend)
             data[j] = sx(data[j], (load->size & 255) * 8);
@@ -7798,7 +7806,7 @@ jk_exec_t(CdjC674x *cpu, const JitKernel *k, unsigned p, uint64_t c,
         } else {
             uint64_t dummy;
             if (!jit_read_mapped(read, opaque, address, encoded) &&
-                !read_transfer(read, opaque, address, encoded, &dummy))
+                !read_transfer_probe(read, opaque, address, encoded, &dummy))
                 goto decline;
         }
         m->e[o][slot].address = address;
@@ -7841,7 +7849,7 @@ jk_exec_t(CdjC674x *cpu, const JitKernel *k, unsigned p, uint64_t c,
         unsigned size = m->e[r->op][s].size;
         uint64_t *v = &data[i];
         if (!jit_read_span(read, opaque, address, size, v) &&
-            !read_transfer_counted(read, opaque, address, size, v, true)) {
+            !read_transfer(read, opaque, address, size, v)) {
             broke = "RAM load mapping changed during execution";
             goto fault;
         }
@@ -8957,7 +8965,7 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
             if (e3_at[j] != c) continue;
             uint64_t v;
             if (!jit_read_span(read, opaque, load->address, load->size, &v) &&
-                !read_transfer_counted(read, opaque, load->address, load->size, &v, true))
+                !read_transfer(read, opaque, load->address, load->size, &v))
                 broke = "RAM load mapping changed during execution";
             else data[reads++] = load->sign_extend ?
                 (uint64_t)(int64_t)sx(v, (load->size & 255) * 8) : v;
@@ -9361,7 +9369,7 @@ LEAN_INLINE bool lean_issue(CdjC674x *cpu, const CdjC674xCacheEntry *e,
         } else {
             uint64_t dummy;
             if (!jit_read_mapped(read, opaque, address, encoded_size) &&
-                !read_transfer(read, opaque, address, encoded_size, &dummy))
+                !read_transfer_probe(read, opaque, address, encoded_size, &dummy))
                 return false;
             *jit_append_load(cpu, &L->undo) = (CdjC674xLoad){
                 .due = start + 5, .address = address, .bank = op->side,
@@ -9468,7 +9476,7 @@ LEAN_INLINE bool lean_issue(CdjC674x *cpu, const CdjC674xCacheEntry *e,
             uint64_t dummy;
             if (cpu->load_count == 40 ||
                 (!jit_read_mapped(read, opaque, address, 4) &&
-                 !read_transfer(read, opaque, address, 4, &dummy)))
+                 !read_transfer_probe(read, opaque, address, 4, &dummy)))
                 return false;
             for (unsigned j = 0; j < cpu->load_count; ++j)
                 if (cpu->loads[j].due == start + 5 &&
@@ -9494,7 +9502,7 @@ LEAN_INLINE bool lean_issue(CdjC674x *cpu, const CdjC674xCacheEntry *e,
         if (size == 8) data |= (uint64_t)cpu->r[bank][reg + 1] << 32;
         uint64_t dummy;
         if (load ? (!jit_read_mapped(read, opaque, address, size) &&
-                    !read_transfer(read, opaque, address, size, &dummy))
+                    !read_transfer_probe(read, opaque, address, size, &dummy))
                  : !ram_write_transfer(write, opaque, address, data, size,
                                        false))
             return false;
@@ -9665,7 +9673,7 @@ LEAN_INLINE const char *lean_e3(const CdjC674x *cpu, unsigned j, DtsLean *L,
     const CdjC674xLoad *load = &cpu->loads[j];
     uint64_t value;
     if (!jit_read_span(read, opaque, load->address, load->size, &value) &&
-        !read_transfer_counted(read, opaque, load->address, load->size, &value, true))
+        !read_transfer(read, opaque, load->address, load->size, &value))
         return "RAM load mapping changed during execution";
     L->data[L->reads++] = load->sign_extend ?
         (uint64_t)(int64_t)sx(value, (load->size & 255) * 8) : value;
@@ -9758,7 +9766,7 @@ LEAN_INLINE __attribute__((unused)) bool lean_mem_prep(const CdjC674x *cpu, cons
     }
     uint64_t dummy;
     return jit_read_mapped(read, opaque, m->address, m->encoded) ||
-           read_transfer(read, opaque, m->address, m->encoded, &dummy);
+           read_transfer_probe(read, opaque, m->address, m->encoded, &dummy);
 }
 
 /* LOP_CB15's and LOP_CDPP's checks and fields (lean_issue's, no append;
@@ -9777,7 +9785,7 @@ lean_cb15_prep(const CdjC674x *cpu, const JitOp *op, DtsMem *m,
     }
     uint64_t dummy;
     return jit_read_mapped(read, opaque, m->address, 4) ||
-           read_transfer(read, opaque, m->address, 4, &dummy);
+           read_transfer_probe(read, opaque, m->address, 4, &dummy);
 }
 
 LEAN_INLINE __attribute__((unused)) bool
@@ -9799,7 +9807,7 @@ lean_cdpp_prep(const CdjC674x *cpu, const JitOp *op, DtsMem *m,
     }
     uint64_t dummy;
     return jit_read_mapped(read, opaque, m->address, size) ||
-           read_transfer(read, opaque, m->address, size, &dummy);
+           read_transfer_probe(read, opaque, m->address, size, &dummy);
 }
 
 /* A disabled LOP_MEM still declines while AMR is not ready. */
@@ -9847,7 +9855,7 @@ LEAN_INLINE __attribute__((unused)) const char *lean_e3_to(const CdjC674x *cpu, 
     const CdjC674xLoad *load = &cpu->loads[j];
     uint64_t value;
     if (!jit_read_span(read, opaque, load->address, load->size, &value) &&
-        !read_transfer_counted(read, opaque, load->address, load->size, &value, true))
+        !read_transfer(read, opaque, load->address, load->size, &value))
         return "RAM load mapping changed during execution";
     *data = load->sign_extend ?
         (uint64_t)(int64_t)sx(value, (load->size & 255) * 8) : value;
