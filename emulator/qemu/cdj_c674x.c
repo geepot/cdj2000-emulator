@@ -502,6 +502,13 @@ static bool loop_retained_schedule_complete(const CdjC674x *cpu)
     return true;
 }
 
+/* Data loads from the reserved gap above L2 RAM complete with zero; see
+ * cdj_c674x_set_data_gap in cdj_c674x.h.  Default on. */
+static bool data_gap = true;
+static uint64_t data_gap_reads;
+void cdj_c674x_set_data_gap(bool on) { data_gap = on; }
+uint64_t cdj_c674x_data_gap_reads(void) { return data_gap_reads; }
+
 /* Side-effect-free RAM reads; nonaligned words may span two bus words. */
 static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
                         unsigned size, uint64_t *value)
@@ -510,7 +517,13 @@ static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
     *value = 0;
     for (unsigned done = 0; done < size;) {
         uint32_t word, current = address + done;
-        if (!read(opaque, current & ~3u, &word)) return false;
+        if (!read(opaque, current & ~3u, &word)) {
+            if (!data_gap || (current & ~3u) < CDJ_C674X_DATA_GAP_BASE ||
+                (current & ~3u) >= CDJ_C674X_DATA_GAP_END)
+                return false;
+            word = 0;
+            ++data_gap_reads;
+        }
         unsigned lane = current & 3, n = 4 - lane;
         if (n > size - done) n = size - done;
         word >>= lane * 8;

@@ -104,6 +104,21 @@ typedef bool (*CdjC674xWrite)(void *, uint32_t, uint64_t, unsigned, bool commit)
  * fault_pc and fault_word. Observers may supply a scratch CPU with only
  * pc/fault initialized. Registers, pipeline and loop state are not accessed. */
 bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
+/* The reserved gap between L2 RAM and L1P, 0x11840000-0x11DFFFFF.  Stock's
+ * hand-scheduled bit reversal (MP4AACDEC_TIJ_scramble, 0xC0030D80) reads one
+ * table entry past its table in the last iteration and, through that junk
+ * index, issues an LDDW into the gap from a branch delay slot (SPRUFE8B: a
+ * branch has 5 delay slots that execute; LDDW has 4, so the load is issued
+ * and its result is simply never used).  Hardware completes such a load -
+ * stock plays AAC on it every frame - as an external read with an error
+ * response (SPRUFK5A chapter 10, BUSERR).  With the gap enabled (default) a
+ * DATA load of an unmapped word there completes with zero and is counted;
+ * stores and instruction fetches of the gap still fault.  Process-wide. */
+#define CDJ_C674X_DATA_GAP_BASE 0x11840000u
+#define CDJ_C674X_DATA_GAP_END  0x11e00000u
+void cdj_c674x_set_data_gap(bool on);
+uint64_t cdj_c674x_data_gap_reads(void);
+
 /* Optional fetch fast path.  Returns a host pointer to the 32 bytes at the
  * 32-byte-aligned address `block` when that whole block is plain memory which
  * the paired read callback would return word for word (little-endian), else
