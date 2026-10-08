@@ -68,6 +68,103 @@ static bool horizon_on;     /* CDJ_DSP_REPLAY_HORIZON=1, see quota_horizon */
  * every state load, as on the QEMU board. */
 static uint64_t fetch_epoch;
 
+/* A/B harness (tools/cdj_dsp/ab_compare.py).  CDJ_DSP_AB_DIR=dir writes
+ * mcasp1.bin / mcasp2.bin (every captured XBUF word, u32 LE, slot order) and
+ * host.bin (16-byte records u32 kind, sequence, address, value: kind 1 a
+ * MAIN HPI data read as the replay answered it, kind 2 a DSP HPIC write) and
+ * drops the per-store write records from the trace.  CDJ_DSP_LENIENT=1
+ * checks only what MAIN observes, logging mismatches instead of stopping.
+ * CDJ_DSP_OVERLAY=file (written by replay.py) patches DSP memory when the
+ * DSP is first about to execute the trigger PC, or at start. */
+static FILE *ab_mcasp[3], *ab_host;
+static uint64_t ab_words[3][16];
+static bool ab_quiet, ab_failed, lenient;
+static uint64_t lenient_mismatches, lenient_activations;
+typedef struct { uint32_t address, size; uint8_t *bytes; } OverlayWrite;
+static struct {
+    bool pending, triggered;
+    uint32_t pc, count;
+    OverlayWrite *writes;
+} overlay;
+
+static void ab_put(FILE *f, const uint32_t *words, size_t n)
+{
+    uint8_t bytes[16];
+    for (size_t i = 0; i < n; ++i)
+        for (unsigned b = 0; b < 4; ++b) bytes[4 * i + b] = words[i] >> (8 * b);
+    if (fwrite(bytes, 4, n, f) != n) ab_failed = true;
+}
+
+static void ab_host_record(uint32_t kind, uint64_t sequence, uint32_t address,
+                           uint32_t value)
+{
+    if (!ab_host) return;
+    uint32_t record[4] = {kind, (uint32_t)sequence, address, value};
+    ab_put(ab_host, record, 4);
+}
+
+static void lenient_log(uint64_t sequence, const char *type, const char *field,
+                        uint64_t expected, uint64_t actual)
+{
+    if (++lenient_mismatches > 100) return;
+    printf("{\"event\":\"lenient_mismatch\",\"sequence\":%" PRIu64
+           ",\"type\":\"%s\",\"field\":\"%s\",\"expected\":%" PRIu64
+           ",\"actual\":%" PRIu64 ",\"packets\":%" PRIu64 "}\n",
+           sequence, type, field, expected, actual, cpu.packets);
+}
+
+static bool overlay_load(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    uint32_t header[4];
+    if (!f || fread(header, 4, 4, f) != 4 || header[0] != 0x4c564f43u) goto bad;
+    overlay.triggered = header[1];
+    overlay.pc = header[2];
+    overlay.count = header[3];
+    overlay.writes = calloc(overlay.count ? overlay.count : 1, sizeof(OverlayWrite));
+    if (!overlay.writes) goto bad;
+    for (uint32_t i = 0; i < overlay.count; ++i) {
+        OverlayWrite *w = &overlay.writes[i];
+        if (fread(&w->address, 4, 1, f) != 1 || fread(&w->size, 4, 1, f) != 1 ||
+            !w->size || !(w->bytes = malloc(w->size)) ||
+            fread(w->bytes, 1, w->size, f) != w->size) goto bad;
+    }
+    if (fgetc(f) != EOF) goto bad;
+    fclose(f);
+    overlay.pending = true;
+    return true;
+bad:
+    if (f) fclose(f);
+    fputs("invalid overlay file\n", stderr);
+    return false;
+}
+
+static uint8_t *memory_span(uint32_t address, size_t size);
+static bool overlay_apply(void)
+{
+    for (uint32_t i = 0; i < overlay.count; ++i) {
+        uint8_t *target = memory_span(overlay.writes[i].address,
+                                      overlay.writes[i].size);
+        if (!target) {
+            fprintf(stderr, "overlay write %#x+%u is not plain DSP memory\n",
+                    overlay.writes[i].address, overlay.writes[i].size);
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < overlay.count; ++i)
+        memcpy(memory_span(overlay.writes[i].address, overlay.writes[i].size),
+               overlay.writes[i].bytes, overlay.writes[i].size);
+    /* No code-write counter is registered (cdj_c674x_set_code_writes), so
+     * the core rechecks every cached packet's bytes after each between()
+     * and run start; the epoch move also drops cached host pointers. */
+    ++fetch_epoch;
+    overlay.pending = false;
+    printf("{\"event\":\"overlay_applied\",\"pc\":%" PRIu32 ",\"packets\":%"
+           PRIu64 ",\"cycles\":%" PRIu64 ",\"writes\":%" PRIu32 "}\n",
+           cpu.pc, cpu.packets, cpu.cycles, overlay.count);
+    return true;
+}
+
 /* Compact dynamic coverage is emitted once at the end of a run. Keeping it
  * here avoids millions of per-step JSON records during connected-event replay
  * while preserving exact packet-start and transition counts. */
@@ -773,14 +870,19 @@ static bool advance_functional_mcasp_slots(void)
         edma = trial_edma;
         mcasp_control = trial_mcasp;
         deliver_edma_notifications();
-        if (tx_capture) {
+        if (tx_capture || ab_mcasp[1]) {
             for (unsigned instance = 1; instance <= 2; ++instance) {
                 for (unsigned serializer = 0; serializer < 16; ++serializer) {
                     uint64_t sequence = trial_mcasp.xrsr_source_sequence[instance][serializer];
                     if (!sequence || sequence ==
                         original_mcasp.xrsr_source_sequence[instance][serializer])
                         continue;
-                    if (fprintf(tx_capture,
+                    if (ab_mcasp[instance]) {
+                        ab_put(ab_mcasp[instance],
+                               &trial_mcasp.xrsr[instance][serializer], 1);
+                        ++ab_words[instance][serializer];
+                    }
+                    if (tx_capture && (fprintf(tx_capture,
                             "{\"sequence\":%" PRIu64 ",\"instance\":%u,"
                             "\"slot\":%u,\"serializer\":%u,\"word\":%u,"
                             "\"xbuf_sequence\":%" PRIu64 ",\"packets\":%" PRIu64 ","
@@ -789,7 +891,7 @@ static bool advance_functional_mcasp_slots(void)
                             ++tx_capture_sequence, instance,
                             trial_mcasp.xslot[instance], serializer,
                             trial_mcasp.xrsr[instance][serializer], sequence,
-                            cpu.packets, cpu.cycles) < 0 || fflush(tx_capture)) {
+                            cpu.packets, cpu.cycles) < 0 || fflush(tx_capture))) {
                         tx_capture_failed = true;
                         ok = false;
                         break;
@@ -909,7 +1011,7 @@ static bool write_bus(void *unused, uint32_t a, uint64_t v, unsigned size, bool 
             ram[physical - 0x11800000 + i] = v >> (8*i);
     }
 record:
-    if (commit || !ok)
+    if ((commit && !ab_quiet) || !ok)
         printf("{\"event\":\"%s\",\"address\":%" PRIu32 ",\"value\":%" PRIu64 ",\"size\":%u}\n",
                ok ? "write" : "rejected_write", a, v, size);
     return ok;
@@ -990,7 +1092,8 @@ typedef struct {
 static void quota_horizon(const Quota *q)
 {
     uint64_t until = UINT64_MAX;
-    horizon.break_pc = q->breakpoint;
+    horizon.break_pc = q->breakpoint ? q->breakpoint :
+        overlay.pending && overlay.triggered ? overlay.pc : 0;
     if (!horizon_on || q->trace || observe_pcm || !ticks.steady ||
         spi_transfer.fault || intc_delivery.cpu_request || hpi.hint ||
         (edma.irq_notifications & 2u) || q->limits->cycle_limit ||
@@ -1024,6 +1127,13 @@ static bool quota_pre(Quota *q)
 {
     const char *limited = limit_reached(q->limits);
     if (limited) { q->reason = limited; return false; }
+    if (overlay.pending && overlay.triggered && cpu.pc == overlay.pc &&
+        !cpu.loop_active && !cpu.idle_cycles && !overlay_apply()) {
+        cpu.fault = "overlay write outside plain DSP memory";
+        cpu.fault_pc = cpu.pc;
+        q->reason = q->standalone ? "fault" : cpu.fault;
+        return false;
+    }
     if (q->breakpoint && cpu.pc == q->breakpoint) {
         q->reason = "breakpoint";
         return false;
@@ -1175,6 +1285,13 @@ static EventReplayResult replay_external_events(
         (!strcmp(checkpoint_state.stop_reason, "DSP start boundary") ||
          !strcmp(checkpoint_state.stop_reason, "boot-phase boundary"));
     unsigned verified_stops = 0;
+    uint64_t lenient_replay_packets = cpu.packets;
+    uint64_t lenient_recorded_packets = cpu.packets;
+    if (lenient && deferred) {
+        fputs("lenient replay supports the legacy scheduler only\n", stderr);
+        fclose(file);
+        return EVENT_REPLAY_ERROR;
+    }
     *reason = "event_eof";
     /* QEMU captures these boundaries after the triggering event but BEFORE
      * run_dsp requests an activation (or coalesces a pending activation). */
@@ -1290,11 +1407,36 @@ static EventReplayResult replay_external_events(
                 !source) goto mismatch;
             uint32_t value = source[0] | (uint32_t)source[1] << 8 |
                 (uint32_t)source[2] << 16 | (uint32_t)source[3] << 24;
-            if (event.value != value) goto mismatch;
+            ab_host_record(1, event.sequence, address, value);
+            if (event.value != value) {
+                if (!lenient) goto mismatch;
+                lenient_log(event.sequence, event.type, "value", event.value, value);
+            }
             if (event.offset == 0x80000) checkpoint_state.hpi_address += 4;
+        } else if (!strcmp(event.type, "dsp_hpic_write") && lenient) {
+            if (hpic_overflow || event.offset) goto mismatch;
+            if (!hpic_count) {
+                lenient_log(event.sequence, event.type, "missing", event.value, 0);
+            } else {
+                PendingHpicEvent *actual = &hpic_events[0];
+                ab_host_record(2, event.sequence, actual->address, actual->value);
+                if (event.address != actual->address)
+                    lenient_log(event.sequence, event.type, "address",
+                                event.address, actual->address);
+                if (event.value != actual->value || event.size != actual->size)
+                    lenient_log(event.sequence, event.type, "value",
+                                event.value, actual->value);
+                if (event.hint != actual->hint || event.dspint != actual->dspint)
+                    lenient_log(event.sequence, event.type, "hint_dspint",
+                                event.hint | event.dspint << 1,
+                                actual->hint | actual->dspint << 1);
+                memmove(hpic_events, hpic_events + 1,
+                        --hpic_count * sizeof(hpic_events[0]));
+            }
         } else if (!strcmp(event.type, "dsp_hpic_write")) {
             if (!hpic_count || hpic_overflow) goto mismatch;
             PendingHpicEvent *actual = &hpic_events[0];
+            ab_host_record(2, event.sequence, actual->address, actual->value);
             if (event.offset || event.address != actual->address ||
                 event.value != actual->value || event.size != actual->size ||
                 event.boot_phase != actual->boot_phase || event.hint != actual->hint ||
@@ -1302,6 +1444,39 @@ static EventReplayResult replay_external_events(
                 event.cycles != actual->cycles) goto mismatch;
             memmove(hpic_events, hpic_events + 1,
                     --hpic_count * sizeof(hpic_events[0]));
+        } else if (!strcmp(event.type, "dsp_stop") && lenient) {
+            /* The image may take other paths inside an activation; only the
+             * activation's length (a step budget or a HINT yield) and what
+             * MAIN sees are compared. */
+            if (event.offset || event.size || !stop_pending || hpic_overflow)
+                goto mismatch;
+            while (hpic_count) {
+                ab_host_record(2, event.sequence, hpic_events[0].address,
+                               hpic_events[0].value);
+                lenient_log(event.sequence, "dsp_hpic_write", "extra", 0,
+                            hpic_events[0].value);
+                memmove(hpic_events, hpic_events + 1,
+                        --hpic_count * sizeof(hpic_events[0]));
+            }
+            if (event.packets - lenient_recorded_packets !=
+                cpu.packets - lenient_replay_packets)
+                lenient_log(event.sequence, event.type, "activation_packets",
+                            event.packets - lenient_recorded_packets,
+                            cpu.packets - lenient_replay_packets);
+            lenient_recorded_packets = event.packets;
+            lenient_replay_packets = cpu.packets;
+            ++lenient_activations;
+            stop_pending = false;
+            ++verified_stops;
+            checkpoint_state.event_sequence = event.sequence;
+            if (cpu.fault) {
+                /* Recorded fault stops carry only their PC. */
+                if (event.address != cpu.fault_pc)
+                    lenient_log(event.sequence, event.type, "fault_pc",
+                                event.address, cpu.fault_pc);
+                fault_matched = true;
+                break;
+            }
         } else if (!strcmp(event.type, "dsp_stop")) {
             uint32_t pc = cpu.fault ? cpu.fault_pc : cpu.pc;
             if (event.offset || event.size || !stop_pending || hpic_count || hpic_overflow ||
@@ -1323,8 +1498,21 @@ static EventReplayResult replay_external_events(
             fclose(file);
             return EVENT_REPLAY_ERROR;
         } else goto mismatch;
-        if (event.boot_phase != checkpoint_state.boot_phase ||
-            event.hint != hpi.hint || event.dspint != hpi.dspint) goto mismatch;
+        if (event.boot_phase != checkpoint_state.boot_phase) goto mismatch;
+        /* A DSP HPIC write's hint/dspint are the state right after that
+         * write, checked above against its queued snapshot; the live state
+         * is already the end of the activation (a later write in the same
+         * activation may have raised HINT). */
+        if (strcmp(event.type, "dsp_hpic_write") &&
+            (event.hint != hpi.hint || event.dspint != hpi.dspint)) {
+            if (!lenient) goto mismatch;
+            /* Follow the recording so activations stay where MAIN made
+             * them; the divergence itself is what gets reported. */
+            lenient_log(event.sequence, event.type, "hint_dspint",
+                        event.hint | event.dspint << 1, hpi.hint | hpi.dspint << 1);
+            hpi.hint = event.hint;
+            hpi.dspint = event.dspint;
+        }
         if (connected_stop_limit && verified_stops >= connected_stop_limit &&
             !strcmp(event.type, "dsp_stop")) break;
         if (begin_quota) {
@@ -1425,6 +1613,21 @@ int main(int argc, char **argv)
             return 2;
         }
     }
+    const char *ab_dir = getenv("CDJ_DSP_AB_DIR");
+    if (ab_dir && *ab_dir) {
+        char path[4096];
+        const char *names[3] = {"host.bin", "mcasp1.bin", "mcasp2.bin"};
+        for (unsigned i = 0; i < 3; ++i) {
+            snprintf(path, sizeof(path), "%s/%s", ab_dir, names[i]);
+            FILE *f = fopen(path, "wb");
+            if (!f) { perror(path); return 2; }
+            if (i) ab_mcasp[i] = f; else ab_host = f;
+        }
+        ab_quiet = true;
+    }
+    lenient = getenv("CDJ_DSP_LENIENT") && !strcmp(getenv("CDJ_DSP_LENIENT"), "1");
+    const char *overlay_path = getenv("CDJ_DSP_OVERLAY");
+    if (overlay_path && *overlay_path && !overlay_load(overlay_path)) return 2;
     if (argc != 8 && argc != 9) return 2;
     char *end;
     errno = 0;
@@ -1525,6 +1728,7 @@ int main(int argc, char **argv)
         checkpoint_state.reset_released = checkpoint_state.dsp_started = true;
     }
     cpu.cycle_tick = cycle_tick;
+    if (overlay.pending && !overlay.triggered && !overlay_apply()) return 2;
     horizon_on = getenv("CDJ_DSP_REPLAY_HORIZON") &&
                  !strcmp(getenv("CDJ_DSP_REPLAY_HORIZON"), "1");
     cdj_c674x_set_horizon(horizon_on ? &horizon : NULL);
@@ -1563,6 +1767,25 @@ int main(int argc, char **argv)
                                    .trace = trace_steps});
     }
     coverage_emit();
+    if (lenient)
+        printf("{\"event\":\"lenient_summary\",\"mismatches\":%" PRIu64
+               ",\"activations\":%" PRIu64 "}\n",
+               lenient_mismatches, lenient_activations);
+    if (ab_host) {
+        printf("{\"event\":\"ab_capture\",\"words\":[");
+        for (unsigned i = 1; i <= 2; ++i) {
+            printf("%s[", i > 1 ? "," : "");
+            for (unsigned j = 0; j < 16; ++j)
+                printf("%s%" PRIu64, j ? "," : "", ab_words[i][j]);
+            printf("]");
+        }
+        printf("]}\n");
+        for (unsigned i = 0; i < 3; ++i) {
+            FILE *f = i ? ab_mcasp[i] : ab_host;
+            if (fclose(f)) ab_failed = true;
+        }
+        if (ab_failed) { fputs("A/B capture write failed\n", stderr); return 2; }
+    }
     /* Fault strings originate in the interpreter and contain no JSON escapes. */
     printf("{\"event\":\"stop\",\"reason\":\"%s\",\"fault\":\"%s\",\"pc\":%" PRIu32
            ",\"fault_pc\":%" PRIu32 ",\"fault_word\":%" PRIu32
@@ -1615,5 +1838,9 @@ int main(int argc, char **argv)
         }
     }
     int tx_status = tx_capture ? fclose(tx_capture) : 0;
+    if (overlay.pending) {
+        fputs("overlay trigger PC was never reached\n", stderr);
+        return 4;
+    }
     return ferror(stdout) || tx_capture_failed || tx_status ? 2 : 0;
 }
