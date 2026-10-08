@@ -36,7 +36,14 @@ typedef struct {
     bool thread_audio_clock;
     CdjDspAudioClock audio_clock;
     uint64_t audio_clock_next_packets;
+    /* dsp_playback_observe's diagnostic (off: playback_metrics false). */
+    bool playback_metrics, playback_active, playback_profile_done, dsp_halted;
+    uint64_t playback_gie, playback_packets, playback_slots, playback_late, gie_packets;
+    double playback_cpu, playback_virtual;
+    uint32_t playback_position;
+    uint8_t *l2;
 } NxsHpi;
+static uint32_t ldl_le_p(const void *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static uint64_t frame_hz = 44100;
 static bool cdj_c6747_mcasp_tx_clock_hz(const void *m, unsigned i, uint64_t aux,
                                         int pin, uint64_t *num, uint32_t *den)

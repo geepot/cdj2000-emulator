@@ -86,7 +86,14 @@ typedef struct {
     CdjDspAudioClock audio_clock;
     uint64_t audio_clock_next_packets;
     struct { uint64_t until; } horizon;    /* the board horizon's bound */
+    /* dsp_playback_observe's diagnostic (off: playback_metrics false). */
+    bool playback_metrics, playback_active, playback_profile_done;
+    uint64_t playback_gie, playback_packets, playback_slots, playback_late, gie_packets;
+    double playback_cpu, playback_virtual;
+    uint32_t playback_position;
+    uint8_t *l2;
 } NxsHpi;
+static uint32_t ldl_le_p(const void *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static void dsp_horizon_close(NxsHpi *s) { qatomic_set(&s->horizon.until, 0); }
 static uint64_t audio_clock_packets(int64_t ns) { (void)ns; return 0; }
 static NxsHpi *nxs_hpi;
