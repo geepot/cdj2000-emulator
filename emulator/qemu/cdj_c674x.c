@@ -2678,14 +2678,47 @@ static bool arm_approx(CdjC674xArm *x)
 }
 
 
-/* A 64-bit DP operand whose encoded register field names the EVEN register of
- * the pair.  Every instruction that reads src_l one cycle before src_h -
- * ADDDP, SUBDP, MPYDP, MPYSPDP and the DP compares - is encoded that way, as
- * read back from TI's assembler (ADDDP .L1 A5:A4,A7:A6,A9:A8 = 04188318h has
- * src1 = 4 and src2 = 6). */
-static uint64_t dp_pair(const CdjC674x *cpu, unsigned bank, unsigned reg)
+/* A register as an instruction reads it `delay` cycles after issue: the
+ * register file at that cycle, i.e. the current one plus every delayed result
+ * already queued that lands by then (the last due wins; a later queue slot
+ * wins a tie).  The DP instructions read the halves of a pair on different
+ * pipeline stages (SPRUFE8B Tables 4-15, 4-16, 4-19, 4-20: ADDDP, SUBDP and
+ * the compares read src_l on E1 and src_h on E2), and TI's code relies on
+ * it: __c6xabi_divf issues SUBDP on the cycle its MPYSP2DP source's low word
+ * lands, so the high word lands exactly on E2.  Reading both at issue saw the
+ * stale high word.  Results written in the cycles in between by instructions
+ * not yet issued are not visible at issue time and are not modelled. */
+static uint32_t reg_at(const CdjC674x *cpu, unsigned bank, unsigned reg,
+                       unsigned delay)
 {
-    return (uint64_t)cpu->r[bank][reg + 1] << 32 | cpu->r[bank][reg];
+    uint32_t value = cpu->r[bank][reg];
+    uint64_t best = 0;
+    bool found = false;
+    for (unsigned i = 0; i < cpu->load_count; ++i) {
+        const CdjC674xLoad *load = &cpu->loads[i];
+        unsigned count = queued_result_registers(load);
+        if (!count || load->bank != bank || load->due > cpu->cycles + delay ||
+            reg < load->dst || reg >= load->dst + count ||
+            (found && load->due < best))
+            continue;
+        best = load->due;
+        found = true;
+        value = (uint32_t)(load->value >> (32 * (reg - load->dst)));
+    }
+    return value;
+}
+
+/* A 64-bit DP operand whose encoded register field names the EVEN register of
+ * the pair (every instruction that reads src_l before src_h - ADDDP, SUBDP,
+ * MPYDP, MPYSPDP and the DP compares - is encoded that way, as read back from
+ * TI's assembler: ADDDP .L1 A5:A4,A7:A6,A9:A8 = 04188318h has src1 = 4 and
+ * src2 = 6), with its low half read lo cycles and its high half hi cycles
+ * after issue. */
+static uint64_t dp_pair_at(const CdjC674x *cpu, unsigned bank, unsigned reg,
+                           unsigned lo, unsigned hi)
+{
+    return (uint64_t)reg_at(cpu, bank, reg + 1, hi) << 32 |
+           reg_at(cpu, bank, reg, lo);
 }
 
 /* Queue one already-computed 32-bit delayed result with the same
@@ -2789,8 +2822,8 @@ static bool arm_cmpdp(CdjC674xArm *x)
     x->reg_write = false;
     if (x->enabled) {
         CdjC674xDpResult result = cdj_c674x_compare_dp(
-            dp_pair(x->cpu, x->side, x->a),
-            dp_pair(x->cpu, x->cross, x->b), relation);
+            dp_pair_at(x->cpu, x->side, x->a, 0, 1),
+            dp_pair_at(x->cpu, x->cross, x->b, 0, 1), relation);
         uint64_t due = x->cpu->cycles + 2;
         if (x->out->load_count + (result.status ? 2u : 1u) > 40)
             return stop(x->cpu, x->pc, x->insn->word,
@@ -2835,11 +2868,11 @@ static bool arm_addsubdp(CdjC674xArm *x)
                     "invalid double-precision result register pair");
     x->reg_write = false;
     if (x->enabled) {
-        uint64_t source1 = dp_pair(x->cpu, x->side, x->a);
-        uint64_t source2 = dp_pair(x->cpu, x->cross, x->b);
+        uint64_t source1 = dp_pair_at(x->cpu, x->side, x->a, 0, 1);
+        uint64_t source2 = dp_pair_at(x->cpu, x->cross, x->b, 0, 1);
         if (encoding == 0x3b8) {
-            source1 = dp_pair(x->cpu, x->cross, x->a);
-            source2 = dp_pair(x->cpu, x->side, x->b);
+            source1 = dp_pair_at(x->cpu, x->cross, x->a, 0, 1);
+            source2 = dp_pair_at(x->cpu, x->side, x->b, 0, 1);
         }
         unsigned rmode = (x->cpu->control[18] >>
                           ((x->side ? 16u : 0u) + 9)) & 3;
@@ -2881,9 +2914,12 @@ static bool arm_mpydp(CdjC674xArm *x)
                     "invalid double-precision result register pair");
     x->reg_write = false;
     if (x->enabled) {
-        uint64_t left = pair_src1 ? dp_pair(x->cpu, x->side, x->a)
+        /* Table 4-19 (MPYDP): src1_l and src2_l on E1, src2_h on E2, src1_h
+         * on E3 (each is read again later, the first read is taken).
+         * Table 4-20 (MPYSPDP): src1 and src2_l on E1, src2_h on E2. */
+        uint64_t left = pair_src1 ? dp_pair_at(x->cpu, x->side, x->a, 0, 2)
             : cdj_c674x_sp_operand_to_dp(x->cpu->r[x->side][x->a]);
-        uint64_t right = pair_src2 ? dp_pair(x->cpu, x->cross, x->b)
+        uint64_t right = pair_src2 ? dp_pair_at(x->cpu, x->cross, x->b, 0, 1)
             : cdj_c674x_sp_operand_to_dp(x->cpu->r[x->cross][x->b]);
         unsigned rmode = (x->cpu->control[20] >>
                           ((x->side ? 16u : 0u) + 9)) & 3;
