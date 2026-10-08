@@ -1,0 +1,1520 @@
+{
+  "revision": "4ba7911fde6d89706b6ec0b43581cdcb115ef7af",
+  "evidence": "Standalone diagnostic checkpoint continuations, not connected playback or realtime audio.",
+  "steps": 60000000,
+  "trials": 3,
+  "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+  "environment": {
+    "CDJ_C674X_JIT": "1",
+    "CDJ_DSP_COMPACT_TRACE": "1",
+    "CDJ_DSP_REPLAY_HORIZON": "1",
+    "CDJ_DSP_REPLAY_RAM_DIRECT": "1",
+    "CDJ_NXS_DSP_FUNCTIONAL_AUDIO": "1"
+  },
+  "experiments": {
+    "compiler-audio-measurements.json": [
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.144663,
+        "wall": 2.2035989998839796,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "pgo",
+        "user": 1.706705,
+        "wall": 1.872166708111763,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "lto",
+        "user": 2.056395,
+        "wall": 2.1997837082017213,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "lto",
+        "user": 2.046552,
+        "wall": 2.1043447079136968,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "pgo",
+        "user": 1.7114260000000003,
+        "wall": 1.7779303330462426,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.1003819999999997,
+        "wall": 2.151874499861151,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.1188970000000005,
+        "wall": 2.1710138751659542,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "pgo",
+        "user": 1.694685999999999,
+        "wall": 1.753938333131373,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "lto",
+        "user": 2.026518000000001,
+        "wall": 2.0824152920395136,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.0039419999999986,
+        "wall": 2.0475995840970427,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "pgo",
+        "user": 1.6361619999999988,
+        "wall": 1.7036975831724703,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "lto",
+        "user": 1.9687170000000016,
+        "wall": 2.0155102910939604,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "lto",
+        "user": 1.9620330000000017,
+        "wall": 2.0071665418799967,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "pgo",
+        "user": 1.6177139999999994,
+        "wall": 1.661545124836266,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.0477209999999992,
+        "wall": 2.1021335418336093,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.039721,
+        "wall": 2.092552167130634,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "pgo",
+        "user": 1.6165739999999964,
+        "wall": 1.6679223328828812,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "lto",
+        "user": 1.9681910000000045,
+        "wall": 2.019140000222251,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.0809330000000017,
+        "wall": 2.128115207888186,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "pgo",
+        "user": 1.6724749999999986,
+        "wall": 1.7240366251207888,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "lto",
+        "user": 2.0104919999999993,
+        "wall": 2.0890868329443038,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "lto",
+        "user": 1.9953900000000004,
+        "wall": 2.0481571659911424,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "pgo",
+        "user": 1.6628749999999997,
+        "wall": 1.7137212080415338,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.079088999999996,
+        "wall": 2.1256904168985784,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.084530000000001,
+        "wall": 2.1353899592068046,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "pgo",
+        "user": 1.6782520000000005,
+        "wall": 1.7356704999692738,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "lto",
+        "user": 2.034632000000002,
+        "wall": 2.089916459051892,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      }
+    ],
+    "aot-audio-measurements.json": [
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.100713,
+        "wall": 2.153506875038147,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "baseline-aot",
+        "user": 1.8251280000000003,
+        "wall": 2.0309051661752164,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "baseline-aot",
+        "user": 1.8041099999999997,
+        "wall": 1.8646978749893606,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.1045180000000006,
+        "wall": 2.154858874855563,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.128741999999999,
+        "wall": 2.274439709028229,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "baseline-aot",
+        "user": 1.810759000000001,
+        "wall": 1.869523333152756,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 1.9959360000000004,
+        "wall": 2.0325556669849902,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "baseline-aot",
+        "user": 1.6538430000000002,
+        "wall": 1.7014882920775563,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "baseline-aot",
+        "user": 1.6664899999999996,
+        "wall": 1.7150889579206705,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.015823000000001,
+        "wall": 2.055565416114405,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.0312069999999984,
+        "wall": 2.0828834590502083,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "baseline-aot",
+        "user": 1.6452349999999996,
+        "wall": 1.6950273751281202,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.0854649999999992,
+        "wall": 2.1317536658607423,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "baseline-aot",
+        "user": 1.7506270000000015,
+        "wall": 1.805454625049606,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "baseline-aot",
+        "user": 1.76398,
+        "wall": 1.8201490000355989,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.035387,
+        "wall": 2.0776583747938275,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.0533590000000004,
+        "wall": 2.0953301249537617,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "baseline-aot",
+        "user": 1.7091139999999996,
+        "wall": 1.759554082993418,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      }
+    ],
+    "o3-audio-measurements.json": [
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.144084,
+        "wall": 2.2023368331138045,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "o3",
+        "user": 2.1401870000000005,
+        "wall": 2.306835333118215,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "o3",
+        "user": 2.1420339999999998,
+        "wall": 2.2186307499650866,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.1437540000000004,
+        "wall": 2.2055445830337703,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.1366879999999995,
+        "wall": 2.2057455421891063,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "o3",
+        "user": 2.164683,
+        "wall": 2.234033041866496,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.0890590000000007,
+        "wall": 2.1467691250145435,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "o3",
+        "user": 2.085607999999999,
+        "wall": 2.143694916041568,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "o3",
+        "user": 2.0787380000000013,
+        "wall": 2.1372707919217646,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.0576459999999983,
+        "wall": 2.1079841249156743,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.041473,
+        "wall": 2.094187041046098,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "o3",
+        "user": 2.0581700000000005,
+        "wall": 2.1129230419173837,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.128038,
+        "wall": 2.188160707941279,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "o3",
+        "user": 2.138123,
+        "wall": 2.221100374823436,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "o3",
+        "user": 2.1349389999999993,
+        "wall": 2.1963447500020266,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.127554,
+        "wall": 2.184289042139426,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.128419000000001,
+        "wall": 2.1916349998209625,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "o3",
+        "user": 2.1269509999999983,
+        "wall": 2.1932566249743104,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      }
+    ],
+    "phase-audio-measurements.json": [
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.182756,
+        "wall": 2.2714256250765175,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "phase",
+        "user": 2.1551320000000005,
+        "wall": 2.2459044167771935,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "phase",
+        "user": 2.219798999999999,
+        "wall": 2.3432864581700414,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.1125690000000006,
+        "wall": 2.1796747089829296,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.1118760000000005,
+        "wall": 2.1753096249885857,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "phase",
+        "user": 2.1210359999999984,
+        "wall": 2.182970416964963,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.045670000000001,
+        "wall": 2.097228541970253,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "phase",
+        "user": 2.0610030000000013,
+        "wall": 2.118977207923308,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "phase",
+        "user": 2.1249489999999973,
+        "wall": 2.2006265001837164,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.007754000000002,
+        "wall": 2.0593620829749852,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.0009580000000007,
+        "wall": 2.0473488750867546,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "phase",
+        "user": 2.108528999999997,
+        "wall": 2.2039915409404784,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.144617,
+        "wall": 2.226792834000662,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "phase",
+        "user": 2.107271000000001,
+        "wall": 2.1735469580162317,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "phase",
+        "user": 2.125624000000002,
+        "wall": 2.2055797919165343,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.092176999999996,
+        "wall": 2.172253542114049,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.116584000000003,
+        "wall": 2.194301165873185,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "phase",
+        "user": 2.0870589999999964,
+        "wall": 2.1485288329422474,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      }
+    ],
+    "empty-audio-measurements.json": [
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.166014,
+        "wall": 2.2283095000311732,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "empty-phase",
+        "user": 2.1473289999999996,
+        "wall": 2.312593291979283,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "empty-phase",
+        "user": 2.1357920000000004,
+        "wall": 2.2008332079276443,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.136666999999999,
+        "wall": 2.1948734999168664,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.1341610000000006,
+        "wall": 2.1971972920000553,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "empty-phase",
+        "user": 2.1446489999999994,
+        "wall": 2.220278084045276,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.090529,
+        "wall": 2.1522068330086768,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "empty-phase",
+        "user": 2.063492000000002,
+        "wall": 2.119853625074029,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "empty-phase",
+        "user": 2.0776649999999997,
+        "wall": 2.1381226249504834,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.060403000000001,
+        "wall": 2.110156208043918,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.0462169999999986,
+        "wall": 2.0896088329609483,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "empty-phase",
+        "user": 2.0268279999999983,
+        "wall": 2.096381082898006,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "baseline",
+        "user": 2.124328000000002,
+        "wall": 2.18010091711767,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "empty-phase",
+        "user": 2.0917840000000005,
+        "wall": 2.147525208070874,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "empty-phase",
+        "user": 2.1228669999999994,
+        "wall": 2.182537749875337,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "baseline",
+        "user": 2.075516999999998,
+        "wall": 2.123769541969523,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "baseline",
+        "user": 2.1206140000000033,
+        "wall": 2.1724134581163526,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "empty-phase",
+        "user": 2.0969049999999996,
+        "wall": 2.1533046250697225,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      }
+    ],
+    "aot-pgo-final-audio-measurements.json": [
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "baseline-aot",
+        "user": 1.855955,
+        "wall": 1.9142417921684682,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 0,
+        "binary": "aot-pgo-final",
+        "user": 1.5578070000000002,
+        "wall": 1.764775666873902,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "aot-pgo-final",
+        "user": 1.556953,
+        "wall": 1.623552333097905,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 1,
+        "binary": "baseline-aot",
+        "user": 1.857322,
+        "wall": 1.9144115829840302,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "baseline-aot",
+        "user": 1.8524379999999994,
+        "wall": 1.91025933297351,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "real",
+        "trial": 2,
+        "binary": "aot-pgo-final",
+        "user": 1.5616060000000012,
+        "wall": 1.6283025408629328,
+        "stdout": "551d93e2221f1d7b8a73056c9794bd76834489f295244dc213cf8a5369f775f7",
+        "cdjdsp": "c58e77399a4160df5dd5af0842fd559b5321dc7b7b51cfffcbd73e2b1d98df09"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "baseline-aot",
+        "user": 1.7451549999999987,
+        "wall": 1.7914300840348005,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 0,
+        "binary": "aot-pgo-final",
+        "user": 1.4385630000000003,
+        "wall": 1.4899816249962896,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "aot-pgo-final",
+        "user": 1.3843200000000007,
+        "wall": 1.4291878340300173,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 1,
+        "binary": "baseline-aot",
+        "user": 1.7104749999999989,
+        "wall": 1.755717750173062,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "baseline-aot",
+        "user": 1.7369100000000017,
+        "wall": 1.7879347919952124,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "live",
+        "trial": 2,
+        "binary": "aot-pgo-final",
+        "user": 1.4152679999999975,
+        "wall": 1.461471457965672,
+        "stdout": "32d087fdcb73f7779a73bb4c638fe4922305e9d57eea7ad0b1174c6fcc8a3e08",
+        "cdjdsp": "4a48e68fbade3a3196d5d759be96a4323ee7687f756ade6d3581332d2622da1c"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "baseline-aot",
+        "user": 1.7430020000000006,
+        "wall": 1.790199999930337,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 0,
+        "binary": "aot-pgo-final",
+        "user": 1.4237740000000016,
+        "wall": 1.4730576670262963,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "aot-pgo-final",
+        "user": 1.441001,
+        "wall": 1.4904947918839753,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 1,
+        "binary": "baseline-aot",
+        "user": 1.7499310000000001,
+        "wall": 1.7964845828246325,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "baseline-aot",
+        "user": 1.7401319999999991,
+        "wall": 1.7845586249604821,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      },
+      {
+        "name": "wet",
+        "trial": 2,
+        "binary": "aot-pgo-final",
+        "user": 1.4536109999999987,
+        "wall": 1.5062687499448657,
+        "stdout": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "cdjdsp": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f"
+      }
+    ]
+  },
+  "held_out_pgo": {
+    "passed": true,
+    "training": [
+      "/Users/gpotvin/Git/cdj2000-emulator/runs/jit-ck/play-real/00000000000000002706.cdjdsp",
+      "/Users/gpotvin/Git/cdj2000-emulator/runs/jit-ck/play-live/00000000000000000001.cdjdsp"
+    ],
+    "inputs": {
+      "/Users/gpotvin/Git/cdj2000-emulator/runs/jit-ck/play-wet/00000000000000000001.cdjdsp": {
+        "schema": 12,
+        "byte_order": "little",
+        "state_size": 15808,
+        "component_sizes": [
+          6592,
+          112,
+          784,
+          36,
+          84,
+          32,
+          144,
+          6,
+          7816
+        ],
+        "checkpoint_sha256": "8c9ce399aede1fc1888363d8f670e9a64fe5fe98906e6fcc44e753dcf1bb57d6",
+        "l2_sha256": "2a675a6d2821f5c9070645b8591db395c39dc5bd95a848021f9ffb1c8c0e8117",
+        "shared_ram_captured": true,
+        "scheduler_state_captured": true,
+        "dsp_scheduler_mode": "legacy",
+        "shared_ram_sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471",
+        "l1d_captured": true,
+        "l1d_sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479",
+        "sdram_sha256": "74c67d61e8212733adaa2420300807e8212e325031c4672d37f80a4bf6bc881d",
+        "present_pages": 249
+      },
+      "/Users/gpotvin/Git/cdj2000-emulator/runs/jit-ck/play-real/00000000000000002706.cdjdsp": {
+        "schema": 12,
+        "byte_order": "little",
+        "state_size": 15808,
+        "component_sizes": [
+          6592,
+          112,
+          784,
+          36,
+          84,
+          32,
+          144,
+          6,
+          7816
+        ],
+        "checkpoint_sha256": "bec228036c1fe73826f93faf10d9c4bb054cd44b5bcba526be99de7a9711bd1f",
+        "l2_sha256": "c40cacb189d860a18ed0488b34b7c250614c9d9112b1648e3b9218696de0f6b4",
+        "shared_ram_captured": true,
+        "scheduler_state_captured": true,
+        "dsp_scheduler_mode": "legacy",
+        "shared_ram_sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471",
+        "l1d_captured": true,
+        "l1d_sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479",
+        "sdram_sha256": "980f60798b63368e1c8b916a1cb039c3bfaffbc306c16a7c41e3afd6d9c8f43a",
+        "present_pages": 520
+      },
+      "/Users/gpotvin/Git/cdj2000-emulator/runs/jit-ck/play-live/00000000000000000001.cdjdsp": {
+        "schema": 12,
+        "byte_order": "little",
+        "state_size": 15808,
+        "component_sizes": [
+          6592,
+          112,
+          784,
+          36,
+          84,
+          32,
+          144,
+          6,
+          7816
+        ],
+        "checkpoint_sha256": "7e1fb63f0b94c4bb282c8c0542b8fef32b1988cf85ed95ee6bf67c5bffe864a4",
+        "l2_sha256": "e7d59229d3106f7277ef72ed9f9a6541f2ae75c76fad52670be0a69324d36c4e",
+        "shared_ram_captured": true,
+        "scheduler_state_captured": true,
+        "dsp_scheduler_mode": "legacy",
+        "shared_ram_sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471",
+        "l1d_captured": true,
+        "l1d_sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479",
+        "sdram_sha256": "741f617bb3ec340bd487720c433a6932ef6a2361e130e013fc5d6d1ae2cc3c6b",
+        "present_pages": 259
+      }
+    },
+    "sources": {
+      "cdj2000_ata.h": "e84f7c45961bac31ecb932299a67728a596de91d1b4e3ab9a87ea35c0ef6fbe5",
+      "cdj2000_cosim.h": "328585146f82708bca8ee574549ee655720565103ea37199a505591330bc5d3e",
+      "cdj2000_dsp.h": "25e93b53b0987cf3f64e588e99d48ff49bb5cf4c30a2c76cffcc0f7f44253a92",
+      "cdj2000_input.h": "2ab003bf418eb0fc1a1ec72e4db09aa458883134feaa4c1fee8a83a61fd4c613",
+      "cdj2000_media_rate.h": "646e4a8308a9b8412766897c486bb39a45e112bca80c89173852d2793099dbfc",
+      "cdj2000_netsim.h": "9b17c154866df41d8a917e44751c6df0e223b91abfd1ace1f458b44c5bf119ea",
+      "cdj2000_nxs_hpi.h": "101959fdb1b041193c9f8fac839c1829f7c90e1ff2f142e3df3cc1b546243053",
+      "cdj2000_usb.h": "2cc3c9e9e23feec985556dbaed1d8a558b0dff583390582e4fc45b21048a2a1c",
+      "cdj2000_usbh.h": "f390e6dce6fae61656a779844c9ae6b21ccf4df6f4ab89b0be2538e8610d80e9",
+      "cdj_c6747_cache.c": "b0e98756e4160b8bb5fadf613db3c937d9da1dccfcc65674f3b92e5b30a96d70",
+      "cdj_c6747_cache.h": "12f00c1486e4c7a48641ffc40e92247925fc286a67430a3af71bb0ae90fe8ad6",
+      "cdj_c6747_edma.c": "d8b1339202688bea54e6e2992c60a77ac26efb08122a245a73697e3b2526cb39",
+      "cdj_c6747_edma.h": "37f61eb33f83d0064fbe14acc75236fba332cddcf2d9fbab918cae7a9d42f6ab",
+      "cdj_c6747_emifb.c": "a79a7d97de3738efd95c8f5178c57c58113488885b8fa7eccd4faced32e1c438",
+      "cdj_c6747_emifb.h": "2e8ff4b7be11e8c281fc61ca536772656ef3dbabb37906058108cbe22be63594",
+      "cdj_c6747_gpio.c": "050cdcfdf6cf20ff94103c4755846255f9bdcfa7afabde41feea13bbcdd6a8f4",
+      "cdj_c6747_gpio.h": "cb91bc5317d48d656d8642ceb577be9bab17a0bb0e66f33840dde58ed21bd17e",
+      "cdj_c6747_hpi.c": "628ce85a80826e6d5a614a149be12e97374a1e0332344b35b5fd21092939c920",
+      "cdj_c6747_hpi.h": "112f735908ae655bc7b6a0f94f6f10176514e5bf040a1a95cb0c2db2728faf79",
+      "cdj_c6747_i2c.c": "fb8749096a2114a62fc54de7674ec19dcf24435c78732ded184ee12552474743",
+      "cdj_c6747_i2c.h": "4b84df3bf735e97f8d6895285874d49ebd6ec985b166db577b58a713dde11bda",
+      "cdj_c6747_intc.c": "a0ab0473d94719aa06ba4d1335bfea7c9e3d3104dd890ad44dc3bdc4f788cda5",
+      "cdj_c6747_intc.h": "a9269a8c4123ba333b7feeda6036fa57b3cd32a0004a22ec764c73039c08e729",
+      "cdj_c6747_mcasp.c": "49ba10892b85f6146992308a7df22179ba43d96e2db884a174dfe0daa0d6cc62",
+      "cdj_c6747_mcasp.h": "f76d6e0c551b038327bc0a1384d1e1474fbf2642be18d345129d92ddaa8ab841",
+      "cdj_c6747_pll.c": "11967d1247bdba22b405d04f201efec5a28dcd1de7149c58d85432afd4347b9c",
+      "cdj_c6747_pll.h": "ed0dd54bbcca4bb9fd5d3dc858103c803f74d9319696649bc83663ed63c5b8c1",
+      "cdj_c6747_psc.c": "da1b3a44f19cb601b4b31ebdc778d23311e93f64cc34ea4e5dba8dbb46b9f4a6",
+      "cdj_c6747_psc.h": "eaa4d440b80a96a6c108e473a3bdddbc22126ddb36637fa88c638ff85f22650d",
+      "cdj_c6747_spi.c": "f43778d3381bb50b6f427242e21940876873448d304e93770e8eb7695ea08972",
+      "cdj_c6747_spi.h": "f9bbaf410dfaa03190bec4a354cdcd50b305a062312e759d98c2ddea2eecef38",
+      "cdj_c6747_spi_clock.h": "193066f48219667aa0a2a5bc114ae4becce82e6fdb1cbf0fe2f12d60646c8f8b",
+      "cdj_c6747_syscfg.c": "bb5380d91c4a024d9dd71e71f909a4b9cb852d13efb81598d50cc155e85d13f1",
+      "cdj_c6747_syscfg.h": "beab10b21d12a6b28f27d0b651c65f813f75f260c402e1e173004694f28925c3",
+      "cdj_c6747_timer.c": "b5ffb0ab241f8fb865d69dc7800bb3a17c6f50396d6b827ef04e32b32d3a3a42",
+      "cdj_c6747_timer.h": "e44446b66583605339bef6c0092757cf38bb2974e17c0adbde45f54dd7bb529b",
+      "cdj_c674x.c": "1731fd577484e3aa0d940ac5c9881ac7e697bb4153343279f547705ee9ac27a3",
+      "cdj_c674x.h": "8c7d661e74a6e6c0be4bc7cf9f86a82c93369c2f3d493e6fd8b872afe44c8340",
+      "cdj_c674x_approx.c": "dcfeae8a7078011c01f723d091f1b155b1c6c527202b1b805457742171ca8dd8",
+      "cdj_c674x_approx.h": "98f0a8727dccd0f8ef8e185ba757093dab2c6a0fd7a07252a4cf787bbe0346ab",
+      "cdj_c674x_control.c": "eb21f042a44cd4ff823336670e0fbf5cadc3d46ad02789f7181f502fa6f63505",
+      "cdj_c674x_control.h": "f764928745e20fcae5047c6faaa6fc5936d92483e96bcbb8107508419e987f2a",
+      "cdj_c674x_dotp.c": "cbbd8fbd36324c7affb9506fc0d3a6bd69de8fa3a830b91c10b180783df049e3",
+      "cdj_c674x_dotp.h": "b5c841dfae45e0b43e20c4fa2789bf40e49ce42bbf19c38eeca1f0f181e2e6aa",
+      "cdj_c674x_dp.c": "d60e901dd8fe374d8afdfd356e6da70132448cfcd6d07a85308ce868333038a4",
+      "cdj_c674x_dp.h": "80c2e4357d910dfd9bba0f050c5274894e7144d703fdb8c5e590694d13166e14",
+      "cdj_c674x_loop.c": "565baba456e2168ac8d4dbc44206c7519f56599a1d8ffff0b25591c71a663021",
+      "cdj_c674x_loop.h": "2af1f262386db5b986a70bd0381eb9831baf115e8ca208cc4115d267dc5fe852",
+      "cdj_c674x_mpy.c": "cb124ed8eb24639cba1144fb3c1afbd6b477a54915f2d28078b1d081dbde6a40",
+      "cdj_c674x_mpy.h": "c7b68312585265ef77d4209165c8451f0faac7a2b98e09e4d04147f2bca90472",
+      "cdj_c674x_mpy32.c": "fbb6de59e01cfb63654f508f31f57c8925e5e53b82a8335114376a64dcd20d12",
+      "cdj_c674x_mpy32.h": "16277719135e374f796555f502d2699910f67c82cbbbadbb29de1e626a980fd1",
+      "cdj_c674x_multicycle.h": "559d40cde86bd7801a18292c14a4b11d8f60252de08e8e6177454750bd634cb1",
+      "cdj_c674x_packbits.c": "d632ba50ddc1718edae55c9b12f25f45a27c07613c04791015b70f0b9d21db54",
+      "cdj_c674x_packbits.h": "008d5163f1ca9bdc39854b564c05cd6be8e3cabf0e706b153ab22ad71b49a9cc",
+      "cdj_c674x_packed16.c": "498bf57a98bc89b94877eba5d7b93b0f7d1d33ad930c0f3827ee873f974807c2",
+      "cdj_c674x_packed16.h": "68fd507e710a430d13a291ecc39cff65a98eb0f779cc54593c6b7f228a6334f4",
+      "cdj_c674x_packed8.c": "eb5bb96205f791ab0376a3db72aedeb09b3b8417d3e6d8180ebc5deb2d210b98",
+      "cdj_c674x_packed8.h": "0cb8f3edfc342e398dd56304ee0255dd053c4bb0515fe0a5857190fa839d2391",
+      "cdj_c674x_sp.c": "d75148b3244349fcedd4257a4b29fae761dd79e354063d765b856b79ee95b800",
+      "cdj_c674x_sp.h": "980dfe8f04780e027f6361a2b8dd67e29e1b61a70f0944e046c93b2cc1b9fef5",
+      "cdj_c674x_uncond.c": "a15e6fd1ee3ee2d8af290c16aba745d87f087ed7482f51012e8be0489e78326c",
+      "cdj_c674x_uncond.h": "d2eededb78d3aff1282edf00945335d86072bf85a1a56800d153ed5ce80ea100",
+      "cdj_dsp_audio_clock.h": "b99519be2fea8b685643cd4dfe8d09500f599cbe66aec3a64348434551bf58bb",
+      "cdj_dsp_budget.h": "ee424c5d75eb8b37b827d42613b3e46f80d7c39b0a1e670245cbd778fa317f85",
+      "cdj_dsp_checkpoint.c": "a3ce28241f22927a78a066c9ec67a69c2f74a3cba22abcbf8dcf5a0ad47c49ad",
+      "cdj_dsp_checkpoint.h": "1ba3bfc0f93f9e85eabf6f229f13ff9cdd0f2b764ed9db02bb98215f2a9b4b2b",
+      "cdj_dsp_scheduler.c": "21ea81647c0ff3e2e4834788bec656e41c7c9d5bfdef9c17c00af7fb336f130e",
+      "cdj_dsp_scheduler.h": "da5c2bfc1f49dc7d470be9bd088547ab9576f95b10565666d69f9c261a08263e",
+      "cdj_dsp_ticks.h": "7b047c7b831bdb08bea1eb627dfebf1ce69561644ca3d94ffb30e6f2894711e1",
+      "cdj_mfi_identity.h": "0165da37a3dd00c03a09d965fbbff73ee0e3e1f32285afd2fa309a1645901fa0",
+      "cdj_nxs_eth.h": "436fa9eb6ddb95ed99e282e2d15f5e4bb070723c2163302f71f82b8e59695bbc",
+      "cdj_nxs_iic.h": "5715387db8ea97114aa9aeda927c477281e54031f32486a9549fa2db48ede92f",
+      "cdj_rtl8201fl.h": "b9bcbd7089ea6e90f6333dd2c1b591db45cb526b1d5c754f7445e71421db587f",
+      "cdj_sh7764_eth.h": "d4c6d6042479cbb5dd422df99e5f88a959224a661d210bcf01aa82eb2dc9f5c5",
+      "cdj_sh7764_iic.h": "23f970be116a5cd1ba457b0a2798aace6f4db525cfe3c54c99b2d981dd813719",
+      "replay.c": "abe9cfea8204c68e1dfb3ef681b23eff2803b5919673e327fc3f2e20f1488f8b"
+    },
+    "builds": {
+      "baseline": {
+        "command": [
+          "/usr/bin/cc",
+          "-O2",
+          "-std=c11",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-I",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/replay.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_mpy.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_dotp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packed8.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packed16.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packbits.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_mpy32.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_dp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_approx.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_uncond.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_sp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_control.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_loop.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_syscfg.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_psc.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_mcasp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_gpio.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_i2c.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_pll.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_hpi.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_emifb.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_intc.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_timer.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_spi.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_cache.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_edma.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_dsp_scheduler.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_dsp_checkpoint.c",
+          "-lm",
+          "-o",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/baseline"
+        ],
+        "sha256": "ea66559e18c9edcaa5650c3d1a745747135330f88f0c94ee699b18f1d08b6cd4"
+      },
+      "instrumented": {
+        "command": [
+          "/usr/bin/cc",
+          "-O2",
+          "-std=c11",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-fprofile-instr-generate",
+          "-I",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/replay.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_mpy.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_dotp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packed8.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packed16.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packbits.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_mpy32.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_dp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_approx.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_uncond.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_sp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_control.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_loop.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_syscfg.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_psc.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_mcasp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_gpio.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_i2c.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_pll.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_hpi.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_emifb.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_intc.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_timer.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_spi.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_cache.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_edma.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_dsp_scheduler.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_dsp_checkpoint.c",
+          "-lm",
+          "-o",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/instrumented"
+        ],
+        "sha256": "11a5678d9dcf25cd059a5c398d45908d3a207c7cca6ce8d7f88f3085cffb76d4"
+      },
+      "candidate": {
+        "command": [
+          "/usr/bin/cc",
+          "-O2",
+          "-std=c11",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-fprofile-instr-use=/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/replay.profdata",
+          "-I",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/replay.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_mpy.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_dotp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packed8.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packed16.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_packbits.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_mpy32.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_dp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_approx.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_uncond.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_sp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_control.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c674x_loop.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_syscfg.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_psc.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_mcasp.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_gpio.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_i2c.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_pll.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_hpi.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_emifb.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_intc.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_timer.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_spi.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_cache.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_c6747_edma.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_dsp_scheduler.c",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/source/cdj_dsp_checkpoint.c",
+          "-lm",
+          "-o",
+          "/Users/gpotvin/Git/cdj2000-emulator/build/performance/dsp6/held-out/candidate"
+        ],
+        "sha256": "cbdb490ab4faae628f0b295ed7670d6bf69a6180c5721bb9c5b560ece82c9cbf"
+      }
+    },
+    "steps": 60000000,
+    "train_steps": 60000000,
+    "trials": [
+      {
+        "checkpoint": 0,
+        "trial": 0,
+        "build": "baseline",
+        "wall_seconds": 2.1991243329830468,
+        "user_seconds": 2.0559559999999983,
+        "stdout_sha256": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "checkpoint_sha256": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f",
+        "packets": 1272300897,
+        "cycles": 2196893608,
+        "matches": true
+      },
+      {
+        "checkpoint": 0,
+        "trial": 0,
+        "build": "candidate",
+        "wall_seconds": 1.877645666943863,
+        "user_seconds": 1.7197069999999997,
+        "stdout_sha256": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "checkpoint_sha256": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f",
+        "packets": 1272300897,
+        "cycles": 2196893608,
+        "matches": true
+      },
+      {
+        "checkpoint": 0,
+        "trial": 1,
+        "build": "candidate",
+        "wall_seconds": 1.705100875115022,
+        "user_seconds": 1.6550830000000012,
+        "stdout_sha256": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "checkpoint_sha256": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f",
+        "packets": 1272300897,
+        "cycles": 2196893608,
+        "matches": true
+      },
+      {
+        "checkpoint": 0,
+        "trial": 1,
+        "build": "baseline",
+        "wall_seconds": 2.142610166920349,
+        "user_seconds": 2.084095999999999,
+        "stdout_sha256": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "checkpoint_sha256": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f",
+        "packets": 1272300897,
+        "cycles": 2196893608,
+        "matches": true
+      },
+      {
+        "checkpoint": 0,
+        "trial": 2,
+        "build": "baseline",
+        "wall_seconds": 2.121372750028968,
+        "user_seconds": 2.0678620000000016,
+        "stdout_sha256": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "checkpoint_sha256": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f",
+        "packets": 1272300897,
+        "cycles": 2196893608,
+        "matches": true
+      },
+      {
+        "checkpoint": 0,
+        "trial": 2,
+        "build": "candidate",
+        "wall_seconds": 1.6986404589843005,
+        "user_seconds": 1.6505140000000011,
+        "stdout_sha256": "ed6cfaa168b936e902f355a553d057de0cd6cacc95c18f49dd29aeca80924acc",
+        "checkpoint_sha256": "e25c2aeb2d7935dcb33e8e5b512458f034b7ca8583b14c1af602abeb53a0749f",
+        "packets": 1272300897,
+        "cycles": 2196893608,
+        "matches": true
+      }
+    ],
+    "summaries": [
+      {
+        "checkpoint": "/Users/gpotvin/Git/cdj2000-emulator/runs/jit-ck/play-wet/00000000000000000001.cdjdsp",
+        "metric": "user_seconds",
+        "medians": {
+          "baseline": 2.0678620000000016,
+          "candidate": 1.6550830000000012
+        },
+        "cpu_or_wall_reduction": 0.19961631869051233
+      }
+    ]
+  },
+  "host": "macOS-27.0-arm64-arm-64bit",
+  "aot_sha256": "471341e2519158c915936c0a507a346872b1b8b887cfdf840398793246138ef5",
+  "aot_pgo_training": [
+    "play-real",
+    "play-live"
+  ],
+  "aot_pgo_held_out": "play-wet",
+  "aot_builds": {
+    "baseline-aot": {
+      "sha256": "e697af9c63084a029e21e3d54f3cfbe4fb6fa62a2b17ca2549e4adcdff34b025",
+      "flags": [
+        "-O2",
+        "-DCDJ_C674X_AOT_FILE=stock-dsp-aot-stage5.inc",
+        "-g"
+      ]
+    },
+    "aot-pgo-final": {
+      "sha256": "b525a32144ef5864e37e8c6e0046f77628a40ab44c33dba9838ccf0402972e69",
+      "flags": [
+        "-O2",
+        "-DCDJ_C674X_AOT_FILE=stock-dsp-aot-stage5.inc",
+        "-fprofile-instr-use=final-aot.profdata"
+      ]
+    }
+  },
+  "validation": {
+    "targeted_dsp": {
+      "passed": 28,
+      "skipped": 2
+    },
+    "full_suite_sandbox": {
+      "passed": 753,
+      "failed": 204,
+      "errors": 4,
+      "skipped": 36,
+      "xfailed": 1
+    },
+    "failed_tests_retried_with_local_socket_permission": {
+      "passed": 206,
+      "failed": 2
+    },
+    "remaining_failures": [
+      "tests/test_orphan_watchdog.py::test_sigkill_launcher_leaves_no_orphans[launcher-under-wrapper]",
+      "tests/test_qemu_sh4_irq_timer.py::test_tmu_stop_keeps_underflow_and_reset_restores_registers"
+    ],
+    "note": "No QEMU binary, runtime sources, or launcher sources changed in this investigation. Remaining failures are wrapped-launcher checkpoint startup timeout and the existing QEMU binary clearing TMU.UNF on timer stop."
+  }
+}

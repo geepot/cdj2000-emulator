@@ -223,6 +223,10 @@ typedef struct {
     uint64_t until;
     uint32_t break_pc;
     uint64_t skipped;
+    /* Opt-in host diagnostics: CSR.GIE after each skipped packet.
+     * Bulk copy kernels cannot change CSR, so count the whole burst. */
+    bool count_gie;
+    uint64_t gie_skipped;
     /* While count_ticks (the board's choice: its cycle_tick would only
      * count the cycle), the compiled paths add each cycle to `ticks`
      * instead of calling cycle_tick; the board takes them from there

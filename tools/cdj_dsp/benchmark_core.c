@@ -59,6 +59,10 @@ static double step_loop(const uint32_t *code, unsigned words, unsigned steps,
     unsigned ticks = 0;
     cdj_c674x_reset(&cpu, 0x1000);
     cpu.r[0][10] = 0x1100;
+    cpu.r[0][16] = 0x3f800001;
+    cpu.r[0][17] = 0x3f000003;
+    cpu.r[0][18] = 0xbf800001;
+    cpu.r[0][19] = 0x3f800000;
     cpu.cycle_tick = tick;
     cpu.cycle_opaque = &ticks;
     cdj_c674x_set_fetch_block(bench_read, bench_block);
@@ -185,6 +189,20 @@ int main(void)
     steady[2] = 3u << 23 | 30000u << 7 | 0x28 | 2;  /* MVK.S2 30000,B3 */
     steady[6] = (steady[6] & ~(15u << 9)) | 1u << 9; /* LDNDW *+B4[1] */
     steady[9] = (steady[9] & ~(15u << 9)) | 1u << 9; /* STNDW *+A5[1] */
+    /* SP pipeline with two empty issue phases per II=4 period, to measure
+     * the cost of leaving steady execution for delayed retirements. */
+    static const uint32_t sparse[] = {
+        3u << 23 | 30000u << 7 | 0x28 | 2,          /* MVK.S2 30000,B3 */
+        13u << 23 | 3u << 18 | 0x3a2,                /* MVC.S2 B3,ILC */
+        3u << 13,                                  /* NOP 4 */
+        3u << 23 | 0x38000,                         /* SPLOOP 4 */
+        20u << 23 | 17u << 18 | 16u << 13 | 0xe00, /* MPYSP A16,A17,A20 */
+        21u << 23 | 19u << 18 | 18u << 13 | 0x218, /* ADDSP A18,A19,A21 */
+        1u << 13,                                  /* NOP 2 */
+        0x34000,                                   /* SPKERNEL */
+        (0x1fffffu & (uint32_t)-8) << 7 | 0x10,    /* B.S1 0x1000 */
+        4u << 13,                                  /* NOP 5 */
+    };
     uint64_t packets;
     double t = step_loop(alu, 6, 30000000, &packets);
     printf("step-alu %.6f s; packets=%llu (%.1f M packets/s)\n", t,
@@ -200,6 +218,9 @@ int main(void)
            (unsigned long long)packets, packets / t / 1e6);
     t = step_loop(steady, 12, 30000000, &packets);
     printf("step-kernel %.6f s; packets=%llu (%.1f M packets/s)\n", t,
+           (unsigned long long)packets, packets / t / 1e6);
+    t = step_loop(sparse, 10, 30000000, &packets);
+    printf("step-sparse-sp %.6f s; packets=%llu (%.1f M packets/s)\n", t,
            (unsigned long long)packets, packets / t / 1e6);
     return 0;
 }

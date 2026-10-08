@@ -796,6 +796,12 @@ def main():
                         help='--dsp-thread: DSP clock in million packets per virtual second '
                              '(1..100000, default 150). With --audio-clock virtual this is '
                              'the DSP budget per McASP slot (150 -> ~1700 packets per slot)')
+    dsp.add_argument('--dsp-playback-metrics', action='store_true',
+                     help='stock NXS first PLAY window only: DSP-thread CPU time, '
+                          'CSR.GIE background packets, slots and underruns')
+    dsp.add_argument('--dsp-playback-profile', type=Path,
+                     help='dump playback-only .profraw from a DSP PGO training QEMU; '
+                          'implies --dsp-playback-metrics')
     dsp.add_argument('--audio-clock', choices=('packets', 'virtual'), default='packets',
                         help='--functional-dsp-audio McASP slot clock: packets, one slot per '
                              '1024 executed DSP packets (default), or virtual (needs '
@@ -930,6 +936,8 @@ def main():
     if removed:
         parser.error(removed)
     args = parser.parse_args()
+    if args.dsp_playback_profile and args.dsp_playback_profile.exists():
+        parser.error('--dsp-playback-profile must name a new file; existing raw counters could be merged')
     if args.sd_insert_seconds is not None and (not (args.sd or args.test_track) or
                                              not 0 <= args.sd_insert_seconds <= 86400):
         parser.error('--sd-insert-seconds requires --sd or --test-track and a value from 0 to 86400')
@@ -951,6 +959,8 @@ def main():
         parser.error('--dsp-clock-mpps must be 1..100000')
     if args.audio_clock == 'virtual' and not (args.dsp_thread and args.functional_dsp_audio):
         parser.error('--audio-clock virtual requires --dsp-thread and --functional-dsp-audio')
+    if (args.dsp_playback_metrics or args.dsp_playback_profile) and args.audio_clock != 'virtual':
+        parser.error('playback metrics/profile require --audio-clock virtual')
     if args.audio_clock == 'virtual' and args.dsp_cycle_mcasp_clock:
         parser.error('--audio-clock virtual cannot be combined with --dsp-cycle-mcasp-clock')
     if args.capture_dsp_tx and not args.functional_dsp_audio:
@@ -1209,6 +1219,14 @@ def main():
     gui_env = {k:v for k,v in os.environ.items() if not k.startswith('BFIN_')}
     gui_env.update(overrides)
     main_env = {k:v for k,v in os.environ.items() if not k.startswith('CDJ_')}
+    if args.dsp_playback_metrics or args.dsp_playback_profile:
+        main_env['CDJ_NXS_DSP_PLAYBACK_METRICS'] = '1'
+    if args.dsp_playback_profile:
+        args.dsp_playback_profile.parent.mkdir(parents=True, exist_ok=True)
+        main_env['CDJ_NXS_DSP_PLAYBACK_PROFILE'] = str(args.dsp_playback_profile.resolve())
+        # A run without PLAY may emit this file at process exit. It must
+        # never be mistaken for the explicitly dumped playback profile.
+        main_env['LLVM_PROFILE_FILE'] = str(run / 'unfiltered.profraw')
     main_env['CDJ_INPUT_PORT'] = str(args.port + 4)
     if args.cosim:
         main_env['CDJ_COSIM'] = str(args.port + 5)
@@ -1355,6 +1373,8 @@ def main():
                    firmware_load_verified=False, audio_verified=False),
         dsp_scheduler_mode=dsp_scheduler_mode,
         dsp_model=args.dsp_model,
+        dsp_playback_metrics=args.dsp_playback_metrics or bool(args.dsp_playback_profile),
+        dsp_playback_profile=str(args.dsp_playback_profile.resolve()) if args.dsp_playback_profile else None,
         dsp_thread=args.dsp_thread,
         dsp_thread_choice=dsp_thread_choice,
         dsp_jit=args.dsp_jit,

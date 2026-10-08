@@ -1765,3 +1765,239 @@ cursor-advance loop, the board's per-slot work, the MAIN hand-over) did not
 get faster; the replay gains are in the memcpy and the loop machinery the
 decoder uses, which only run once the background gets time.  E-8302 stays.
 Real time needs ~2.5x on the playing ISR mix as well as the background.
+
+## Further compiler experiments (2026-10-08)
+
+Clang instrumentation PGO is the best additional optimization measured in
+this pass. On three playback checkpoint continuations, it reduces user CPU
+time by **19–21%** over the current `-O2` JIT build. Thin LTO saves **3–4%**;
+`-O3` alone gives no useful improvement. These are standalone replay results,
+not a connected playback or realtime audio claim. No emulator defaults or
+execution semantics changed in this pass.
+
+Each continuation requested 60 million steps with functional audio, direct
+RAM stores, compact trace output and the replay horizon enabled. Three trials
+alternate the baseline and candidate order. Median user CPU seconds:
+
+| Continuation | `-O2` JIT | + Clang PGO | + Thin LTO |
+|---|---:|---:|---:|
+| play-real | 2.119 | 1.707 | 2.047 |
+| play-live | 2.040 | 1.618 | 1.968 |
+| play-wet | 2.081 | 1.672 | 2.010 |
+
+PGO trained on all three continuations for that table. A separate experiment
+trained only on play-real and play-live: the held-out play-wet continuation
+used **2.068 → 1.655 user seconds (20.0% less)**. Every candidate and repeat
+has byte-identical compact output and final CPU/peripheral/RAM checkpoints.
+Inputs are local diagnostic captures; this does not supply the missing
+connected event transcript or prove architectural validity.
+
+PGO also helps with AOT already enabled. Retraining an instrumented stock-AOT
+build on play-real and play-live, then rebuilding with that profile, gives:
+
+| Continuation | `-O2` AOT | AOT + PGO | Less CPU time |
+|---|---:|---:|---:|
+| play-real | 1.856 | 1.558 | 16.1% |
+| play-live | 1.737 | 1.415 | 18.5% |
+| play-wet (held out) | 1.743 | 1.441 | 17.3% |
+
+The output and final checkpoints remain byte-identical in all trials. This
+uses the original core, with both rejected prototypes removed.
+
+Existing stock AOT regions still help: in a separate alternating comparison
+they reduced CPU time by 14–18% over JIT alone. They handled 24.1 million of
+25.2 million direct packets in play-real (95.5%). Generating more regions
+for the same workload therefore has limited room; making hot regions cheaper
+is more promising. Raw measurements and hashes are in
+`analysis/iterations/16-dsp-compiler/measurements.json`; firmware-derived
+profiles, generated code, binary snapshots and traces remain under
+`build/performance/dsp6/`.
+
+A five-second macOS sample of the play-wet functional-audio replay put 25.9%
+of top-of-stack samples in `dts_lean`, 13.5% in `run_compiled` (including its
+inlined burst), 6.3% in memmove, 4.9% in `jk_exec`, 4.3% in `entry_current`,
+and 3.2% + 1.1% in SP addition/subtraction and multiplication. This profile
+uses JIT without AOT; replay's output and peripheral dispatch are also in
+the sample, so it cannot substitute for a live DSP-thread profile. It argues
+against prioritizing host-FPU shortcuts before removing scheduling costs.
+
+Two exact core prototypes were tested and discarded: carrying the burst's
+phase instead of dividing each cycle, and keeping steady execution across
+empty issue phases. Both passed lockstep and playback continuation checks,
+but neither produced a reliable whole-replay gain. The latter also failed to
+improve a synthetic sparse SP pipeline. `benchmark_core` now includes that
+workload as `step-sparse-sp`, so future kernel work can measure it directly.
+
+`tools.cdj_dsp.benchmark_compiled` makes the compiler experiment repeatable:
+
+```sh
+python -m tools.cdj_dsp.benchmark_compiled --pgo --functional-audio \
+  --checkpoint runs/jit-ck/play-wet/00000000000000000001.cdjdsp \
+  --train-checkpoint runs/jit-ck/play-real/00000000000000002706.cdjdsp \
+  --train-checkpoint runs/jit-ck/play-live/00000000000000000001.cdjdsp \
+  --output build/performance/pgo-held-out
+```
+
+Use one's own compatible checkpoints if these local captures are absent.
+`--aot PATH` supplies the same generated include to both builds; `--lto thin`
+tests LTO alone or together with PGO. The tool freezes and hashes sources
+and checkpoints, builds from one snapshot, records compiler commands and
+binary hashes, trains Clang profiles when requested, alternates trials,
+requires a fault-free step-limit stop, and fails on any output or final-state
+mismatch. It does not overwrite an existing output directory. Profiles are
+build inputs: retrain after source, AOT output or compiler changes.
+
+The next implementation priorities are:
+
+1. Apply PGO to the DSP objects in a QEMU build, training on the actual
+   playing ISR mix. Measure packets per DSP-thread CPU second, background
+   progress and underruns during playback; keep boot and post-error polling
+   out of the playback average. Replay PGO is a validated candidate for that
+   experiment, not a measured live improvement.
+2. Reduce hot AOT regions' per-packet register and pipeline bookkeeping.
+   Keeping values in host locals across proven straight-line portions could
+   avoid repeated CPU-struct traffic. Materialize the complete observable
+   state before callbacks, horizon exits, faults and interrupts; preserve
+   delayed-result timing and rollback. Measure generated code size and
+   instruction-cache costs as well as throughput.
+3. Only after a profile of the PGO+AOT live build, consider a native host-code
+   backend for the remaining hot loops. Current runtime JIT specializes C
+   data and schedules; it does not emit host instructions. A machine-code
+   backend would need host-specific code generation and the same horizon,
+   code invalidation and byte-exact state gates. Its speedup is unmeasured.
+
+Validation: the targeted C674x/replay files pass (28 passed, 2 skipped), and
+the new tool passes held-out PGO and LTO smoke runs. The broader suite passed
+753 tests inside the socket-restricted sandbox; rerunning its 208 failures
+and errors with localhost permission passed 206. Two integration failures
+remain: wrapped-launcher checkpoint startup times out, and the existing QEMU
+binary clears TMU.UNF when a timer stops. Those replay experiments did not change QEMU's binary, runtime or launcher
+sources; the subsequent live experiment below adds opt-in diagnostics and
+rebuilds QEMU. The complete test
+logs are retained under `build/performance/dsp6/`.
+
+## Live DSP-only QEMU PGO (2026-10-08)
+
+The first implementation priority above now has a connected experiment.
+`tools/cdj_dsp/qemu_pgo.py` replaces only the 30 DSP/core/peripheral/board-HPI
+objects in a separate QEMU executable. SH4, TCG and other QEMU objects retain
+the normal build's compilation. The training and optimized variants use the
+same stock AOT include. Source hashes, compiler, original compilation/link
+commands and the remaining link-object hashes must match before profile use;
+Clang treats missing or stale function profiles as errors. Verified object
+reuse also checks the profile hash. Ninja's normal objects and executable are
+not replaced by the variant builder.
+
+`--dsp-playback-metrics` enables stock-firmware diagnostics on the DSP thread
+with `--functional-dsp-audio --audio-clock virtual`. The first nonzero stream
+position with an initialized stream header and active McASP clock opens the
+window; the error header, zeroed/backward position, fault or shutdown closes
+it. These are stock forward-PLAY diagnostics: a PAUSE that retains position
+is not separately classified. The controlled trials load one USB track and
+play forward without pausing. Boot, preloading and subsequent error polling
+are excluded. Boundaries are observed between chunks of at most 2,048 packets.
+CSR.GIE after each packet is the background proxy, including horizon skips
+and bulk-copy bursts; it is not a firmware-task scheduler measurement.
+
+`--dsp-playback-profile PATH` additionally resets Clang counters at window
+entry and dumps once at exit. The output must be new, so an earlier raw profile
+cannot silently merge into it. An unfiltered process-exit profile has a
+separate filename and is not used for training. The collection hook is
+excluded from profiling so its training-only runtime calls cannot invalidate
+the optimized board object's function profiles. This uses Clang's documented
+[profile collection controls](https://clang.llvm.org/docs/UsersManual.html#fine-tuning-profile-collection).
+
+Training used a real connected USB PLAY interval: 84,985,302 packets over
+4.476 virtual seconds, with 1,050,059 GIE-enabled packets. The final stream
+position was 119 and the profile dump succeeded. This is a live ISR-dominated
+profile, rather than a checkpoint continuation.
+
+Three clean trials of each variant alternated baseline / PGO. No build or
+sampling profiler ran alongside those trials. All used the same USB image,
+firmware, GUI simulator, 150 Mpps DSP budget and virtual audio clock. Medians:
+
+| Playback-only metric | AOT `-O2` | DSP PGO + AOT | Change |
+|---|---:|---:|---:|
+| Packets / DSP-thread CPU second | 18.696 M | 19.935 M | +6.6% |
+| Packets / virtual second | 29.921 M | 31.704 M | +6.0% |
+| GIE-enabled packets / virtual second | 0.465 M | 0.552 M | +18.8% |
+| GIE-enabled packets / DSP-thread CPU second | 0.285 M | 0.347 M | +21.9% |
+| Late McASP slots / all slots | 80.06% | 78.91% | -1.16 percentage points |
+
+CPU-throughput ranges overlap: baseline 18.16–20.53 M, PGO 19.48–20.72 M.
+These are small shared-host samples, not a confidence interval. Every trial
+still ended at position 119 with E-8302. The median gain is measured live,
+but it does not reproduce replay PGO's 16–20% savings or recover playback.
+The optimized binary remains an explicit experimental choice.
+
+Code size was measured on the exact DSP core objects. Core `__text` grew
+from 5,215,668 to 5,648,596 bytes (+8.3%). Generated AOT functions grew from
+approximately 5,024,584 to 5,068,648 bytes (+0.9%); this symbol-span measure
+includes function alignment padding. One separate five-second Instruments
+CPU Counters capture per variant found DSP-thread instruction-delivery
+bottleneck fractions of 39.11% baseline and 39.10% PGO. Discarded-work fractions
+were 13.88% and 16.91%. These user-level captures are diagnostics, excluded
+from throughput medians. Instruction delivery includes more than instruction
+cache misses, so these figures do not isolate an L1 I-cache miss rate or prove
+that the larger code caused a particular throughput change. See Apple's
+[CPU bottleneck analysis](https://developer.apple.com/videos/play/wwdc2025/308/).
+
+A separate PGO+AOT live stack sample had 2,821 DSP-thread samples:
+
+- 580 (20.6%) were self time in generated AOT functions. Groups 7, 8 and 4
+  were the leading generated groups, with 100, 71 and 68 self samples.
+- 745 (26.4%) were under the compiled loop path. Kernel issue/scheduling,
+  inlined burst bookkeeping and `memmove` remain substantial; SP arithmetic
+  helpers are only part of this cost.
+- `sched_yield`'s kernel leaf and mutex waits accounted for 354 and 117
+  samples (16.7% together). Lock transfer and board work remain relevant.
+
+This profile supports the second priority, but is not a measured AOT-local
+caching improvement. The generator currently calculates register operands
+through `dts_value(cpu, ...)`, commits each node to the CPU structure, retires
+its queues and validates its successor. A useful prototype must carry both
+known register values and the proven queue schedule across callback-free
+segments. Its slow code-validation path, timer ticks, commit/E3 callbacks,
+declines, faults, horizon exits and interrupts must see fully materialized
+state. Groups 7/8/4 are concrete profiling targets. Simply adding host locals
+without changing those aliasing and observation boundaries is insufficient.
+No native machine-code backend was added; the remaining loop profile is now
+available to evaluate that later priority.
+
+Validation used the exact baseline/PGO DSP object files from the QEMU builds,
+linked into the native replay harness: seven checkpoints (four boot, three
+playback), each with and without functional audio, 10 M requested steps per
+case. All 14 compact traces and final checkpoints were byte-identical and
+stopped fault-free at the step limit. The packet-cache lockstep test also
+checks GIE skip accounting against interpreter execution. Targeted launcher,
+metrics and replay tests passed (55 passed, 1 skipped), and the lockstep test
+passed separately. Results, hashes, code sizes and normalized profile counts
+are in `analysis/iterations/16-dsp-compiler/live-qemu-pgo.json`; firmware,
+generated C, raw profiles and Instruments traces stay in ignored local paths.
+
+Reproduction with one's own stock AOT include and media:
+
+```sh
+CDJ_C674X_AOT_SOURCE=build/aot/stock-dsp-aot-stage5.inc \
+  sh scripts/build-qemu-sh4.sh "$PWD/build/qemu"
+python -m tools.cdj_dsp.qemu_pgo --train --output build/performance/live-train
+python -m tools.cdj_main.nxs_vm runs/live-train \
+  --qemu build/performance/live-train/qemu-system-sh4 \
+  --usb runs/cards/rekordbox-usb/card.img --source-key-when-ready --debug \
+  --functional-dsp-audio --audio-clock virtual --seconds 300 \
+  --dsp-playback-profile build/performance/live-playing.profraw
+# Load a track and PLAY using the normal panel controls during that run.
+# Require a completed nxs-dsp-playback window and profile-status=0.
+xcrun llvm-profdata merge -o build/performance/live-playing.profdata \
+  build/performance/live-playing.profraw
+python -m tools.cdj_dsp.qemu_pgo \
+  --profile build/performance/live-playing.profdata \
+  --training-build build/performance/live-train/build.json \
+  --output build/performance/live-pgo
+# Repeat the same PLAY with normal QEMU and live-pgo, enabling
+# --dsp-playback-metrics, then summarize their main-stderr.log files:
+python -m tools.cdj_dsp.playback_metrics \
+  --run baseline=runs/live-base/main-stderr.log \
+  --run pgo=runs/live-pgo/main-stderr.log \
+  --output build/performance/live-comparison.json
+```

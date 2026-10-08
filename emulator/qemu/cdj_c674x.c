@@ -8997,6 +8997,7 @@ static inline __attribute__((always_inline)) bool horizon_skip(const CdjC674x *c
         cpu->pc == h->break_pc || !interrupt_quiet(cpu))
         return false;
     ++h->skipped;
+    if (h->count_gie) h->gie_skipped += cpu->control[1] & 1u;
     return true;
 }
 
@@ -10384,6 +10385,7 @@ static unsigned jk_bulk(CdjC674x *cpu, JitLoop *l, const JitKernel *k,
     cpu->packets += K;
     h->ticks += K;
     h->skipped += K;
+    if (h->count_gie && (cpu->control[1] & 1u)) h->gie_skipped += K;
     jit_counts.steady += K;
     return K;
 }

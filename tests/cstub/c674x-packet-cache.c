@@ -601,17 +601,21 @@ static bool b_step(JitPair *p)
 static void catch_up(JitPair *p)
 {
     unsigned skipped = test_horizon.skipped;
+    uint64_t expected_gie = 0, observed_gie = test_horizon.gie_skipped;
+    test_horizon.gie_skipped = 0;
     test_horizon.skipped = 0;
     horizon_skips += skipped;
     for (unsigned k = 0; k < skipped; ++k) {
         cdj_c674x_set_packet_cache(0);
         assert(b_step(p));
+        expected_gie += p->b->control[1] & 1u;
         cdj_c674x_set_packet_cache(2);
         ++p->step;
         uint32_t mask = horizon_event(p->b);
         assert(cdj_c674x_interrupt(p->b, mask));
         if (mask) event_mask = mask;    /* A's turn to look for it */
     }
+    assert(observed_gie == expected_gie);
 }
 
 static void horizon_open(JitPair *p, uint32_t pending)
@@ -1403,6 +1407,7 @@ static void dt_directed_faucr(void)
 
 int main(void)
 {
+    test_horizon.count_gie = true;
     cdj_c674x_set_fetch_block(sys_read, sys_block);
     cdj_c674x_set_fetch_epoch(&test_epoch);
     cdj_c674x_set_ram_window(sys_write, sys_window, &test_direct);

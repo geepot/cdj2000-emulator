@@ -53,6 +53,13 @@ static __attribute__((unused)) void dsp_thread_prefer_performance(void)
 #include "cdj_dsp_audio_clock.h"
 #include "cdj_dsp_ticks.h"
 
+#ifdef CDJ_DSP_PGO_TRAIN
+/* Linked only by the DSP-only instrumented QEMU experiment. */
+void __llvm_profile_reset_counters(void);
+void __llvm_profile_set_filename(const char *);
+int __llvm_profile_dump(void);
+#endif
+
 #define HPI_BASE 0x0c000000u
 #define L2_BASE 0x11800000u
 #define L2_SIZE 0x40000u
@@ -92,6 +99,13 @@ typedef struct {
      * audio_clock.rate_num is 0 while McASP1 transmit is stopped. */
     bool thread_audio_clock;
     CdjDspAudioClock audio_clock;
+    /* Stock NXS firmware diagnostic, explicitly enabled by the launcher.
+     * These host counters are not architectural/checkpoint state. */
+    bool playback_metrics, playback_active, playback_profile_done;
+    uint64_t playback_gie, playback_packets, playback_slots, playback_late;
+    double playback_cpu, playback_virtual;
+    uint32_t playback_position;
+    uint64_t gie_packets;
     uint64_t audio_clock_next_packets;  /* packets at which next_ns is due */
     uint32_t legacy_budget;
     CdjDspScheduler scheduler;
@@ -1979,6 +1993,7 @@ static bool dsp_post_step(DspActivation *a)
 {
     NxsHpi *s = a->s;
     ++a->steps;
+    if (s->playback_metrics) s->gie_packets += s->cpu.control[1] & 1u;
     if (s->spi_transfer.fault) {
         s->cpu.fault = "unsupported SPI transfer clock or state";
         s->cpu.fault_pc = s->cpu.pc;
@@ -2012,6 +2027,8 @@ static bool dsp_post_step(DspActivation *a)
 static void dsp_horizon_steps(DspActivation *a)
 {
     a->steps += a->s->horizon.skipped;
+    a->s->gie_packets += a->s->horizon.gie_skipped;
+    a->s->horizon.gie_skipped = 0;
     a->s->horizon.skipped = 0;
 }
 
@@ -2203,6 +2220,66 @@ static double dsp_thread_cpu_seconds(void)
            ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+/* The stock stream position advances only during PLAY. Header ffffffff
+ * denotes E-8302. Sample under the DSP lock, at chunk boundaries (<=2048
+ * packets); training and metrics share those boundaries. A zeroed/reloaded
+ * position closes the window. These offsets are firmware diagnostics, never
+ * used to decide emulated execution. */
+static void dsp_playback_report(NxsHpi *s, int64_t virt, bool final)
+{
+    double cpu = dsp_thread_cpu_seconds() - s->playback_cpu;
+    double elapsed = virt / 1e9 - s->playback_virtual;
+    info_report("nxs-dsp-playback: final=%u virtual=%.6fs cpu=%.6fs"
+                " packets=%" PRIu64 " background=%" PRIu64
+                " slots=%" PRIu64 " underruns=%" PRIu64
+                " position=%u", final, elapsed, cpu,
+                s->cpu.packets - s->playback_packets,
+                s->gie_packets - s->playback_gie,
+                s->audio_clock.slots - s->playback_slots,
+                s->audio_clock.late - s->playback_late,
+                ldl_le_p(s->l2 + 0x37c10));
+}
+
+static __attribute__((no_profile_instrument_function))
+void dsp_playback_observe(NxsHpi *s, int64_t virt, bool stopping)
+{
+    if (!s->playback_metrics) return;
+    uint32_t position = ldl_le_p(s->l2 + 0x37c10);
+    uint32_t header = ldl_le_p(s->l2 + 0x38140);
+    bool playing = !stopping && s->audio_clock.rate_num &&
+                   s->audio_clock.slots && position && header &&
+                   header != UINT32_MAX && !s->dsp_halted;
+    if (!s->playback_active && playing && !s->playback_profile_done) {
+        s->playback_active = true;
+        s->playback_position = position;
+        s->playback_packets = s->cpu.packets;
+        s->playback_gie = s->gie_packets;
+        s->playback_slots = s->audio_clock.slots;
+        s->playback_late = s->audio_clock.late;
+        s->playback_cpu = dsp_thread_cpu_seconds();
+        s->playback_virtual = virt / 1e9;
+#ifdef CDJ_DSP_PGO_TRAIN
+        __llvm_profile_reset_counters();
+#endif
+        info_report("nxs-dsp-playback: begin position=%u header=%#x", position, header);
+    } else if (s->playback_active &&
+               (!playing || position < s->playback_position)) {
+        dsp_playback_report(s, virt, true);
+        s->playback_active = false;
+        s->playback_profile_done = true;
+#ifdef CDJ_DSP_PGO_TRAIN
+        const char *path = getenv("CDJ_NXS_DSP_PLAYBACK_PROFILE");
+        if (path && *path) {
+            __llvm_profile_set_filename(path);
+            int status = __llvm_profile_dump();
+            info_report("nxs-dsp-playback: profile-status=%d", status);
+        }
+#endif
+    } else if (s->playback_active) {
+        s->playback_position = position;
+    }
+}
+
 static void *dsp_thread_run(void *opaque)
 {
     NxsHpi *s = opaque;
@@ -2216,6 +2293,7 @@ static void *dsp_thread_run(void *opaque)
             continue;
         }
         int64_t virt = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        dsp_playback_observe(s, virt, false);
         dsp_thread_slip(s, virt);
         uint64_t limit = dsp_thread_packets_at(virt + t->quantum_ns);
         /* MAIN blocked on the DSP holds virtual time (always under icount):
@@ -2250,6 +2328,7 @@ static void *dsp_thread_run(void *opaque)
                         t->main_waits, t->main_wait_ns / 1e9, t->chunks,
                         t->host_breaks, t->waits, t->credited_packets,
                         s->cpu.pc, dsp_thread_cpu_seconds());
+            if (s->playback_active) dsp_playback_report(s, virt, false);
             dsp_jit_report();
             if (s->thread_audio_clock)
                 info_report("nxs-c674x-audio-clock: virtual=%.3fs slots=%" PRIu64
@@ -2271,6 +2350,7 @@ static void *dsp_thread_run(void *opaque)
             qemu_mutex_lock(&t->lock);
         }
     }
+    dsp_playback_observe(s, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL), true);
     qemu_cond_broadcast(&t->progress);
     qemu_mutex_unlock(&t->lock);
     return NULL;
@@ -2972,6 +3052,8 @@ static const MemoryRegionOps hpi_ops = {
 void cdj_nxs_hpi_init(MemoryRegion *system, void (*hint)(void *, bool), void *opaque)
 {
     NxsHpi *s = g_new0(NxsHpi, 1);
+    s->playback_metrics = g_strcmp0(getenv("CDJ_NXS_DSP_PLAYBACK_METRICS"), "1") == 0;
+    s->horizon.count_gie = s->playback_metrics;
     const char *timing = getenv("CDJ_NXS_DSP_FUNCTIONAL_TIMING");
     const char *audio = getenv("CDJ_NXS_DSP_FUNCTIONAL_AUDIO");
     const char *virtual_audio = getenv("CDJ_NXS_DSP_VIRTUAL_MCASP");
