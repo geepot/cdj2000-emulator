@@ -906,11 +906,14 @@ def main():
                              'before). A fast '
                              'MAIN otherwise reaches the GUI link before the slower simulated '
                              'GUI is ready and waits for a retry (0.5 s measured too short)')
-    dsp.add_argument('--dsp-idle-skip', action=argparse.BooleanOptionalAction, default=True,
+    dsp.add_argument('--dsp-idle-skip', action=argparse.BooleanOptionalAction, default=None,
                         help='advance a DSP that provably spins in an idle loop (repeated '
                              'registers and memory, no device access, quiescent peripherals) '
                              'by whole loop periods without executing them; events and '
-                             'checkpoints are those of full execution (default: on)')
+                             'checkpoints are those of full execution (default: on, except '
+                             'with --audio-clock virtual, where the DSP thread is paced '
+                             'against virtual time and the proofs only cost time: '
+                             'PERFORMANCE.md "C674x stage 5")')
     dsp.add_argument('--dsp-jit', action=argparse.BooleanOptionalAction, default=True,
                         help='run the C674x\'s software-pipelined loops from compiled form '
                              '(CDJ_C674X_JIT=1; PERFORMANCE.md "Compiled SPLOOP kernels"); '
@@ -991,6 +994,8 @@ def main():
         parser.error('positive duration and port 1024..65531 required')
     if args.debug_paused and not args.debug:
         parser.error('--debug-paused requires --debug')
+    if args.dsp_idle_skip is None:
+        args.dsp_idle_skip = args.audio_clock != 'virtual'
     if args.gui_head_start is None:
         args.gui_head_start = 2.0 if args.dsp_idle_skip and not (args.cosim or args.debug_paused) else 0
     if not math.isfinite(args.gui_head_start) or not 0 <= args.gui_head_start <= 60:

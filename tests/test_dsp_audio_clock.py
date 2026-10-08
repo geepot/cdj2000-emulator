@@ -11,6 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 SHIM = r'''
+#include <time.h>
 #include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>

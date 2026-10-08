@@ -35,6 +35,20 @@
 #include "cdj_c6747_emifb.h"
 #include "cdj_dsp_checkpoint.h"
 #include "cdj_dsp_budget.h"
+#ifdef __APPLE__
+#include <pthread/qos.h>
+#endif
+
+/* The DSP thread is the emulator's bottleneck while a track plays and runs
+ * flat out: on macOS ask for the performance cores.  At default QoS a busy
+ * host (a dozen other emulators) put it on an efficiency core in some runs,
+ * at about half the packet rate (PERFORMANCE.md, "C674x stage 5"). */
+static __attribute__((unused)) void dsp_thread_prefer_performance(void)
+{
+#ifdef __APPLE__
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+}
 #include "cdj_dsp_scheduler.h"
 #include "cdj_dsp_audio_clock.h"
 #include "cdj_dsp_ticks.h"
@@ -164,7 +178,10 @@ typedef struct {
      * Set at each horizon open, cleared when an idle anchor is taken. */
     bool ram_direct;
     uint64_t edma_writes, mcasp_control_writes;   /* see log_sample */
-    CdjC6747Edma edma_backup;   /* advance_functional_mcasp_slots' undo */
+    /* advance_functional_mcasp_slots' undo: the registers outside param[]
+     * and the PaRAM sets the slot's events changed. */
+    CdjC6747Edma edma_backup;
+    CdjC6747EdmaJournal edma_journal;
     uint64_t hpic_writes, wm8740_latches;
     /* Opt-in idle-loop skip (CDJ_NXS_DSP_IDLE_SKIP=1); see dsp_idle_repeat.
      * Host-side bookkeeping only: never checkpointed. */
@@ -924,9 +941,13 @@ static bool edma_write_bytes(void *opaque, uint32_t address,
     return false;
 }
 
+/* Every caller discards or puts back both models when this fails, so the
+ * events need no trial runs of their own (cdj_c6747_edma_event_unchecked);
+ * `journal` (or NULL) collects the PaRAM sets they change. */
 static bool service_mcasp_axevt(CdjC6747Edma *edma,
                                 CdjC6747McaspControl *mcasp,
-                                EdmaBusContext *context)
+                                EdmaBusContext *context,
+                                CdjC6747EdmaJournal *journal)
 {
     const CdjC6747EdmaBus bus = {edma_read_bytes, edma_write_bytes, context};
     for (unsigned instance = 1; instance <= 2; ++instance) {
@@ -936,7 +957,8 @@ static bool service_mcasp_axevt(CdjC6747Edma *edma,
              cdj_c6747_mcasp_axevt_ready(mcasp, instance);
              ++serializer) {
             uint64_t before = mcasp->xbuf_writes[instance];
-            if (!cdj_c6747_edma_event(edma, channel, &bus)) return false;
+            if (!cdj_c6747_edma_event_unchecked(edma, channel, &bus, journal))
+                return false;
             /* A disabled EDMA channel latches ER without servicing XBUF.
              * Stop until EESR is programmed rather than spinning. */
             if (mcasp->xbuf_writes[instance] == before) break;
@@ -972,7 +994,7 @@ static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
                              &trial_bus) :
         cdj_c6747_mcasp_control_write(&trial_mcasp, address, value, size, true);
     if (ok) ok = service_mcasp_axevt(&trial_edma, &trial_mcasp,
-                                     &trial_context);
+                                     &trial_context, NULL);
     if (ok && commit) {
         for (size_t i = 0; i < trial_context.write_count; ++i) {
             EdmaStagedWrite *write = &trial_context.writes[i];
@@ -990,11 +1012,18 @@ static bool edma_mcasp_transaction(NxsHpi *s, bool edma_access,
 static bool advance_functional_mcasp_slots(NxsHpi *s)
 {
     /* In place, with both models put back on a failure exactly as
-     * discarding a trial copy left them: one 4 KB EDMA copy per slot
-     * instead of two (nothing a slot runs reads the board's EDMA or McASP
-     * state other than through these pointers). */
+     * discarding a trial copy left them (nothing a slot runs reads the
+     * board's EDMA or McASP state other than through these pointers): the
+     * EDMA registers outside param[] are copied, the PaRAM sets the events
+     * change are journalled (cdj_c6747_edma_event_unchecked). */
     CdjC6747McaspControl original_mcasp = s->mcasp_control;
-    s->edma_backup = s->edma;
+    const size_t edma_regs = offsetof(CdjC6747Edma, qchmap);
+    _Static_assert(offsetof(CdjC6747Edma, param) == 0 &&
+                   offsetof(CdjC6747Edma, qchmap) ==
+                   sizeof(((CdjC6747Edma *)0)->param), "param[] leads");
+    memcpy((char *)&s->edma_backup + edma_regs, (const char *)&s->edma + edma_regs,
+           sizeof(s->edma) - edma_regs);
+    cdj_c6747_edma_journal_reset(&s->edma_journal);
     CdjC6747McaspControl *const trial_mcasp_p = &s->mcasp_control;
     CdjC6747Edma *const trial_edma_p = &s->edma;
     EdmaBusContext trial_context = {.owner = s, .mcasp = trial_mcasp_p};
@@ -1011,7 +1040,8 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         advanced = true;
     }
     if (ok && advanced)
-        ok = service_mcasp_axevt(trial_edma_p, trial_mcasp_p, &trial_context);
+        ok = service_mcasp_axevt(trial_edma_p, trial_mcasp_p, &trial_context,
+                                 &s->edma_journal);
     if (ok && advanced) {
         committed = true;
         for (size_t i = 0; i < trial_context.write_count; ++i) {
@@ -1089,7 +1119,9 @@ static bool advance_functional_mcasp_slots(NxsHpi *s)
         }
     }
     if (!committed && (advanced || !ok)) {
-        s->edma = s->edma_backup;
+        memcpy((char *)&s->edma + edma_regs, (const char *)&s->edma_backup + edma_regs,
+               sizeof(s->edma) - edma_regs);
+        cdj_c6747_edma_journal_undo(&s->edma, &s->edma_journal);
         s->mcasp_control = original_mcasp;
     }
     edma_free_staged_writes(&trial_context);
@@ -1113,7 +1145,8 @@ static int functional_slot_probe(NxsHpi *s, CdjC6747Edma *edma,
         if (!cdj_c6747_mcasp_tx_slot(mcasp, instance, &axevt)) result = -1;
         advanced = true;
     }
-    if (result >= 0 && advanced && !service_mcasp_axevt(edma, mcasp, &context))
+    if (result >= 0 && advanced &&
+        !service_mcasp_axevt(edma, mcasp, &context, NULL))
         result = -1;
     if (result >= 0 && (context.write_count || context.idle_log_hit ||
                         (edma->irq_notifications & ~notifications & 2u)))
@@ -1855,18 +1888,23 @@ static void dsp_horizon_open(NxsHpi *s, const DspActivation *a)
         if (s->idle_anchor_valid && !s->idle_dirty)
             h->break_pc = s->idle_anchor_pc;
     }
+    uint64_t due = 0;
     if (dsp_thread.on) {
         NxsDspThread *t = &dsp_thread;
-        uint64_t due = t->main_last + t->access_packets;
+        due = t->main_last + t->access_packets;
         if (packets < due) until = MIN(until, due);
         uint64_t target = qatomic_read(&t->main_target);
         if (target) until = MIN(until, target);
     } else if (s->hpi.hint) until = 0;
     qatomic_set(&h->until, until);
-    /* MAIN raises host_waiting before closing the horizon (main_lock): if
-     * it did so after the bound above was read, close it here. */
+    /* A waiting MAIN (host_waiting) ends the chunk at the first between()
+     * at or past `due` (dsp_thread_main_due), and `until` is already at
+     * most `due` before it: only a DSP past it must stop at once.  MAIN
+     * raises host_waiting before it reads `until` (main_lock): if it did so
+     * after the flag was read here, one of the two sees the other. */
     smp_mb();
-    if (dsp_thread.on && qatomic_read(&dsp_thread.host_waiting))
+    if (dsp_thread.on && packets >= due &&
+        qatomic_read(&dsp_thread.host_waiting))
         dsp_horizon_close(s);
 }
 
@@ -2156,10 +2194,20 @@ static void dsp_thread_slip(NxsHpi *s, int64_t virt)
  * burst to a few dozen slots (about one EDMA period). */
 #define DSP_THREAD_AUDIO_CHUNK 2048u
 
+/* This thread's CPU time: packets per CPU second is the DSP's speed on a
+ * shared host, where packets per wall second also measures the load. */
+static double dsp_thread_cpu_seconds(void)
+{
+    struct timespec ts;
+    return clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) ? 0 :
+           ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
 static void *dsp_thread_run(void *opaque)
 {
     NxsHpi *s = opaque;
     NxsDspThread *t = &dsp_thread;
+    dsp_thread_prefer_performance();
     qemu_mutex_lock(&t->lock);
     while (!t->quit) {
         if (!s->dsp_started || s->dsp_halted) {
@@ -2196,12 +2244,12 @@ static void *dsp_thread_run(void *opaque)
                         " main-waits=%" PRIu64 " main-wait=%.3fs"
                         " chunks=%" PRIu64 " host-breaks=%" PRIu64
                         " pacing-waits=%" PRIu64 " credited=%" PRIu64
-                        " pc=%#x",
+                        " pc=%#x thread-cpu=%.3fs",
                         virt / 1e9, s->cpu.packets, s->idle_skipped_packets,
                         t->lag_max_ns / 1e9, t->slipped_ns / 1e9,
                         t->main_waits, t->main_wait_ns / 1e9, t->chunks,
                         t->host_breaks, t->waits, t->credited_packets,
-                        s->cpu.pc);
+                        s->cpu.pc, dsp_thread_cpu_seconds());
             dsp_jit_report();
             if (s->thread_audio_clock)
                 info_report("nxs-c674x-audio-clock: virtual=%.3fs slots=%" PRIu64
@@ -2809,7 +2857,14 @@ static void main_lock(void)
     bool bql = bql_locked(), dropped = false, held = false;
     if (qemu_mutex_trylock(&t->lock)) {
         qatomic_inc(&t->host_waiting);
-        dsp_horizon_close(s);
+        /* A DSP short of main_last + access_packets has its horizon at most
+         * there (dsp_horizon_open) and stops at it for this flag
+         * (dsp_thread_main_due); one past it must stop at the next packet.
+         * main_last is MAIN's own; the barrier pairs with
+         * dsp_horizon_open's. */
+        smp_mb();
+        if (qatomic_read(&s->horizon.until) > t->main_last + t->access_packets)
+            dsp_horizon_close(s);
         if (bql) {
             held = hold_virtual_clock();
             bql_unlock();

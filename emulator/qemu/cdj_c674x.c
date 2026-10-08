@@ -5260,8 +5260,15 @@ typedef struct {
     uint64_t epoch;
 } RamTlb;
 typedef struct { uint64_t packets, runs, plans, untraceable; } DtCounts;
+/* The compiled paths' state is one copy for the process: its only users
+ * step one core at a time on one thread at a time (the NXS board holds its
+ * DSP lock around every call, the replay and the tests are single-threaded),
+ * and on Mach-O every thread-local access is a call (_tlv_get_addr was 4% of
+ * a playing DSP thread on its own, AOT region chains included: PERFORMANCE.md
+ * "C674x stage 5").  A client stepping cores on several threads at once
+ * builds with -DCDJ_C674X_TLS=_Thread_local. */
 #ifndef CDJ_C674X_TLS
-#  define CDJ_C674X_TLS _Thread_local
+#  define CDJ_C674X_TLS
 #endif
 typedef struct {
     uint64_t hits, builds, misses, lean, aot, aot_exit[6];
@@ -5648,7 +5655,7 @@ static bool loop_decode(const CdjC674xPacket *packet, unsigned buffered,
                         CdjC674xDecoded decoded[8], bool *branches)
 {
     enum { LOOP_DECODE_SLOTS = 256 };
-    static _Thread_local struct {
+    static CDJ_C674X_TLS struct {
         CdjC674xInstruction insn;
         CdjC674xDecoded decoded;
         uint8_t fast;
@@ -5751,6 +5758,192 @@ static int loop_step_in_place(CdjC674x *cpu, CdjC674xRead read,
         cpu->control[13] = launched < cpu->loop.iterations ?
                            cpu->loop.iterations - launched : 0;
     if (end_while) loop_set_active(cpu, false);
+    if (drained && scheduler_post) loop_set_active(cpu, false);
+    return 1;
+}
+
+/* A loading cycle (the loop not yet sealed) of a plain SPLOOP or SPLOOPD -
+ * no SPKERNELR reload, no interrupt being taken, drained or returned from,
+ * no retained buffer, no IDLE - run in place: loop_step's own steps for
+ * that case (no SPMASK either), in its order, with what they write saved
+ * for an undo instead of the scratch copy of the loop arrays and the instruction buffer (~3.5 KB
+ * there and back per cycle).  The fetched packet is parsed before anything
+ * is written; any case loop_step stops on, and any packet execute_fast does
+ * not take, returns 0 with the CPU untouched so loop_step runs it (and
+ * stops, or takes the transactional path, itself).  Returns as
+ * loop_step_in_place.  Mode 2 only; tests/cstub/c674x-packet-cache.c runs
+ * SPLOOP programs against loop_step in lockstep. */
+static int loop_load_in_place(CdjC674x *cpu, CdjC674xRead read,
+                              CdjC674xWrite write, void *opaque)
+{
+    CdjC674xLoop *loop = &cpu->loop;
+    if (packet_cache_setting() != 2 || loop->sealed || loop->predicate_loop ||
+        cpu->store_count > 24 || cpu->load_count > 40 ||
+        loop_immediate_reload(cpu) || loop_interrupt_armed(cpu) ||
+        loop_interrupt_draining(cpu) || loop_retained_valid(cpu) ||
+        (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) ||
+        cpu->idle_cycles || loop->cycle >= 48)
+        return 0;
+    /* The fetch and its parse: loop_step's, for a loop not returning from
+     * an interrupt (so no BNOP-as-NOP rule and no masked-as-NOP rule). */
+    bool fetched = !cpu->loop_wait, finish = false;
+    unsigned mask = 0, wait = 0, delay = 0, count = 0, added = 0;
+    uint32_t tags[8];
+    CdjC674xInstruction add[8];
+    uint32_t next_pc = cpu->pc;
+    if (fetched) {
+        CdjC674xPacket source;
+        if (!fetch_packet(cpu, read, opaque, &source, NULL))
+            return -1;                  /* loop_step's stop(), same fields */
+        /* ponytail: SPMASK packets (masked loads, buffered issue masked)
+         * stay on loop_step, which the lockstep test does not drive with
+         * SPMASK either; the stock audio loops have none. */
+        if (spmask_decode(&source.instructions[0], &mask)) return 0;
+        bool protect = false;
+        for (unsigned i = 0; i < source.count; ++i) {
+            CdjC674xInstruction insn = source.instructions[i];
+            uint32_t w = insn.word;
+            unsigned m;
+            if (spmaskr_decode(&insn)) return 0;
+            if (spmask_decode(&insn, &m)) {
+                if (i) return 0;
+                continue;
+            }
+            bool full_kernel = !insn.compact && (w & 0xf03ffffc) == 0x34000;
+            bool compact_kernel = insn.compact && (w & 0x3c7e) == 0x1c66;
+            bool full_kernel_reload = !insn.compact && (w & ~1u) == 0x36000u;
+            if (full_kernel || compact_kernel || full_kernel_reload) {
+                if (i != 0 || full_kernel_reload) return 0;
+                unsigned field = compact_kernel ?
+                    ((w & 1) << 5) | ((w >> 7) & 7) | (((w >> 14) & 3) << 3) :
+                    (w >> 22) & 63;
+                unsigned cbits = 0, stage = 0;
+                while ((1u << cbits) < loop->ii) ++cbits;
+                for (unsigned j = 5; j >= cbits && j < 6; --j)
+                    stage |= ((field >> j) & 1) << (5 - j);
+                unsigned cycle = field & ((1u << cbits) - 1);
+                if (cycle >= loop->ii) return 0;
+                delay = stage * loop->ii + cycle;
+                finish = true;
+                continue;
+            }
+            if (finish && interrupt_gate_decode(&insn) !=
+                              CDJ_C674X_INTERRUPT_GATE_NONE)
+                return 0;
+            unsigned n = nop_cycles(&insn);
+            if (n) {
+                if (n > 9 || (n > 1 && (finish || wait))) return 0;
+                if (n > 1) wait = n - 1;
+                continue;
+            }
+            if (protected_load(&insn)) {
+                if (finish || (wait && !protect)) return 0;
+                wait = 4;
+                protect = true;
+                insn.header &= ~(1u << 20);
+            }
+            if ((!insn.compact && ((w & 0x1ffe) == 0x162 || (w & 0x7c) == 0x10 ||
+                                  (w & 0xffe) == 0x362 || (w & 0x1ffc) == 0x120)) ||
+                compact_branch(&insn))
+                return 0;
+            if ((!insn.compact && (w & 0xffe) == 0x3a2) ||
+                (insn.compact && (w & 0xfc7f) == 0xd86f))
+                return 0;
+            if (cpu->loop_tags + added == 112) return 0;
+            tags[count++] = cpu->loop_tags + added;
+            add[added++] = insn;
+        }
+        next_pc = source.next_pc;
+    }
+    /* Everything below is undone on a decline. */
+    const size_t scalars = offsetof(CdjC674xLoop, ii);
+    unsigned char saved_loop[sizeof(CdjC674xLoop) - offsetof(CdjC674xLoop, ii)];
+    memcpy(saved_loop, (const char *)loop + scalars, sizeof(saved_loop));
+    unsigned index = loop->cycle;
+    uint32_t saved_row[8];
+    memcpy(saved_row, loop->tags[index], sizeof(saved_row));
+    unsigned saved_count = loop->count[index];
+    unsigned saved_wait = cpu->loop_wait, saved_tags = cpu->loop_tags;
+    unsigned saved_packets = cpu->loop_packets;
+    uint64_t saved_ctx = cpu->control_ready[CDJ_C674X_LOOP_CONTEXT];
+    uint32_t tsr = cpu->control[26];
+    unsigned history = cpu->loop_pred_history;
+    CdjC674xInstruction saved_insns[8];
+    memcpy(saved_insns, &cpu->loop_instructions[saved_tags],
+           added * sizeof(saved_insns[0]));
+#define LOAD_UNDO() do { \
+        memcpy((char *)loop + scalars, saved_loop, sizeof(saved_loop)); \
+        memcpy(loop->tags[index], saved_row, sizeof(saved_row)); \
+        loop->count[index] = saved_count; \
+        cpu->loop_wait = saved_wait; cpu->loop_tags = saved_tags; \
+        cpu->loop_packets = saved_packets; \
+        cpu->control_ready[CDJ_C674X_LOOP_CONTEXT] = saved_ctx; \
+        cpu->control[26] = tsr; cpu->loop_pred_history = history; \
+        memcpy(&cpu->loop_instructions[saved_tags], saved_insns, \
+               added * sizeof(saved_insns[0])); \
+    } while (0)
+    cpu->control[26] |= CDJ_C674X_TSR_SPLX;
+    if (fetched) {
+        ++cpu->loop_packets;
+        memcpy(&cpu->loop_instructions[cpu->loop_tags], add,
+               added * sizeof(add[0]));
+        cpu->loop_tags += added;
+        cpu->loop_wait = wait;
+        if (!cdj_c674x_loop_load(loop, tags, count, finish, delay)) {
+            LOAD_UNDO();
+            return 0;
+        }
+    } else {
+        --cpu->loop_wait;
+        if (!cdj_c674x_loop_load(loop, NULL, 0, false, 0)) {
+            LOAD_UNDO();
+            return 0;
+        }
+    }
+    /* The issue: the loop's schedule with the cycle's own load (no SPMASK
+     * here, so loop_allow passes everything). */
+    LoopMask masking = {.cpu = cpu};
+    uint32_t itags[8];
+    unsigned icount;
+    bool scheduler_post, drained;
+    if (!cdj_c674x_loop_issue_filtered_from(loop, loop, itags, &icount,
+                                            &scheduler_post, &drained,
+                                            loop_allow, &masking) ||
+        masking.unknown) {
+        LOAD_UNDO();
+        return 0;
+    }
+    CdjC674xPacket combined = {.next_pc = next_pc, .single_cycle = true};
+    for (unsigned i = 0; i < icount; ++i)
+        combined.instructions[combined.count++] =
+            cpu->loop_instructions[itags[i]];
+    bool condition = (cpu->r[cpu->loop_pred_bank][cpu->loop_pred_reg] != 0) ^
+                     cpu->loop_pred_invert;
+    cpu->loop_pred_history =
+        (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
+        ((((cpu->loop_pred_history & 7) << 1) | condition) & 7);
+    CdjC674xDecoded decoded[8];
+    bool branches;
+    if (!loop_decode(&combined, icount, decoded, &branches)) {
+        LOAD_UNDO();
+        return 0;
+    }
+    unsigned extent[2];
+    int fast = execute_fast(cpu, &combined, decoded, branches, read, write,
+                            opaque, extent);
+    if (fast <= 0) {
+        LOAD_UNDO();
+        return fast;
+    }
+#undef LOAD_UNDO
+    uint64_t launched = 1 + loop->cycle / loop->ii;
+    if (loop->delayed_count) {
+        if (!scheduler_post && loop->cycle >= 4 &&
+            loop->cycle % loop->ii == 0 && cpu->control[13])
+            --cpu->control[13];
+    } else
+        cpu->control[13] = launched < loop->iterations ?
+                           loop->iterations - launched : 0;
     if (drained && scheduler_post) loop_set_active(cpu, false);
     return 1;
 }
@@ -6236,6 +6429,13 @@ typedef struct {
 } JitShape;
 
 typedef struct {
+    int state;                          /* 0 unknown, 1 copy kernel, -1 not */
+    unsigned lo, so;                    /* the load and the store op */
+    unsigned pl, ps;                    /* their issue phases */
+    unsigned size, read_age, retire_age, commit_age, delta;
+} JkCopy;
+
+typedef struct {
     bool valid;
     uint32_t setup_pc;
     unsigned ii, length, tags;          /* tags: highest referenced tag + 1 */
@@ -6245,6 +6445,9 @@ typedef struct {
     unsigned origins[16][48], phase_count[16];
     JitShape **shapes;                  /* [phase][first][last], lazily */
     struct JitKernel *kernel;           /* steady-state form, lazily */
+    const struct AotKernel *aotk;       /* its compiled-ahead burst */
+    uint64_t steady;                    /* steady cycles run (profile) */
+    JkCopy copy;                        /* jk_copy_analyze of the kernel */
 } JitLoop;
 typedef struct JitKernel JitKernel;
 
@@ -6348,11 +6551,14 @@ static bool jit_compile(JitLoop *l, const CdjC674x *cpu)
 }
 
 /* The compiled loop for the CPU's current buffer, compiling on a miss. */
+static CDJ_C674X_TLS JitLoop *jit_loops;
+
 static JitLoop *jit_lookup(const CdjC674x *cpu)
 {
-    static _Thread_local JitLoop *loops;
-    static _Thread_local unsigned victim;
-    if (!loops && !(loops = calloc(JIT_LOOPS, sizeof(*loops)))) return NULL;
+    JitLoop *loops = jit_loops;
+    static CDJ_C674X_TLS unsigned victim;
+    if (!loops && !(loops = jit_loops = calloc(JIT_LOOPS, sizeof(*loops))))
+        return NULL;
     uint32_t pc = loop_setup_pc(cpu);
     JitLoop *l = NULL;
     for (unsigned i = 0; i < JIT_LOOPS && !l; ++i)
@@ -7190,7 +7396,7 @@ typedef struct {
     struct { uint64_t value; uint32_t address; unsigned size; } e[JK_OPS][JK_AGES];
 } JitModel;
 
-static _Thread_local JitModel *jit_model;
+static CDJ_C674X_TLS JitModel *jit_model;
 
 /* A queue entry as the interpreter would hold it: operation `o` of age `a`
  * (issued `a` loop cycles before loop cycle `c`, CPU time `t`). */
@@ -7454,11 +7660,11 @@ static bool jk_enter(CdjC674x *cpu, const JitKernel *k, unsigned p,
  * Returns 1 done, 0 declined and -1 faulted as jit_exec; on anything but 1
  * steady execution has ended with the arrays rebuilt as they stood before
  * the cycle (the cycle's issue only wrote model slots of age 0). */
-static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
-                   CdjC674xWrite write, void *opaque)
+static inline __attribute__((always_inline)) int
+jk_exec_t(CdjC674x *cpu, const JitKernel *k, unsigned p, uint64_t c,
+          CdjC674xRead read, CdjC674xWrite write, void *opaque)
 {
     JitModel *m = jit_model;
-    const JitKernel *k = m->k;
     const JitPhase *ph = &k->phase[p];
     const uint64_t t = cpu->cycles, now = t + 1;
     const unsigned slot = c % JK_AGES;
@@ -7611,6 +7817,14 @@ fault:
     jk_sync_at(cpu, t, c);
     stop(cpu, cpu->pc, 0, broke);
     return -1;
+}
+
+/* jk_exec_t with @k the active model's kernel (an AOT kernel passes its own
+ * constant copy of the same bytes, so the compiler can fold it). */
+static int jk_exec(CdjC674x *cpu, unsigned p, uint64_t c, CdjC674xRead read,
+                   CdjC674xWrite write, void *opaque)
+{
+    return jk_exec_t(cpu, jit_model->k, p, c, read, write, opaque);
 }
 
 /* ---- direct traces: compiled direct (non-loop) code ----------------------
@@ -8045,8 +8259,8 @@ enum {
 #define DTS_SHAPE_BUCKETS 4096u
 #define DTS_SHAPES_MAX 65536u
 #define DTS_VARIANTS_MAX 8u
-static _Thread_local DtsShape **dts_table;
-static _Thread_local unsigned dts_shapes;
+static CDJ_C674X_TLS DtsShape **dts_table;
+static CDJ_C674X_TLS unsigned dts_shapes;
 static int dts_mode = -1;
 
 /* CDJ_C674X_STATIC=0 runs every traced packet through the generic path. */
@@ -8076,7 +8290,7 @@ static uint64_t dts_mix(uint64_t h, uint64_t v)
 /* The CPU's queue shape, interned; NULL when an entry falls outside what a
  * shape holds (dues more than 63 cycles out or already past, a bank or
  * register out of range, a delayed IFR effect) or the table is full. */
-static _Thread_local const DtsShape *dts_empty;
+static CDJ_C674X_TLS const DtsShape *dts_empty;
 static const DtsShape *dts_intern(const CdjC674x *cpu);
 
 static const DtsShape *dts_shape_of(const CdjC674x *cpu)
@@ -9810,6 +10024,24 @@ void cdj_c674x_aot_profile_dump(FILE *f, uint64_t min_runs)
             P_COMMIT, P_E3, P_STAIL, P_SMOVE, P_SFILL, P_SCOUNT, P_LTAIL,
             P_LE3, P_LRET, P_LMOVE, P_LFILL, P_LCOUNT, P_BRANCH, LOP_BRANCH,
             LOP_COMPACT, LOP_CB15, LOP_CDPP);
+    fprintf(f, "KJ jk_op %zu jk_phase %zu jk_ops %u jk_phases %u\n",
+            sizeof(JitOp), sizeof(JitPhase), (unsigned)JK_OPS, 16u);
+    /* Steady kernels (aot_gen.py's AOT kernels): the bytes jk_exec reads. */
+    for (unsigned i = 0; jit_loops && i < JIT_LOOPS; ++i) {
+        const JitLoop *l = &jit_loops[i];
+        const JitKernel *k = l->kernel;
+        if (!l->valid || !k || k->state <= 0 || l->steady < min_runs) continue;
+        fprintf(f, "J ii %u ops %u steady %llu op ", l->ii, k->ops,
+                (unsigned long long)l->steady);
+        const uint8_t *b = (const uint8_t *)k->op;
+        for (size_t j = 0; j < k->ops * sizeof(k->op[0]); ++j) fprintf(f, "%02x", b[j]);
+        fprintf(f, " lat ");
+        for (unsigned j = 0; j < k->ops; ++j) fprintf(f, "%02x", k->lat[j]);
+        fprintf(f, " ph ");
+        b = (const uint8_t *)k->phase;
+        for (size_t j = 0; j < l->ii * sizeof(k->phase[0]); ++j) fprintf(f, "%02x", b[j]);
+        fprintf(f, "\n");
+    }
     if (!packet_cache) return;
     for (unsigned i = 0; i < 1u << CDJ_C674X_PACKET_CACHE_BITS; ++i)
         aot_dump_entry(f, &packet_cache[i], min_runs);
@@ -9867,7 +10099,7 @@ enum { AOT_DECLINED, AOT_LIMIT, AOT_BETWEEN, AOT_CONT, AOT_FAULT, AOT_REDO };
 #ifdef CDJ_C674X_AOT_STRESS
 __attribute__((unused)) static inline bool aot_stress(void)
 {
-    static _Thread_local uint32_t x = 1;
+    static CDJ_C674X_TLS uint32_t x = 1;
     x = x * 1103515245u + 12345u;
     return (x >> 16) % 16 == 0;
 }
@@ -9912,6 +10144,381 @@ static inline bool aot_current(CdjC674xCacheEntry *f, void *opaque)
 #  define AOT_TAIL
 #endif
 
+/* Copy kernels in bulk.  The stage-1 memcpy (dsp_stage1_memcpy, SPLOOP 2:
+ * LDNDW *B4++ -> A7:A6, STNDW A7:A6 -> *A5++) is most of a playing DSP's
+ * steady cycles.  Its kernel moves memory through one register pair: each
+ * store issues the pair as the latest retired load left it, so the store
+ * issued at loop cycle t carries the data of the load issued at t - delta.
+ * When every value in flight at a period's start still equals the memory it
+ * came from, the state N periods later is this one with every address moved
+ * by N * size and every value read again at its moved address, and the
+ * stores committed meanwhile copied memory from the moved-load addresses -
+ * provided neither range overlaps the other, so no load can see a store.
+ * jk_bulk checks all of that (the entries' addresses against the bases,
+ * their values against memory) and declines otherwise; it then does the
+ * copy and rebuilds the model, the registers, the counters and the queue
+ * tails the last period would have written, exactly as N * II steady
+ * cycles would have left them. */
+
+static void jk_copy_analyze(JkCopy *x, const JitKernel *k, unsigned ii)
+{
+    x->state = -1;
+    if (k->state <= 0 || k->ops != 2 || ii > 16) return;
+    const JitOp *a = &k->op[0], *b = &k->op[1];
+    if (a->kind != JOP_MEM || b->kind != JOP_MEM || a->is_store == b->is_store)
+        return;
+    x->lo = a->is_store ? 1 : 0;
+    x->so = 1 - x->lo;
+    const JitOp *l = &k->op[x->lo], *s = &k->op[x->so];
+    /* Post-increment by an immediate of exactly the size, pairs of 8 bytes
+     * through the same register pair, distinct bases outside that pair. */
+    if (l->size != 8 || s->size != 8 || !l->pair || !s->pair ||
+        l->side != s->side || l->dst != s->dst || l->sign_extend ||
+        (l->mode & 4) || (s->mode & 4) || (l->mode & 11) != 11 ||
+        (s->mode & 11) != 11 || l->a * l->scale != 8 || s->a * s->scale != 8 ||
+        (l->bank == s->bank && l->b == s->b) ||
+        (l->bank == l->side && (l->b == l->dst || l->b == l->dst + 1)) ||
+        (s->bank == l->side && (s->b == l->dst || s->b == l->dst + 1)))
+        return;
+    x->size = 8;
+    int pl = -1, ps = -1, ra = -1, ta = -1, ca = -1;
+    for (unsigned p = 0; p < ii; ++p) {
+        const JitPhase *ph = &k->phase[p];
+        for (unsigned i = 0; i < ph->ops; ++i) {
+            unsigned o = ph->first + i;
+            if (o == x->lo) { if (pl >= 0) return; pl = p; }
+            if (o == x->so) { if (ps >= 0) return; ps = p; }
+        }
+        for (unsigned i = 0; i < ph->reads; ++i) {
+            const JitRef *r = &ph->load[ph->read[i]];
+            if (r->op != x->lo || ra >= 0) return;
+            ra = r->age;
+        }
+        for (unsigned i = 0; i < ph->retires; ++i) {
+            const JitRef *r = &ph->load[ph->retire[i]];
+            if (r->op != x->lo || ta >= 0) return;
+            ta = r->age;
+        }
+        for (unsigned i = 0; i < ph->commits; ++i) {
+            const JitRef *r = &ph->store[ph->commit[i]];
+            if (r->op != x->so || ca >= 0) return;
+            ca = r->age;
+        }
+        /* Only freshly issued entries as queue tails (their value at the
+         * cycle is the one the model keeps). */
+        if ((ph->store_new < ph->store_pre && ph->store_tail.age) ||
+            (ph->load_new < ph->load_pre && ph->load_tail.age))
+            return;
+    }
+    if (pl < 0 || ps < 0 || ra < 0 || ta < 0 || ca < 0) return;
+    x->pl = pl; x->ps = ps;
+    x->read_age = ra; x->retire_age = ta; x->commit_age = ca;
+    /* The store issued at t reads the pair the last retirement before t
+     * left: the load issued at the latest u = pl (mod ii) with
+     * u + retire_age <= t - 1. */
+    unsigned t = ii * 4 + ps, u = t - 1 - ta;
+    while (u % ii != (unsigned)pl) --u;
+    x->delta = t - u;
+    if (x->delta > 64) return;
+    x->state = 1;
+}
+
+static inline uint64_t jk_mem8(const uint8_t *p)
+{
+    return ram_load(p, 8);
+}
+
+/* N periods of a copy kernel at loop cycle c0 (phase 0) in one step, or 0
+ * (nothing changed) where any check fails.  @k is the active model's
+ * kernel (or its AOT copy, same bytes). */
+static unsigned jk_bulk(CdjC674x *cpu, JitLoop *l, const JitKernel *k,
+                        unsigned periods, CdjC674xRead read,
+                        CdjC674xWrite write, void *opaque)
+{
+    const JkCopy *x = &l->copy;
+    JitModel *m = jit_model;
+    CdjC674xLoop *loop = &cpu->loop;
+    const unsigned ii = l->ii;
+    const JitOp *lo = &k->op[x->lo], *so = &k->op[x->so];
+    CdjC674xHorizon *h = horizon;
+    if (!h || !h->count_ticks || periods < 4 ||
+        read != fetch_block_read || !fetch_block ||
+        write != ram_write_callback || !ram_writes_direct ||
+        !*ram_writes_direct || !ram_window || !fetch_epoch)
+        return 0;
+    /* Linear addressing for both bases, as jk_exec would find it. */
+    unsigned width;
+    if (((lo->b >= 4 && lo->b <= 7) || (so->b >= 4 && so->b <= 7)) &&
+        cpu->control_ready[0] > cpu->cycles)
+        return 0;
+    if (!address_width(cpu, lo->bank, lo->b, &width) || width ||
+        !address_width(cpu, so->bank, so->b, &width) || width)
+        return 0;
+    /* The loop condition register must not be one the kernel changes. */
+    unsigned pb = cpu->loop_pred_bank, pr = cpu->loop_pred_reg;
+    if ((pb == lo->bank && pr == lo->b) || (pb == so->bank && pr == so->b) ||
+        (pb == lo->side && (pr == lo->dst || pr == lo->dst + 1)))
+        return 0;
+    const uint64_t c0 = loop->cycle, K = (uint64_t)periods * ii;
+    const int64_t s = 8;
+    const uint32_t bl = cpu->r[lo->bank][lo->b], bs = cpu->r[so->bank][so->b];
+    /* Addresses of the load/store issued at cycle u (u in its phase). */
+#define ADDR_L(u) ((uint32_t)(bl + s * (((int64_t)(u) - (int64_t)(c0 + x->pl)) / (int64_t)ii)))
+#define ADDR_S(u) ((uint32_t)(bs + s * (((int64_t)(u) - (int64_t)(c0 + x->ps)) / (int64_t)ii)))
+    /* Ranges: every address this step reads or writes, with a margin of
+     * eight periods back. */
+    uint32_t src_lo = ADDR_L(c0 + x->pl - 8 * ii);
+    uint32_t src_hi = ADDR_L(c0 + x->pl + K + ii) + 8;
+    uint32_t dst_lo = ADDR_S(c0 + x->ps - 8 * ii);
+    uint32_t dst_hi = ADDR_S(c0 + x->ps + K + ii) + 8;
+    if (src_hi <= src_lo || dst_hi <= dst_lo || (dst_lo & 7)) return 0;
+    uint8_t *src = ram_ptr(opaque, src_lo, src_hi - src_lo);
+    uint8_t *dst = ram_ptr(opaque, dst_lo, dst_hi - dst_lo);
+    if (!src || !dst || (src < dst + (dst_hi - dst_lo) &&
+                         dst < src + (src_hi - src_lo)))
+        return 0;
+#define HOST_L(a) (src + (uint32_t)((a) - src_lo))
+#define HOST_S(a) (dst + (uint32_t)((a) - dst_lo))
+    /* The live entries at a phase-0 start, and the value each must hold. */
+    const JitPhase *ph0 = &k->phase[0];
+    for (unsigned j = 0; j < ph0->loads; ++j) {
+        const JitRef *r = &ph0->load[j];
+        uint64_t u = c0 - r->age;
+        unsigned slot = u % JK_AGES;
+        if (r->op != x->lo || u % ii != x->pl || m->e[r->op][slot].size != 8 ||
+            m->e[r->op][slot].address != ADDR_L(u) ||
+            m->e[r->op][slot].value != (r->age > x->read_age ?
+                jk_mem8(HOST_L(ADDR_L(u))) : 0))
+            return 0;
+    }
+    for (unsigned j = 0; j < ph0->stores; ++j) {
+        const JitRef *r = &ph0->store[j];
+        uint64_t t = c0 - r->age;
+        unsigned slot = t % JK_AGES;
+        if (r->op != x->so || t % ii != x->ps || m->e[r->op][slot].size != 8 ||
+            m->e[r->op][slot].address != ADDR_S(t) ||
+            m->e[r->op][slot].value != jk_mem8(HOST_L(ADDR_L(t - x->delta))))
+            return 0;
+    }
+    /* The pair: the last load retired before c0. */
+    uint64_t ur = c0 - 1 - x->retire_age;
+    while (ur % ii != x->pl) --ur;
+    uint64_t pair = cpu->r[lo->side][lo->dst] |
+                    (uint64_t)cpu->r[lo->side][lo->dst + 1] << 32;
+    if (pair != jk_mem8(HOST_L(ADDR_L(ur)))) return 0;
+    /* The stores committing in [c0, c0 + K): issued from t1 on, one per
+     * period, each the data of the load issued delta cycles before. */
+    uint64_t t1 = c0 - x->commit_age;
+    while (t1 % ii != x->ps) ++t1;
+    uint32_t to = ADDR_S(t1), from = ADDR_L(t1 - x->delta);
+    uint64_t bytes = (uint64_t)periods * 8;
+    for (uint64_t i = 0; i < bytes; i += 8)
+        if (code_page(HOST_S(to) + i)) ++code_gen;
+    memcpy(HOST_S(to), HOST_L(from), bytes);
+    /* The state K cycles on: addresses moved by N * 8, values read again. */
+    const uint64_t c1 = c0 + K, shift = (uint64_t)periods * 8;
+    struct JkNew { unsigned op, slot; uint64_t value; uint32_t address; } ne[64];
+    unsigned nn = 0;
+    for (unsigned j = 0; j < ph0->loads; ++j) {
+        const JitRef *r = &ph0->load[j];
+        uint32_t a = (uint32_t)(ADDR_L(c0 - r->age) + shift);
+        ne[nn++] = (struct JkNew){r->op, (c1 - r->age) % JK_AGES,
+            r->age > x->read_age ? jk_mem8(HOST_L(a)) : 0, a};
+    }
+    for (unsigned j = 0; j < ph0->stores; ++j) {
+        const JitRef *r = &ph0->store[j];
+        uint64_t t = c1 - r->age;
+        ne[nn++] = (struct JkNew){r->op, t % JK_AGES,
+            jk_mem8(HOST_L(ADDR_L(t - x->delta))), ADDR_S(t)};
+    }
+    for (unsigned j = 0; j < nn; ++j) {
+        m->e[ne[j].op][ne[j].slot].value = ne[j].value;
+        m->e[ne[j].op][ne[j].slot].address = ne[j].address;
+        m->e[ne[j].op][ne[j].slot].size = 8;
+    }
+    /* The queue tails the last period's cycles wrote (fresh entries only,
+     * jk_copy_analyze). */
+    for (uint64_t c = c1 - ii; c < c1; ++c) {
+        const JitPhase *ph = &k->phase[c % ii];
+        uint64_t t = cpu->cycles + (c - c0);
+        if (ph->store_new < ph->store_pre) {
+            CdjC674xStore tail = {
+                .due = t + k->lat[ph->store_tail.op], .address = ADDR_S(c),
+                .value = jk_mem8(HOST_L(ADDR_L(c - x->delta))), .size = 8
+            };
+            for (unsigned j = ph->store_new; j < ph->store_pre; ++j)
+                memcpy(&cpu->stores[j], &tail, sizeof(tail));
+        }
+        if (ph->load_new < ph->load_pre) {
+            const JitOp *op = &k->op[ph->load_tail.op];
+            CdjC674xLoad tail = {
+                .due = t + k->lat[ph->load_tail.op], .value = 0,
+                .address = ADDR_L(c), .bank = op->side, .dst = op->dst,
+                .size = 8, .sign_extend = op->sign_extend
+            };
+            for (unsigned j = ph->load_new; j < ph->load_pre; ++j)
+                memcpy(&cpu->loads[j], &tail, sizeof(tail));
+        }
+    }
+    uint64_t last = jk_mem8(HOST_L(ADDR_L(ur + K)));
+    cpu->r[lo->side][lo->dst] = (uint32_t)last;
+    cpu->r[lo->side][lo->dst + 1] = (uint32_t)(last >> 32);
+    cpu->r[lo->bank][lo->b] = (uint32_t)(bl + shift);
+    cpu->r[so->bank][so->b] = (uint32_t)(bs + shift);
+#undef ADDR_L
+#undef ADDR_S
+#undef HOST_L
+#undef HOST_S
+    /* jit_cycle's bookkeeping over the K cycles. */
+    bool condition = (cpu->r[pb][pr] != 0) ^ cpu->loop_pred_invert;
+    cpu->loop_pred_history = (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
+                             (condition ? 7u : 0u);
+    uint64_t launched = c1 / ii + 1;
+    cpu->control[13] = launched < loop->iterations ?
+                       loop->iterations - launched : 0;
+    loop->cycle = c1;
+    cpu->cycles += K;
+    cpu->packets += K;
+    h->ticks += K;
+    h->skipped += K;
+    jit_counts.steady += K;
+    return K;
+}
+
+/* Steady cycles back to back: what run_compiled's loop does for each - the
+ * cycle (jit_cycle), the jit_ready re-check, the limit and the horizon's
+ * skip of between() - for cycles jit_cycle would run as a full steady
+ * cycle of the active kernel, without its per-cycle lookups.  Within steady
+ * execution between() is skipped and a kernel issues only memory and SP
+ * operations, so the pc (each full shape's next_pc) stays as the cycle
+ * before left it.  Runs at most @max cycles; stops before a cycle that is
+ * not a full steady one, after one whose between() is due (*between_due),
+ * or at one that declines (the CPU as before it, steady execution ended:
+ * the caller's jit_cycle redoes it) or faults (*fault).  Only for SPLOOP
+ * (no SPLOOPD count delay, no SPLOOPW predicate). */
+typedef int (*JkExecFn)(CdjC674x *, unsigned, uint64_t, CdjC674xRead,
+                        CdjC674xWrite, void *);
+static bool jit_ready(const CdjC674x *cpu);
+
+static inline __attribute__((always_inline)) unsigned
+jk_burst_t(CdjC674x *cpu, JitLoop *l, unsigned max, CdjC674xRead read,
+           CdjC674xWrite write, void *opaque, bool *between_due, bool *fault,
+           JkExecFn exec)
+{
+    CdjC674xLoop *loop = &cpu->loop;
+    *between_due = *fault = false;
+    if (!max || !jk_active(cpu) || jit_model->k != l->kernel ||
+        loop->predicate_loop || loop->delayed_count)
+        return 0;
+    /* Of jit_ready's conditions only cycle < post_cycle can change
+     * between steady cycles: a kernel touches no loop context, idle or
+     * fault state, its queue counts are its shape's (within the limits by
+     * jk_compile), and SPLX and the RETURNING history bit are kept. */
+    if (!jit_ready(cpu)) return 0;
+    const unsigned ii = l->ii;
+    const uint64_t span = (uint64_t)loop->iterations * ii;
+    /* Per phase: whether its full shape is one jit_cycle runs natively
+     * (0 unknown, 1 yes, 2 no) - the same for every cycle of the burst. */
+    uint8_t native[16] = {0};
+    unsigned n = 0;
+    while (n < max) {
+        uint64_t cycle = loop->cycle;
+        uint64_t stage = cycle / ii;
+        unsigned phase = cycle - stage * ii;
+        unsigned have = l->phase_count[phase];
+        const unsigned *origins = l->origins[phase];
+        /* jit_cycle's full: no origin retired, every origin issuing. */
+        if (!have || (cycle - origins[0] >= span && origins[0] <= cycle) ||
+            origins[have - 1] > cycle)
+            break;
+        if (!native[phase]) {
+            const JitShape *shape = jit_shape(l, cpu->pc, phase, 0, have - 1);
+            native[phase] = shape && shape->native &&
+                            (shape->fast || shape->faucr) ? 1 : 2;
+        }
+        if (native[phase] != 1) break;
+        if (!phase && l->copy.state >= 0) {
+            if (!l->copy.state) jk_copy_analyze(&l->copy, l->kernel, ii);
+            if (l->copy.state > 0) {
+                /* Room for the step and one more period: the limit, the
+                 * horizon, the full stretch and post_cycle. */
+                uint64_t room = max - n, until = 0;
+                if (horizon)
+                    until = __atomic_load_n(&horizon->until, __ATOMIC_ACQUIRE);
+                uint64_t lim = until > cpu->packets + 1 ?
+                               until - cpu->packets - 1 : 0;
+                if (lim < room) room = lim;
+                if (loop->post_cycle - cycle < room)
+                    room = loop->post_cycle - cycle;
+                for (unsigned p = 0; p < ii; ++p) {
+                    if (!l->phase_count[p]) continue;
+                    lim = l->origins[p][0] + span > cycle ?
+                          l->origins[p][0] + span - cycle : 0;
+                    if (lim < room) room = lim;
+                }
+                if (room >= 5 * ii) {
+                    unsigned b = jk_bulk(cpu, l, jit_model->k,
+                                         room / ii - 1, read, write, opaque);
+                    if (b) {
+                        n += b;
+                        continue;
+                    }
+                }
+            }
+        }
+        loop->cycle = cycle + 1;
+        uint32_t tsr = cpu->control[26];
+        unsigned history = cpu->loop_pred_history;
+        cpu->control[26] |= CDJ_C674X_TSR_SPLX;
+        bool boundary = phase + 1 == ii;
+        uint64_t launched = 1 + stage + boundary;
+        bool condition = (cpu->r[cpu->loop_pred_bank][cpu->loop_pred_reg] != 0) ^
+                         cpu->loop_pred_invert;
+        cpu->loop_pred_history =
+            (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) |
+            ((((cpu->loop_pred_history & 7) << 1) | condition) & 7);
+        int fast = exec(cpu, phase, cycle, read, write, opaque);
+        if (fast <= 0) {
+            loop->cycle = cycle;
+            cpu->control[26] = tsr;
+            cpu->loop_pred_history = history;
+            if (fast < 0) *fault = true;
+            return n;
+        }
+        ++jit_counts.steady;
+        cpu->control[13] = launched < loop->iterations ?
+                           loop->iterations - launched : 0;
+        ++n;
+        bool ended = loop->cycle >= loop->post_cycle;
+        if (ended) jk_sync(cpu);        /* run_compiled's !jit_ready */
+        if (n == max) break;
+        if (!horizon_skip(cpu)) {
+            *between_due = true;
+            break;
+        }
+        if (ended) break;
+    }
+    return n;
+}
+
+static unsigned jk_burst(CdjC674x *cpu, JitLoop *l, unsigned max,
+                         CdjC674xRead read, CdjC674xWrite write, void *opaque,
+                         bool *between_due, bool *fault)
+{
+    return jk_burst_t(cpu, l, max, read, write, opaque, between_due, fault,
+                      jk_exec);
+}
+
+/* A steady kernel compiled ahead of time (tools/cdj_dsp/aot_gen.py, from
+ * the profile's J lines): its JitKernel as constants and jk_burst with
+ * them.  Used for a loop whose own kernel has the same bytes. */
+typedef struct AotKernel {
+    const JitKernel *k;
+    unsigned ii;
+    unsigned (*burst)(CdjC674x *, JitLoop *, unsigned, CdjC674xRead,
+                      CdjC674xWrite, void *, bool *, bool *);
+} AotKernel;
+
 #if defined(CDJ_C674X_AOT_FILE)
 #include CDJ_C674X_AOT_FILE
 #elif defined(__has_include) && __has_include("cdj_c674x_aot.inc")
@@ -9920,6 +10527,10 @@ static inline bool aot_current(CdjC674xCacheEntry *f, void *opaque)
 static const AotPacket aot_packets[1];
 static const unsigned aot_npackets = 0;
 static const AotNode aot_nodes[1];
+#endif
+#ifndef CDJ_C674X_AOT_KERNELS
+static const AotKernel aot_kernels[1];
+static const unsigned aot_nkernels = 0;
 #endif
 
 static int aot_mode = -1;
@@ -9930,6 +10541,27 @@ static bool aot_enabled(void)
         aot_mode = aot_npackets && env && !strcmp(env, "1");
     }
     return aot_mode;
+}
+
+/* The AOT kernel with @k's bytes (those jk_exec reads), if any. */
+static const AotKernel *aot_kernel_find(const JitKernel *k, unsigned ii)
+{
+    static int off = -1;                /* CDJ_C674X_AOT_KERNELS=0: A/B */
+    if (off < 0) {
+        const char *env = getenv("CDJ_C674X_AOT_KERNELS");
+        off = env && !strcmp(env, "0");
+    }
+    if (!aot_enabled() || off || k->state <= 0) return NULL;
+    for (unsigned i = 0; i < aot_nkernels; ++i) {
+        const JitKernel *a = aot_kernels[i].k;
+        if (aot_kernels[i].ii == ii && a->state == k->state &&
+            a->ops == k->ops &&
+            !memcmp(a->op, k->op, k->ops * sizeof(k->op[0])) &&
+            !memcmp(a->lat, k->lat, k->ops * sizeof(k->lat[0])) &&
+            !memcmp(a->phase, k->phase, ii * sizeof(k->phase[0])))
+            return &aot_kernels[i];
+    }
+    return NULL;
 }
 
 static const AotPacket *aot_packet_of(const CdjC674xCacheEntry *e)
@@ -10197,14 +10829,19 @@ static int jit_cycle(CdjC674x *cpu, JitLoop *l, bool all_pairs,
     unsigned extent[2];
     int fast = 0;
     if (full && shape->native) {
-        if (!l->kernel && (l->kernel = calloc(1, sizeof(*l->kernel))))
+        if (!l->kernel && (l->kernel = calloc(1, sizeof(*l->kernel)))) {
             jk_compile(l->kernel, l, cpu->pc);
+            l->aotk = aot_kernel_find(l->kernel, l->ii);
+        }
         /* A run's first cycle keeps the all-pairs overlap check. */
         if (l->kernel && l->kernel->state > 0 &&
             (jk_active(cpu) || (!all_pairs &&
                                 jk_enter(cpu, l->kernel, phase, cycle))))
             fast = jk_exec(cpu, phase, cycle, read, write, opaque);
-        if (fast > 0) ++jit_counts.steady;
+        if (fast > 0) {
+            ++jit_counts.steady;
+            ++l->steady;
+        }
     }
     if (!fast && shape && shape->native) {
         fast = jit_exec(cpu, shape, all_pairs, read, write, opaque);
@@ -10331,6 +10968,32 @@ static unsigned run_compiled(CdjC674x *cpu, CdjC674xRead read,
                 return n;
             }
             code_gen_external();
+            continue;
+        }
+        bool between_due, fault;
+        unsigned b = l->aotk ?
+            l->aotk->burst(cpu, l, limit - n, read, write, opaque,
+                           &between_due, &fault) :
+            jk_burst(cpu, l, limit - n, read, write, opaque, &between_due,
+                     &fault);
+        n += b;
+        l->steady += b;
+        if (fault) {
+            jk_sync(cpu);
+            *status = CDJ_C674X_RUN_FAULT;
+            return n;
+        }
+        if (n == limit) {
+            jk_sync(cpu);
+            return n;
+        }
+        if (between_due) {
+            if (!between(between_opaque)) {
+                jk_sync(cpu);
+                *status = CDJ_C674X_RUN_STOPPED;
+                return n;
+            }
+            code_gen_external();
         }
     }
 }
@@ -10343,6 +11006,8 @@ bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
     if (cpu->fault) return false;
     if (cpu->loop_active) {
         int done = loop_step_in_place(cpu, read, write, opaque);
+        if (done) return done > 0;
+        done = loop_load_in_place(cpu, read, write, opaque);
         if (done) return done > 0;
         return loop_step(cpu, read, write, opaque);
     }

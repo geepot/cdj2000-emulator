@@ -1537,3 +1537,231 @@ regions that keep in-flight writes across packets (no queue array copies:
 cycles, fewer horizon ends (each ~55 packets), an EDMA slot rollback that
 copies only what a slot touches, and a cheaper idle-proof policy while
 playing.  AOT stays off by default (`CDJ_C674X_AOT=1`).
+
+## C674x stage 5 (`dsp-jit5`, 2026-10-06/07)
+
+Goal: real-time stock playback under `--audio-clock virtual` (~63 M DSP
+packets per virtual second, no E-8302).  Live numbers below are the
+virtual-clock scenario of stage 4 (stock firmware, the confirmed rekordbox
+USB, `--lightweight --dsp-thread --audio-clock virtual`, auto-play after
+load), measured from 5 s after the load to the end of a 150 s run, on a
+host shared with other agents' emulators (load 11-17 on 16 cores).
+Baseline (develop f3fe256 with the stage-4 AOT file): **50.6-52.8 M
+packets per virtual second** (5 runs), underrun slots 66-69%.
+
+### 1. Board: MAIN's hand-over, the idle skip, the slot's EDMA copies
+
+A live profile of the DSP thread (`sample`, 10 s of playback) and
+temporary counters (horizon ends by cause, interpreter steps by kind) gave:
+
+- **MAIN's waits ended every horizon.**  85 M of ~120 M between() calls
+  in a run came from `dsp_horizon_open` closing the horizon whenever
+  `host_waiting` was set: MAIN tries the DSP lock on every HPI access
+  (~400 K/s while a track plays), and while it waited for the DSP to reach
+  `main_last + access_packets` the DSP called between() after *every*
+  packet up to that point.  But `until` is already bounded by that packet
+  count, and `dsp_thread_main_due` ends the chunk there: only a DSP past
+  it must stop at once.  `dsp_horizon_open` now closes only then, and
+  `main_lock` closes only when the published `until` lies past it
+  (a Dekker pair: MAIN raises the flag, barrier, reads `until`; the DSP
+  publishes `until`, barrier, reads the flag).  AOT region exits at a
+  horizon end fell from 41.6 M to 5.5 M per run.  Live alone: +2%
+  (52.5-52.8 M), within the noise.
+- **The idle skip only costs under the virtual audio clock.**  During
+  playback it never skipped (`idle-skipped` flat after boot: the next slot
+  edge is always due for a DSP behind virtual time), but every activation
+  re-anchored (a state copy), RAM stores went through the logging
+  callback instead of the direct path, and every pass of the anchor PC
+  was a between().  `--no-dsp-idle-skip` alone: **58.8-59.9 M** against
+  ~51.5 M, and `Not Loaded.` 1.1 s sooner (no 2 s GUI head start, which
+  only exists for the skip).  A back-off of the anchoring instead (fewer
+  anchors after unproductive ones, the GUI head start kept) put 4 of 6
+  runs into a different firmware regime: the DSP spent most of its time
+  in the 8-byte SPLOOP memcpy at 0x11804838 (2.0 G steady kernel cycles
+  per run against ~0.37 G) at ~33 M per virtual second, as did 2 of 5
+  runs with the skip off in the board but the head start kept.  Skipping
+  is exact either way (45 s boots byte-identical), so this is timing
+  sensitivity of the firmware, not a fault; the launcher setting that
+  never showed it is the one adopted: `nxs_vm` now defaults to
+  `--no-dsp-idle-skip` (and so no GUI head start) with `--audio-clock
+  virtual`; `--dsp-idle-skip` still turns it on.
+- **The McASP slot's EDMA copies.**  Each slot copied the 4 KB EDMA state
+  twice: the board's undo copy and `cdj_c6747_edma_event`'s own trial run
+  on a copy (`preview`).  Every board caller of `service_mcasp_axevt`
+  already discards or restores both models on failure, so it now uses
+  `cdj_c6747_edma_event_unchecked` (the commit pass alone, which fails
+  exactly where the trial would) with a journal of the PaRAM sets the
+  events change (an event changes only its own set; each is saved once,
+  before its first change), and the slot copies only the ~250 bytes of
+  registers outside `param[]`.  `tests/cstub/c6747-edma.c` checks the
+  unchecked events against the checked ones (state and bus) and the undo
+  after a failure in a chained transfer.
+- **QoS.**  The DSP thread asks macOS for the performance cores
+  (`QOS_CLASS_USER_INTERACTIVE`): on the busy host an occasional run had
+  shown about half the packet rate per wall second with the normal kernel
+  mix, as on an efficiency core.  Not measured on its own.
+
+Exactness: 45 s full-capture stock boots against develop, all 298,354
+events and 5,314 checkpoints of the common prefix byte-identical (this
+binary reaches 395,405 events), with `--functional-dsp-audio` 142,177 and
+1,093 (the slot path with the journal); `tests/test_dsp_thread.py` (MAIN's
+hand-over under the shim) and the EDMA test pass.
+
+Live, three runs: **61.8 / 60.8 / 53.3 M per virtual second** (the last
+at virtual/wall 0.70 under load 12-17), underrun slots 61-64%.  E-8302
+stays on screen: real time is not reached yet.
+
+**Where E-8302 comes from.**  In every virtual-clock run, at 26 to 67 M
+packets per virtual second and with DSP clocks of 60, 100 and 150 Mpps, the
+counter stops at elapsed frame 239 (1.6 s into the track) and E-8302
+follows; with the packets clock the same build plays on (slowly, 0.09x,
+pause/resume/seek/cue all work).  A temporary log of MAIN's HPI writes to
+the stream header (0x11838140) and data hand-over (0x118381c4), and of
+the DSP's frames-ahead/position words (0x11837cd0/0x11837c10) at DSPINT,
+shows why: before play MAIN hands over a block every ~0.1 virtual s and
+preloads 0x78 frames; once playing, the DSP consumes them at about real
+time (0x76 frames in 2.8 virtual s) and then waits with one frame ahead,
+while MAIN hands over a block only every ~2-2.5 virtual s (a 0x28-frame
+buffer per ~6.5 s against ~1 s needed).  The feed is starved, not the
+decode: the DSP's background tasks, which serve MAIN's stream traffic,
+get what the audio interrupts leave.  Weighting packets by CSR.GIE at
+each between(): of ~57 M packets per virtual second, ~36 M ran with
+interrupts disabled (the ISRs, mostly) and ~21 M in the background.  So
+"~63 M packets per virtual second" understates what real time needs: the
+background must be several times faster, i.e. a DSP well above 100 M
+packets per virtual second.
+
+**Measurement.**  The DSP thread's report now includes its CPU time
+(`thread-cpu=`), so `rate.py` gives packets per DSP-thread CPU second,
+which the host's load moves far less than packets per wall second.
+
+### 2. One copy of the core's compiled-path state
+
+The compiled paths' per-thread state (`core_tls`: code generation, packet
+cache, horizon, RAM TLB, counters; the loop tables, the steady-kernel
+model, the shape table) was `_Thread_local`; on Mach-O each access is a
+`_tlv_get_addr` call, and the AOT regions' chain checks (`aot_current`,
+`horizon_skip`, the tick counting) made them 9% of the DSP thread
+(`aot_current` 5.3% self, `_tlv_get_addr` 3.6%).  Every user steps one
+core on one thread at a time (the board holds its DSP lock around every
+call, from either thread; replay and tests are single-threaded), so the
+state is now one process-wide copy; `-DCDJ_C674X_TLS=_Thread_local`
+restores per-thread copies for a client that needs them.  (As a side
+effect MAIN's HPI writes now see the code pages the DSP thread marked,
+which `cdj_c674x_may_hold_code` reads; before, MAIN's own empty
+thread-local copy answered.)
+
+Exactness: the eight checkpoint replays identical (develop JIT on against
+this with the horizon; this JIT off against AOT on with the horizon), 45 s
+full-capture boot byte-identical over the common prefix (298,354 events,
+5,314 checkpoints), C674x and DSP test files pass.
+
+Live, alternated with step 1 (two each): **51.1 / 53.1 M packets per
+DSP-thread CPU second against 43.7 / 45.1 M (+17%)**; per virtual second
+63.1 / 66.5 M against 55.7 / 56.7 M.  E-8302 as before.
+
+### 3. What real time needs: the playback phase, not the run average
+
+The live numbers above are run averages, and most of a 150 s run is spent
+after E-8302, where the DSP sits in fast polling code.  A temporary board
+diagnostic that splits packets by the stream's state (frames ahead
+`0x11837cd0`, position `0x11837c10`, header `0x11838140` = `0xffffffff`
+after the error) and by CSR.GIE gives, per virtual second (HEAD of step 2,
+150 Mpps DSP clock, five runs on a shared host):
+
+| state | packets | ISRs (GIE 0) | background | underrun slots |
+|---|---:|---:|---:|---:|
+| before play | 52-81 M | 32-49 M | 20-32 M | 46-66% |
+| playing, frames ahead | 26-37 M | 26-36 M | 0.5-1.2 M | 81-86% |
+| playing, buffer dry | 23-31 M | 22-29 M | 0.6-1.7 M | 79-85% |
+| after E-8302 | 54-76 M | 33-45 M | 21-31 M | 49-64% |
+
+While a track plays, the audio interrupts take everything the DSP gets and
+the background (which copies MAIN's stream blocks: `0x118381c4` is cleared
+by the block copy at `0x11804854`) gets ~1 M packets per virtual second.  A
+log of `0x118381c4`/`0x11838140` shows the hand-over is DSP-paced: MAIN
+writes the next block ~20 ms after the DSP clears the flag, every ~0.15
+virtual s before play and every ~2.5 virtual s once playing.  PC histograms
+put the playing ISRs in `dsp_varispeed_resample` (`0xc00100c0`-`0xc0010e00`,
+SPLOOPs, about half), `dsp_output_cursor_advance` (`0xc0006f18`, ~14%) and
+`0xc00057c0`.
+
+**The demand**, with MAIN unconstrained: `--audio-clock packets` with the
+slot interval made configurable (diagnostic build) plays on past frame 450
+at 1,024 packets per slot, stops at frame 239 (as under the virtual clock)
+at 768, and never starts at 512.  At 88,200 slots per second the stock
+playback needs more than 68 M and at most 90 M DSP packets per virtual
+second, delivered on time.  The ~63 M of stage 4 was a run average; in the
+playing phase the live DSP delivers ~30 M.
+
+**Where the playing DSP's time goes.**  A checkpoint taken 3 s into
+playback (`build/ck/play-wet`, diagnostic: a DSP-thread run) replays like
+the other playback checkpoints; on those the time goes to loops: steady
+kernels (`jk_exec`, `jit_cycle`, ~40%: the stage-1 memcpy alone is ~40% of
+all packets, the AAC decoder copying through it), loading cycles through
+`loop_step` (~20%: 3% of the packets, each with ~7 KB of scratch copies),
+then the direct/AOT code.  Live, the DSP thread also waits for MAIN's HPI
+accesses (`sched_yield`/mutex, ~15% of its time while playing).
+
+### 4. Loops: bursts, AOT kernels, loading cycles in place, bulk copies
+
+- **Bursts** (`jk_burst`).  After a steady cycle whose between() the
+  horizon skips, the next full steady cycles of the kernel run in one loop:
+  only `cycle < post_cycle` of `jit_ready` can change between them, and
+  each phase's shape is looked up once.  Bursts average ~730 cycles.
+- **AOT kernels.**  The profile dumps every hot loop's `JitKernel` bytes (J
+  lines, `KJ` for the layout); `aot_gen.py` emits them as constant
+  `JitKernel`s with `jk_burst_t`/`jk_exec_t` over them, so the compiler
+  folds each phase.  A loop uses one when its own kernel has the same bytes
+  (`CDJ_C674X_AOT_KERNELS=0` turns them off).  Six kernels from the seven
+  replays (`--kernel-min`, default 10,000 steady cycles).
+- **Loading cycles in place** (`loop_load_in_place`).  A loading cycle of a
+  plain SPLOOP/SPLOOPD - no reload, interrupt, retained buffer, SPMASK,
+  SPLOOPW or IDLE - parses its packet first, then writes in place with a
+  small undo instead of `loop_step`'s scratch copies; anything `loop_step`
+  would stop on, and any packet `execute_fast` declines, goes to `loop_step`
+  untouched.
+- **Bulk copies** (`jk_bulk`).  A kernel of one 8-byte post-increment load
+  and one store of the same register pair (the stage-1 memcpy) is advanced
+  N periods at once at a period start: every in-flight value is checked
+  against the memory it came from, the source and destination ranges must
+  not overlap and lie in RAM windows with direct stores, the horizon, the
+  limit, the full stretch and `post_cycle` must leave room for N periods
+  and one more; then the committed stores are one `memcpy`, the model, the
+  registers, the queue tails, ILC, the loop condition history and the
+  counters are set as N * II steady cycles leave them.  In the replays it
+  takes all of the memcpy's steady cycles (11.35 M of 30 M packets on
+  `play-wet`).
+
+Exactness: the ten checkpoint replays (boot 1/25/250/400, play-real,
+play-live, play-wet, each with and without functional audio) identical
+between the interpreter (JIT off) and AOT + kernels + horizon (steps
+burst, kernels, loading) and, with direct RAM writes on both sides,
+identical to HEAD (all four steps); lockstep plain / AOT (kernels from the
+test's own profile) / ASan / ASan+AOT; mutations of the burst's ILC, the
+loading cycle's wait and packet count, the bulk copy's length and its
+store-base update are caught (mutations of the bulk's queue-tail due cycle
+and pair register are not: both are overwritten by the period that always
+follows a bulk step before anything can read them); 45 s full-capture
+boots byte-identical to develop over the common prefix (298,354 events /
+5,314 checkpoints; functional audio 142,177 / 1,093).
+
+Lean replay, user s (stock-AOT HEAD build -> this):
+
+| replay | HEAD | bursts | + AOT kernels | + loading in place | + bulk copy |
+|---|---:|---:|---:|---:|---:|
+| play-real 20 M | 0.76 | 0.67 | 0.63 | 0.57 | 0.52 |
+| play-wet 60 M | 2.24 | - | 1.78 | 1.62 | 1.46 |
+
+**Live: no change in the playing phase.**  Same diagnostic, four runs of
+this branch's builds alternated with four of HEAD on a shared host: playing
+32-35 M per virtual second against 32-37 M, buffer dry 31-32 M against
+30-31 M, the run average 31-78 M against 31-75 M (the host's load moves
+single runs by 2x).  One run (AOT kernels, before the bulk copy) stayed 51
+virtual s with the buffer dry but the background busy (67 M of 75 M per
+virtual second with GIE 1), without recovering playback.  The playing DSP is ISR-bound
+(97% GIE 0) and the ISR mix (varispeed SPLOOPs with SP arithmetic, the
+cursor-advance loop, the board's per-slot work, the MAIN hand-over) did not
+get faster; the replay gains are in the memcpy and the loop machinery the
+decoder uses, which only run once the background gets time.  E-8302 stays.
+Real time needs ~2.5x on the playing ISR mix as well as the background.

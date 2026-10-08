@@ -29,6 +29,8 @@ SHIM = r'''
 #define qatomic_set(p, v) __atomic_store_n(p, v, __ATOMIC_SEQ_CST)
 #define qatomic_inc(p) __atomic_fetch_add(p, 1, __ATOMIC_SEQ_CST)
 #define qatomic_dec(p) __atomic_fetch_sub(p, 1, __ATOMIC_SEQ_CST)
+#define smp_mb() __atomic_thread_fence(__ATOMIC_SEQ_CST)
+static void dsp_thread_prefer_performance(void) {}
 typedef pthread_mutex_t QemuMutex;
 typedef pthread_cond_t QemuCond;
 typedef pthread_t QemuThread;

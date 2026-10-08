@@ -685,12 +685,23 @@ static void catch_up_compare(JitPair *p)
     same(&view, p->sa, p->b, p->sb, p->seed, p->step);
 }
 
+/* dt_directed_toggle: the word between() flips between two encodings. */
+static uint32_t toggle_at, toggle_word[2];
+
 static bool jit_between(void *opaque)
 {
     JitPair *p = opaque;
     ++jit_packets;
     step_b(p, true);
     if (rnd() % 61 == 0) return false;
+    if (toggle_at && rnd() % 5 == 0) {
+        uint32_t w;
+        memcpy(&w, sys_at(p->sa, toggle_at), 4);
+        w = toggle_word[w == toggle_word[0]];
+        memcpy(sys_at(p->sa, toggle_at), &w, 4);
+        memcpy(sys_at(p->sb, toggle_at), &w, 4);
+        note_write(sys_at(p->sa, toggle_at), 4);
+    }
     /* What a board's between-step work may do: write code (an EDMA
      * transfer into it, say), in direct-trace programs. */
     if (direct_programs && rnd() % 53 == 0) {
@@ -1256,6 +1267,36 @@ static void dt_directed_dpp(void)
     dt_program(twice, 8, setup_dpp, 200);
 }
 
+/* A loop whose ADDK between() keeps flipping between two constants (an
+ * upload rewriting code): both encodings, and so the loop's other packets
+ * in the same fetch block with each, run often enough to be compiled ahead
+ * of time, and a region chaining into the flipped packet must notice the
+ * new bytes (aot_ready). */
+static void setup_toggle(CdjC674x *cpu)
+{
+    cpu->r[1][1] = 1000;
+}
+
+static void dt_directed_toggle(void)
+{
+    /* The flipped word is in the second fetch block: a region entered in
+     * the first (whose bytes never change) reaches it by chaining. */
+    const uint32_t branch_back = (uint32_t)((int32_t)-8 & 0x1fffff) << 7 | 0x10;
+    toggle_word[0] = 3u << 23 | 1u << 7 | 0x50;        /* ADDK 1,A3 */
+    toggle_word[1] = 3u << 23 | 2u << 7 | 0x50;        /* ADDK 2,A3 */
+    const uint32_t code[] = {
+        0,                                              /* 1000 NOP */
+        1u << 23 | 0xffffu << 7 | 0x50 | 2,             /* ADDK -1,B1 */
+        0, 0, 0, 0, 0, 0,                               /* NOPs */
+        toggle_word[0],                                 /* 1020 */
+        branch_back,                                    /* B .S1 0x1000 */
+        4u << 13,                                       /* NOP 5 */
+    };
+    toggle_at = BASE + 0x20;
+    dt_program(code, 11, setup_toggle, 600);
+    toggle_at = 0;
+}
+
 static void dt_directed_static(void)
 {
     const uint32_t branch_back = (uint32_t)((int32_t)-0 & 0x1fffff) << 7 | 0x10;
@@ -1423,6 +1464,7 @@ int main(void)
             test_horizon.until = 0;
             dt_directed_static();
             dt_directed_dpp();
+            dt_directed_toggle();
         }
         cdj_c674x_set_horizon(current_horizon = NULL);
         cdj_c674x_jit_stats(&s1);
