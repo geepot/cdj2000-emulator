@@ -32,7 +32,11 @@
  * panel_control.py, from a test, or by hand.
  *
  *   ping                      -> ok pong
- *   press <byte> <mask> [ms]  queue one down/up pulse, mask is hex;
+ *   press <byte> <mask> [ms [gap]]  queue one down/up pulse, mask is hex;
+ *                             GAP is the quiet time after it (default: the
+ *                             `gap` verb), so the next press goes down about
+ *                             ms + gap after this one (two panel frames, ~3 ms,
+ *                             is the floor of each half; guest time);
  *                             answers "ok press id=N"
  *   ack <id>                  where press N is: queued, down since frame F, or
  *                             done, first..last frame that carried it
@@ -89,6 +93,7 @@ typedef struct CdjInputPress {
     unsigned byte;
     uint8_t mask;
     int64_t hold_ns;
+    int64_t gap_ns;                     /* the quiet time after this press (press <byte> <mask> <hold> <gap>) */
     unsigned id;
 } CdjInputPress;
 
@@ -474,15 +479,18 @@ static void cdj_input_command(char *line)
     const char *arg1;
     const char *arg2;
     const char *arg3;
+    const char *arg4;
     long first = 0;
     long second = 0;
     long third = 0;
+    long fourth = 0;
 
     cdj_input_split(line, word, 5);
     verb = word[0];
     arg1 = word[1];
     arg2 = word[2];
     arg3 = word[3];
+    arg4 = word[4];
     if (!verb) {
         return;
     }
@@ -591,7 +599,12 @@ static void cdj_input_command(char *line)
         }
         if (arg3 && (!cdj_input_number(arg3, &third) || third < 0
                      || third > 60000)) {
-            cdj_input_reply("err press <byte> <mask> [ms 0..60000]\n");
+            cdj_input_reply("err press <byte> <mask> [ms 0..60000 [gap 0..60000]]\n");
+            return;
+        }
+        if (arg4 && (!arg3 || !cdj_input_number(arg4, &fourth) || fourth < 0
+                     || fourth > 60000)) {
+            cdj_input_reply("err press <byte> <mask> [ms 0..60000 [gap 0..60000]]\n");
             return;
         }
         if (cdj_input_queue_len >= CDJ_INPUT_QUEUE) {
@@ -609,6 +622,8 @@ static void cdj_input_command(char *line)
             cdj_input_queue[slot].mask = (uint8_t)second;
             cdj_input_queue[slot].hold_ns = arg3 ? third * 1000000LL
                                                  : cdj_input_hold_ns;
+            cdj_input_queue[slot].gap_ns = arg4 ? fourth * 1000000LL
+                                                : cdj_input_gap_ns;
             cdj_input_queue[slot].id = id;
             cdj_input_queue_len++;
             memset(ack, 0, sizeof(*ack));
@@ -985,7 +1000,7 @@ static void cdj_input_run_press(uint8_t *payload, unsigned len, int64_t now)
     } else if (cdj_input_phase == CDJ_INPUT_UP) {
         cdj_input_phase_frames++;
         if (cdj_input_phase_frames >= CDJ_INPUT_MIN_FRAMES
-            && now - cdj_input_phase_since >= cdj_input_gap_ns) {
+            && now - cdj_input_phase_since >= cdj_input_active.gap_ns) {
             cdj_input_phase = CDJ_INPUT_IDLE;
         }
     }

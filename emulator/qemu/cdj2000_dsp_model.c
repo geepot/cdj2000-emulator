@@ -153,9 +153,21 @@ struct CdjDspModel {
     bool status_first;                  /* CDJ_DSP_STATUS_FIRST: ... or the first one registered after a flush */
     uint32_t first_record;              /* +0x8120 of the first +0x8100 = 3 since the flush, 0 = none */
     bool track_end;                     /* CDJ_DSP_TRACK_END: state 7 at the record's last frame */
+    unsigned next_record;               /* CDJ_DSP_NEXT_RECORD: 2 (default) = play on into the queued record and publish 7 once, 1 = silently, 0 = stop */
     bool slot_release;                  /* CDJ_DSP_SLOT_RELEASE: request 1 frees the ready slots */
     bool slot_released[DSP_HOT_SLOTS];  /* freed since recorded: a 0x11 records again */
     bool at_end;                        /* the position reached the record's end */
+    bool end_ack;                       /* a 7 was published at a record switch: the request follows after end_ack_ns */
+    int64_t end_ack_ns;
+    bool prev_record;                   /* CDJ_DSP_PREV_RECORD (default on): a reverse run reaching the start goes on into the previous track (record 255) */
+    unsigned rev_start;                 /* CDJ_DSP_REV_START: state published once when a reverse run reaches the start (8; 0 = clamp at 0 only) */
+    bool at_start;                      /* the reverse run is at the start */
+    bool cue_search_seen;               /* MAIN sent the AUTO CUE search (+0x7ba0 = 7) since the last load (+0x7cb0 = 1) */
+    int64_t switch_hold_ms;             /* CDJ_DSP_SWITCH_HOLD: how long the 7 stays (default 100) */
+    unsigned switch_answer;             /* CDJ_DSP_SWITCH_ANSWER: what follows the 7 at a record switch (8 = the AUTO CUE answer, 0 = MAIN's request again) */
+    unsigned end_answer;                /* the answer chosen when end_ack was set */
+    bool end_answer_from_switch;        /* ... at a record switch (not at a reverse run's start) */
+    unsigned rev_answer;                /* CDJ_DSP_REV_ANSWER: the answer after the state at a reverse run's start (0 = MAIN's request again) */
     uint32_t end_toggle;                /* +0x7bf8 alternates 7 / the request at the end */
     uint32_t last_request;              /* the last +0x7ba0 request taken, get(18) */
     uint32_t record_frames[256];        /* +0x811c of the +0x8100 command naming the record, CD frames */
@@ -601,6 +613,22 @@ CdjDspModel *cdj_dsp_model_new(Chardev *external)
     model->slot_entry = g_strcmp0(getenv("CDJ_DSP_SLOT_ENTRY"), "0") != 0;
     /* The end of a track (see cdj_dsp_model_track_end): on unless 0. */
     model->track_end = g_strcmp0(getenv("CDJ_DSP_TRACK_END"), "0") != 0;
+    /*
+     * The end of a record with another queued behind it (see
+     * ..._track_end): 2 (the default) plays on and publishes 7 once, 1 plays
+     * on silently, 0 stops at the end as before.
+     */
+    model->next_record = g_strcmp0(getenv("CDJ_DSP_NEXT_RECORD"), "1") == 0 ? 1
+                         : g_strcmp0(getenv("CDJ_DSP_NEXT_RECORD"), "0") == 0 ? 0 : 2;
+    model->rev_answer = getenv("CDJ_DSP_REV_ANSWER")
+        ? strtol(getenv("CDJ_DSP_REV_ANSWER"), NULL, 0) : 0;
+    model->prev_record = g_strcmp0(getenv("CDJ_DSP_PREV_RECORD"), "0") != 0;
+    model->rev_start = getenv("CDJ_DSP_REV_START")
+        ? strtol(getenv("CDJ_DSP_REV_START"), NULL, 0) : 0;
+    model->switch_hold_ms = getenv("CDJ_DSP_SWITCH_HOLD")
+        ? strtol(getenv("CDJ_DSP_SWITCH_HOLD"), NULL, 0) : 100;
+    model->switch_answer = getenv("CDJ_DSP_SWITCH_ANSWER")
+        ? strtol(getenv("CDJ_DSP_SWITCH_ANSWER"), NULL, 0) : 8;
     /* Held slots freed at a re-stream (see the +0x7ba0 handler): on unless 0. */
     model->slot_release = g_strcmp0(getenv("CDJ_DSP_SLOT_RELEASE"), "0") != 0;
     /*
@@ -1481,6 +1509,23 @@ static void cdj_dsp_model_stream_seek(CdjDspModel *model, uint8_t *window,
 #define DSP_POS_VALID       0x7c14
 
 /*
+ * Whether MAIN has opened a stream for the record since the table was last
+ * cleared (a load's start, a flush).  record_frames[] is never cleared, so a
+ * length alone says only that the record existed once.
+ */
+static bool cdj_dsp_model_record_queued(const CdjDspModel *model, uint32_t record)
+{
+    unsigned i;
+
+    for (i = 0; i < model->rec_count; i++) {
+        if (model->rec_queue[i] == record) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
  * The end of a track (CDJ_DSP_TRACK_END).  MAIN hands the DSP each record's
  * length with the +0x8100 command that names it: +0x811c is the audio's
  * length in CD frames (75 a second) and +0x8120 the record (runs/cosim/te-1:
@@ -1501,6 +1546,38 @@ static void cdj_dsp_model_track_end(CdjDspModel *model, uint8_t *window, int64_t
     uint32_t frames;
     int64_t end_ms;
 
+    if (model->end_ack && now >= model->end_ack_ns) {
+        /* The main pass adopts MAIN's request again (0x80048aa0), so the 7 at
+           a record switch does not stay; held for ever, MAIN's DSP task waits
+           its 10 s for an answer and re-streams.  Taken away after one pass
+           MAIN's task sometimes missed it (nr-7, nr-8: no event 0x30), so it
+           lasts 100 ms.  This comes before the CDJ_DSP_TRACK_END test below:
+           a reverse run's start arms the answer too (the position report),
+           and with CDJ_DSP_TRACK_END=0 that 7 was never answered. */
+        model->end_ack = false;
+        if (model->end_answer) {
+            /*
+             * The deck's end handler (event 0x30, AUTO CUE on) goes to the
+             * AUTO CUE search state and MAIN's DSP task keeps that pending
+             * while +0x7bf8 reads 7, giving up after 10 s (acue-1).  The
+             * DSP's answer is 8 with the slot entry of the cue (0x80035370,
+             * 0x8002dc90): MAIN then sends 4 at once and the deck stands
+             * cued, state 6, which is what the deck does at a track's end.
+             */
+            if (model->end_answer_from_switch) {
+                /* the cue of the new record is its start */
+                model->pos_ms = 0;
+                model->pos_rem_ns = 0;
+            }
+            model->cue_ms = model->pos_ms;
+            stl_le_p(window + 0x7bf8, model->end_answer);
+            cdj_dsp_model_slot_entry(model, window, 0x8100, 0, model->cue_ms, now);
+            fprintf(stderr, "cdj2000-dsp: +0x7bf8 = %u (answer after the 7), cue at %" PRId64
+                    " ms t=%.3f\n", model->end_answer, model->cue_ms, now / 1e9);
+        } else {
+            stl_le_p(window + 0x7bf8, model->last_request);
+        }
+    }
     if (!model->track_end || model->pos_record >= 256) {
         return;
     }
@@ -1512,6 +1589,70 @@ static void cdj_dsp_model_track_end(CdjDspModel *model, uint8_t *window, int64_t
     if (model->pos_ms < end_ms) {
         model->at_end = false;
         return;
+    }
+    if (model->next_record) {
+        /*
+         * MAIN preloads the next tracks of the list behind the one played
+         * (records 2.. in the table, trackload-86/87).  When a record's data
+         * runs out the DSP goes on with the next one in the table, and the
+         * position report (+0x7c14) then names it: MAIN's reader finds the
+         * record in its ring (0x041b23e4) and the deck's track word
+         * (0x04832204) follows, which is how the real deck changes to the
+         * next track at the end (owner, 01.10: 0x88 -> 0x89 in one pass, no
+         * load).  The 7 published once is the end MAIN's DSP task signals:
+         * event 0x30, which with AUTO CUE on puts the deck in state 2 (the
+         * pause on the new track's cue, 0x04282868); without it (mode 1) the
+         * track word changes and the deck just plays on (nr-2).  Without a
+         * record behind, the end below stays.
+         *
+         * After the 7 the DSP has to answer, and the answer is 8 with the
+         * slot entry of the new record's cue (CDJ_DSP_SWITCH_ANSWER, 8 by
+         * default; see the end_ack block above).  Without it MAIN's DSP
+         * task keeps the 7 pending and gives up after exactly 10 s, then
+         * re-streams (the "10.004 s" of NOTES-track-end-10s.md; owner's
+         * deck, 01.10: sub 3 -> 2 -> 6 in about 120 ms, no load, 0x05355628
+         * stays 15).  With the 8 the model reproduces that timeline
+         * (te-21): 0x04832204 and state 2 in one pass, state 6 124 ms later.
+         */
+        unsigned i, next = 0;
+
+        /* Record 255 is the PREVIOUS track of the list, which MAIN preloads behind the played one
+           (`+0x8120 = 0xff`): at the last track of a list it is the only record behind the played
+           one and must not be mistaken for a next track (v3-3: the deck played on into the track
+           before). */
+        for (i = 0; i < model->rec_count; i++) {
+            if (model->rec_queue[i] == model->pos_record) {
+                unsigned j;
+
+                for (j = i + 1; j < model->rec_count; j++) {
+                    if (model->rec_queue[j] != 0xff) {
+                        next = model->rec_queue[j];
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        if (next && next < 256 && model->record_frames[next]) {
+            fprintf(stderr, "cdj2000-dsp: record %u ends at %" PRId64 " ms: playing on "
+                    "into record %u (%u CD frames)%s t=%.3f\n", model->pos_record, end_ms,
+                    next, model->record_frames[next],
+                    model->next_record == 2 && model->cue_search_seen ? ", +0x7bf8 = 7 once" : "", now / 1e9);
+            model->pos_record = next;
+            model->pos_ms = 0;
+            model->pos_rem_ns = 0;
+            model->at_end = false;
+            if (model->next_record == 2 && model->cue_search_seen) {
+                /* With AUTO CUE off MAIN never asked for the cue search at the load (no 7), and the deck
+                   plays the next record on at once: the track word changes and nothing is published. */
+                stl_le_p(window + 0x7bf8, 7);
+                model->end_ack = true;
+                model->end_answer = model->switch_answer;
+                model->end_answer_from_switch = true;
+                model->end_ack_ns = now + model->switch_hold_ms * 1000000LL;
+            }
+            return;
+        }
     }
     /*
      * Called only while running.  With no data the decoder pass sets state
@@ -1584,8 +1725,44 @@ static void cdj_dsp_model_position_report(CdjDspModel *model, uint8_t *window,
         if (model->reverse && (ldl_le_p(window + 0x7bc4) & 0x80000000u)) {
             int64_t total = model->pos_ms * SCALE_MS + model->pos_rem_ns - played_ns;
 
-            if (total < 0) {
+            if (total <= 0) {
                 total = 0;
+                if (model->prev_record && !model->at_start && model->cue_search_seen
+                    && cdj_dsp_model_record_queued(model, 0xff)
+                    && model->record_frames[0xff] && model->pos_record != 0xff) {
+                    /*
+                     * The deck's REV (and SLIP REV) at the start of a track goes to the PREVIOUS track of
+                     * the playlist (owner, 02.10).  MAIN has that track in the DSP's table as record 255;
+                     * the way back is the mirror of the track end: the DSP goes on into it, publishes
+                     * the 7, answers with the cue (8), and the deck stands cued on the previous track.
+                     * Only a record 255 opened for this load counts: the first track of a list has none,
+                     * and the length of an earlier load's 255 sent the model into a record MAIN no longer
+                     * holds (pr16-rev-1: track 2 loaded, then track 1; REV at its start, 7 and 8).
+                     */
+                    fprintf(stderr, "cdj2000-dsp: reverse run reached the start of record %u: going on "
+                            "into the previous record 255 (%u CD frames), +0x7bf8 = 7 once t=%.3f\n",
+                            model->pos_record, model->record_frames[0xff], now / 1e9);
+                    model->at_start = true;
+                    model->pos_record = 0xff;
+                    total = 0;
+                    stl_le_p(window + 0x7bf8, 7);
+                    model->end_ack = true;
+                    model->end_answer = model->switch_answer;
+                    model->end_answer_from_switch = true;
+                    model->end_ack_ns = now + model->switch_hold_ms * 1000000LL;
+                } else if (model->rev_start && !model->at_start) {
+                    fprintf(stderr, "cdj2000-dsp: reverse run reached the start of record %u: "
+                            "+0x7bf8 = %u once t=%.3f\n", model->pos_record, model->rev_start,
+                            now / 1e9);
+                    model->at_start = true;
+                    stl_le_p(window + 0x7bf8, model->rev_start);
+                    model->end_ack = true;
+                    model->end_answer = model->rev_answer;
+                    model->end_answer_from_switch = false;
+                    model->end_ack_ns = now + model->switch_hold_ms * 1000000LL;
+                }
+            } else {
+                model->at_start = false;
             }
             model->pos_ms = total / SCALE_MS;
             model->pos_rem_ns = total % SCALE_MS;
@@ -1799,12 +1976,21 @@ void cdj_dsp_model_tick(CdjDspModel *model, uint8_t *window, size_t length)
                 stl_le_p(window + DSP_LEVEL_BUFFER2, 0);
                 stl_le_p(window + 0x81c4, 0);
                 stl_le_p(window + 0x7cd4, 0xff);
+                if (word == 1) {
+                    model->cue_search_seen = false;     /* a load: AUTO CUE on sends its 7 after this */
+                }
                 model->rec_count = 0;
                 model->pos_record = 0;
                 model->first_record = 0;
                 model->pos_ms = 0;
                 model->pos_state = 0;
                 model->loop_on = false;
+                /* An answer still owed for a record switch belongs to the
+                   table just cleared: left armed (a load or a jump within
+                   CDJ_DSP_SWITCH_HOLD of the 7) it fired at the next PLAY,
+                   position 0 and +0x7bf8 = 8 on a deck that only started. */
+                model->end_ack = false;
+                model->at_start = false;
                 fprintf(stderr, "cdj2000-dsp: +0x7cb0 = %d flushes the DSP: record table, "
                         "levels and position report cleared, +0x7cd4 = 0xff%s t=%.3f\n",
                         word, word == 1 ? ", hot cue slots emptied" : "", now / 1e9);
@@ -2262,6 +2448,9 @@ void cdj_dsp_model_tick(CdjDspModel *model, uint8_t *window, size_t length)
                 }
                 if (length >= 0x7bfc) {
                     stl_le_p(window + 0x7bf8, word);
+                }
+                if (word == 7) {
+                    model->cue_search_seen = true;
                 }
                 if (word == 7 && model->auto_cue && length >= 0x7bfc) {
                     /*

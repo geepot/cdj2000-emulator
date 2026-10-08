@@ -92,6 +92,26 @@ class Rsp:
     def interrupt(self) -> None:
         self.sock.sendall(b"\x03")
 
+    def detach(self) -> str:
+        """`D` (detach): the machine runs again.  A client that connects and goes away WITHOUT `c` or `D`
+        leaves the machine halted for ever (0 % CPU, guest time frozen: the "hung at t=28.0"
+        of 02.10.2026, reproduced); `with Rsp(...)` and this call exist so a probe that dies
+        cannot do that.  Use `python -m tools.cdj_main.vm_resume PORT` on a machine already stuck."""
+        try:
+            return self.cmd("D", 3.0)
+        except OSError:
+            return ""
+
+    def __enter__(self) -> "Rsp":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.detach()
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
 
 def start(sd: Path, port: int, gdbport: int, env: dict, log: Path,
           frozen: bool = False):

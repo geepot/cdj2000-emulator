@@ -23,6 +23,7 @@ and with --load2-row N, the next track while the first one plays:
   load2     BROWSE, N detents, ENCODER PUSH -> the GUI's LOAD again
   stream2   MAIN sets the DSP a new stream (+0x8100 = 3 and a stream open),
             which the first load always does and a second one must too
+  loaded2   the second load closes the same way (+0x7ba0 = 4)
 
 --then KEY:SECONDS[,...] then presses more keys (payload byte.bit, 20.0 =
 BROWSE; rot+N / rot-N turns the select encoder; KEY@MS holds it MS ms), each
@@ -36,7 +37,10 @@ medium out and put it back; jog+N / jog-N turns the jog ring N steps
 top of the jog dial (a brake in VINYL mode), scratch+S / scratch-S touches
 it and turns the ring for S wall seconds; needle=N touches the NEEDLE
 SEARCH pad at N (0..511) and needle-off lifts the finger; direction-rev /
-direction-fwd sets the DIRECTION lever.
+direction-fwd sets the DIRECTION lever; dnB.b / upB.b hold and release a bit (dn18.0 = REC held for a chord).  A plain button press with a pause under a second
+(`17.0@30:0.07,17.1@30:3`) goes out with the board's own guest-time spacing: the next press goes
+down SECONDS after this one (about 30 ms is the floor in practice, +5 ms of frame quantisation;
+the intervals achieved are printed).
 
 and writes a table of what passed at which guest second, the frame at each
 step (PNG) and the logs, into --out.  A step that times out ends the run: the
@@ -156,6 +160,13 @@ class Run:
             command += ["--gui-env", item]
         if self.args.firmware:
             command += ["--firmware", str(self.args.firmware)]
+        for item in self.args.hold_key:
+            command += ["--hold-key", item]
+        if self.args.dense_window:
+            # every frame of that stretch of guest time, kept at --dense-fps a second as PNG, and a GIF
+            command += ["--dense-frames", str(self.out / "dense"), "--dense-window", self.args.dense_window,
+                        "--dense-fps", str(self.args.dense_fps),
+                        "--dense-gif", str(self.out / "dense.gif")]
         command += self.args.boot_arg
         (self.out / "command.txt").write_text(" ".join(command) + "\n")
         self.proc = subprocess.Popen(command, cwd=ROOT, env=env,
@@ -239,19 +250,27 @@ class Run:
     def press(self, key, hold_ms=100):
         self.panel("press", key, "--hold-ms", str(hold_ms))
 
+    RETRY_AFTER = 4.0           # guest seconds of silence before a press is repeated
+    PRESSES = 3                 # at most this many presses of one key for one step
+
     def press_for(self, what, key, check, guest_timeout):
-        """Press KEY and wait for CHECK; if nothing shows in half the time,
-        press once more.  A press that reached MAIN and still did nothing in
-        the GUI happens now and then (r55-1: ENCODER PUSH down 16.275 s, up
-        16.377 s, no ENTER); the second press is logged, never silent."""
-        self.press(key)
-        got = self.wait(what, check, guest_timeout / 2)
-        if got or (self.proc and self.proc.poll() is not None):
-            return got
-        print(f"  ({what}: no effect from {key}, pressed again)", flush=True)
-        self.repeats.append(what)
-        self.press(key)
-        return self.wait(what, check, guest_timeout / 2)
+        """Press KEY and wait for CHECK; while nothing shows, press again after RETRY_AFTER guest seconds (at most
+        PRESSES presses, GUEST_TIMEOUT in all).  The GUI drops a press that lands while it is refreshing its own
+        list (the browse requests come in bursts at 13.2, 16.2, 20.0, 20.5, 21.5 s ...: runs/emu-b3 deck A, press
+        down 16.110 s, no ENTER request, 4 s of silence); earlier the repeat came only after half of the timeout,
+        and a key that fell into two such bursts failed the step.  Every repeat is logged, never silent."""
+        got = None
+        for attempt in range(self.PRESSES):
+            if attempt:
+                print(f"  ({what}: no effect from {key}, pressed again)", flush=True)
+                self.repeats.append(what)
+            self.press(key)
+            last = attempt == self.PRESSES - 1
+            got = self.wait(what, check, guest_timeout - self.RETRY_AFTER * (self.PRESSES - 1) if last
+                            else self.RETRY_AFTER)
+            if got or (self.proc and self.proc.poll() is not None):
+                return got
+        return got
 
     # --------------------------------------------------------------- report --
     def snap(self, name):
@@ -270,6 +289,8 @@ class Run:
         return ok
 
     def report(self):
+        if not self.out.exists():           # refused before the run began (a busy port): the refusal is the message
+            return
         lines = ["| step | result | guest s | note |", "|---|---|---|---|"]
         lines += [f"| {n} | {r} | {t:.2f} | {note}"
                   f"{' (pressed twice)' if n in self.repeats else ''} |"
@@ -327,6 +348,31 @@ def err_matching(run: Run, pattern: str, after: int = 0):
     return check
 
 
+def turn_down(run: Run, steps: int, since: int) -> None:
+    """Turn the select encoder STEPS clicks down, one at a time: after each click wait for the browse preview request
+    of the row it should have reached (or a later one) and click again when it does not come.  The GUI drops a click
+    that lands while it refreshes its list; sent blind with 0.3 s of wall time between them, the cursor stayed on row 0
+    in runs/emu-b1 ("no preview of row 4").  A click that came late is not repeated: any row at or past the wanted
+    one counts."""
+    def reached(row: int):
+        def check():
+            for _, words in run.requests(since):
+                m = re.match(r"^0000 0001 000b 0007 0002 ([0-9a-f]{4})$", words)
+                if m and int(m.group(1), 16) >= visible_row(row):
+                    return words
+            return None
+        return check
+
+    for row in range(1, steps + 1):
+        for attempt in range(3):
+            run.panel("rotary", "7", "+1")
+            if run.wait("turn", reached(row), 3.0):
+                break
+            print(f"  (row {row}: no preview after the click, clicked again)", flush=True)
+            run.repeats.append("turn")
+        time.sleep(0.3)
+
+
 def scenario(run: Run, args) -> None:
     run.start()
     if args.manual:
@@ -359,13 +405,15 @@ def scenario(run: Run, args) -> None:
     if not run.step("playlist", bool(got), got[1] if got else "no ENTER request"):
         return
     run.wait("settle", lambda: run.guest() >= got[0] + 2, 20)
-
-    for _ in range(args.playlist_row):
-        run.panel("rotary", "7", "+1")
-        time.sleep(0.3)
+    turn_down(run, args.playlist_row, mark)
     want = r"^0000 0001 000b 0007 0002 %04x" % visible_row(args.playlist_row)
     got = run.wait("select", request_matching(run, mark, want), 20)
-    if not run.step("select", bool(got), got[1] if got else f"no preview of row {args.playlist_row}"):
+    note = got[1] if got else f"no preview of row {args.playlist_row}"
+    if not got and any(re.match(r"^0000 0001 000b 000a ", w) for _, w in run.requests(mark)):
+        # The previews of the playlist list carry 0007, those of a track list 000a.  Seen in runs/emu-c8 deck A: one
+        # logged ENTER (16.158 s), the clicks went on, and at 20.06 s the GUI asked for a track list of its own accord.
+        note += " (the GUI entered the track list by itself: the one ENTER was handled again about 4 s later)"
+    if not run.step("select", bool(got), note):
         return
     run.wait("settle", lambda: run.guest() >= got[0] + 1, 20)
 
@@ -378,9 +426,7 @@ def scenario(run: Run, args) -> None:
     run.wait("list", payload_after(run, mark), 30)
     run.wait("settle", lambda: run.guest() >= got[0] + 3, 30)
 
-    for _ in range(args.track_row):
-        run.panel("rotary", "7", "+1")
-        time.sleep(0.3)
+    turn_down(run, args.track_row, mark)
     mark = len(run.main_lines())
     got = run.press_for("load", "17.0", request_matching(run, mark, r"^0000 0007 "), 20)
     if not got:
@@ -437,14 +483,104 @@ def scenario(run: Run, args) -> None:
             args.load_timeout)
         if not run.step("stream2", bool(got), got or "no new stream (+0x8100 = 3) for the second track"):
             return
+        got = run.wait("loaded2", err_matching(run, r"control \+0x7ba0 command 0x00000004", err_mark),
+                       args.load_timeout)
+        if not run.step("loaded2", bool(got), "second load closed (+0x7ba0 = 4)" if got
+                        else "the second load never closed"):
+            return
     then_keys(run, args.then)
+
+
+SPECIAL_KEY = re.compile(
+    r"rot.*|r\d[+-]\d+|a\d=(0x[0-9a-fA-F]+|\d+)|sd-eject|sd-insert|usb-detach|usb-attach|jog[+-]\d+|"
+    r"bend[+-]\d+(\.\d+)?|scratch[+-]\d+(\.\d+)?|touch-on|touch-off|direction-rev|direction-fwd|"
+    r"needle=(0x[0-9a-fA-F]+|\d+)|needle-off|(dn|up)\d+\.\d+")
+
+
+def sub_second(item: tuple[str, str]) -> bool:
+    """A plain button press whose pause is under a second: the pause is then the guest-time
+    interval from this press going down to the next one going down (SECONDS may be 0.07)."""
+    key, secs = item
+    if SPECIAL_KEY.fullmatch(key.partition("@")[0]) or not secs:
+        return False
+    try:
+        return 0 < float(secs) < 1
+    except ValueError:
+        return False
+
+
+def plain_press(item: tuple[str, str]) -> bool:
+    return not SPECIAL_KEY.fullmatch(item[0].partition("@")[0])
+
+
+def press_times(run: Run) -> dict[int, float]:
+    """press id -> guest time it went down, from the input channel's log lines."""
+    try:
+        text = run.err.read_text(errors="replace")
+    except FileNotFoundError:
+        return {}
+    return {int(i): float(t) for i, t in re.findall(
+        r"cdj2000-input: press (\d+): byte \d+ mask \S+ down at ([\d.]+) s", text)}
 
 
 def then_keys(run: Run, spec: str, name: str = "then") -> None:
     """--then: more keys after the scenario, each with guest seconds after it
-    (--before: the same between the library and the first browse press)."""
-    for n, item in enumerate(x for x in spec.split(",") if x):
+    (--before: the same between the library and the first browse press).
+
+    A button press whose pause is under a second (`17.0@30:0.07,17.1@30:3`) is queued with the
+    board's own guest-time spacing: the next press goes down SECONDS after this one (floor
+    ~10 ms, the hold defaults to half of it up to 100 ms, `KEY@MS` sets it).  The census the
+    other pauses wait on ticks once a second, so these never look at it; the intervals
+    that were really achieved are printed from the input channel's log."""
+    items = []
+    for item in (x for x in spec.split(",") if x):
         key, _, secs = item.rpartition(":")
+        items.append((key, secs))
+    n = 0
+    while n < len(items):
+        key, secs = items[n]
+        if sub_second(items[n]):
+            group = [items[n]]
+            while sub_second(group[-1]) and n + len(group) < len(items) and plain_press(items[n + len(group)]):
+                group.append(items[n + len(group)])
+            batch = []
+            for gkey, gsecs in group:
+                button, _, hold = gkey.partition("@")
+                interval = max(10, round(float(gsecs) * 1000)) if sub_second((gkey, gsecs)) else 0
+                hold_ms = int(hold) if hold else max(5, min(100, interval // 2))
+                gap_ms = max(0, interval - hold_ms) if interval else 300
+                batch.append(f"{button}:{hold_ms}:{gap_ms}")
+            at = run.guest()
+            reply = subprocess.run([PY, "-m", "tools.cdj_main.panel_control", "--port", str(run.port + 4),
+                                    "sequence", *batch], cwd=ROOT, capture_output=True, text=True,
+                                   timeout=300)
+            ids = [int(x) for x in reply.stdout.split() if x.isdigit()]
+            down = press_times(run)
+            marks = [down.get(i) for i in ids]
+            spans = [f"{(b - a) * 1000:.0f}" for a, b in zip(marks, marks[1:]) if a is not None and b is not None]
+            for index, (gkey, gsecs) in enumerate(group):
+                print(f"{name} {n + index + 1}: {gkey.partition('@')[0]}, pause {gsecs} s in guest time", flush=True)
+            if spans:
+                print(f"  intervals between the presses going down (ms): {', '.join(spans)}", flush=True)
+            if not ids:
+                print(f"  (the sequence did not run: {reply.stdout.strip()} {reply.stderr.strip()[-200:]})", flush=True)
+            n += len(group)
+            last_key, last_secs = group[-1]
+            if sub_second(group[-1]):
+                # the group ended on a sub-second item (end of list or a key that is not a plain press):
+                # the board has already finished it (the sequence waits for the last ack); take one census tick
+                at = run.guest()
+                run.wait(name, lambda: run.guest() >= at + 1, 61)
+                continue
+            # the group's last press carries a normal pause: wait it out like any other step
+            at = run.guest()
+            run.wait(name, lambda: run.guest() >= at + float(last_secs or 3), float(last_secs or 3) + 60)
+            try:
+                save_panel(run.frame, run.out / f"{name}-{n}-{last_key.partition('@')[0]}.png")
+            except Exception as error:
+                print(f"  (no frame for {name} {n}: {error})")
+            continue
+        n += 1
         if key.startswith("rot"):
             run.panel("rotary", "7", key[3:])
         elif re.fullmatch(r"r\d[+-]\d+", key):
@@ -465,6 +601,8 @@ def then_keys(run: Run, spec: str, name: str = "then") -> None:
             run.panel("touch", key[6:])
         elif key in ("direction-rev", "direction-fwd"):
             run.panel("direction", key[10:])
+        elif re.fullmatch(r"(dn|up)\d+\.\d+", key):
+            run.panel("down" if key.startswith("dn") else "up", key[2:])     # a chord: hold REC, press a pad, release
         elif re.fullmatch(r"needle=(0x[0-9a-fA-F]+|\d+)", key) or key == "needle-off":
             run.panel("needle", key[7:] if key.startswith("needle=") else "off")
         else:
@@ -473,10 +611,10 @@ def then_keys(run: Run, spec: str, name: str = "then") -> None:
         at = run.guest()
         run.wait(name, lambda: run.guest() >= at + float(secs or 3), float(secs or 3) + 60)
         try:
-            save_panel(run.frame, run.out / f"{name}-{n + 1}-{key}.png")
+            save_panel(run.frame, run.out / f"{name}-{n}-{key}.png")
         except Exception as error:
-            print(f"  (no frame for {name} {n + 1}: {error})")
-        print(f"{name} {n + 1}: {key}, guest {at:.1f} -> {run.guest():.1f}", flush=True)
+            print(f"  (no frame for {name} {n}: {error})")
+        print(f"{name} {n}: {key}, guest {at:.1f} -> {run.guest():.1f}", flush=True)
 
 
 def main(argv=None) -> int:
@@ -506,6 +644,15 @@ def main(argv=None) -> int:
     parser.add_argument("--gui-env", action="append", default=[], metavar="NAME=VALUE")
     parser.add_argument("--boot-arg", action="append", default=[], metavar="ARG",
                         help="extra boot_vm argument, e.g. --boot-arg=--trace=0x42596ee")
+    parser.add_argument("--hold-key", action="append", default=[], metavar="KEY[:SECONDS]",
+                        help="hold a panel key from guest time zero for SECONDS (default 20), "
+                             "e.g. delete:20 for the mod's safe mode")
+    parser.add_argument("--dense-window", metavar="FROM:TO",
+                        help="keep every frame of this stretch of guest seconds (FROM: runs to the end) "
+                             "as PNG in OUT/dense/png and as OUT/dense.gif; needs the simulator with "
+                             "patch 15 (bin/cdj-run-frames)")
+    parser.add_argument("--dense-fps", type=float, default=10.0, metavar="N",
+                        help="frames kept per guest second of the dense window (default 10)")
     parser.add_argument("--dsp-trace", action="store_true")
     parser.add_argument("--no-play", action="store_true",
                         help="do not press PLAY after the load: with AUTO CUE off "
@@ -530,7 +677,7 @@ def main(argv=None) -> int:
                         help="keys between the library and the first browse press, "
                              "e.g. 19.4@1500:3 (TIME/A.CUE held: AUTO CUE)")
     parser.add_argument("--stop-after", metavar="STEP",
-                        help="end the scenario after this step passes")
+                        help="end the scenario after this step passes (--then keys still follow it)")
     parser.add_argument("--keep", action="store_true",
                         help="leave the machine running after the last step")
     args = parser.parse_args(argv)
@@ -538,6 +685,8 @@ def main(argv=None) -> int:
     run = Run(args)
     try:
         scenario(run, args)
+        if args.stop_after and args.then and run.rows and run.rows[-1][:2] == (args.stop_after, "ok"):
+            then_keys(run, args.then)       # the scenario ended where it was told to; the keys go on from there
     finally:
         run.report()
         if not args.keep:

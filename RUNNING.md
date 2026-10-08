@@ -160,6 +160,32 @@ Useful flags: `--frames DIR --frame-every 2` samples the screen on a fixed grid,
 and `--no-peer` switches off the canned MAIN answers so that what appears on
 screen came from the machine rather than from a file.
 
+## Dense frames, for an animation
+
+`--frames` samples the live frame on a wall-clock tick (2 s by default): enough for before and after, far too
+few for a GIF.  The simulator can publish every frame it draws (patch 15), about 55 a second of guest time, which
+is gigabytes for a minute.  `--dense-frames` arms that only inside a window of guest seconds, keeps
+`--dense-fps` frames per guest second as PNG and deletes the rest as they arrive:
+
+    python -m tools.cdj_main.cosim_scenario --card card.img --out runs/cosim/anim \
+        --dense-window 28:40 --dense-fps 10
+
+writes `runs/cosim/anim/dense/png/t<guest seconds>.png` and `dense.gif`, whose delays follow the guest stamps
+(it plays at guest speed however long the emulator took).  A 12 s window at 10 a second is about 110 frames and
+4 MB, from about 670 archived.  `boot_vm` takes the same as `--dense-frames DIR --dense-window FROM:TO
+--dense-fps N --dense-gif FILE`; it needs `--cosim` (the guest clock is MAIN's link log) and a simulator with
+patch 15 (`bin/cdj-run-frames`, or `bin/cdj-run` rebuilt from the current patch stack; `boot_vm` looks for the
+sibling by itself).  The window starts a second early so the archive is already armed; the GIF is written when
+the run ends, so stop it with SIGINT (`cosim_scenario` does), not a kill.
+
+## A key held from the first second
+
+`boot_vm --hold-key KEY[:SECONDS]` (also `cosim_scenario`) holds a panel key from guest time zero for SECONDS
+(default 20), the way a person holds it while switching the deck on: `--hold-key delete:20` is the NEW FIRMWARE
+mod's safe mode.  KEY is a name MAIN knows (`delete`, `memory`, `hot cue a`) or `BYTE.BIT`.  It writes a
+`CDJ_PANEL_KEYS` entry `0:<byte>:<mask>:<seconds>`; the fourth field is the entry's own hold time (see
+INPUT_MANIFEST.md).
+
 ## The GUI board on its own
 
 The Blackfin board runs without MAIN if you feed it MAIN's side of the
@@ -1321,6 +1347,33 @@ python -m tools.cdj_main.cosim_scenario --card $H/cardB.img --playlist-row 4 --t
   n x 208) from A's status, and its beat handler 0x042899DC runs for A's beats
   but stores them only when 0x04C0849C != 0, which stock 4.33 leaves at 0.
   Stock 4.33 has no SYNC or MASTER keys.
+- **Working example (02.10.2026):** `scripts/two-decks.sh runs/qz-sync5 7200 7300` does the three commands above in one go
+  (both cards cloned, hub, deck A to `time`, deck B to `loaded`, both kept). **OUT must be short and relative to the repo root**:
+  the hub's unix socket lives under it and an absolute path from a deep home directory is "AF_UNIX path too long". Three runs on
+  the shared build of 29.09 and on `build/qemu-te` (one of them with eight busy loops on the host) all reached PLAY on deck A and
+  ran on; the "waited N s for the other players" hang reported on 02.10 did not reproduce, so it is not fixed, only not seen:
+  if it comes back, note whether `OUT/b/qemu.err` still advances (`cdj2000-cosim: t=`), and the last `netsim: waited` line of
+  both decks. The line is printed once per 5 s of wall clock a deck spends in `cdj2000_netsim.c`'s poll for the hub's promise.
+  Deck B is cued, not playing: press PLAY on it with `panel_control --port <B+4> press 16.0 --hold-ms 100`.
+  `CDJ_WATCH=04c0849c,04c084a4,04fdc510,04fdc514,04fdc518,04fdc530,04fdc544,04fdc608,07db33cc scripts/two-decks.sh ...` logs every
+  write to the SYNC engine's words with the writer's pc (`cdj2000-watch:` lines in `OUT/b/qemu.err`).
+- **A machine frozen at one guest time with 0 % CPU** is, in every case I could reproduce, a gdb client that attached to PORT+3 and left without `c` /
+  `D`. `python -m tools.cdj_main.vm_resume PORT` resumes it; write probes as `with Rsp(PORT + 3) as stub:` (the exit detaches).
+- **TEMPO slider through `panel_control analog`**: field 2 is the position and field 3 its centre; the tempo is recomputed when field 2 changes, so set
+  the centre first (`a3=0x8000`) and then the position (`a2=0x4000` = -5 %, `a2=0xFFFF` = +10 %)..  Measured: position 0x4000 / 0xC000 with centre 0x8000 give -5.1 % / +5.1 %,
+  position 0xFFFF gives +10 %; moving the centre alone after the position was driven changes nothing.
+  Since the base panel frame starts the slider at its centre (bytes 4/5 and 6/7 = 0x8000, `cdj_panel_frame`), a deck needs no `analog` at all to be at 0 % with a pitch
+  word of 0x100000 in its status packets (`+0x8C` / `+0x98`, byte 0x21 = player number); before, both words were 0 until the slider was driven, and the stock SYNC engine on a following
+  deck (BPM x pitch) held it still.  Check on a two-deck run: read those words of the `type 0x0a` packets (port 50002) in `OUT/hub/link.pcap`.
+- **Beat phase of one deck against another**: `python -m tools.cdj_main.beat_phase OUT/hub/link.pcap PLAYER_A PLAYER_B [--from S --to S --every S --json]` takes the
+  type 0x28 beat packets (UDP 50001, byte 0x21 = player number) and, for every beat of B, the closest PRECEDING beat of A, in milliseconds (mean, min, max, sd), plus the signed
+  offset to A's nearest beat (the first figure jumps by a period when B is slightly ahead).  A `--sync` hub (scripts/two-decks.sh) stamps guest time.  The player numbers are
+  negotiated: in the two-deck stand deck A usually becomes player 2 and deck B player 1 (read the "players with beats" line).  Tests: tests/test_beat_phase.py (synthetic captures).
+- SYNC probe of NEW FIRMWARE docs/38 step 0: the stock engine 0x04289AF4 follows another deck when, on the follower over gdb (PORT+3),
+  `[0x04C0849C] = 1` (gate) and `[0x04C084A4]` = the other deck's PLAYER NUMBER (1..4; 0 and 0xFF switch it off; player numbers are negotiated, read byte 0x21 of the status
+  packets). In 25 s it matches the other deck's tempo (rate = its actual BPM over the follower's own) and locks the beat phase to about 10 ms. Scripts:
+  `runs/exp/sync_probe4.py OUT PORT_B SELECTOR [SECONDS] [ADDR=VALUE ...]` (e.g. `0x04C0849C=1`), `runs/exp/sync_follow.py OUT PORT_A PORT_B PLAYER_A` (changes deck A, prints B's rate and
+  the beat-phase offset from `OUT/hub/link.pcap`). A selector equal to the follower's own number gives a rate of 0.
 - `--replay CAPTURE.pcap` plays a real deck's traffic into the segment instead
   of a second emulated deck (`--replay-renumber 1:2` when the capture's player
   number collides with the emulated one). A recording cannot serve media, so

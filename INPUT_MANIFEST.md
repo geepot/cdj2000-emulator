@@ -179,9 +179,12 @@ reach.
 
 ### Before the boot — `CDJ_PANEL_KEYS`
 
-A semicolon-separated list of `<virtual seconds>:<payload byte>:<hex mask>`, at
-most **16 entries** (`PANEL_KEYS_MAX`), with `CDJ_PANEL_HOLD_MS` setting how
-long each stays down. Everything in the table below was driven this way.
+A semicolon-separated list of `<virtual seconds>:<payload byte>:<hex mask>[:<hold seconds>]`,
+at most **16 entries** (`PANEL_KEYS_MAX`), with `CDJ_PANEL_HOLD_MS` setting how
+long each stays down, unless the entry names its own hold time. `0:21:04:20` is
+DELETE held from the first frame for 20 s, the way a person holds a key while
+switching the deck on; `boot_vm --hold-key delete:20` (also `cosim_scenario
+--hold-key`) writes that entry. Everything in the table below was driven this way.
 
 Its two limits are why the rest of this section exists: sixteen presses fixed
 before the machine starts, and **only an OR of button bits** — it cannot ramp an

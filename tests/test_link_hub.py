@@ -99,6 +99,22 @@ def test_set_peer_count_only_touches_keepalives():
     assert link_hub.set_peer_count(status, 3) == status
 
 
+def test_a_deck_that_leaves_does_not_freeze_the_one_that_stays(tmp_path):
+    hub = link_hub.SyncHub(tmp_path, "127.0.0.1:0", decks=2, replay=None, replay_delay=0)
+    try:
+        a, b = object(), object()
+        hub.clients[a] = dict(id=1, t=5, promise=7_000, granted=-1, joined=True, rx=0, tx=0)
+        hub.clients[b] = dict(id=2, t=3, promise=4_000, granted=-1, joined=True, rx=0, tx=0)
+        assert hub.grant(a) == 4_000
+        hub.clients[a]["granted"] = 4_000
+        hub.drop = lambda conn: hub.clients.pop(conn)       # no socket in this test
+        hub.drop(b)
+        assert hub.grant(a) == link_hub.NEVER > hub.clients[a]["granted"]
+    finally:
+        hub.clients.clear()
+        hub.close()
+
+
 def test_sync_grants_the_least_promise_of_the_others(tmp_path):
     hub = link_hub.SyncHub(tmp_path, "127.0.0.1:0", decks=2, replay=None, replay_delay=0)
     try:
@@ -107,9 +123,8 @@ def test_sync_grants_the_least_promise_of_the_others(tmp_path):
         assert hub.grant(a) == 0            # held until both have joined
         hub.clients[b] = dict(id=2, t=3, promise=4_000, granted=-1, joined=True, rx=0, tx=0)
         assert hub.grant(a) == 4_000 and hub.grant(b) == 7_000
-        del hub.clients[b]
-        hub.decks_wanted = 1
-        assert hub.grant(a) == link_hub.NEVER   # alone: nothing can reach it
+        del hub.clients[b]                      # deck B's machine is closed
+        assert hub.grant(a) == link_hub.NEVER   # alone: nothing can reach it, and it is not held again
     finally:
         hub.clients.clear()
         hub.close()

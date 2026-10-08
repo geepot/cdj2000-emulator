@@ -666,17 +666,20 @@ static bool cdj_sdhi_dma_write(unsigned nr_bytes, const uint8_t *buffer);
  * only on a bit that is set now and was clear before -- so a key has to go down
  * and come back up.  CDJ_PANEL_KEYS is a semicolon-separated list of
  *
- *     <seconds>:<payload byte>:<hex mask>
+ *     <seconds>:<payload byte>:<hex mask>[:<hold seconds>]
  *
  * against the virtual clock, e.g. "35:19:04" for the SD SOURCE key at 35 s
  * (payload byte 19 bit 2, from the decoder at 0x28e44a; bit 1 is USB, the
  * firmware's own name table in tools/cdj_main/panel_control.py).  CDJ_PANEL_HOLD_MS
  * sets how long each stays down; the default is long enough for several frames.
+ * The optional fourth field holds that one key for its own time instead, so a
+ * key held while the deck is switched on is "0:21:04:20" (DELETE, the first 20 s).
  */
 #define PANEL_KEYS_MAX 16
 
 typedef struct CdjPanelKey {
     int64_t at_ns;
+    int64_t hold_ns;                    /* 0: CDJ_PANEL_HOLD_MS */
     unsigned byte;
     uint8_t mask;
 } CdjPanelKey;
@@ -706,6 +709,10 @@ static void cdj_panel_keys_parse(void)
         }
         key->mask = strtoul(end + 1, &end, 16);
         key->at_ns = (int64_t)(seconds * 1000000000.0);
+        key->hold_ns = 0;
+        if (*end == ':') {
+            key->hold_ns = (int64_t)(strtod(end + 1, &end) * 1000000000.0);
+        }
         if (key->byte < PANEL_FRAME_LEN - 2u) {
             info_report("cdj2000: panel key byte %u mask %#x at %.2f s",
                         key->byte, key->mask, seconds);
@@ -783,14 +790,27 @@ static void cdj_panel_frame(uint8_t *frame)
     if (!cdj_nxs_profile && !reverse) {
         frame[15] |= 0x02;
     }
+    /*
+     * The TEMPO slider: payload bytes 4/5 are its position and bytes 6/7 its centre, big-endian
+     * (ANSWER-NEW-FIRMWARE-1003).  A frame of zeros is position 0 with centre 0, which MAIN turns into
+     * a pitch word of 0 in the status packet (+0x8C / +0x98), where a real deck, with its slider at
+     * rest, sends 0x100000 (0 %): the stock SYNC engine on a following deck multiplies the BPM by that
+     * pitch and the deck stood still.  So a frame that names no slider of its own starts with the
+     * slider at its centre; `analog 3` / `analog 2` still move it from there.
+     */
+    if (!cdj_nxs_profile && !frame[4] && !frame[5] && !frame[6] && !frame[7]) {
+        frame[4] = 0x80;
+        frame[6] = 0x80;
+    }
     if (cdj_panel_nr_keys < 0) {
         cdj_panel_keys_parse();
     }
     now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     for (i = 0; i < cdj_panel_nr_keys; i++) {
         const CdjPanelKey *key = &cdj_panel_keys[i];
+        int64_t hold = key->hold_ns ? key->hold_ns : cdj_panel_hold_ns;
 
-        if (now >= key->at_ns && now < key->at_ns + cdj_panel_hold_ns) {
+        if (now >= key->at_ns && now < key->at_ns + hold) {
             frame[key->byte] |= key->mask;
         }
     }

@@ -581,3 +581,7 @@ receive, while MAIN waited for the answer -- the "3.7 s per step" of every
 native browse, and a key press made in that window was lost or read as a long
 press. `boot_vm --cosim` removes it; the live-link runs without co-simulation
 still have it.
+
+15. `15-gdb-17.2-gui-frame-archive.patch`: `BFIN_GUI_ARCHIVE_DIR=DIR` keeps every frame the GUI publishes as
+    `DIR/f<n>-t<guest seconds>.ppm` while `DIR/ARM` exists (a glitch of a few video frames is invisible to a poller of the
+    single output file). Off by default. `boot_vm --dense-frames` drives it (see RUNNING.md, "Dense frames").

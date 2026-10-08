@@ -522,6 +522,7 @@ class SyncHub(Hub):
         self.replay_index = 0
         self.replay_lap = 0
         self.replay_sent = 0
+        self.started = False
 
     def accept(self) -> None:
         super().accept()
@@ -629,8 +630,13 @@ class SyncHub(Hub):
 
     def grant(self, conn) -> int:
         joined = [c for c in self.clients.values() if c.get("joined")]
-        if len(joined) < self.decks_wanted:
-            return 0                # hold everyone at the start until all are in
+        if not self.started:
+            if len(joined) < self.decks_wanted:
+                return 0            # hold everyone at the start until all are in
+            self.started = True
+            self.event("start", decks=len(joined))
+        # From then on a deck that goes away (its machine closed) is simply not waited for: the hold used to
+        # come back with it (one joined < two wanted) and the deck left running froze at its last grant.
         grant = NEVER
         for other, client in self.clients.items():
             if other is not conn and client.get("joined"):
@@ -665,7 +671,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("out", type=Path)
     parser.add_argument("--listen", required=True,
                         help="PORT, HOST:PORT or unix:PATH for the decks to connect to")
-    parser.add_argument("--seconds", type=float, default=3600)
+    parser.add_argument("--seconds", type=float, default=3600,
+                        help="host seconds the hub lives (default 3600; 0 = until it is killed).  A stand that is "
+                             "left running longer than this loses its hub: the decks then print 'Connection reset "
+                             "by peer' and the guests run on alone")
     parser.add_argument("--replay", type=Path, help="a pcap of real Pro DJ Link traffic")
     parser.add_argument("--replay-from", action="append", default=[], metavar="IP",
                         help="replay only what this sender sent (repeatable)")
@@ -707,12 +716,18 @@ def main(argv: list[str] | None = None) -> int:
     hub.event("listening", listen=listen,
               replay=(str(args.replay) if replay else None),
               replay_frames=(len(replay.frames) if replay else 0))
-    deadline = time.time() + args.seconds
+    deadline = time.time() + args.seconds if args.seconds > 0 else float("inf")
+    reason = {"why": "deadline"}
 
-    def stop(*_):
+    def stop(signum, _frame):
+        reason["why"] = f"signal {signal.Signals(signum).name}"
         raise KeyboardInterrupt
     # A kill by PID still writes summary.json.
     signal.signal(signal.SIGTERM, stop)
+    if hasattr(signal, "SIGHUP"):
+        # A hub started from a shell that is then closed (a stand left running overnight, a paused session) is
+        # not the shell's: it ends when told to, or at its deadline.
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
     try:
         while args.sync and time.time() < deadline:
             for key, _ in hub.sel.select(0.2):
@@ -749,9 +764,15 @@ def main(argv: list[str] | None = None) -> int:
                     hub.record(frame, "replay")
                     hub.send_all(frame)
     except KeyboardInterrupt:
-        pass
+        if reason["why"] == "deadline":
+            reason["why"] = "interrupt (Ctrl-C)"
+    except BaseException as error:              # never a silent end: the decks only see the connection reset
+        reason["why"] = f"error: {type(error).__name__}: {error}"
+        raise
     finally:
+        hub.event("stopped", reason=reason["why"], seconds=args.seconds)
         summary = hub.summary()
+        summary["stopped"] = reason["why"]
         if replay is not None and not args.sync:
             summary["replay"] = {"frames_sent": replay.sent, "laps": replay.laps}
         hub.close()

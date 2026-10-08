@@ -1,0 +1,61 @@
+Keep every frame the GUI simulator publishes (BFIN_GUI_ARCHIVE_DIR, armed by DIR/ARM), stamped with guest time.
+
+The published output file is replaced on each change, so a poller sees a few frames of a burst; a glitch of 3-4 video frames needs all of them.
+
+--- a/sim/bfin/gui.c	2026-09-30 18:22:39
++++ b/sim/bfin/gui.c	2026-09-30 18:22:45
+@@ -403,6 +403,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <unistd.h>
+ #ifdef _WIN32
+ #include <windows.h>
+ #endif
+@@ -773,6 +774,38 @@
+ 	    p[0] = p[1] = p[2] = 0;
+ 	  }
+   }
++}
++
++/* BFIN_GUI_ARCHIVE_DIR=DIR keeps every frame the display publishes, not just
++   the newest: while the file DIR/ARM exists each changed frame is also
++   written as DIR/f<n>-t<guest seconds>.ppm.  The output file is replaced at
++   every change and a viewer polling it sees a few of them; a glitch that
++   lasts three or four video frames (60 a second) is only found this way.
++   The stamp is the simulator's guest time, which under --cosim is the time
++   MAIN's census counts.  Off (no variable, or no ARM file) it costs one
++   getenv the first time and one access() per published frame.  */
++static void
++bfin_gui_archive_frame (struct gui_state *gui)
++{
++  extern double bfin_guest_seconds (void);	/* interp.c */
++  static const char *dir;
++  static int init;
++  static unsigned long seq;
++  char path[4096];
++
++  if (!init)
++    {
++      dir = getenv ("BFIN_GUI_ARCHIVE_DIR");
++      init = 1;
++    }
++  if (!dir || !*dir)
++    return;
++  snprintf (path, sizeof path, "%s/ARM", dir);
++  if (access (path, F_OK) != 0)
++    return;
++  snprintf (path, sizeof path, "%s/f%06lu-t%010.4f.ppm", dir, ++seq,
++	    bfin_guest_seconds ());
++  bfin_gui_write_frame_to (gui, path);
+ }
+ 
+ static void
+@@ -858,6 +891,7 @@
+ 	  ++bfin_stat_frames_published;
+ 	}
+ 	bfin_gui_write_frame_to (gui, gui->output_path);
++	bfin_gui_archive_frame (gui);
+ 	bfin_gui_write_raw_frame (gui);
+       }
+   }

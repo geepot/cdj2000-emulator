@@ -38,3 +38,18 @@ def test_send_appends_the_checksum():
     finally:
         rsp.sock.close()
         peer.close()
+
+
+def test_leaving_the_with_block_detaches():
+    # A probe that dies without `c` or `D` leaves the machine halted for ever, so the
+    # context manager sends `D` on the way out, even when the body raised.
+    rsp, peer = connected_pair()
+    try:
+        try:
+            with rsp:
+                raise RuntimeError("probe crashed")
+        except RuntimeError:
+            pass
+        assert peer.recv(64) == b"$D#44"          # 0x44 == ord('D')
+    finally:
+        peer.close()
