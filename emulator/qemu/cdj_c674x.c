@@ -395,9 +395,12 @@ static unsigned instruction_unit(const CdjC674xInstruction *insn)
     unsigned side = insn->compact ? w & 1 : (w >> 1) & 1;
     if (!insn->compact) {
         if ((w & 0x0c) == 12) return 32u; /* Long offsets always use .D2. */
+        /* Figures C-4, C-6 and C-7 (printed page 724): load/store unit is
+         * the y bit; s only names the data register file (Table 3-2), so
+         * LDW .D2T1 is a .D2 operation for SPMASK. */
+        if ((w & 0x0c) == 4) return 16u << ((w >> 7) & 1);
         if ((w & 0x1c) == 0x18) return 1u << side;
-        if ((w & 0x0c) == 4 || (w & 0x0c) == 12 ||
-            (w & 0x7c) == 0x40 || (w & 0xc3c) == 0x830) return 16u << side;
+        if ((w & 0x7c) == 0x40 || (w & 0xc3c) == 0x830) return 16u << side;
         if ((w & 0x3c) == 0x20 || (w & 0x3c) == 0x28 ||
             (w & 0x3c) == 8 || (w & 0x7c) == 0x10 ||
             (w & 0x7c) == 0x50 || (w & 0xc3c) == 0xc30) return 4u << side;
@@ -10998,12 +11001,46 @@ static unsigned run_compiled(CdjC674x *cpu, CdjC674xRead read,
     }
 }
 
+/* SPRUFE8B 7.7.3.2 (printed page 678): the buffer stays active only until
+ * "the SPLOOP(D) loop is finished draining".  loop_step runs the cycle at
+ * end_cycle, which issues nothing from the buffer, as a loop cycle and idles
+ * after it, so a post-loop SPLOOP(D/W) fetched in exactly that cycle (stock
+ * 0xc0016b72, right after the 0xc0016a88 loop's epilog, MASTER TEMPO) went
+ * to execute as an ordinary instruction.  In that one case go idle first so
+ * the normal path starts the new loop.  1 idled, 0 not, -1 fetch fault (the
+ * fault loop_step's own fetch of this packet would raise). */
+static int loop_drained_before_sploop(CdjC674x *cpu, CdjC674xRead read,
+                                      void *opaque)
+{
+    const CdjC674xLoop *loop = &cpu->loop;
+    if (!loop->sealed || loop->predicate_loop ||
+        loop->cycle < loop->end_cycle || loop->cycle < loop->post_cycle ||
+        loop_immediate_reload(cpu) || loop_interrupt_armed(cpu) ||
+        loop_interrupt_draining(cpu) || loop_retained_valid(cpu) ||
+        (cpu->loop_pred_history & CDJ_C674X_LOOP_RETURNING) ||
+        cpu->idle_cycles)
+        return 0;
+    CdjC674xPacket source;
+    if (!fetch_packet(cpu, read, opaque, &source, NULL)) return -1;
+    const CdjC674xInstruction *first = &source.instructions[0];
+    uint32_t w = first->word;
+    bool sploop = first->compact ?
+        (w & 0xbc7e) == 0x0c66 :            /* SPLOOP, SPLOOPD */
+        ((w & 0x007ffffc) == 0x38000 || (w & 0x007ffffc) == 0x3a000 ||
+         (w & 0x007ffffe) == 0x3e000);      /* SPLOOP, SPLOOPD, SPLOOPW */
+    if (!sploop) return 0;
+    loop_set_active(cpu, false);
+    return 1;
+}
+
 bool cdj_c674x_step_capture_direct(CdjC674x *cpu, CdjC674xRead read,
                                   CdjC674xWrite write, void *opaque,
                                   CdjC674xPacket *direct)
 {
     if (direct) direct->count = 0;
     if (cpu->fault) return false;
+    if (cpu->loop_active && loop_drained_before_sploop(cpu, read, opaque) < 0)
+        return false;
     if (cpu->loop_active) {
         int done = loop_step_in_place(cpu, read, write, opaque);
         if (done) return done > 0;
