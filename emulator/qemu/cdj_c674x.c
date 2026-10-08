@@ -2897,10 +2897,11 @@ static bool arm_dp_convert(CdjC674xArm *x)
      *
      * All three name the ODD register of the source pair, for the same
      * reason ABSDP does: "the operand is read in one cycle by using the src2
-     * port for the 32 MSBs and the src1 port for the 32 LSBs".  TI asm6x
-     * emits zero in the encoded src1 field even for nonzero pairs; older GNU
-     * tic6x puts the even register number there.  Both select b:b-1, so do
-     * not use the encoded a field to locate the low word. */
+     * port for the 32 MSBs and the src1 port for the 32 LSBs".  TI asm6x 8.5
+     * puts the even (low) register number in src1 (DPSP .L1 A7:A6,A8 =
+     * 041CC138h has src1 = 6); other encoders have left it zero.  Both
+     * select b:b-1, so do not use the encoded a field to locate the low
+     * word, and the opcode mask must not constrain it. */
     unsigned encoding = x->w & 0xffc;
     if (!(x->b & 1))
         return stop(x->cpu, x->pc, x->insn->word,
@@ -3610,7 +3611,10 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x00000fa0, NULL,                  arm_approx },
     { 0x00000ffc, 0x00000b60, NULL,                  arm_approx },
     { 0x00000ffc, 0x00000ba0, NULL,                  arm_approx },
-    { 0x0003effc, 0x00000b20, NULL,                  arm_two_cycle_dp },
+    /* ABSDP's src1 field carries the pair's LOW register (TI's assembler
+     * emits ABSDP .S1 A7:A6 with src1 = 6, src2 = 7), so only SPDP, whose
+     * src1 is unused, may require it zero. */
+    { 0x00000ffc, 0x00000b20, NULL,                  arm_two_cycle_dp },
     { 0x0003effc, 0x000000a0, NULL,                  arm_two_cycle_dp },
     { 0x00000ffc, 0x00000a20, NULL,                  arm_cmpdp },
     { 0x00000ffc, 0x00000a60, NULL,                  arm_cmpdp },
