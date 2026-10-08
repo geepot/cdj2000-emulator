@@ -105,15 +105,19 @@ typedef bool (*CdjC674xWrite)(void *, uint32_t, uint64_t, unsigned, bool commit)
  * pc/fault initialized. Registers, pipeline and loop state are not accessed. */
 bool cdj_c674x_fetch(CdjC674x *, CdjC674xRead, void *, CdjC674xPacket *);
 /* The reserved gap between L2 RAM and L1P, 0x11840000-0x11DFFFFF.  Stock's
- * hand-scheduled bit reversal (MP4AACDEC_TIJ_scramble, 0xC0030D80) reads one
- * table entry past its table in the last iteration and, through that junk
- * index, issues an LDDW into the gap from a branch delay slot (SPRUFE8B: a
- * branch has 5 delay slots that execute; LDDW has 4, so the load is issued
- * and its result is simply never used).  Hardware completes such a load -
- * stock plays AAC on it every frame - as an external read with an error
- * response (SPRUFK5A chapter 10, BUSERR).  With the gap enabled (default) a
- * DATA load of an unmapped word there completes with zero and is counted;
- * stores and instruction fetches of the gap still fault.  Process-wide. */
+ * bit reversal (MP4AACDEC_TIJ_scramble, a plain branch loop at 0xC0030D80)
+ * has LDDW *+A4[A9] at 0xC0030E80 in a delay slot of [A1] B at 0xC0030E6C;
+ * on the last iteration it prefetches pair (16,0), one entry past its
+ * table, into the gap.  SPRUFE8B: a branch's 5 delay slots execute, so the
+ * load really happens on hardware.  TI leaves reserved-address accesses
+ * undefined (SPRS377F section 3.4).  Stock's AAC runs on silicon, so the
+ * load completes without a fatal exception.  Its value is never consumed
+ * (verified: identical output for 0 or 0xDEADBEEF), so 0 is an arbitrary
+ * choice.  With the gap enabled (default) a DATA load of an unmapped word
+ * there completes with zero and is counted once per word read
+ * (cdj_c674x_data_gap_reads); stores and instruction fetches of the gap
+ * still fault.  The gap's local alias 0x00840000-0x00DFFFFF is not handled
+ * (it still faults).  Process-wide. */
 #define CDJ_C674X_DATA_GAP_BASE 0x11840000u
 #define CDJ_C674X_DATA_GAP_END  0x11e00000u
 void cdj_c674x_set_data_gap(bool on);

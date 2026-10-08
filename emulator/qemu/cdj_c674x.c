@@ -509,9 +509,12 @@ static uint64_t data_gap_reads;
 void cdj_c674x_set_data_gap(bool on) { data_gap = on; }
 uint64_t cdj_c674x_data_gap_reads(void) { return data_gap_reads; }
 
-/* Side-effect-free RAM reads; nonaligned words may span two bus words. */
-static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
-                        unsigned size, uint64_t *value)
+/* Side-effect-free RAM reads; nonaligned words may span two bus words.
+ * `count` is set only for the read that completes a load (not for the
+ * issue-time mapping probes), so each gap word is counted once. */
+static bool read_scalar_counted(CdjC674xRead read, void *opaque,
+                                uint32_t address, unsigned size,
+                                uint64_t *value, bool count)
 {
     if ((uint64_t)address + size > UINT64_C(0x100000000)) return false;
     *value = 0;
@@ -522,7 +525,7 @@ static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
                 (current & ~3u) >= CDJ_C674X_DATA_GAP_END)
                 return false;
             word = 0;
-            ++data_gap_reads;
+            if (count) ++data_gap_reads;
         }
         unsigned lane = current & 3, n = 4 - lane;
         if (n > size - done) n = size - done;
@@ -536,19 +539,32 @@ static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
 
 /* High size byte retains issue-time circular width for nonaligned memory.
  * Delayed E3 transactions must not re-read a subsequently changed AMR. */
-static bool read_transfer(CdjC674xRead read, void *opaque, uint32_t address,
-                          unsigned encoded_size, uint64_t *value)
+static bool read_scalar(CdjC674xRead read, void *opaque, uint32_t address,
+                        unsigned size, uint64_t *value)
+{
+    return read_scalar_counted(read, opaque, address, size, value, false);
+}
+
+static bool read_transfer_counted(CdjC674xRead read, void *opaque,
+                                  uint32_t address, unsigned encoded_size,
+                                  uint64_t *value, bool count)
 {
     unsigned size = encoded_size & 255, width = encoded_size >> 8;
-    if (!width) return read_scalar(read, opaque, address, size, value);
+    if (!width) return read_scalar_counted(read, opaque, address, size, value, count);
     *value = 0;
     for (unsigned i = 0; i < size; ++i) {
         uint64_t byte;
-        if (!read_scalar(read, opaque, circular_address(address, address + i, width), 1, &byte))
+        if (!read_scalar_counted(read, opaque, circular_address(address, address + i, width), 1, &byte, count))
             return false;
         *value |= byte << (8 * i);
     }
     return true;
+}
+
+static bool read_transfer(CdjC674xRead read, void *opaque, uint32_t address,
+                          unsigned encoded_size, uint64_t *value)
+{
+    return read_transfer_counted(read, opaque, address, encoded_size, value, false);
 }
 
 static bool write_transfer(CdjC674xWrite write, void *opaque, uint32_t address,
@@ -2946,9 +2962,10 @@ static bool arm_dp_convert(CdjC674xArm *x)
      *
      * All three name the ODD register of the source pair, for the same
      * reason ABSDP does: "the operand is read in one cycle by using the src2
-     * port for the 32 MSBs and the src1 port for the 32 LSBs".  TI asm6x 8.5
-     * puts the even (low) register number in src1 (DPSP .L1 A7:A6,A8 =
-     * 041CC138h has src1 = 6); other encoders have left it zero.  Both
+     * port for the 32 MSBs and the src1 port for the 32 LSBs".  The TI
+     * cl6x 8.5 driver puts the even (low) register number in src1 (DPSP .L1
+     * A7:A6,A8 = 041CC138h has src1 = 6); standalone asm6x and older GNU
+     * tic6x leave it zero.  Both
      * select b:b-1, so do not use the encoded a field to locate the low
      * word, and the opcode mask must not constrain it. */
     unsigned encoding = x->w & 0xffc;
@@ -3660,9 +3677,10 @@ static const CdjC674xArmEntry cdj_c674x_arms[] = {
     { 0x00000ffc, 0x00000fa0, NULL,                  arm_approx },
     { 0x00000ffc, 0x00000b60, NULL,                  arm_approx },
     { 0x00000ffc, 0x00000ba0, NULL,                  arm_approx },
-    /* ABSDP's src1 field carries the pair's LOW register (TI's assembler
-     * emits ABSDP .S1 A7:A6 with src1 = 6, src2 = 7), so only SPDP, whose
-     * src1 is unused, may require it zero. */
+    /* ABSDP's src1 field may carry the pair's LOW register (code built with
+     * the TI cl6x 8.5 driver has ABSDP .S1 A7:A6 with src1 = 6, src2 = 7;
+     * standalone asm6x emits 0), so only SPDP, whose src1 is unused, may
+     * require it zero. */
     { 0x00000ffc, 0x00000b20, NULL,                  arm_two_cycle_dp },
     { 0x0003effc, 0x000000a0, NULL,                  arm_two_cycle_dp },
     { 0x00000ffc, 0x00000a20, NULL,                  arm_cmpdp },
@@ -5008,7 +5026,7 @@ static bool execute_packet(CdjC674x *cpu, CdjC674x *out,
             if (load->due > now + 2) { ++j; continue; }
             if (queued_memory_load(load) && load->due == now + 2) {
                 uint64_t data;
-                if (!read_transfer(read, opaque, load->address, load->size, &data))
+                if (!read_transfer_counted(read, opaque, load->address, load->size, &data, true))
                     return stop(cpu, entry_pc, 0, "RAM load mapping changed during execution");
                 if (load->sign_extend) data = sx(data, (load->size & 255) * 8);
                 load->value = data;
@@ -7360,7 +7378,7 @@ static int jit_exec(CdjC674x *cpu, const JitShape *s, bool all_pairs,
         const CdjC674xLoad *load = &cpu->loads[j];
         if (load->due != now + 2 || !queued_memory_load(load)) continue;
         if (!jit_read_span(read, opaque, load->address, load->size, &data[j]) &&
-            !read_transfer(read, opaque, load->address, load->size, &data[j]))
+            !read_transfer_counted(read, opaque, load->address, load->size, &data[j], true))
             broke = "RAM load mapping changed during execution";
         else if (load->sign_extend)
             data[j] = sx(data[j], (load->size & 255) * 8);
@@ -7823,7 +7841,7 @@ jk_exec_t(CdjC674x *cpu, const JitKernel *k, unsigned p, uint64_t c,
         unsigned size = m->e[r->op][s].size;
         uint64_t *v = &data[i];
         if (!jit_read_span(read, opaque, address, size, v) &&
-            !read_transfer(read, opaque, address, size, v)) {
+            !read_transfer_counted(read, opaque, address, size, v, true)) {
             broke = "RAM load mapping changed during execution";
             goto fault;
         }
@@ -8939,7 +8957,7 @@ static int dt_exec(CdjC674x *cpu, CdjC674xCacheEntry *e, bool all_pairs,
             if (e3_at[j] != c) continue;
             uint64_t v;
             if (!jit_read_span(read, opaque, load->address, load->size, &v) &&
-                !read_transfer(read, opaque, load->address, load->size, &v))
+                !read_transfer_counted(read, opaque, load->address, load->size, &v, true))
                 broke = "RAM load mapping changed during execution";
             else data[reads++] = load->sign_extend ?
                 (uint64_t)(int64_t)sx(v, (load->size & 255) * 8) : v;
@@ -9647,7 +9665,7 @@ LEAN_INLINE const char *lean_e3(const CdjC674x *cpu, unsigned j, DtsLean *L,
     const CdjC674xLoad *load = &cpu->loads[j];
     uint64_t value;
     if (!jit_read_span(read, opaque, load->address, load->size, &value) &&
-        !read_transfer(read, opaque, load->address, load->size, &value))
+        !read_transfer_counted(read, opaque, load->address, load->size, &value, true))
         return "RAM load mapping changed during execution";
     L->data[L->reads++] = load->sign_extend ?
         (uint64_t)(int64_t)sx(value, (load->size & 255) * 8) : value;
@@ -9829,7 +9847,7 @@ LEAN_INLINE __attribute__((unused)) const char *lean_e3_to(const CdjC674x *cpu, 
     const CdjC674xLoad *load = &cpu->loads[j];
     uint64_t value;
     if (!jit_read_span(read, opaque, load->address, load->size, &value) &&
-        !read_transfer(read, opaque, load->address, load->size, &value))
+        !read_transfer_counted(read, opaque, load->address, load->size, &value, true))
         return "RAM load mapping changed during execution";
     *data = load->sign_extend ?
         (uint64_t)(int64_t)sx(value, (load->size & 255) * 8) : value;

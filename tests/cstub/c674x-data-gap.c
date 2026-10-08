@@ -58,7 +58,8 @@ int main(void)
         run(&c, 2);
         assert(!c.fault && c.r[0][6] == 0 && c.r[0][7] == 0);
     }
-    assert(cdj_c674x_data_gap_reads() >= 9);
+    /* One count per gap word a completed load read: 3 x (LDW 1 + LDDW 2). */
+    assert(cdj_c674x_data_gap_reads() == 9);
 
     /* Just outside the gap, a store into it, and strict mode all fault. */
     static const uint32_t outside[] = {0x11e00000, 0x11700000, 0x00000004};
